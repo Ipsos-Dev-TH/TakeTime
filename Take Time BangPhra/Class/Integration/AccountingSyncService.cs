@@ -1275,6 +1275,35 @@ namespace Take_Time_BangPhra.Integration
         // ──────────────────────────────────────────────
 
         /// <summary>
+        /// VOID_RECEIPT ของเลขใบเดียวกันที่เข้าคิว "ก่อน" รายการนี้และยังไม่จบ (PENDING/PROCESSING/FAILED)
+        /// คืน "VOID #id (สถานะ)" หรือ null ถ้าไม่มี — ใช้บังคับลำดับ VOID เก่า → CREATE ใหม่
+        /// </summary>
+        private string FindUnsentVoidBefore(long queueId, string payloadJson)
+        {
+            try
+            {
+                var pl = _serializer.Deserialize<Dictionary<string, object>>(payloadJson ?? "{}");
+                string rn = pl != null && pl.ContainsKey("receiptNumber") ? pl["receiptNumber"]?.ToString() : null;
+                if (string.IsNullOrEmpty(rn)) return null;
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 ID, Status FROM Accounting_Sync_Queue
+                      WHERE Action_Type = 'VOID_RECEIPT' AND ID < @qid
+                        AND Status IN ('PENDING', 'PROCESSING', 'FAILED')
+                        AND Payload LIKE @pat
+                      ORDER BY ID",
+                    new Dictionary<string, object>
+                    {
+                        { "@qid", queueId },
+                        { "@pat", "%\"receiptNumber\":\"" + rn + "\"%" }
+                    });
+                if (dt != null && dt.Rows.Count > 0)
+                    return $"VOID #{dt.Rows[0]["ID"]} ({dt.Rows[0]["Status"]})";
+            }
+            catch { }
+            return null;
+        }
+
+        /// <summary>
         /// Enqueue void for a receipt that was deleted or cancelled.
         /// Looks up the original Nexaacc_Response_Id from queue and voids it.
         /// </summary>
@@ -2764,6 +2793,23 @@ namespace Take_Time_BangPhra.Integration
                 // ต่ออายุ lease ทุกรายการ — รอบที่ยาว (NextAcc ตอบช้า) จะได้ไม่ถูกยึดคืนกลางคัน
                 if (_queueLease != null) _queueLease.Renew();
 
+                // ⛔ สร้างใบเสร็จใหม่ต้องรอ VOID เอกสารเก่า "ของเลขเดียวกัน" ที่เข้าคิวก่อนหน้าให้จบก่อน
+                //   (แก้ใบ/repost = VOID เก่า → CREATE ใหม่) ถ้า VOID ล้มแล้ว CREATE วิ่งไปก่อน:
+                //   • CREATE เห็น marker เอกสารเก่ายังอยู่ → คืนเอกสารเก่า (ยอดที่แก้หายเงียบ) หรือ
+                //   • VOID ที่วิ่งทีหลังไปล้างมาร์ค/กลับ JV มัดจำของ "เอกสารใหม่" แทน
+                //   ⇒ รอ (คง PENDING ไม่นับ retry) จนกว่า VOID สำเร็จ — VOID ล้มถาวรจะเห็นชัดที่หน้าคิว
+                if (actionType == "CREATE_RECEIPT_DOCUMENT")
+                {
+                    string waitingOn = FindUnsentVoidBefore(queueId, payload);
+                    if (waitingOn != null)
+                    {
+                        UpdateQueueStatus(queueId, "PENDING",
+                            $"รอ {waitingOn} (ยกเลิกเอกสารเก่าของใบนี้) ให้สำเร็จก่อน — ไม่นับ retry. " +
+                            "ถ้ารายการ VOID นั้นล้ม ให้แก้/Retry ที่ตัว VOID ก่อน", null);
+                        continue;
+                    }
+                }
+
                 try
                 {
                     _lastDocNumber = null;
@@ -4082,6 +4128,74 @@ namespace Take_Time_BangPhra.Integration
         // ไม่เปิดลูกหนี้ ไม่ต้องบันทึก payment แยก. idempotent ผ่าน Nexaacc_Receipt_Payment_Id
         // 3 เฟส: DOC:{id} (สร้างแล้ว) → APR:{id} (อนุมัติแล้ว) → {id} (ปรับมัดจำเสร็จ/จบ)
         // ──────────────────────────────────────────────
+        /// <summary>
+        /// ทับ draft ที่ค้างบน NextAcc (marker DOC: จากรอบก่อนที่ล้มตอนอนุมัติ) ด้วยบรรทัดปัจจุบัน "ก่อนอนุมัติ"
+        ///
+        /// เคส: รอบก่อนสร้าง draft แล้วล้มตอนอนุมัติ → ผู้ใช้แก้ยอดใบเสร็จ → Retry เดิมอนุมัติ draft ยอดเก่าเข้า GL
+        /// PUT /document/{id} แก้ได้เฉพาะ Draft, Lines != null = แทนที่ทั้งชุด (CLAUDE.md)
+        /// PUT ไม่ผ่าน (NextAcc รุ่นเก่า ฯลฯ) → ยอมอนุมัติต่อเฉพาะเมื่อยอด draft ตรงกับยอดปัจจุบัน ไม่งั้น throw
+        /// ⚠ UpdateDocumentRequest ไม่มีช่องมัดจำ — "ยอดหักมัดจำที่แสดงบนใบ" คงของ draft
+        ///   แต่ JV ปรับมัดจำลงตามยอดปัจจุบัน GL จึงถูก
+        /// </summary>
+        private async Task RefreshStaleDraftAsync(Guid docId, CreateDocumentRequest doc, string receiptNumber, decimal? draftTotal)
+        {
+            if (docId == Guid.Empty || doc?.Lines == null) return;
+
+            ApiResponse<DocumentResponse> upd = null;
+            string updErr = null;
+            try
+            {
+                upd = await _apiClient.UpdateDocumentAsync(docId, new UpdateDocumentRequest
+                {
+                    DocumentDate = doc.DocumentDate,
+                    ContactId = doc.ContactId,
+                    Reference = doc.Reference,
+                    Notes = doc.Notes,
+                    Lines = doc.Lines,                 // แทนที่ทั้งชุด
+                    PaymentAccountId = doc.PaymentAccountId,
+                    BankAccountId = doc.BankAccountId,
+                    PricesIncludeVat = doc.PricesIncludeVat,
+                    BookingNumber = doc.BookingNumber
+                });
+            }
+            catch (AccountingApiException ux)
+            {
+                updErr = $"HTTP {ux.StatusCode}: {DecodeUnicodeEscapes(ux.ResponseBody) ?? ux.Message}";
+            }
+
+            if (upd?.success == true)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"RefreshStaleDraft: ทับ draft {docId.ToString().Substring(0, 8)} ด้วยบรรทัดปัจจุบันก่อนอนุมัติ" +
+                    (draftTotal.HasValue ? $" (ยอด draft เดิม {draftTotal.Value:N2})" : "") + $" receipt={receiptNumber}", "SYSTEM");
+                return;
+            }
+
+            // PUT ไม่ผ่าน → อ่านยอด draft มาเทียบ (ถ้ายังไม่รู้)
+            if (!draftTotal.HasValue)
+            {
+                try
+                {
+                    var chk = await _apiClient.GetDocumentAsync(docId);
+                    if (chk?.data != null) draftTotal = chk.data.TotalAmount;
+                }
+                catch (AccountingApiException) { }
+            }
+
+            decimal expectedGross = ExpectedDocumentTotal(doc);
+            decimal expectedNet = expectedGross - (doc.DepositAppliedAmount ?? 0m);
+            bool same = draftTotal.HasValue
+                && (Math.Abs(draftTotal.Value - expectedGross) <= 0.10m
+                    || Math.Abs(draftTotal.Value - expectedNet) <= 0.10m);
+            if (!same)
+                throw new Exception(
+                    $"draft ค้างบน NextAcc (ยอด {(draftTotal.HasValue ? draftTotal.Value.ToString("N2") : "อ่านไม่ได้")}) " +
+                    $"ไม่ตรงกับใบเสร็จตอนนี้ ({expectedGross:N2}) และอัปเดต draft ไม่สำเร็จ " +
+                    $"({updErr ?? upd?.message ?? "null response"}) — ไม่อนุมัติยอดเก่า receipt={receiptNumber}");
+            _code.Logs(_connectionString, "AccountingSync",
+                $"RefreshStaleDraft: อัปเดต draft ไม่ได้ ({updErr ?? upd?.message}) แต่ยอดตรงกับปัจจุบัน → อนุมัติต่อ receipt={receiptNumber}", "SYSTEM");
+        }
+
         /// <summary>ยอดรวม (รวม VAT) ที่ NextAcc ควรได้จากบรรทัดของ request — ใช้เทียบกับ draft ที่ค้างอยู่</summary>
         private static decimal ExpectedDocumentTotal(CreateDocumentRequest doc)
         {
@@ -4185,40 +4299,10 @@ namespace Take_Time_BangPhra.Integration
                 }
             }
 
-            // 0) draft ที่ค้างจากรอบก่อน (marker DOC:) แต่ใบเสร็จถูกแก้ยอดระหว่างนั้น
-            //    → ต้องอัปเดต draft ให้เป็นยอดปัจจุบัน "ก่อน" อนุมัติ ไม่งั้นอนุมัติยอดเก่าเข้า GL
-            //    (เคส: รอบก่อนสร้าง draft แล้วล้มตอนอนุมัติ → ผู้ใช้แก้ใบ → Retry = อนุมัติ draft ยอดเดิม)
-            //    ทำเฉพาะเมื่อยอดต่างจริง — flow ปกติที่ยอดไม่เปลี่ยนไม่ถูกแตะ
-            //    เทียบได้ทั้งยอดเต็มและยอดหลังหักมัดจำ (สัญญา NextAcc ไม่ได้ระบุว่า TotalAmount หักหรือไม่)
-            if (docId != Guid.Empty && !approved && !isFinal && draftTotal.HasValue && doc?.Lines != null)
-            {
-                decimal expectedGross = ExpectedDocumentTotal(doc);
-                decimal expectedNet = expectedGross - (doc.DepositAppliedAmount ?? 0m);
-                bool same = Math.Abs(draftTotal.Value - expectedGross) <= 0.10m
-                         || Math.Abs(draftTotal.Value - expectedNet) <= 0.10m;
-                if (!same)
-                {
-                    var upd = await _apiClient.UpdateDocumentAsync(docId, new UpdateDocumentRequest
-                    {
-                        DocumentDate = doc.DocumentDate,
-                        ContactId = doc.ContactId,
-                        Reference = doc.Reference,
-                        Notes = doc.Notes,
-                        Lines = doc.Lines,                 // แทนที่ทั้งชุด
-                        PaymentAccountId = doc.PaymentAccountId,
-                        BankAccountId = doc.BankAccountId,
-                        PricesIncludeVat = doc.PricesIncludeVat,
-                        BookingNumber = doc.BookingNumber
-                    });
-                    if (upd?.success != true)
-                        throw new Exception(
-                            $"SettleReceiptDoc: draft ค้างบน NextAcc ยอด {draftTotal.Value:N2} แต่ใบเสร็จตอนนี้ {expectedGross:N2} " +
-                            $"และอัปเดต draft ไม่สำเร็จ ({upd?.message ?? "null response"}) — ไม่อนุมัติยอดเก่า receipt={receiptNumber}");
-                    _code.Logs(_connectionString, "AccountingSync",
-                        $"SettleReceiptDoc: อัปเดต draft {docId.ToString().Substring(0, 8)} ยอด {draftTotal.Value:N2} → {expectedGross:N2} " +
-                        $"(ใบเสร็จถูกแก้หลังสร้าง draft) ก่อนอนุมัติ receipt={receiptNumber}", "SYSTEM");
-                }
-            }
+            // 0) draft ที่ค้างจากรอบก่อน (marker DOC:) — ใบเสร็จอาจถูกแก้ยอดระหว่างนั้น
+            //    → ส่งบรรทัดปัจจุบันทับ draft ก่อนอนุมัติ (ไม่งั้นอนุมัติยอดเก่าเข้า GL) — ดู RefreshStaleDraftAsync
+            if (docId != Guid.Empty && !approved && !isFinal)
+                await RefreshStaleDraftAsync(docId, doc, receiptNumber, draftTotal);
 
             // 1) สร้างเอกสาร (company /document ไม่ dedupe → marker กันสร้างซ้ำ)
             if (docId == Guid.Empty)
@@ -4373,6 +4457,10 @@ namespace Take_Time_BangPhra.Integration
                     $"EnsureRevenueDoc: marker={marker} แต่หา doc id จาก queue ไม่เจอ receipt={receiptNumber} → สร้างใหม่", "SYSTEM");
             }
 
+            // ใบกำกับ draft ที่ค้างจากรอบก่อน (DOC:) — ใบอาจถูกแก้ยอดระหว่างนั้น → ทับด้วยบรรทัดปัจจุบันก่อนอนุมัติ
+            if (docId != Guid.Empty && !approved)
+                await RefreshStaleDraftAsync(docId, doc, receiptNumber, null);
+
             if (docId == Guid.Empty)
             {
                 var createResult = await _apiClient.CreateDocumentAsync(doc);
@@ -4459,11 +4547,19 @@ namespace Take_Time_BangPhra.Integration
             try
             {
                 var found = await _apiClient.SearchJournalsAsync(reference, 10);
-                var je = found?.data?.Items?.FirstOrDefault(j =>
-                    string.Equals(j.Reference, reference, StringComparison.OrdinalIgnoreCase)
-                    && !IsVoidedStatus(j.Status) && j.OriginalEntryId == null);
-                if (je == null) return false;
-                if (je.ReversedByEntryId != null && je.ReversedByEntryId != Guid.Empty) return true;   // เคยกลับแล้ว
+                var matches = (found?.data?.Items ?? new List<JournalEntryResponse>())
+                    .Where(j => string.Equals(j.Reference, reference, StringComparison.OrdinalIgnoreCase)
+                             && !IsVoidedStatus(j.Status) && j.OriginalEntryId == null)
+                    .ToList();
+                if (matches.Count == 0) return false;
+                // ⚠ ref เดียวกันเกิดซ้ำได้ทุกรอบ แก้ใบ→void→สร้างใหม่ (เช่น {receipt}-DEPADJ) — เดิมหยิบ "ตัวแรก"
+                //   ถ้าตัวแรกเป็นของรอบเก่าที่กลับไปแล้ว → return true ทั้งที่ตัวของรอบปัจจุบันยังไม่ถูกกลับ
+                //   ⇒ หนี้สินมัดจำ/เงินสดเพี้ยนสะสมทุกครั้งที่แก้. เลือก "ตัวล่าสุดที่ยังไม่ถูกกลับ" แทน
+                var je = matches
+                    .Where(j => j.ReversedByEntryId == null || j.ReversedByEntryId == Guid.Empty)
+                    .OrderByDescending(j => j.CreatedAt)
+                    .FirstOrDefault();
+                if (je == null) return true;   // ทุกตัวกลับแล้ว
                 var rev = await _apiClient.ReverseJournalAsync(je.Id, new ReverseJournalEntryRequest { Description = description });
                 return rev?.success == true;
             }
@@ -6113,7 +6209,10 @@ namespace Take_Time_BangPhra.Integration
                 {
                     // บรรทัดหักมัดจำในใบ = ความจริง (ใบอาจถูกแก้หลังออกครั้งแรก) — ไม่ใช่ payload/ค่าที่ persist
                     // กำหนดค่า ไม่ได้บวกเพิ่ม ⇒ retry ซ้ำกี่รอบก็ได้ค่าเดิม ไม่เบิล (ดู ReconcileDepositApplied)
-                    depositApplied = ReconcileDepositApplied(receiptNumber, depositApplied, depositFromLines);
+                    // เขียนลง DB เฉพาะเมื่อ NextAcc ยังไม่มี GL ของใบนี้ (ยังไม่สร้าง/draft/ถูก void แล้ว)
+                    // ถ้าโพสต์ไปแล้ว (APR:/ADJ:/final) ค่าที่เก็บต้องคง = ยอดที่ลงไว้จริง — VOID ใช้ค่านี้กลับรายการ
+                    depositApplied = ReconcileDepositApplied(receiptNumber, depositApplied, depositFromLines,
+                        persist: !ReceiptGlAlreadyPosted(receiptNumber));
                     // GROSS = ผลรวม "บรรทัดบวก" (room/service จริง จาก LookupReceiptLinesEx ที่ตัด negative ออก)
                     // — deterministic ไม่ขึ้นกับว่า Total_Amount ที่ store เป็น net หรือ gross.
                     // ⚠ เดิม `totalAmount += depositFromLines` สมมติ Total_Amount = net เสมอ → ถ้าบางใบ store
@@ -6149,7 +6248,7 @@ namespace Take_Time_BangPhra.Integration
                         totalAmount = netReceivedBeforeGrossUp;
                         // และยอดหักมัดจำที่เก็บไว้ของใบนี้ต้องเป็น 0 ให้ตรงกับที่ลงจริง (ไม่งั้นการตัดมัดจำ/ยอดคงเหลือ
                         // มองว่าใบนี้ใช้มัดจำไปแล้ว → หนี้สินมัดจำค้างไม่มีใครล้าง)
-                        PersistDepositApplied(receiptNumber, 0m);
+                        if (!ReceiptGlAlreadyPosted(receiptNumber)) PersistDepositApplied(receiptNumber, 0m);
                     }
                 }
 
@@ -6824,8 +6923,15 @@ namespace Take_Time_BangPhra.Integration
         /// <summary>ถ้าใบนี้ใช้ Option B (cash-sale JV หักมัดจำ ref "-CSDEPADJ") → โพสต์ undo
         /// (Dr แหล่งเงิน / Cr 21510) คืน true = จัดการแล้ว (ผู้เรียกข้าม reverse แบบ AR).
         /// idempotent ด้วย ref "-CSDEPADJ-REV". ไม่ใช่ Option B → คืน false ให้ไปใช้ AR reverse เดิม</summary>
+        /// <param name="voidedDocId">
+        /// GUID ของเอกสารที่กำลัง void — ใช้หา JV ผูกเอกสาร (-CSDEPADJ-{docId8}) ตรง ๆ
+        /// ⚠ อย่าพึ่ง marker: repost ล้าง marker ก่อน void วิ่ง / แก้ใบใน Receipt.aspx ลบแล้ว insert แถวใหม่
+        ///   (marker ว่าง) ⇒ เดิมหา tag ไม่เจอ → ไม่กลับ JV มัดจำของใบเก่า แล้ว CREATE ใหม่ลง JV ใหม่ซ้อน
+        ///   = ตัดมัดจำ 2 รอบ (21510 ติดลบ เงินสดขาด)
+        /// </param>
         private async Task<bool> TryReverseCashSaleDepositOnVoidAsync(
-            int resId, decimal applied, string paymentMethod, string paymentAccountId, string custName, string receiptNumber)
+            int resId, decimal applied, string paymentMethod, string paymentAccountId, string custName, string receiptNumber,
+            Guid voidedDocId = default(Guid))
         {
             if (applied <= 0.005m || string.IsNullOrEmpty(receiptNumber)) return false;
 
@@ -6858,7 +6964,7 @@ namespace Take_Time_BangPhra.Integration
             // ชุดผูก GUID เอกสาร (-CSDEPADJ-{docId8}) — รูปแบบปัจจุบัน ต้องกลับก่อน
             // marker เก็บ docId ของใบที่กำลัง void อยู่ → หา ref ของใบนั้นได้ตรง ๆ
             string mkDoc = LookupReceiptPaymentMarker(receiptNumber) ?? "";
-            var mkGuid = ExtractGuid(mkDoc);
+            var mkGuid = voidedDocId != Guid.Empty ? voidedDocId : ExtractGuid(mkDoc);
             if (mkGuid != Guid.Empty)
             {
                 string tag = mkGuid.ToString("N").Substring(0, 8);
@@ -6945,11 +7051,6 @@ namespace Take_Time_BangPhra.Integration
         // ══════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// คืน "เลขเอกสารเช็คเอาท์ใบอื่น" ที่เรียกใช้มัดจำของการจองนี้ไปแล้ว (ไม่ใช่ใบปัจจุบัน) —
-        /// ใช้เป็น guard กันหักมัดจำก้อนเดิมซ้ำจากเอกสารคนละใบ. คืน null = ยังไม่ถูกใช้ / ถูกใช้โดยใบเดียวกันนี้
-        /// (retry/edit ปกติ) → หักได้. คอลัมน์ยังไม่มี (ยังไม่ migrate) → คืน null (ไม่บล็อก).
-        /// </summary>
-        /// <summary>
         /// ข้อความเมื่อ "ยอดหักมัดจำในใบ &gt; มัดจำที่รับจริงทั้งหมด" และไม่มีใบมัดจำเหลือให้ sync
         ///
         /// เดิมใช้ข้อความ "ใบมัดจำยังไม่ขึ้น NextAcc → auto-enqueue 0 ใบ" ซึ่งชวนให้เข้าใจว่ารอสักพักจะหาย
@@ -6967,6 +7068,11 @@ namespace Take_Time_BangPhra.Integration
                    $"receipt={receiptNumber}";
         }
 
+        /// <summary>
+        /// คืน "เลขเอกสารเช็คเอาท์ใบอื่น" ที่เรียกใช้มัดจำของการจองนี้ไปแล้ว (ไม่ใช่ใบปัจจุบัน) —
+        /// ใช้เป็น guard กันหักมัดจำก้อนเดิมซ้ำจากเอกสารคนละใบ. คืน null = ยังไม่ถูกใช้ / ถูกใช้โดยใบเดียวกันนี้
+        /// (retry/edit ปกติ) → หักได้. คอลัมน์ยังไม่มี (ยังไม่ migrate) → คืน null (ไม่บล็อก).
+        /// </summary>
         private string GetDepositConsumedByOther(int reservationId, string currentReceiptNumber)
         {
             if (reservationId <= 0) return null;
@@ -7016,7 +7122,12 @@ namespace Take_Time_BangPhra.Integration
                           Deposit_Consumed_Amount = @amt
                       WHERE Reservation_ID = @rid AND IsDeposit = 1
                         AND (Status='Normal' OR Status IS NULL)
-                        AND (Deposit_Consumed_By_Receipt IS NULL OR Deposit_Consumed_By_Receipt = @rcpt)",
+                        AND (Deposit_Consumed_By_Receipt IS NULL OR Deposit_Consumed_By_Receipt = @rcpt
+                             -- มาร์คของใบที่ถูกยกเลิก/ลบไปแล้ว = ว่าง → รับช่วงได้ (สอดคล้องกับ GetDepositConsumedByOther)
+                             -- ไม่งั้น VOID ของใบเก่าที่วิ่งทีหลังจะล้างมาร์คทิ้งทั้งที่ใบใหม่ใช้มัดจำอยู่
+                             OR NOT EXISTS (SELECT 1 FROM Account_Receipt c
+                                             WHERE c.ID = Account_Receipt.Deposit_Consumed_By_Receipt
+                                               AND (c.Status = 'Normal' OR c.Status IS NULL)))",
                     new Dictionary<string, object>
                     {
                         { "@rid", reservationId },
@@ -7905,6 +8016,19 @@ namespace Take_Time_BangPhra.Integration
             catch { }
         }
 
+        /// <summary>
+        /// NextAcc มี GL ของใบนี้แล้วหรือยัง (ดูจาก marker) — null/VOIDED/DOC: (draft) = ยัง;
+        /// APR:/ADJ:/GUID/CSNATIVE:/paymentId/NOCASH = โพสต์แล้ว
+        /// ใช้ตัดสินว่าเขียนยอดหักมัดจำใหม่ลง DB ได้ไหม (โพสต์แล้ว = ค่าที่เก็บต้องเท่ายอดที่ลงไว้จริง)
+        /// </summary>
+        private bool ReceiptGlAlreadyPosted(string receiptNumber)
+        {
+            string mk = LookupReceiptPaymentMarker(receiptNumber);
+            if (string.IsNullOrEmpty(mk) || mk == "VOIDED") return false;
+            if (mk.StartsWith("DOC:", StringComparison.Ordinal)) return false;
+            return true;
+        }
+
         // ──────────────────────────────────────────────
         // Void/Cancel Processors
         // ──────────────────────────────────────────────
@@ -8019,6 +8143,14 @@ namespace Take_Time_BangPhra.Integration
                             if (voidedDocType == NexaaccDocumentType.TaxInvoice)
                             {
                                 int resIdV = LookupReceiptHeaderInfo(receiptNumber)?.reservationId ?? 0;
+                                // ใบขายสด (isCashSale) ตัดมัดจำด้วย JV แยก ({receipt}-CSDEPADJ-{doc8}) ไม่ใช่ document payment
+                                // → void doc ไม่ cascade ให้ ต้องกลับเอง (เดิมไม่มีขั้นนี้ ⇒ void→สร้างใหม่ = ตัดมัดจำซ้ำ)
+                                // ไม่ใช่ใบขายสด → helper คืน false ไม่ทำอะไร (payment ถูก cascade กลับแล้ว)
+                                var infoV = LookupReceiptHeaderInfo(receiptNumber);
+                                if (infoV != null)
+                                    await TryReverseCashSaleDepositOnVoidAsync(infoV.Value.reservationId, applied,
+                                        infoV.Value.paymentMethod, infoV.Value.paymentAccountId,
+                                        infoV.Value.customerName ?? "", receiptNumber, docId);
                                 if (_config.IsDepositVatAtReceipt && !_config.IsDepositOutputVatDeferred)
                                 {
                                     // โหมด §78/1 เคร่ง: ใบกำกับออกเฉพาะยอดคงเหลือ + มี journal รับรู้รายได้มัดจำ
@@ -8125,7 +8257,7 @@ namespace Take_Time_BangPhra.Integration
                                     int resId = info.Value.reservationId;
                                     string custName = info.Value.customerName ?? "";
                                     // Option B (cash-sale JV) → กลับ Dr แหล่งเงิน/Cr 21510; ไม่ใช่ → AR reverse เดิม
-                                    if (!await TryReverseCashSaleDepositOnVoidAsync(resId, applied, info.Value.paymentMethod, info.Value.paymentAccountId, custName, receiptNumber))
+                                    if (!await TryReverseCashSaleDepositOnVoidAsync(resId, applied, info.Value.paymentMethod, info.Value.paymentAccountId, custName, receiptNumber, docId))
                                     {
                                         var counterAdj = _mapper.MapDepositAppliedAdjustmentReverse(
                                             resId, applied, info.Value.paymentMethod, DateTime.Now,
@@ -8175,7 +8307,7 @@ namespace Take_Time_BangPhra.Integration
                                 if (applied > 0 && info != null)
                                 {
                                     // Option B (cash-sale JV) → กลับ Dr แหล่งเงิน/Cr 21510; ไม่ใช่ → AR reverse เดิม
-                                    if (!await TryReverseCashSaleDepositOnVoidAsync(resId, applied, info.Value.paymentMethod, info.Value.paymentAccountId, custName, receiptNumber))
+                                    if (!await TryReverseCashSaleDepositOnVoidAsync(resId, applied, info.Value.paymentMethod, info.Value.paymentAccountId, custName, receiptNumber, docId))
                                     {
                                         var counterAdj = _mapper.MapDepositAppliedAdjustmentReverse(
                                             resId, applied, info.Value.paymentMethod, DateTime.Now,
@@ -10959,20 +11091,23 @@ namespace Take_Time_BangPhra.Integration
         /// <summary>
         /// Manually retry a failed queue item.
         /// </summary>
-        public void RetryItem(long queueId)
+        /// <returns>true = รีเซ็ตเป็น PENDING แล้ว; false = สถานะไม่อนุญาต (กำลังส่ง/สำเร็จ/ถูกแทน/ยกเลิก)</returns>
+        public bool RetryItem(long queueId)
         {
             var parameters = new Dictionary<string, object>
             {
                 { "@id", queueId }
             };
 
-            // ⚠ ห้ามรีเซ็ตรายการที่ "กำลังส่งอยู่" (PROCESSING) — ตัวประมวลผลอีกรอบจะ claim ซ้ำได้
+            // ⚠ ห้ามรีเซ็ตรายการที่กำลังส่งอยู่ (PROCESSING) — ตัวประมวลผลอีกรอบจะ claim ซ้ำได้
             //   ⇒ ยิงสร้างเอกสารบน NextAcc 2 ครั้ง. COMPLETED/SUPERSEDED ก็ห้าม (re-post มีเส้นเฉพาะ)
-            _code.DatabaseInsertSafe(_connectionString,
+            // CANCELLED = ถูกแทนด้วย re-sync — ปลุกกลับมาจะยิงซ้ำกับรายการใหม่
+            int n = _code.DatabaseInsertSafe(_connectionString,
                 @"UPDATE Accounting_Sync_Queue
                   SET Status = 'PENDING', Retry_Count = 0, Next_Retry_Date = NULL, Error_Message = NULL
-                  WHERE ID = @id AND Status NOT IN ('PROCESSING', 'COMPLETED', 'SUPERSEDED')",
+                  WHERE ID = @id AND Status NOT IN ('PROCESSING', 'COMPLETED', 'SUPERSEDED', 'CANCELLED')",
                 parameters);
+            return n > 0;
         }
 
         /// <summary>
@@ -12209,6 +12344,30 @@ namespace Take_Time_BangPhra.Integration
             string receiptNumber = p.ContainsKey("receiptNumber") ? p["receiptNumber"]?.ToString() : null;
             if (string.IsNullOrEmpty(receiptNumber)) return -1;
 
+            // รายการนี้ถูกแทนแล้ว (แก้ใบ = void→CREATE ใหม่ของเลขเดียวกัน) → ห้าม repost จากแถวเก่า
+            // ไม่งั้น path "เอกสารเดิมถูกลบ/void" ด้านล่างจะสร้างเอกสารเพิ่มอีกใบซ้อนกับของใหม่
+            try
+            {
+                var newer = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 ID, Status FROM Accounting_Sync_Queue
+                      WHERE Action_Type = 'CREATE_RECEIPT_DOCUMENT' AND ID > @id
+                        AND Status IN ('PENDING', 'PROCESSING', 'FAILED', 'COMPLETED')
+                        AND Payload LIKE @pat
+                      ORDER BY ID DESC",
+                    new Dictionary<string, object>
+                    {
+                        { "@id", queueId },
+                        { "@pat", "%\"receiptNumber\":\"" + receiptNumber + "\"%" }
+                    });
+                if (newer != null && newer.Rows.Count > 0)
+                {
+                    LastRepostMessage = $"รายการนี้ถูกแทนด้วยรายการใหม่กว่าแล้ว (#{newer.Rows[0]["ID"]}, {newer.Rows[0]["Status"]}) " +
+                                        "— กด Retry ที่รายการนั้นแทน (repost จากแถวเก่าจะได้เอกสารซ้อน)";
+                    return -1;
+                }
+            }
+            catch { }
+
             string docType = row.Table.Columns.Contains("Nexaacc_Document_Type")
                 ? row["Nexaacc_Document_Type"]?.ToString() ?? "" : "";
 
@@ -12590,6 +12749,7 @@ namespace Take_Time_BangPhra.Integration
                     if (depositApplied <= 0)
                         depositApplied = LookupDepositAppliedFromReceipt(receiptNumber);
 
+                    decimal netReceived = totalAmount;   // ยอดรับจริงก่อน gross-up (ใช้เมื่อด่านมัดจำซ้ำบล็อก)
                     decimal depositFromLines;
                     var lines = LookupReceiptLinesEx(receiptNumber, reservationId, totalAmount, revenueType, out depositFromLines);
                     // OTA/prepaid gate (เหมือน ProcessReceiptDocument): ยอดหัก = "มัดจำจริง" ก็ต่อเมื่อมีใบมัดจำ
@@ -12610,6 +12770,14 @@ namespace Take_Time_BangPhra.Integration
                         decimal grossFromLines = lines != null ? lines.Sum(l => l.Amount) : 0m;
                         if (grossFromLines > 0.005m) totalAmount = grossFromLines;
                         else totalAmount += depositFromLines;   // fallback ไม่มี lines
+                    }
+                    // ด่านกันใช้มัดจำซ้ำ (เหมือน ProcessReceiptDocument) — repost ต้องไม่หักมัดจำที่ใบอื่นที่ยัง
+                    // ใช้งานอยู่เรียกใช้ไปแล้ว (เดิมเส้น repost ไม่มีด่านนี้ ⇒ ใบที่เคยถูกบล็อกกลับมาหักซ้ำได้)
+                    if (depositApplied > 0.005m && !string.IsNullOrEmpty(GetDepositConsumedByOther(reservationId, receiptNumber)))
+                    {
+                        depositApplied = 0m;
+                        lines = null;
+                        totalAmount = netReceived;
                     }
 
                     bool useMultiLine = lines != null && (lines.Count > 1 || depositApplied > 0);
@@ -12737,6 +12905,7 @@ namespace Take_Time_BangPhra.Integration
                 if (depositApplied <= 0)
                     depositApplied = LookupDepositAppliedFromReceipt(receiptNumber);
 
+                decimal netReceived = totalAmount;   // ยอดรับจริงก่อน gross-up (ใช้เมื่อด่านมัดจำซ้ำบล็อก)
                 decimal depositFromLines;
                 var lines = LookupReceiptLinesEx(receiptNumber, reservationId, totalAmount, revenueType, out depositFromLines);
                 // OTA/prepaid gate — เหมือน ProcessReceiptDocument / BuildCorrectedReceiptInvoice
@@ -12759,6 +12928,15 @@ namespace Take_Time_BangPhra.Integration
                     decimal grossFromLinesJ = lines != null ? lines.Sum(l => l.Amount) : 0m;
                     if (grossFromLinesJ > 0.005m) totalAmount = grossFromLinesJ;
                     else totalAmount += depositFromLines;   // fallback ไม่มี lines
+                }
+                // ด่านกันใช้มัดจำซ้ำ (เหมือน ProcessReceiptDocument) — ไม่งั้นแก้ JE ในที่แล้วหักมัดจำที่ใบอื่นใช้ไป
+                // แล้วเขียนยอดนั้นกลับลง DB (PersistDepositApplied) ⇒ มัดจำถูกใช้ 2 ใบ
+                if (depositApplied > 0.005m && !string.IsNullOrEmpty(GetDepositConsumedByOther(reservationId, receiptNumber)))
+                {
+                    depositApplied = 0m;
+                    lines = null;
+                    totalAmount = netReceived;
+                    builtDepositApplied = 0m;
                 }
 
                 bool useMultiLine = lines != null && (lines.Count > 1 || depositApplied > 0);
@@ -12819,7 +12997,12 @@ namespace Take_Time_BangPhra.Integration
                     string entityType = completedDt.Rows[0]["Entity_Type"]?.ToString();
                     string oldNexaaccId = completedDt.Rows[0]["Nexaacc_Response_Id"]?.ToString();
 
-                    if (!string.IsNullOrEmpty(oldNexaaccId))
+                    // ผู้เรียก (repost fallback) อาจใส่ VOID ของเอกสารเดียวกันไว้แล้ว — ตอนนี้ VOID ไม่ถูกยกเลิก
+                    // ใน Step 3 แล้ว จึงต้องกันไม่ให้ซ้อนสองตัว (เส้น int_ กลับรายการมัดจำซ้ำได้)
+                    bool voidAlreadyQueued = !string.IsNullOrEmpty(oldNexaaccId)
+                        && FindPendingEntry(entityType, entityType == "RECEIPT" ? "VOID_RECEIPT" : "VOID_VOUCHER",
+                                            "nexaaccId", oldNexaaccId) > 0;
+                    if (!string.IsNullOrEmpty(oldNexaaccId) && !voidAlreadyQueued)
                     {
                         // ProcessVoidReceipt อ่าน "receiptNumber" (ProcessVoidVoucher อ่าน "documentNumber")
                         // → ใส่ทั้งคู่ ไม่งั้น void ฝั่ง RECEIPT วิ่งแบบ null ข้ามกลับรายการหักมัดจำ

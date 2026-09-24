@@ -1407,7 +1407,10 @@ namespace Take_Time_BangPhra.Admin.Settings
                         { "message", "รายการนี้กำลังส่งไป NextAcc อยู่ — รอให้จบรอบก่อน (ถ้าค้างเกิน 15 นาที ระบบจะคืนเป็นรอส่งเอง)" } };
                 }
 
-                sync.RetryItem(queueId);
+                if (!sync.RetryItem(queueId))
+                    return new Dictionary<string, object> { { "success", false },
+                        { "message", $"รายการ #{queueId} อยู่ในสถานะ {rowStatus} — Retry ไม่ได้ " +
+                            "(ถูกแทนด้วยรายการใหม่/ถูกยกเลิก — ให้ Retry ที่รายการล่าสุดของเอกสารนี้แทน)" } };
                 return new Dictionary<string, object> { { "success", true }, { "message", $"Reset queue item #{queueId} to PENDING" } };
             }
             catch (Exception ex)
