@@ -401,7 +401,12 @@ namespace Take_Time_BangPhra.Services
 
         // ── helpers ────────────────────────────────────────────────────────────────
 
-        /// <summary>ดึงเบอร์โทรไทยจากข้อความ (รองรับ 0812345678 / 081-234-5678 / +66812345678)</summary>
+        /// <summary>
+        /// ดึงเบอร์โทรจากข้อความ (สูงสุด 3 เบอร์)
+        ///   • ไทย: 0812345678 / 081-234-5678 / +66812345678 → "0…"
+        ///   • ต่างประเทศ: +852 9545 6676 / +1 (415) 555-2671 → "+85295456676" (รูปเดียวกับที่
+        ///     GuestPhone เก็บเป็น Customer_MobilePhone ของแขกต่างชาติ)
+        /// </summary>
         private static List<string> ExtractPhones(string text)
         {
             var list = new List<string>();
@@ -414,6 +419,18 @@ namespace Take_Time_BangPhra.Services
                 if (digits.Length >= 9 && digits.Length <= 10 && !list.Contains(digits))
                     list.Add(digits);
                 if (list.Count >= 3) break;   // กันข้อความยาวยิง query รัว
+            }
+            if (list.Count >= 3) return list;
+
+            // เบอร์ต่างประเทศ: "+" ตามด้วยตัวเลข 8-15 หลัก (คั่นด้วยช่องว่าง/ขีด/จุด/วงเล็บได้)
+            foreach (Match m in Regex.Matches(text, @"\+\s?\d(?:[\s\-\.\(\)]{0,2}\d){7,14}"))
+            {
+                string digits = Regex.Replace(m.Value, @"[^\d]", "");
+                if (digits.StartsWith("66")) continue;   // +66 = เบอร์ไทย ลูปบนจัดการแล้ว
+                string intl = "+" + digits;
+                if (GuestPhone.IsInternational(intl) && !list.Contains(intl))
+                    list.Add(intl);
+                if (list.Count >= 3) break;
             }
             return list;
         }

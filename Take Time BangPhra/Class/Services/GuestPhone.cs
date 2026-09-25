@@ -15,10 +15,17 @@ namespace Take_Time_BangPhra.Services
     ///
     /// กฎเดิมหลวมเกินไป (ยาว 9-20 ตัวและไม่ขึ้นต้น 02 = ผ่าน) → 01111111111111 ผ่านฉลุย
     /// ที่นี่ตรวจให้ตรงรูปแบบเบอร์ไทยจริง ๆ และดักค่าคงที่/ค่าหลอกด้วย
+    ///
+    /// เบอร์ต่างประเทศ (แขกต่างชาติ เช่น "+852 9545 6676") เก็บเป็น "+" + ตัวเลขล้วน — ห้ามเติม 0 นำหน้า
+    /// (รุ่นก่อนตัด + แล้วเติม 0 → "085295456676" ผิดและแขกประจำถูกแยกเป็นหลายแถวลูกค้า)
     /// </summary>
     public static class GuestPhone
     {
-        /// <summary>ตัดอักขระที่ไม่ใช่ตัวเลข + แปลง +66 / 66 ให้เป็น 0</summary>
+        /// <summary>
+        /// ตัดอักขระที่ไม่ใช่ตัวเลข + แปลง +66 / 66 ให้เป็น 0 (สำหรับเบอร์ไทยที่คนกรอก เช่นหน้าสมาชิก)
+        /// ⚠ ห้ามใช้ก่อน <see cref="ResolveKey"/> / <see cref="Normalize"/> — ตัด '+' ทิ้งแล้วเติม 0
+        ///   ทำให้เบอร์ต่างประเทศเพี้ยน ("+852 9545 6676" → "085295456676")
+        /// </summary>
         public static string Sanitize(string p)
         {
             if (string.IsNullOrWhiteSpace(p)) return "";
@@ -47,10 +54,179 @@ namespace Take_Time_BangPhra.Services
                 && !LooksFake(digits);
         }
 
-        /// <summary>เป็นเบอร์โทรไทยที่ "โทรออกได้จริง" ไหม (มือถือหรือเบอร์บ้าน)</summary>
-        public static bool IsUsable(string digits)
+        /// <summary>
+        /// เป็นเบอร์ที่ "โทรออกได้จริง" ไหม — มือถือ/เบอร์บ้านไทย ("0…") หรือเบอร์ต่างประเทศ ("+…")
+        /// (เส้นอีเมลแก้ไขใช้ตัวนี้ตัดสินว่าจะย้ายใบจองไปผูกลูกค้าเบอร์ใหม่ไหม ⇒ ต้องรับเบอร์ต่างประเทศด้วย
+        ///  ไม่งั้นแขกต่างชาติที่เปลี่ยนเบอร์ในอีเมลแก้ไขจะไม่ถูกย้าย)
+        /// </summary>
+        public static bool IsUsable(string value)
         {
-            return IsMobile(digits) || IsLandline(digits);
+            return IsMobile(value) || IsLandline(value) || IsInternational(value);
+        }
+
+        /// <summary>
+        /// ค่านี้เป็น "เบอร์ต่างประเทศ" ในรูปที่ระบบเก็บไหม: "+" ตามด้วยตัวเลข 8-15 หลัก
+        /// (หลักแรก 1-9, ไม่ใช่ค่าหลอก) — ตรงกับรูปแบบที่ <see cref="Normalize"/> คืนให้
+        /// </summary>
+        public static bool IsInternational(string value)
+        {
+            if (string.IsNullOrEmpty(value) || value.Length < 2 || value[0] != '+') return false;
+            return IsInternationalDigits(value.Substring(1));
+        }
+
+        /// <summary>ตัวเลขล้วน (ไม่มี +) ใช้เป็นเบอร์ต่างประเทศได้ไหม: 8-15 หลัก หลักแรก 1-9 และไม่ใช่ค่าหลอก</summary>
+        private static bool IsInternationalDigits(string digits)
+        {
+            return !string.IsNullOrEmpty(digits)
+                && Regex.IsMatch(digits, @"^[1-9][0-9]{7,14}$")
+                && !LooksFake(digits);
+        }
+
+        /// <summary>
+        /// รหัสประเทศที่ยอมรับเมื่อเบอร์ "ไม่มี + / 00 นำหน้า" (OTA บางเจ้าตัด + ทิ้ง เช่น 85295456676)
+        /// — ต้องมีรายการ เพราะตัวเลขล้วนยาว ๆ ที่ไม่มี + อาจเป็นเลขจอง/PIN ก็ได้
+        /// 66 (ไทย) ไม่อยู่ในรายการ — ถูกแปลงเป็นเบอร์ไทย "0…" ก่อนถึงขั้นนี้แล้ว
+        /// ⚠ รายการเดียวกับใน Database/PHASE19_Migration_16_Fix_Placeholder_Guest_Phone.sql
+        /// </summary>
+        private static readonly string[] KnownCountryCodes =
+        {
+            "852", "853", "855", "856", "880", "886", "971", "972", "973", "974", "977",
+            "20", "27", "30", "31", "32", "33", "34", "36", "39", "40", "41",
+            "43", "44", "45", "46", "47", "48", "49",
+            "51", "52", "53", "54", "55", "56", "57", "58",
+            "60", "61", "62", "63", "64", "65",
+            "81", "82", "84", "86",
+            "90", "91", "92", "93", "94", "95",
+            "1", "7"
+        };
+
+        /// <summary>ตัวเลขล้วนขึ้นต้นด้วยรหัสประเทศที่รู้จักไหม (ดู <see cref="KnownCountryCodes"/>)</summary>
+        public static bool StartsWithKnownCountryCode(string digits)
+        {
+            if (string.IsNullOrEmpty(digits)) return false;
+            foreach (string cc in KnownCountryCodes)
+                if (digits.StartsWith(cc, StringComparison.Ordinal)) return true;
+            return false;
+        }
+
+        /// <summary>
+        /// ความยาวสูงสุดของ Customer key ที่ยอมเก็บ — DDL ของตาราง Customer/Reservation ไม่อยู่ใน repo
+        /// (คอลัมน์เบอร์อาจเป็น VARCHAR(20)) ⇒ กันไว้ก่อน: "+" + 15 หลัก = 16 ตัว, OTA_ key ≤ 16 ตัว
+        /// ถ้าค่าที่เลือกได้ยาวเกินนี้ (ไม่ควรเกิด) ให้ใช้ OTA_ key แทน ดีกว่าให้ INSERT ถูกตัดท้าย/ล้มทั้งใบจอง
+        /// </summary>
+        public const int MaxKeyLength = 20;
+
+        private const string FakeReasonFormat = "เบอร์ที่ส่งมาเป็นค่าคงที่/ค่าหลอก ({0})";
+
+        /// <summary>
+        /// เลขในวงเล็บของเลขที่จอง (Booking.com/Expedia: "1114600000001755 (5904188856)" → "5904188856")
+        /// — เป็น PIN/เลขอ้างอิงที่สอง ไม่ใช่เบอร์โทร (โค้ดรุ่นเก่าเคยเอาไปเก็บเป็นเบอร์) คืน "" ถ้าไม่มี
+        /// </summary>
+        public static string BookingPin(string bookingId)
+        {
+            if (string.IsNullOrWhiteSpace(bookingId)) return "";
+            var m = Regex.Match(bookingId, @"\((\d{6,})\)");
+            return m.Success ? m.Groups[1].Value : "";
+        }
+
+        /// <summary>
+        /// แปลง "ข้อความเบอร์ดิบ" จากอีเมล → ค่าที่เก็บเป็นเบอร์ลูกค้าได้
+        ///   • เบอร์ไทย → "0…" (มือถือ 10 หลัก / เบอร์บ้าน 9 หลัก)
+        ///   • เบอร์ต่างประเทศ → "+" + ตัวเลขล้วน (ห้ามเติม 0 นำหน้าเด็ดขาด)
+        /// ใช้ไม่ได้ → คืน "" และบอกเหตุผลใน <paramref name="reason"/> (ใช้ได้ → reason = null)
+        ///
+        /// ⚠ ต้องได้ข้อความ "ดิบ" — ห้ามผ่าน <see cref="Sanitize"/> มาก่อน: Sanitize ตัด '+' ทิ้งแล้วเติม 0
+        ///   ⇒ "+852 9545 6676" (แขกฮ่องกง) กลายเป็น "085295456676" ซึ่งทั้งผิดและแยกไม่ออกว่าเป็นเบอร์ต่างประเทศ
+        ///
+        /// กฎ:
+        ///  1) ขึ้นต้น '+' หรือตัวเลขขึ้นต้น "00" = เบอร์ต่างประเทศ
+        ///     - รหัส 66 → แปลงเป็นไทย "0…" แล้วตรวจแบบเบอร์ไทย
+        ///     - อื่น ๆ → 8-15 หลัก หลักแรก 1-9 ไม่ใช่ค่าหลอก → "+ตัวเลข"
+        ///  2) ไม่มี + / 00: ขึ้นต้น 0 = เบอร์ไทย; 9 หลักขึ้นต้น 6/8/9 = มือถือไทยที่หาย 0 นำหน้า;
+        ///     66 + 8-10 หลัก = ไทย; ≥ 11 หลักและขึ้นต้นรหัสประเทศที่รู้จัก = ต่างประเทศ "+ตัวเลข"
+        ///  3) ปฏิเสธ: ค่าหลอก, ตรงกับเลขในวงเล็บของเลขที่จอง (PIN), หรือรูปแบบอื่น
+        /// </summary>
+        public static string Normalize(string raw, string bookingId, out string reason)
+        {
+            reason = null;
+            if (string.IsNullOrWhiteSpace(raw)) { reason = "ไม่มีเบอร์โทรมาในอีเมล"; return ""; }
+
+            string trimmed = raw.Trim();
+            bool plus = trimmed.StartsWith("+", StringComparison.Ordinal);
+            // "+44 (0) 7911 123456" — (0) คือเลขนำหน้าในประเทศ ไม่ใช่ส่วนของเบอร์สากล
+            if (plus) trimmed = Regex.Replace(trimmed, @"\(\s*0\s*\)", "");
+            string digits = Regex.Replace(trimmed, @"[^0-9]", "");   // [0-9] ไม่ใช่ \d — \d ของ .NET รับเลขไทย/อารบิกด้วย
+            if (digits.Length == 0) { reason = $"ไม่มีตัวเลขในช่องเบอร์โทร ({Trunc(trimmed)})"; return ""; }
+
+            // PIN ของ Booking.com/Expedia หลุดมาเป็นเบอร์ (รุ่นเก่าเคยเก็บ "5904188856" จาก "(5904188856)")
+            string pin = BookingPin(bookingId);
+            if (pin.Length > 0 && (digits == pin || digits == "0" + pin))
+            {
+                reason = $"ตัวเลขที่ได้คือเลขอ้างอิงในวงเล็บของเลขที่จอง ({pin}) ไม่ใช่เบอร์โทร";
+                return "";
+            }
+
+            if (LooksFake(digits)) { reason = string.Format(FakeReasonFormat, digits); return ""; }
+
+            bool intl = plus || digits.StartsWith("00", StringComparison.Ordinal);
+            if (intl)
+            {
+                string d = digits.StartsWith("00", StringComparison.Ordinal) ? digits.Substring(2) : digits;
+                if (d.StartsWith("66", StringComparison.Ordinal))
+                    return ThaiFromCountryCode(d, out reason);
+                if (IsInternationalDigits(d)) return "+" + d;
+                reason = LooksFake(d)
+                    ? string.Format(FakeReasonFormat, d)
+                    : $"เบอร์ต่างประเทศรูปแบบไม่ถูกต้อง (+{d} = {d.Length} หลัก — ต้อง 8-15 หลัก หลักแรก 1-9)";
+                return "";
+            }
+
+            if (digits.StartsWith("0", StringComparison.Ordinal))
+            {
+                if (IsMobile(digits) || IsLandline(digits)) return digits;
+                reason = digits.Length != 9 && digits.Length != 10
+                    ? $"ความยาวไม่ใช่เบอร์ไทย ({digits} = {digits.Length} หลัก)"
+                    : $"รูปแบบไม่ใช่เบอร์ไทย ({digits})";
+                return "";
+            }
+
+            // มือถือไทยที่ OTA ตัด 0 นำหน้าทิ้ง: 812345678 → 0812345678
+            if (digits.Length == 9 && (digits[0] == '6' || digits[0] == '8' || digits[0] == '9'))
+            {
+                string th = "0" + digits;
+                if (IsMobile(th)) return th;
+                reason = $"รูปแบบไม่ใช่เบอร์ไทย ({th})";
+                return "";
+            }
+
+            // 66 ไม่มี + นำหน้า (66812345678 / 6638123456) — ช่วงความยาวเดียวกับที่ Sanitize เดิมแปลง
+            if (digits.StartsWith("66", StringComparison.Ordinal) && digits.Length >= 10 && digits.Length <= 12)
+                return ThaiFromCountryCode(digits, out reason);
+
+            // เบอร์ต่างประเทศที่ OTA ตัด + ทิ้ง (85295456676) — ต้องยาวพอและขึ้นต้นรหัสประเทศที่รู้จัก
+            if (digits.Length >= 11 && StartsWithKnownCountryCode(digits) && IsInternationalDigits(digits))
+                return "+" + digits;
+
+            reason = $"ไม่ใช่รูปแบบเบอร์ไทย และไม่มีรหัสประเทศ (+) นำหน้า ({digits} = {digits.Length} หลัก)";
+            return "";
+        }
+
+        /// <summary>"66…" (ตัด + / 00 แล้ว) → เบอร์ไทย "0…" ถ้าถูกรูปแบบ ("+66 (0)81…" ก็รับ)</summary>
+        private static string ThaiFromCountryCode(string digitsWith66, out string reason)
+        {
+            reason = null;
+            string th = "0" + digitsWith66.Substring(2).TrimStart('0');
+            if (IsMobile(th) || IsLandline(th)) return th;
+            reason = LooksFake(th)
+                ? string.Format(FakeReasonFormat, th)
+                : $"เบอร์ไทย (+66) รูปแบบไม่ถูกต้อง ({th} = {th.Length} หลัก)";
+            return "";
+        }
+
+        private static string Trunc(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            return s.Length <= 30 ? s : s.Substring(0, 30) + "…";
         }
 
         /// <summary>
@@ -91,12 +267,15 @@ namespace Take_Time_BangPhra.Services
         /// </summary>
         public static string RejectReason(string raw)
         {
-            string d = Sanitize(raw);
-            if (string.IsNullOrEmpty(d)) return "ไม่มีเบอร์โทรมาในอีเมล";
-            if (LooksFake(d)) return $"เบอร์ที่ส่งมาเป็นค่าคงที่/ค่าหลอก ({d})";
-            if (d.Length != 9 && d.Length != 10) return $"ความยาวไม่ใช่เบอร์ไทย ({d} = {d.Length} หลัก)";
-            if (!IsUsable(d)) return $"รูปแบบไม่ใช่เบอร์ไทย ({d})";
-            return null;
+            return RejectReason(raw, null);
+        }
+
+        /// <summary>เหมือน <see cref="RejectReason(string)"/> แต่ดัก PIN ในวงเล็บของเลขที่จองด้วย</summary>
+        public static string RejectReason(string raw, string bookingId)
+        {
+            string reason;
+            Normalize(raw, bookingId, out reason);
+            return reason;
         }
 
         /// <summary>คำนำหน้าของ "รหัสอ้างอิง" ที่ใช้แทนเบอร์ — ทั้งระบบเช็คด้วยคำนี้ว่าไม่ใช่เบอร์จริง</summary>
@@ -141,20 +320,33 @@ namespace Take_Time_BangPhra.Services
 
         /// <summary>
         /// เลือกค่าที่จะใช้เป็น Customer key ของใบจองนี้
-        /// ลำดับ: เบอร์มือถือจริง → รหัสอ้างอิงจากเลขจอง → เบอร์บ้านจริง → ค่าตั้งต้นที่ตั้งไว้ → OTA_UNKNOWN
+        /// ลำดับ: เบอร์มือถือไทยจริง / เบอร์ต่างประเทศจริง ("+…") → รหัสอ้างอิงจากเลขจอง → เบอร์บ้านจริง
+        ///       → ค่าตั้งต้นที่ตั้งไว้ → OTA_UNKNOWN
         ///
         /// เบอร์บ้านถูกจัดหลังรหัสอ้างอิงตามตรรกะเดิมของระบบ (เบอร์บ้านในอีเมล OTA มักเป็นเบอร์รีสอร์ทเอง
         /// ไม่ใช่ของลูกค้า) — แต่ถ้าไม่มีเลขจองเลยก็ยังดีกว่าไม่มีอะไร
+        ///
+        /// ⚠ <paramref name="rawPhone"/> ต้องเป็นข้อความดิบจากอีเมล (ห้าม Sanitize ก่อน — ดู <see cref="Normalize"/>)
         /// </summary>
         /// <param name="note">เหตุผลที่ไม่ได้ใช้เบอร์ที่ส่งมา (null = ใช้เบอร์จริงตามที่ส่งมา)</param>
         public static string ResolveKey(string rawPhone, string bookingId, string defaultPhone, out string note)
         {
             note = null;
-            string d = Sanitize(rawPhone);
+            string reason;
+            string d = Normalize(rawPhone, bookingId, out reason);
 
-            if (IsMobile(d)) return d;
+            // กันคอลัมน์เบอร์ล้น (ดู MaxKeyLength) — ปกติ Normalize ไม่คืนค่ายาวเกิน 16 ตัวอยู่แล้ว
+            if (d.Length > MaxKeyLength)
+            {
+                reason = $"เบอร์ยาวเกินคอลัมน์ที่เก็บได้ ({d.Length} ตัว > {MaxKeyLength})";
+                d = "";
+            }
 
-            string reason = RejectReason(rawPhone);
+            if (IsMobile(d) || IsInternational(d)) return d;
+
+            if (IsLandline(d))
+                reason = $"ได้เบอร์บ้าน/สำนักงาน ({d}) ไม่ใช่มือถือ — มักเป็นเบอร์ของที่พักเอง";
+
             string key = ReferenceKey(bookingId);
             if (!string.IsNullOrEmpty(key))
             {

@@ -1272,7 +1272,7 @@ namespace Take_Time_BangPhra.Services
             apply("ChannelName", v => string.IsNullOrWhiteSpace(ch), v => ch = v);
             apply("GuestName", v => string.IsNullOrWhiteSpace(gn), v => gn = v);
             apply("MobilePhone", v => string.IsNullOrWhiteSpace(phv) || GuestPhone.IsReference(phv),
-                  v => phv = ResolvePhone(SanitizePhone(v), bid));
+                  v => phv = ResolvePhone(v, bid));   // ข้อความดิบ — ห้าม SanitizePhone ก่อน (ทำเบอร์ต่างประเทศเพี้ยน)
             bookingId = bid; paymentType = pt; channel = ch; guest = gn; phone = phv;
 
             if (gross <= 0)
@@ -1346,7 +1346,8 @@ namespace Take_Time_BangPhra.Services
             var nameNode = doc.DocumentNode.SelectSingleNode("//span[contains(., 'CONTACT NAME')]/following-sibling::span[1]");
             string guest = nameNode?.InnerText?.Trim().Replace("'", "") ?? "";
             var mobileNode = doc.DocumentNode.SelectSingleNode("//span[contains(., 'CONTACT NUMBER')]/following-sibling::span[1]");
-            string phone = ResolvePhone(SanitizePhone(mobileNode?.InnerText?.Trim() ?? ""), bookingId);
+            // ส่งข้อความ "ดิบ" — SanitizePhone ตัด '+' แล้วเติม 0 ⇒ "+852 9545 6676" กลายเป็น "085295456676"
+            string phone = ResolvePhone(mobileNode?.InnerText?.Trim() ?? "", bookingId);
 
             // ══════════════════════════════════════════════════════════════════
             //  ชั้นกู้ภัย: ฟิลด์ไหนที่ regex ข้างบนอ่านไม่ได้/ได้ค่าน่าสงสัย
@@ -3206,10 +3207,15 @@ namespace Take_Time_BangPhra.Services
         /// ขึ้นชื่อ "Kanthicha Suparojwathin"
         ///
         /// ตอนนี้ตรวจรูปแบบเบอร์ไทยจริง (มือถือ 10 หลัก 06/08/09) + ดักค่าซ้ำ/ค่าเรียง
+        /// เบอร์ต่างประเทศเก็บเป็น "+ตัวเลข" (เช่น +85295456676) ไม่เติม 0
         /// ไม่ผ่าน → ใช้ **เลขที่จองเป็นรหัสอ้างอิง** (OTA_xxxx) ซึ่งไม่ซ้ำข้ามใบ
         /// </summary>
-        private string ResolvePhone(string phone, string bookingId)
+        /// <param name="rawPhone">ข้อความเบอร์ "ดิบ" จากอีเมล (ห้าม SanitizePhone มาก่อน)</param>
+        private string ResolvePhone(string rawPhone, string bookingId)
         {
+            // InnerText ของ HtmlAgilityPack ไม่ถอด entity — "+" อาจมาเป็น "&#43;" แล้วกลายเป็นตัวเลข 43 นำหน้า
+            string phone = rawPhone ?? "";
+            try { phone = HtmlEntity.DeEntitize(phone) ?? phone; } catch { }
             string note;
             string key = GuestPhone.ResolveKey(phone, bookingId, Cfg("Email_Rsv_DefaultPhone", ""), out note);
             if (!string.IsNullOrEmpty(note)) _lastPhoneNote = note;
