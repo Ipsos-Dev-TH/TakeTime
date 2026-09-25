@@ -1590,8 +1590,13 @@ namespace Take_Time_BangPhra.Services
                             cmd.Parameters.AddWithValue("@Out", head.CheckOut);
                             cmd.Parameters.AddWithValue("@Days", stayDays);
                             // Deposit = gross ก็ต่อเมื่อ Channel Collect (OTA เก็บเงินแล้ว); Hotel Collect = 0 (เก็บหน้างาน)
+                            // ระบบ "เดา" โหมด (อีเมลไม่บอกใครเก็บ) → Deposit = 0 เสมอ: ยังไม่มีใครยืนยันว่าเงินเข้าแล้ว
+                            //   (เดิมเดา Channel แล้วตั้งมัดจำเต็ม = ทิศที่แย่ที่สุด — ไม่มีใครเก็บเงิน)
                             cmd.Parameters.AddWithValue("@Total", (decimal)bookedTotal);
-                            cmd.Parameters.AddWithValue("@Dep", channelCollect ? (decimal)bookedTotal : 0m);
+                            cmd.Parameters.AddWithValue("@Dep", (channelCollect && !collectGuessed) ? (decimal)bookedTotal : 0m);
+                            // OTA_Collect_Mode/Source (ใช้เมื่อ migration 17 รันแล้ว — ไม่งั้นพารามิเตอร์ไม่ถูกอ้างถึง)
+                            cmd.Parameters.AddWithValue("@CMode", collectMode);
+                            cmd.Parameters.AddWithValue("@CSrc", collectGuessed ? "GUESS" : "EMAIL");
                             cmd.Parameters.AddWithValue("@Remark", BuildOtaRemark(head, rooms, null, false));
                             cmd.Parameters.AddWithValue("@Ch", (object)head.ChannelName ?? DBNull.Value);
                             cmd.Parameters.AddWithValue("@Bk", (object)head.BookingId ?? DBNull.Value);
@@ -2200,6 +2205,14 @@ namespace Take_Time_BangPhra.Services
             opt("OTA_Net_Amount", "@Net");
             opt("OTA_Payment_Type", "@Pay");
             opt("OTA_Guest_Name", "@Guest");
+            // วิธีเก็บเงินแบบคอลัมน์ (PHASE19 migration 17) — ใส่เฉพาะเมื่อ "เห็น" คอลัมน์จริง
+            // (ไม่ใช้ opt: อ่าน schema ไม่ได้ opt จะใส่ทุกคอลัมน์ ซึ่งพังทั้งใบจองถ้ายังไม่ได้รัน migration)
+            // ⚠ SQL นี้ cache ไว้ใน static — รัน migration แล้วต้อง recycle แอปถึงจะเริ่มเขียนคอลัมน์นี้
+            if (cols.Contains("OTA_Collect_Mode") && cols.Contains("OTA_Collect_Source"))
+            {
+                names.Add("[OTA_Collect_Mode]"); vals.Add("@CMode");
+                names.Add("[OTA_Collect_Source]"); vals.Add("@CSrc");
+            }
 
             _reservationInsertSql = $"INSERT INTO [dbo].[Reservation] ({string.Join(",", names)}) " +
                                     $"VALUES ({string.Join(",", vals)}); SELECT SCOPE_IDENTITY();";
@@ -2227,6 +2240,17 @@ namespace Take_Time_BangPhra.Services
             opt("OTA_Payment_Type", "OTA_Payment_Type = @Pay");
             opt("OTA_Guest_Name", "OTA_Guest_Name = @Guest");
             opt("Modified_Date", "Modified_Date = GETDATE()");
+            // วิธีเก็บเงินแบบคอลัมน์ (PHASE19 migration 17) — เฉพาะเมื่อเห็นคอลัมน์จริง (เหตุผลเดียวกับ ReservationInsertSql)
+            // เจ้าหน้าที่ยืนยันไว้แล้ว (source = STAFF) → อีเมลแก้ไขห้ามเขียนทับ ทั้งโหมด/แหล่ง และ Deposit ต้องตามโหมดที่ยืนยัน
+            // (SET ทุกนิพจน์ใน UPDATE เห็นค่า "ก่อนแก้" ของแถว จึงอ้าง OTA_Collect_Source เดิมได้ทุกตัว)
+            if (cols.Contains("OTA_Collect_Mode") && cols.Contains("OTA_Collect_Source"))
+            {
+                sets[sets.IndexOf("[Deposit] = @Dep")] =
+                    "[Deposit] = CASE WHEN ISNULL(OTA_Collect_Source, N'') = N'STAFF' " +
+                    "THEN (CASE WHEN OTA_Collect_Mode = N'CHANNEL' THEN @Total ELSE 0 END) ELSE @Dep END";
+                sets.Add("OTA_Collect_Mode = CASE WHEN ISNULL(OTA_Collect_Source, N'') = N'STAFF' THEN OTA_Collect_Mode ELSE @CMode END");
+                sets.Add("OTA_Collect_Source = CASE WHEN ISNULL(OTA_Collect_Source, N'') = N'STAFF' THEN OTA_Collect_Source ELSE @CSrc END");
+            }
             _reservationUpdateSet = string.Join(", ", sets);
             return _reservationUpdateSet;
         }
@@ -2445,7 +2469,8 @@ namespace Take_Time_BangPhra.Services
                         double netTotal = rooms.Sum(r => r.NetAmount * r.NoOfRooms * stayDays);
                         double refSell = head.GrossTotal;
                         bool collectGuessed2;
-                        bool channelCollect = ResolveCollect(head.PaymentType, out collectGuessed2) == CollectChannel;
+                        string collectMode2 = ResolveCollect(head.PaymentType, out collectGuessed2);
+                        bool channelCollect = collectMode2 == CollectChannel;
                         // ยอด 0 บนเส้นแก้ไข = เขียนทับใบเดิมให้กลายเป็น 0 (แย่กว่าตอนสร้างใหม่)
                         if (bookedTotal <= 0)
                         {
@@ -2503,7 +2528,11 @@ namespace Take_Time_BangPhra.Services
                             cmd.Parameters.AddWithValue("@Out", head.CheckOut);
                             cmd.Parameters.AddWithValue("@Days", stayDays);
                             cmd.Parameters.AddWithValue("@Total", (decimal)bookedTotal);
-                            cmd.Parameters.AddWithValue("@Dep", channelCollect ? (decimal)bookedTotal : 0m);
+                            // โหมดที่ระบบเดา → Deposit = 0 (เหมือนตอนสร้างใหม่); ใบที่เจ้าหน้าที่ยืนยันโหมดแล้ว (STAFF)
+                            // SET ของ Deposit ใน ReservationUpdateSet จะใช้โหมดที่ยืนยันแทน @Dep
+                            cmd.Parameters.AddWithValue("@Dep", (channelCollect && !collectGuessed2) ? (decimal)bookedTotal : 0m);
+                            cmd.Parameters.AddWithValue("@CMode", collectMode2);
+                            cmd.Parameters.AddWithValue("@CSrc", collectGuessed2 ? "GUESS" : "EMAIL");
                             cmd.Parameters.AddWithValue("@Gross", (decimal)(refSell > 0 ? refSell : bookedTotal));
                             cmd.Parameters.AddWithValue("@Net", (decimal)netTotal);
                             cmd.Parameters.AddWithValue("@Pay", (object)(head.PaymentType ?? "") ?? DBNull.Value);

@@ -617,13 +617,46 @@ namespace Take_Time_BangPhra
             //   เดิมเขียนทับด้วยยอดรวม Payment_History ⇒ ลูกค้าจ่ายของเสริม 450 ผ่านลิงก์ → Deposit ร่วงจาก
             //   3,719 เหลือ 450 → หน้ารายละเอียดโชว์ "ยอดเงินรับมา 450" ค่าห้องกลายเป็นค้างทั้งที่ OTA เก็บแล้ว
             //   → ห้ามลดต่ำกว่ายอดเดิมสำหรับใบที่ระบุว่า Channel Collect
+            // วิธีเก็บเงิน: คอลัมน์ OTA_Collect_Mode (PHASE19 migration 17) ก่อน — กันเฉพาะ CHANNEL ที่ไม่ได้มาจากการเดา
+            //   (HOTEL / UNKNOWN / CHANNEL+GUESS = ยังไม่มีใครยืนยันว่า OTA เก็บ → Deposit = เงินที่รับจริง ไม่กัน
+            //    แม้หมายเหตุจะเขียน Channel)
+            //   ยังไม่มีค่า (NULL) → ถอยไปดูหมายเหตุแบบ "Hotel มาก่อน" (มีทั้งสองคำ = Hotel = ไม่กัน)
+            //   ยังไม่ได้รัน migration (คอลัมน์ไม่มี → query พัง) → ใช้เงื่อนไขหมายเหตุอย่างเดียว
+            const string remarkChannel =
+                "(ISNULL(CAST(Remark AS NVARCHAR(MAX)), N'') NOT LIKE N'%(Hotel Collect)%' " +
+                " AND ISNULL(CAST(Remark AS NVARCHAR(MAX)), N'') LIKE N'%(Channel Collect)%')";
+            if (!_collectModeColumnMissing)
+            {
+                try
+                {
+                    _code.DatabaseInsertSafe(_connectionString,
+                        @"UPDATE Reservation SET Deposit = CASE
+                                WHEN ((ISNULL(OTA_Collect_Mode, N'') = N'CHANNEL'
+                                       AND ISNULL(OTA_Collect_Source, N'') <> N'GUESS')
+                                      OR (OTA_Collect_Mode IS NULL AND " + remarkChannel + @"))
+                                     AND ISNULL(Deposit, 0) > @deposit
+                                THEN Deposit ELSE @deposit END
+                          WHERE ID = @reservationId",
+                        parameters);
+                    return;
+                }
+                catch (Exception ex) when ((ex.Message ?? "").IndexOf("OTA_Collect_", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    // "Invalid column name 'OTA_Collect_Mode'/'OTA_Collect_Source'" — ยังไม่ได้รัน migration 17
+                    _collectModeColumnMissing = true;   // ถาวรจน recycle แอป (หลังรัน migration 17 ให้ recycle)
+                }
+            }
+
             _code.DatabaseInsertSafe(_connectionString,
                 @"UPDATE Reservation SET Deposit = CASE
-                        WHEN ISNULL(Remark, N'') LIKE N'%(Channel Collect)%' AND ISNULL(Deposit, 0) > @deposit
+                        WHEN " + remarkChannel + @" AND ISNULL(Deposit, 0) > @deposit
                         THEN Deposit ELSE @deposit END
                   WHERE ID = @reservationId",
                 parameters);
         }
+
+        /// <summary>ยังไม่ได้รัน PHASE19 migration 17 (ไม่มีคอลัมน์ Reservation.OTA_Collect_Mode) — ตั้งครั้งแรกที่ query พัง</summary>
+        private static volatile bool _collectModeColumnMissing;
 
         /// <summary>
         /// Update reservation status
