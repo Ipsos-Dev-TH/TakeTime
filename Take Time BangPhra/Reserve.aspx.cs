@@ -841,8 +841,11 @@ namespace Take_Time_BangPhra
                             // เป็นยอด Payment_History (= 0 สำหรับใบ OTA) → เดิม fallback ไปใช้ราคาห้องทั้งหมด
                             // ⇒ คืนที่เพิ่มหลังแก้ไขถูกนับว่า OTA จ่ายแล้ว ไม่ได้เก็บเงินลูกค้า
                             decimal otaAmount = otaBal.OtaAmount >= 0 ? otaBal.OtaAmount : otaBal.RoomTotal;
-                            decimal covered = Math.Min(otaAmount, pageTotal);
-                            if (covered > totalPaid)
+                            // ชำระแล้ว = ยอดที่ OTA เก็บ + ที่ลูกค้าจ่ายโรงแรมเอง (เช่น จ่ายของเสริมผ่านลิงก์ก่อนเข้าพัก)
+                            //   — "รวมกัน" ไม่ใช่เอาค่ามากกว่า (เดิมเงินที่ลูกค้าจ่ายเองหายไป → ถูกเก็บซ้ำ)
+                            //   สูตรเดียวกับ ReservationBalance (Due = รวม − OTA − ที่ลูกค้าจ่าย); ไม่เกินยอดรวมในหน้า
+                            decimal covered = Math.Min(otaAmount + ledgerPaid, pageTotal);
+                            if (otaAmount > 0m && covered > totalPaid)
                             {
                                 totalPaid = covered;
                                 otaChannelCovered = true;
@@ -6042,8 +6045,9 @@ namespace Take_Time_BangPhra
                 if (bal.IsChannelCollect)
                 {
                     decimal otaForPage = bal.OtaAmount >= 0m ? bal.OtaAmount : bal.RoomTotal;
-                    decimal covered = Math.Min(otaForPage, pageTotal);
-                    channelCovered = covered > ledgerPaid;
+                    // OTA เก็บ + ลูกค้าจ่ายเอง (รวมกัน — ดูคำอธิบายบล็อกเช็คอินด้านบน)
+                    decimal covered = Math.Min(otaForPage + ledgerPaid, pageTotal);
+                    channelCovered = otaForPage > 0m && covered > ledgerPaid;
                     TextBox5.Text = (channelCovered ? covered : ledgerPaid).ToString();
                 }
 

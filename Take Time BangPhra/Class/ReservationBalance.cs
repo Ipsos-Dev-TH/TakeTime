@@ -88,7 +88,8 @@ namespace Take_Time_BangPhra
 
         /// <summary>คำนวณยอด — ไม่แตะฐานข้อมูล (ยกเว้นอ่านค่า tolerance ผ่าน AppCfg ที่ cache ไว้)</summary>
         public static ReservationBalance Compute(int reservationId, string collectMode, decimal roomTotal, decimal charges,
-            decimal pendingCharges, decimal paidLedger, int ledgerRows, decimal deposit, decimal otaAmount = -1m)
+            decimal pendingCharges, decimal paidLedger, int ledgerRows, decimal deposit, decimal otaAmount = -1m,
+            bool unknownDepositIsReal = false)
         {
             var b = new ReservationBalance();
             b.ReservationId = reservationId;
@@ -116,7 +117,9 @@ namespace Take_Time_BangPhra
                 b.OtaAmountEstimated = otaAmount < 0m;
                 b.OtaAmount = otaAmount >= 0m ? otaAmount : roomTotal;
                 b.OtaCovered = 0m;
-                decimal paidByGuest = ledgerRows > 0 ? paidLedger : 0m;
+                // ยกเว้นใบ OTA ที่ไม่มีเครื่องหมายเก็บเงินเลย (ไม่ได้มาจากการเดาของระบบรับอีเมล เช่น เจ้าหน้าที่คีย์เอง /
+                // Channel Manager) — Deposit ของใบพวกนี้คือมัดจำที่รับจริง ต้องนับเหมือนเดิม ไม่งั้นใบเก่าขึ้นค้างเต็มยอด
+                decimal paidByGuest = ledgerRows > 0 ? paidLedger : (unknownDepositIsReal ? deposit : 0m);
                 due = roomTotal + charges - paidByGuest;
             }
             else if (channel)
@@ -248,7 +251,8 @@ namespace Take_Time_BangPhra
                     Dec(row["PaidLedger"]),
                     row["LedgerRows"] == DBNull.Value ? 0 : Convert.ToInt32(row["LedgerRows"]),
                     Dec(row["Deposit"]),
-                    hasOtaAmt && row["OtaAmount"] != DBNull.Value ? Dec(row["OtaAmount"]) : -1m);
+                    hasOtaAmt && row["OtaAmount"] != DBNull.Value ? Dec(row["OtaAmount"]) : -1m,
+                    source != SourceGuess);
                 b.CollectSource = source;
                 b.IsOta = isOta;
 
