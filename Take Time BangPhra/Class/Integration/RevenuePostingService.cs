@@ -19,7 +19,8 @@ namespace Take_Time_BangPhra.Integration
     ///     ⟹ รายได้ค่าห้องจาก Agoda/Booking ไม่เคยเข้าบัญชี
     ///     ⟹ job นี้: หลังเลยวันเช็คเอาท์ โพสต์ Dr ลูกหนี้ OTA / Cr รายได้ห้อง / Cr ภาษีขาย
     ///        ต่อการจอง (ตาม docs/OTA_Settlement_Design.md เคส A) — ยอดโอนจริงจาก OTA
-    ///        ไปตัดลูกหนี้ตอนปิดงวด payout
+    ///        ไปตัดลูกหนี้ตอนปิดงวด payout. เฉพาะ Channel Collect, ยอดตามอีเมลจอง (NET/GROSS),
+    ///        ข้ามการจองที่ยกเลิก/ลบ/เลื่อนวัน และที่ค่าห้องออกใบเสร็จไปแล้ว
     ///
     /// ทุก job เป็น idempotent (marker ในตาราง + dedup ของ queue) และเรียกจาก background timer
     /// เดียวกับ POS rollup — no-op ทันทีถ้าปิดสวิตช์
@@ -248,8 +249,10 @@ namespace Take_Time_BangPhra.Integration
         // ═══════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// โพสต์รายได้ค่าห้องของการจอง OTA ที่เลยวันเช็คเอาท์แล้วและ "ไม่มีใบเสร็จในระบบ"
-        /// (Dr ลูกหนี้ OTA / Cr รายได้ห้อง / Cr ภาษีขาย) — no-op ถ้าปิดสวิตช์.
+        /// โพสต์รายได้ค่าห้องของการจอง OTA แบบ **Channel Collect** ที่เลยวันเช็คเอาท์แล้วและค่าห้อง
+        /// "ยังไม่ถูกรับรู้ด้วยใบเสร็จที่ยังใช้งาน" (Dr ลูกหนี้ OTA / Cr รายได้ห้อง / Cr ภาษีขาย) — no-op ถ้าปิดสวิตช์
+        /// (Nexaacc_OtaRoomRevenue, ค่าเริ่มต้นปิด).
+        /// ยอด = ยอดตามอีเมลจอง (ฐาน NET/GROSS ตาม Nexaacc_OtaRevenue_Basis) — ไม่ใช้ TotalPrice.
         /// idempotent ด้วย `Reservation.Ota_Revenue_Ref`
         /// </summary>
         public void PostOtaRoomRevenueIfDue(int maxPerRun = 20)
@@ -273,28 +276,68 @@ namespace Take_Time_BangPhra.Integration
                 return;
             }
 
+            // ฐานรายได้ OTA — "นโยบายบัญชี" ให้ผู้ทำบัญชีเลือก (Accounting_Integration_Config.Nexaacc_OtaRevenue_Basis):
+            //   NET   (ค่าเริ่มต้น) = agency model — โรงแรมรับรู้รายได้เท่ายอดสุทธิที่ OTA จะโอนให้ (หลังหักคอมมิชชั่น)
+            //                        ใช้ ReservationBalance.OtaAmount (ยอดตามอีเมลจอง อิง OTA_Net_Amount)
+            //   GROSS              = merchant model — รับรู้รายได้เต็มราคาขายที่ลูกค้าจ่าย OTA (OTA_Gross_Amount)
+            //                        คอมมิชชั่นไปลงค่าใช้จ่ายตอนปิดงวด payout
+            // ไม่มียอดตามฐานที่เลือก → ข้าม + log (ไม่ถอยไปใช้ TotalPrice ที่พนักงานแก้ได้)
+            bool grossBasis = string.Equals(
+                (ReadIntegrationConfig("Nexaacc_OtaRevenue_Basis", "NET") ?? "NET").Trim(),
+                "GROSS", StringComparison.OrdinalIgnoreCase);
+
             try
             {
-                // การจอง OTA ที่: เลยเช็คเอาท์แล้ว, ยังไม่โพสต์, ไม่ถูกยกเลิก, มียอด, และไม่มีใบเสร็จในระบบ
-                var dt = _code.DatabaseQuerySafe(_conn,
-                    @"SELECT TOP (@cap) r.ID, r.TotalPrice, r.CheckoutDate, r.OTA_Channel,
-                             r.OTA_Booking_ID, r.OTA_Guest_Name, r.Customer_MobilePhone
-                        FROM Reservation r
-                       WHERE r.Ota_Revenue_Ref IS NULL
+                // การจอง OTA ที่: เลยเช็คเอาท์แล้ว, ยังไม่โพสต์ (Ota_Revenue_Ref IS NULL — รวม LEGACY / RECLASS-… ที่ตั้งไว้แล้ว),
+                // ไม่ถูกยกเลิก/ลบ/เลื่อนวัน/ไม่มาเช็คอิน, และ "ค่าห้องยังไม่ถูกรับรู้ด้วยใบเสร็จ" —
+                //   ใบเสร็จที่ถือว่ารับรู้ค่าห้องแล้ว = ใบที่ยังใช้งาน (Status Normal/NULL), ไม่ใช่ใบมัดจำ, และมีบรรทัด
+                //   ค่าห้อง (ProductType_ID = 1) ยอดบวกที่ไม่ใช่บรรทัด "ส่วนลด…"
+                //   (ใบเสร็จเฉพาะค่าใช้จ่ายเสริม / ใบที่ยกเลิกแล้ว ไม่บล็อกรายได้ค่าห้องอีกต่อไป)
+                // หมายเหตุ: whereSql นี้เขียนในโค้ด (ไม่มีค่าจากผู้ใช้) — ใช้ร่วมกับ ReservationBalance.LoadMany (alias r)
+                const string candidateWhere = @"r.Ota_Revenue_Ref IS NULL
                          AND r.OTA_Channel IS NOT NULL AND LTRIM(RTRIM(r.OTA_Channel)) <> ''
                          AND r.CheckoutDate < CAST(GETDATE() AS DATE)
                          AND ISNULL(r.TotalPrice, 0) > 0
-                         AND r.Status NOT IN (N'ยกเลิก', N'ไม่มาเช็คอิน')
-                         AND NOT EXISTS (SELECT 1 FROM Account_Receipt ar WHERE ar.Reservation_ID = r.ID)
-                       ORDER BY r.CheckoutDate",
-                    new Dictionary<string, object> { { "@cap", maxPerRun } });
+                         AND r.Status NOT LIKE N'ยกเลิก%'
+                         AND r.Status NOT LIKE N'ลบ%'
+                         AND r.Status <> N'ไม่มาเช็คอิน'
+                         AND NOT EXISTS (
+                               SELECT 1
+                                 FROM Account_Receipt ar
+                                 JOIN Account_Receipt_Detail ard ON ard.Receipt_ID = ar.ID
+                                WHERE TRY_CONVERT(INT, ar.Reservation_ID) = r.ID
+                                  AND (ar.Status = 'Normal' OR ar.Status IS NULL)
+                                  AND ISNULL(ar.IsDeposit, 0) = 0
+                                  AND TRY_CONVERT(INT, ard.ProductType_ID) = 1
+                                  AND ISNULL(ard.Product_Data, N'') NOT LIKE N'ส่วนลด%'
+                                  AND TRY_CONVERT(DECIMAL(18, 2), ard.Price_Amount) > 0)";
+
+                var dt = _code.DatabaseQuerySafe(_conn,
+                    @"SELECT r.ID, r.CheckoutDate, r.OTA_Channel, r.OTA_Booking_ID, r.OTA_Guest_Name,
+                             r.OTA_Net_Amount, r.OTA_Gross_Amount
+                        FROM Reservation r
+                       WHERE " + candidateWhere + @"
+                       ORDER BY r.CheckoutDate, r.ID",
+                    null);
 
                 if (dt == null || dt.Rows.Count == 0) return;
 
+                // ใครเก็บเงินค่าห้อง + ยอดตามอีเมลจอง — สูตรเดียวกับทั้งระบบ (ReservationBalance)
+                Dictionary<int, Take_Time_BangPhra.ReservationBalance> balances =
+                    Take_Time_BangPhra.ReservationBalance.LoadMany(_conn, candidateWhere, null);
+
+                int posted = 0;
                 foreach (DataRow r in dt.Rows)
                 {
+                    if (posted >= maxPerRun) break;
                     int resId = Convert.ToInt32(r["ID"]);
-                    try { ProcessOneOtaReservation(r, resId, arAccountId); }
+                    try
+                    {
+                        decimal amount;
+                        if (!TryResolveOtaRevenueAmount(r, resId, balances, grossBasis, out amount)) continue;
+                        ProcessOneOtaReservation(r, resId, amount, grossBasis ? "GROSS" : "NET", arAccountId);
+                        posted++;
+                    }
                     catch (Exception exOne)
                     {
                         Log($"OtaRoomRevenue: การจอง #{resId} ล้มเหลว: {exOne.Message}");
@@ -308,10 +351,78 @@ namespace Take_Time_BangPhra.Integration
             }
         }
 
-        private void ProcessOneOtaReservation(DataRow r, int resId, string arAccountId)
+        /// <summary>
+        /// ตัดสินว่าการจองนี้โพสต์ได้ไหม และยอดเท่าไร — โพสต์เฉพาะ Channel Collect (OTA เก็บเงินแทนโรงแรม)
+        /// Hotel Collect / ไม่ทราบ (NONE/UNKNOWN) → ข้าม: เงินค่าห้องเก็บที่หน้าเคาน์เตอร์ ต้องมาทางใบเสร็จ
+        /// ไม่ใช่ลูกหนี้ OTA (ไม่งั้นเกิดลูกหนี้ OTA ที่ไม่มีวันได้รับโอน)
+        /// ไม่ mark Ota_Revenue_Ref ตอนข้าม — ถ้าแก้ข้อมูลการจองภายหลัง (เช่น ระบุโหมดเก็บเงิน) รอบถัดไปจะโพสต์ได้เอง
+        /// </summary>
+        private bool TryResolveOtaRevenueAmount(DataRow r, int resId,
+            Dictionary<int, Take_Time_BangPhra.ReservationBalance> balances, bool grossBasis, out decimal amount)
         {
-            decimal gross = SafeDec(r["TotalPrice"]);
-            if (gross <= 0m) { MarkOtaPosted(resId, "SKIP-ZERO"); return; }
+            amount = 0m;
+
+            Take_Time_BangPhra.ReservationBalance b;
+            if (balances == null || !balances.TryGetValue(resId, out b) || b == null)
+            {
+                LogOnce("OtaRoomRevenue_NoBal_" + resId,
+                    $"OtaRoomRevenue: การจอง #{resId} โหลดยอด (ReservationBalance) ไม่ได้ — ข้าม");
+                return false;
+            }
+
+            if (!b.IsChannelCollect)
+            {
+                LogOnce("OtaRoomRevenue_NotChannel_" + resId,
+                    $"OtaRoomRevenue: การจอง #{resId} โหมดเก็บเงิน = {b.CollectMode} (ไม่ใช่ Channel Collect) " +
+                    "— ข้าม ไม่ตั้งลูกหนี้ OTA (ค่าห้องต้องรับรู้ผ่านใบเสร็จหน้าเคาน์เตอร์)");
+                return false;
+            }
+
+            decimal net = SafeDec(r["OTA_Net_Amount"]);
+            decimal gross = SafeDec(r["OTA_Gross_Amount"]);
+
+            if (grossBasis)
+            {
+                if (gross <= 0m)
+                {
+                    LogOnce("OtaRoomRevenue_NoGross_" + resId,
+                        $"OtaRoomRevenue: การจอง #{resId} ฐานรายได้ = GROSS แต่ไม่มี OTA_Gross_Amount จากอีเมลจอง " +
+                        "— ข้าม (ไม่ใช้ TotalPrice แทน)");
+                    return false;
+                }
+                amount = gross;
+                return true;
+            }
+
+            // NET: ReservationBalance.Compute ถอยไปใช้ Deposit/TotalPrice เมื่อไม่มียอดจากอีเมล (เพื่อแสดงยอดค้างหน้าเคาน์เตอร์)
+            // ⟹ ใช้ b.OtaAmount ได้เฉพาะเมื่ออีเมลจองมียอดจริง (OTA_Net_Amount / OTA_Gross_Amount > 0)
+            bool hasEmailAmount = net > 0m || gross > 0m;
+            if (!hasEmailAmount || b.OtaAmount < 0m)
+            {
+                LogOnce("OtaRoomRevenue_NoOtaAmt_" + resId,
+                    $"OtaRoomRevenue: การจอง #{resId} ไม่มียอดตามอีเมลจอง (OTA_Net_Amount/OTA_Gross_Amount) " +
+                    "— ข้าม (ไม่ใช้ TotalPrice แทน)");
+                return false;
+            }
+            if (b.OtaAmount == 0m)
+            {
+                LogOnce("OtaRoomRevenue_ZeroOtaAmt_" + resId,
+                    $"OtaRoomRevenue: การจอง #{resId} ยอดตามอีเมลจอง = 0 — ข้าม");
+                return false;
+            }
+            if (net > 0m && b.OtaAmount != net)
+            {
+                // เช่น Email_Rsv_TotalSource = REFSELL → OtaAmount อิงยอด gross — แจ้งให้ผู้ทำบัญชีทราบ
+                Log($"OtaRoomRevenue: การจอง #{resId} ฐาน NET แต่ OtaAmount {b.OtaAmount:N2} ≠ OTA_Net_Amount {net:N2} " +
+                    "(ตรวจค่า Email_Rsv_TotalSource) — โพสต์ตาม OtaAmount");
+            }
+            amount = b.OtaAmount;
+            return true;
+        }
+
+        private void ProcessOneOtaReservation(DataRow r, int resId, decimal amount, string basisLabel, string arAccountId)
+        {
+            if (amount <= 0m) return;   // ผู้เรียกกรองแล้ว — กันพลาดเท่านั้น (ไม่ mark เพื่อให้แก้ข้อมูลแล้วโพสต์ได้)
 
             DateTime docDate = r["CheckoutDate"] != DBNull.Value
                 ? Convert.ToDateTime(r["CheckoutDate"]) : DateTime.Today;
@@ -326,16 +437,16 @@ namespace Take_Time_BangPhra.Integration
             if (ReceiptExists(docRef)) { MarkOtaPosted(resId, docRef); return; }
 
             // Dr ลูกหนี้ OTA (ไม่ใช่เงินสด — เงินยังอยู่กับ Agoda/Booking จนกว่าจะปิดงวด payout)
-            _sync.EnqueueReceipt(resId, docRef, gross, 0, docDate,
+            _sync.EnqueueReceipt(resId, docRef, amount, 0, docDate,
                 $"{guest} ({channel}{(string.IsNullOrEmpty(bookingId) ? "" : " " + bookingId)})",
                 isDeposit: false, paymentMethod: channel,
                 revenueType: "ROOM_REVENUE", paymentAccountId: arAccountId);
 
-            CreateSummaryReceiptRow(docRef, resId, docDate, gross, channel,
+            CreateSummaryReceiptRow(docRef, resId, docDate, amount, channel,
                 $"ค่าห้องพัก {channel} การจอง #{resId}" + (string.IsNullOrEmpty(bookingId) ? "" : $" ({bookingId})"), "0");
 
             MarkOtaPosted(resId, docRef);
-            Log($"OtaRoomRevenue: การจอง #{resId} {channel} {gross:N2} → ลูกหนี้ OTA (ref={docRef})");
+            Log($"OtaRoomRevenue: การจอง #{resId} {channel} {amount:N2} (ฐาน {basisLabel}) → ลูกหนี้ OTA (ref={docRef})");
         }
 
         private void MarkOtaPosted(int reservationId, string reference)
@@ -387,6 +498,26 @@ namespace Take_Time_BangPhra.Integration
             }
             catch { }
             return null;
+        }
+
+        /// <summary>
+        /// อ่านค่าจาก Accounting_Integration_Config (ตารางเดียวกับที่ AccountingConfig อ่าน) — ไม่มี/ว่าง/อ่านไม่ได้ = ค่าเริ่มต้น
+        /// </summary>
+        private string ReadIntegrationConfig(string key, string defaultValue)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_conn,
+                    "SELECT TOP 1 ConfigValue FROM Accounting_Integration_Config WHERE ConfigKey = @k AND ConfigValue IS NOT NULL",
+                    new Dictionary<string, object> { { "@k", key } });
+                if (dt?.Rows.Count > 0 && dt.Rows[0][0] != DBNull.Value)
+                {
+                    string v = dt.Rows[0][0].ToString();
+                    if (!string.IsNullOrWhiteSpace(v)) return v.Trim();
+                }
+            }
+            catch { }
+            return defaultValue;
         }
 
         private bool ReceiptExists(string receiptId)
