@@ -27,10 +27,12 @@ namespace Take_Time_BangPhra
                     return;
                 }
 
-                // Don't set default date filter initially - let data show to match stats
-                // User can filter by date if needed
+                // เปิดหน้าครั้งแรก: กรองตาม "วันเข้าพัก" ย้อนหลัง 7 วัน → ล่วงหน้า 30 วัน (งานหน้างานใช้ช่วงนี้)
+                // และยอดรวมด้านบนคำนวณจากช่วงนี้ — วันที่จองเว้นว่างไว้ (กรองเพิ่มได้)
                 txtDateFrom.Text = "";
                 txtDateTo.Text = "";
+                txtStayFrom.Text = DateTime.Today.AddDays(-7).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+                txtStayTo.Text = DateTime.Today.AddDays(30).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
 
                 // Initialize
                 ViewState["CurrentPage"] = 1;
@@ -132,11 +134,14 @@ namespace Take_Time_BangPhra
                 gvReservations.DataSource = dt;
                 gvReservations.DataBind();
 
-                // Update summary
+                // Update summary — ยอดรวมแสดงเฉพาะเมื่อมีช่วงวันที่ (ไม่งั้นแสดงคำแนะนำแทน)
+                bool showTotals = HasDateRange();
                 lblResultCount.Text = totalRecords.ToString("N0");
                 lblTotalAmount.Text = totalAmount.ToString("N0");
                 lblTotalDeposit.Text = totalDeposit.ToString("N0");
                 lblTotalRemain.Text = totalDue.ToString("N0");
+                phTotals.Visible = showTotals;
+                phTotalsHint.Visible = !showTotals;
 
                 // Update pagination
                 int totalPages = (int)Math.Ceiling((double)totalRecords / PageSize);
@@ -220,6 +225,9 @@ namespace Take_Time_BangPhra
                     parameters.Add(new SqlParameter("@DateTo", SqlDbType.DateTime) { Value = dateTo.AddDays(1).AddSeconds(-1) });
                 }
 
+                // ช่วงวันเข้าพัก (วันพักทับช่วงที่เลือก)
+                AppendStayFilter(whereClause, parameters);
+
                 // Get ORDER BY clause
                 string orderBy = GetOrderByClause();
 
@@ -247,23 +255,27 @@ namespace Take_Time_BangPhra
 
                 // ยอดสรุปด้วยสูตรกลาง ReservationBalance (รวมค่าใช้จ่ายในห้อง, Payment_History, Channel Collect)
                 // ยอดรวม = Σ Total, รับแล้ว = Σ Received, ค้างชำระ = Σ Due (ไม่เอายอดจ่ายเกินของใบอื่นมาหักกลบ)
-                try
+                // คำนวณเฉพาะเมื่อมีช่วงวันที่ — ไม่มีช่วง = ทุกใบในประวัติ (ช้า และตัวเลขไม่มีความหมาย) หน้าจอแสดงคำแนะนำแทน
+                if (HasDateRange())
                 {
-                    Dictionary<int, ReservationBalance> sumBalances = LoadBalancesForFilter(whereClause.ToString(), parameters);
-                    decimal sAmount = 0, sReceived = 0, sDue = 0;
-                    foreach (ReservationBalance b in sumBalances.Values)
+                    try
                     {
-                        sAmount += b.Total;
-                        sReceived += b.Received;
-                        sDue += b.Due;
+                        Dictionary<int, ReservationBalance> sumBalances = LoadBalancesForFilter(whereClause.ToString(), parameters);
+                        decimal sAmount = 0, sReceived = 0, sDue = 0;
+                        foreach (ReservationBalance b in sumBalances.Values)
+                        {
+                            sAmount += b.Total;
+                            sReceived += b.Received;
+                            sDue += b.Due;
+                        }
+                        totalAmount = sAmount;
+                        totalDeposit = sReceived;
+                        totalDue = sDue;
                     }
-                    totalAmount = sAmount;
-                    totalDeposit = sReceived;
-                    totalDue = sDue;
-                }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine("ReservationList balance summary Error: " + ex.Message);
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine("ReservationList balance summary Error: " + ex.Message);
+                    }
                 }
 
                 // Get paginated data
@@ -299,6 +311,7 @@ namespace Take_Time_BangPhra
                 {
                     dataParams.Add(new SqlParameter("@DateTo", SqlDbType.DateTime) { Value = dateTo.AddDays(1).AddSeconds(-1) });
                 }
+                AppendStayFilter(null, dataParams);   // พารามิเตอร์ชุดเดียวกับ whereClause ด้านบน
                 dataParams.Add(new SqlParameter("@Offset", offset));
                 dataParams.Add(new SqlParameter("@PageSize", PageSize));
 
@@ -391,6 +404,39 @@ namespace Take_Time_BangPhra
             }
         }
 
+        private static bool TryParseFilterDate(string text, out DateTime value)
+        {
+            return DateTime.TryParseExact((text ?? "").Trim(), "yyyy-MM-dd",
+                System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out value);
+        }
+
+        /// <summary>มีช่วงวันที่ (วันเข้าพัก หรือ วันที่จอง ด้านใดด้านหนึ่ง) — ใช้ตัดสินว่าจะคำนวณยอดรวมหรือไม่</summary>
+        private bool HasDateRange()
+        {
+            DateTime d;
+            return TryParseFilterDate(txtStayFrom.Text, out d) || TryParseFilterDate(txtStayTo.Text, out d)
+                || TryParseFilterDate(txtDateFrom.Text, out d) || TryParseFilterDate(txtDateTo.Text, out d);
+        }
+
+        /// <summary>
+        /// ตัวกรองช่วงวันเข้าพัก: การจองที่ "วันพักทับช่วงที่เลือก" (เช็คอินไม่หลังวันสุดท้าย และเช็คเอาท์ไม่ก่อนวันแรก
+        /// — รวมใบที่ออกในวันแรกของช่วง) where = null → เติมเฉพาะพารามิเตอร์ (สำหรับ query ที่ต้องสร้างพารามิเตอร์ชุดใหม่)
+        /// </summary>
+        private void AppendStayFilter(StringBuilder where, List<SqlParameter> ps)
+        {
+            DateTime from, to;
+            if (TryParseFilterDate(txtStayFrom.Text, out from))
+            {
+                if (where != null) where.Append(" AND R.CheckoutDate >= @StayFrom");
+                ps.Add(new SqlParameter("@StayFrom", SqlDbType.DateTime) { Value = from.Date });
+            }
+            if (TryParseFilterDate(txtStayTo.Text, out to))
+            {
+                if (where != null) where.Append(" AND R.CheckinDate < @StayToExcl");
+                ps.Add(new SqlParameter("@StayToExcl", SqlDbType.DateTime) { Value = to.Date.AddDays(1) });
+            }
+        }
+
         private string GetOrderByClause()
         {
             switch (ddlSortBy.SelectedValue)
@@ -473,6 +519,8 @@ namespace Take_Time_BangPhra
             ddlStatus.SelectedIndex = 0;
             txtDateFrom.Text = "";
             txtDateTo.Text = "";
+            txtStayFrom.Text = "";
+            txtStayTo.Text = "";
             ddlSortBy.SelectedIndex = 0;
 
             ViewState["CurrentPage"] = 1;
@@ -495,13 +543,18 @@ namespace Take_Time_BangPhra
                 case "all":
                     ViewState["FilterStatus"] = "";
                     ddlStatus.SelectedIndex = 0;
+                    // "ทั้งหมด" = ไม่จำกัดวันเข้าพัก (ช่วงเริ่มต้น 7 วันก่อน–30 วันหน้า ถูกตั้งตอนเปิดหน้า)
+                    txtStayFrom.Text = "";
+                    txtStayTo.Text = "";
                     break;
                 case "today":
                     ViewState["FilterStatus"] = "today";
                     ddlStatus.SelectedIndex = 0;
-                    // Clear date range for today
+                    // "จองวันนี้" = การจองที่สร้างวันนี้ ไม่ว่าจะเข้าพักวันไหน → ล้างช่วงวันที่ทั้งสองแบบ
                     txtDateFrom.Text = "";
                     txtDateTo.Text = "";
+                    txtStayFrom.Text = "";
+                    txtStayTo.Text = "";
                     break;
                 case "deposit":
                     ViewState["FilterStatus"] = "มัดจำแล้ว";
@@ -654,6 +707,8 @@ namespace Take_Time_BangPhra
                     whereClause.Append(" AND R.Created_Date <= @DateTo");
                     parameters.Add(new SqlParameter("@DateTo", SqlDbType.DateTime) { Value = dateTo.AddDays(1).AddSeconds(-1) });
                 }
+
+                AppendStayFilter(whereClause, parameters);
 
                 string query = $@"
                     SELECT R.ID, R.Created_Date, R.Customer_MobilePhone,

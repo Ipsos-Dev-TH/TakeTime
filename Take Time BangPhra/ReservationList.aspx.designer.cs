@@ -92,6 +92,16 @@ namespace Take_Time_BangPhra
         protected global::System.Web.UI.WebControls.DropDownList ddlStatus;
 
         /// <summary>
+        /// txtStayFrom control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtStayFrom;
+
+        /// <summary>
+        /// txtStayTo control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtStayTo;
+
+        /// <summary>
         /// txtDateFrom control.
         /// </summary>
         protected global::System.Web.UI.WebControls.TextBox txtDateFrom;
@@ -125,6 +135,16 @@ namespace Take_Time_BangPhra
         /// lblResultCount control.
         /// </summary>
         protected global::System.Web.UI.WebControls.Label lblResultCount;
+
+        /// <summary>
+        /// phTotals control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.PlaceHolder phTotals;
+
+        /// <summary>
+        /// phTotalsHint control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.PlaceHolder phTotalsHint;
 
         /// <summary>
         /// lblTotalAmount control.

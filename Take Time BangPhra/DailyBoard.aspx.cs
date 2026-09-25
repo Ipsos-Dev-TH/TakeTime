@@ -93,6 +93,7 @@ namespace Take_Time_BangPhra
             var rows = new List<BoardRow>();
             int roomCount = 0, checkIn = 0, checkOut = 0;
             decimal dueTotal = 0;
+            decimal tol = ReservationBalance.RoundingTolerance;
 
             foreach (DataRow r in dt.Rows)
             {
@@ -150,8 +151,14 @@ namespace Take_Time_BangPhra
                 row.Total = bal.Total;
                 row.Extra = bal.Charges;
                 row.Paid = bal.Received;
-                row.Due = bal.Due;
+                // เศษไม่เกินเกณฑ์ปัด (รวมเศษที่ปัดแสดงผลแล้วไม่เกินเกณฑ์ เช่น 1.30 → "1") = ครบแล้ว
+                // ไม่ให้ขึ้นเลขแดง "1" ในตาราง/รูป LINE ทั้งที่ระบบถือว่าจ่ายครบ
+                row.Due = IsSettled(bal.Due, tol) ? 0m : bal.Due;
                 row.IsChannelCollect = bal.IsChannelCollect;
+                row.IsHotelCollect = bal.CollectMode == ReservationBalance.ModeHotel;
+                row.IsCollectUnknown = bal.IsCollectUnknown;
+                row.OtaCovered = bal.OtaCovered;
+                row.OtaEstimated = bal.OtaAmountEstimated;
                 if (row.Due > 0) dueTotal += row.Due;
 
                 // จำนวนครั้งที่เคยมา
@@ -219,16 +226,46 @@ namespace Take_Time_BangPhra
                 sb.Append(Td(itemCell, bg));
 
                 sb.Append(Td($"{row.Total:N0}", bg, "right"));
-                // Channel Collect: ยอดที่ "รับแล้ว" คือเงินที่ OTA เก็บไป — บอกให้ชัด ไม่ให้หน้างานไปทวงลูกค้าซ้ำ
-                string paidCell = $"{row.Paid:N0}";
+                // Channel Collect: แยก "เงินที่ OTA เก็บไป" กับ "เงินที่ลูกค้าจ่ายหน้างานเพิ่ม" ให้ชัด
+                // ไม่ให้หน้างานไปทวงลูกค้าซ้ำ และไม่เข้าใจผิดว่าเงิน OTA เป็นเงินในลิ้นชัก
+                string paidCell;
                 if (row.IsChannelCollect)
-                    paidCell += $"<br/><span style='{ST_SUB}'>OTA เก็บแล้ว</span>";
+                {
+                    paidCell = $"OTA &#3647;{row.OtaCovered:N0}";
+                    if (row.OtaEstimated)
+                        paidCell += $"<br/><span style='{ST_SUB}'>(ยอด OTA ประมาณ)</span>";
+                    decimal desk = row.Paid - row.OtaCovered;
+                    if (desk > tol)
+                        paidCell += $"<br/><span style='{ST_SUB}'>+ รับหน้างาน &#3647;{desk:N0}</span>";
+                }
+                else
+                {
+                    paidCell = $"{row.Paid:N0}";
+                }
                 sb.Append(Td(paidCell, bg, "right"));
-                sb.Append(row.Due > 0
-                    ? Td($"<span style='font-size:18px;font-weight:bold;color:#a5241a;'>{row.Due:N0}</span>", bg, "right")
-                    : Td("<span style='font-weight:bold;color:#1b7a43;'>ครบแล้ว</span>", bg, "right"));
 
-                string note = E(row.Channel);
+                if (row.Due > 0)
+                {
+                    string dueCell = $"<span style='font-size:18px;font-weight:bold;color:#a5241a;'>{row.Due:N0}</span>";
+                    if (row.IsCollectUnknown)
+                        dueCell += $"<br/><span style='{ST_SUB}'>ตรวจก่อนเก็บเงิน</span>";
+                    sb.Append(Td(dueCell, bg, "right"));
+                }
+                else
+                {
+                    sb.Append(Td("<span style='font-weight:bold;color:#1b7a43;'>ครบแล้ว</span>", bg, "right"));
+                }
+
+                // ป้ายใครเก็บเงินค่าห้อง (เฉพาะใบ OTA) — สัญลักษณ์วงกลม HTML entity แทน emoji
+                // เพราะ HtmlRenderer (รูป LINE) วาด emoji สีไม่ได้
+                string note = "";
+                if (row.IsCollectUnknown)
+                    note = Badge("&#9675;", "ยังไม่ชัดใครเก็บเงิน", "#6b6b6b") + "<br/>";
+                else if (row.IsChannelCollect)
+                    note = Badge("&#9679;", "OTA เก็บแล้ว", "#1b7a43") + "<br/>";
+                else if (row.IsHotelCollect)
+                    note = Badge("&#9679;", "เก็บหน้างาน", "#c25e00") + "<br/>";
+                note += E(row.Channel);
                 if (!string.IsNullOrWhiteSpace(row.Remark))
                     note += $"<br/><span style='{ST_SUB}'>{E(Shorten(row.Remark, 70))}</span>";
                 sb.Append(Td(note, bg));
@@ -268,6 +305,23 @@ namespace Take_Time_BangPhra
         private static string Tag(string text, string color)
         {
             return $"<span style='font-size:16px;font-weight:bold;color:{color};'>&#9679; {text}</span>";
+        }
+
+        /// <summary>ป้ายสีพร้อมสัญลักษณ์ที่กำหนดเอง (HTML entity) — text ต้องเป็นข้อความคงที่ในโค้ด</summary>
+        private static string Badge(string symbolEntity, string text, string color)
+        {
+            return $"<span style='font-size:16px;font-weight:bold;color:{color};'>{symbolEntity} {text}</span>";
+        }
+
+        /// <summary>
+        /// ยอดค้างที่ถือว่า "ครบแล้ว": ไม่เกินเกณฑ์ปัดเศษ หรือเมื่อปัดเป็นจำนวนเต็มเพื่อแสดงผลแล้วไม่เกินเกณฑ์
+        /// (ตารางแสดงแบบ N0 — ถ้าไม่เช็คตรงนี้ 1.30 จะขึ้นเป็นเลขแดง "1")
+        /// </summary>
+        private static bool IsSettled(decimal due, decimal tol)
+        {
+            if (due <= 0m) return true;
+            if (due <= tol) return true;
+            return Math.Round(due, 0, MidpointRounding.AwayFromZero) <= tol;
         }
 
         /// <summary>แถบหัวเรื่อง + สรุปตัวเลขประจำวัน</summary>
@@ -313,8 +367,8 @@ namespace Take_Time_BangPhra
             public int ResId, Order, Nights, PastVisits;
             public string Rooms, Guest, Phone, Items, Channel, Remark, Status;
             public DateTime CheckIn, CheckOut;
-            public bool IsArrival, IsDeparture, IsChannelCollect;
-            public decimal Total, Paid, Due, Extra;
+            public bool IsArrival, IsDeparture, IsChannelCollect, IsHotelCollect, IsCollectUnknown, OtaEstimated;
+            public decimal Total, Paid, Due, Extra, OtaCovered;
         }
 
         private static Dictionary<string, int> MapByKey(DataTable dt, string keyCol, string valCol)

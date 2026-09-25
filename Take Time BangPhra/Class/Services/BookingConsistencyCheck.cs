@@ -17,10 +17,15 @@ namespace Take_Time_BangPhra.Services
     ///
     /// ตรวจการจองที่ยังไม่ยกเลิก เช็คเอาท์ตั้งแต่วันนี้ และเช็คอินภายใน 14 วันข้างหน้า:
     ///   ก) Channel Collect แต่มีเงินสดใน Payment_History (บันทึกเงิน OTA เป็นเงินสด)
-    ///   ข) ไม่ใช่ Channel Collect เช็คอินวันนี้/พรุ่งนี้ และยังมียอดค้าง (ต้องเก็บเงินหน้างาน)
-    ///   ค) เศษปัด: ยอดรวม − ยอดรับ อยู่ระหว่าง 0–10 บาท
-    ///   ง) เบอร์ลูกค้าผิดรูปแบบ (OTA_UNKNOWN / ใช้ PIN เป็นเบอร์ / เบอร์ต่างประเทศเพี้ยน)
-    ///   จ) มัดจำ ≠ ยอดใน Payment_History ก่อนเช็คอิน
+    ///      — หมวดนี้หมวดเดียวย้อนดูใบที่เช็คเอาท์ไปแล้ว CashBacklogDays วันด้วย (งานค้างแก้)
+    ///      แถวที่ถูกย้ายไปสถานะ OTA_RECLASS (หน้าตรวจเงินสดของใบ OTA) ไม่นับ
+    ///   ข) OTA แบบเก็บหน้างาน รับเงินแล้ว (Payment_History ยังไม่ผูกใบเสร็จ) และยังไม่มีใบเสร็จที่ใช้งานอยู่
+    ///   ค) OTA ที่ยังไม่ชัดว่าใครเก็บเงิน และเข้าพักภายใน 3 วัน
+    ///   ง) เศษปัด: ยอดรวม − ยอดรับ ต่างเกินเกณฑ์ปัดเศษ (Balance_Rounding_Tolerance) แต่ไม่เกิน 10 บาท
+    ///   จ) เบอร์ลูกค้าผิดรูปแบบ (OTA_UNKNOWN / ใช้ PIN เป็นเบอร์ / เบอร์ต่างประเทศเพี้ยน)
+    ///   ฉ) มัดจำ ≠ ยอดใน Payment_History ก่อนเช็คอิน
+    ///
+    /// "ต้องเก็บเงินหน้างาน" ไม่อยู่ในรายงานนี้แล้ว — ซ้ำกับตารางรายวันที่ส่งเข้า LINE อีก 30 นาทีถัดมา
     ///
     /// ส่งผ่าน <c>Notify.Send(Notify.Ev.BookingConsistency, …)</c> เฉพาะวันที่พบปัญหา
     /// ไม่พบอะไรเลย = บันทึก log อย่างเดียว ไม่ส่ง
@@ -31,6 +36,10 @@ namespace Take_Time_BangPhra.Services
         private const int MaxRowsPerCategory = 10;
         private const decimal RoundingResidueMax = 10m;
         private const int HorizonDays = 14;
+        /// <summary>หมวด "บันทึกเงิน OTA เป็นเงินสด" ย้อนดูใบที่เช็คเอาท์ไปแล้วกี่วัน (งานค้างที่ยังไม่ได้แก้)</summary>
+        private const int CashBacklogDays = 60;
+        /// <summary>หมวด "ยังไม่ชัดใครเก็บเงิน" เตือนเมื่อเข้าพักภายในกี่วัน</summary>
+        private const int UnknownCollectDays = 3;
 
         // กันยิง query config ทุก 30 วิ ของ timer — ตรวจเงื่อนไขอย่างมากนาทีละครั้ง
         private static readonly object _probeLock = new object();
@@ -164,15 +173,16 @@ namespace Take_Time_BangPhra.Services
         {
             public int Id;
             public string Name, Phone, Channel, OtaBookingId, OtaPaymentType, Status;
-            public DateTime? CheckIn;
+            public DateTime? CheckIn, CheckOut;
         }
 
         private sealed class Category
         {
             public string Title;
+            public string Hint;   // บรรทัดบอกว่าแก้ที่ไหน — แสดงเมื่อมีรายการ
             public readonly List<string> Rows = new List<string>();
             public string Error;
-            public Category(string title) { Title = title; }
+            public Category(string title, string hint = null) { Title = title; Hint = hint; }
         }
 
         /// <summary>
@@ -183,17 +193,22 @@ namespace Take_Time_BangPhra.Services
         {
             findings = 0;
             DateTime today = DateTime.Today;
-            DateTime tomorrow = today.AddDays(1);
+            decimal tol = ReservationBalance.RoundingTolerance;
 
             const string whereSql =
                 "r.CheckoutDate >= @bcToday AND r.CheckinDate < @bcHorizon AND ISNULL(r.Status, N'') NOT LIKE N'ยกเลิก%'";
+            // เฉพาะหมวด "บันทึกเงิน OTA เป็นเงินสด": รวมใบที่เช็คเอาท์ไปแล้วย้อนหลัง (งานค้างที่ยังไม่ได้แก้)
+            const string whereCashSql =
+                "r.CheckoutDate >= @bcBacklog AND r.CheckinDate < @bcHorizon AND ISNULL(r.Status, N'') NOT LIKE N'ยกเลิก%'";
 
-            var catCash = new Category("บันทึกเงิน OTA เป็นเงินสด");
-            var catDue = new Category("ต้องเก็บเงินหน้างาน (เช็คอินวันนี้/พรุ่งนี้)");
-            var catRound = new Category("เศษปัด (ยอดรวมกับยอดรับต่างกันไม่เกิน 10 บาท)");
+            var catCash = new Category("บันทึกเงิน OTA เป็นเงินสด (รวมใบที่ออกไปแล้วย้อนหลัง " + CashBacklogDays + " วัน)",
+                "ตรวจ/แก้ที่ หน้าประวัติการชำระ → แท็บ ⚠ เงินสดของใบ OTA");
+            var catNoReceipt = new Category("รับเงินแล้วแต่ยังไม่ออกใบเสร็จ (OTA เก็บหน้างาน)");
+            var catUnknown = new Category("⚪ ยังไม่ชัดใครเก็บเงิน — เข้าภายใน " + UnknownCollectDays + " วัน");
+            var catRound = new Category("เศษปัด (ยอดรวมกับยอดรับต่างเกิน " + Money(tol) + " แต่ไม่เกิน 10 บาท)");
             var catPhone = new Category("เบอร์ลูกค้าผิดรูปแบบ");
             var catDeposit = new Category("มัดจำไม่ตรงกับประวัติรับเงิน (ก่อนเช็คอิน)");
-            var cats = new[] { catCash, catDue, catRound, catPhone, catDeposit };
+            var cats = new[] { catCash, catNoReceipt, catUnknown, catRound, catPhone, catDeposit };
 
             string loadError = null;
             var infos = new List<ResInfo>();
@@ -215,16 +230,24 @@ namespace Take_Time_BangPhra.Services
             catch (Exception ex) { balError = "คำนวณยอดเงินไม่สำเร็จ: " + ex.Message; }
             if (bal == null) bal = new Dictionary<int, ReservationBalance>();
 
-            // ── ก) Channel Collect แต่มีเงินสดใน Payment_History ────────────────
+            // ── ก) Channel Collect แต่มีเงินสดใน Payment_History (รวมใบที่ออกไปแล้ว) ──
             try
             {
-                if (balError != null) throw new Exception(balError);
+                // ช่วงเวลาของหมวดนี้กว้างกว่าหมวดอื่น → โหลดยอด/ข้อมูลใบของช่วงนี้แยก
+                Dictionary<int, ReservationBalance> balCash = ReservationBalance.LoadMany(conn, whereCashSql, Params(today));
+                List<ResInfo> infosCash;
+                try { infosCash = LoadInfos(conn, whereCashSql, today); }
+                catch { infosCash = infos; }   // โหลดชื่อไม่ได้ก็ยังรายงานเลขใบได้
+
+                // Status = 'COMPLETED' ตัดแถวที่หน้าตรวจเงินสดของใบ OTA ย้ายไปเป็น OTA_RECLASS แล้วอยู่แล้ว
+                // (เขียนเงื่อนไข <> 'OTA_RECLASS' ไว้ด้วยให้เจตนาชัด)
                 var dt = new code().DatabaseQuerySafe(conn,
                     @"SELECT ph.Reservation_ID, SUM(ph.PaymentAmount) AS CashAmt, COUNT(*) AS Cnt
                         FROM Payment_History ph
                         INNER JOIN Reservation r ON r.ID = ph.Reservation_ID
-                       WHERE " + whereSql + @"
+                       WHERE " + whereCashSql + @"
                          AND ph.Status = 'COMPLETED'
+                         AND ph.Status <> 'OTA_RECLASS'
                          AND ph.PaymentMethod IS NOT NULL
                          AND (UPPER(ph.PaymentMethod) LIKE N'%CASH%' OR ph.PaymentMethod LIKE N'%เงินสด%')
                        GROUP BY ph.Reservation_ID", Params(today));
@@ -233,51 +256,91 @@ namespace Take_Time_BangPhra.Services
                 {
                     int id = Convert.ToInt32(row["Reservation_ID"]);
                     ReservationBalance b;
-                    if (!bal.TryGetValue(id, out b) || b == null || !b.IsChannelCollect) continue;
+                    if (!balCash.TryGetValue(id, out b) || b == null || !b.IsChannelCollect) continue;
                     decimal cash = Dec(row["CashAmt"]);
                     // ลูกค้าจ่ายของเสริม/ค่าชาร์จเป็นเงินสดเองได้ปกติ — ธงนี้หมายถึง "ลงเงิน OTA เป็นเงินสด"
                     // (หน้าเช็คอินรุ่นเก่าบังคับลงเต็มยอดค่าห้อง) → เตือนเฉพาะเมื่อเงินสดครอบคลุมยอด OTA
                     decimal otaPart = b.OtaAmount >= 0 ? b.OtaAmount : b.RoomTotal;
-                    if (cash + ReservationBalance.RoundingTolerance < otaPart) continue;
+                    if (cash + tol < otaPart) continue;
                     int cnt = row["Cnt"] == DBNull.Value ? 0 : Convert.ToInt32(row["Cnt"]);
-                    catCash.Rows.Add(Line(Find(infos, id), id, b,
-                        "เงินสด " + Money(cash) + " (" + cnt + " รายการ)"));
+                    ResInfo info = Find(infosCash, id);
+                    string departed = info != null && info.CheckOut.HasValue && info.CheckOut.Value.Date < today
+                        ? " · ออกไปแล้ว " + info.CheckOut.Value.ToString("dd/MM", CultureInfo.InvariantCulture) : "";
+                    catCash.Rows.Add(Line(info, id, b,
+                        "เงินสด " + Money(cash) + " (" + cnt + " รายการ)" + departed));
                 }
             }
             catch (Exception ex) { catCash.Error = ex.Message; }
 
-            // ── ข) ต้องเก็บเงินหน้างาน ─────────────────────────────────────────
+            // ── ข) OTA เก็บหน้างาน: รับเงินแล้วแต่ยังไม่ออกใบเสร็จ ───────────────
+            try
+            {
+                if (balError != null) throw new Exception(balError);
+                var dt = new code().DatabaseQuerySafe(conn,
+                    @"SELECT ph.Reservation_ID, SUM(ph.PaymentAmount) AS Amt, COUNT(*) AS Cnt
+                        FROM Payment_History ph
+                        INNER JOIN Reservation r ON r.ID = ph.Reservation_ID
+                       WHERE " + whereSql + @"
+                         AND ph.Status = 'COMPLETED'
+                         AND (ph.Receipt_ID IS NULL OR ph.Receipt_ID = '')
+                         AND NOT EXISTS (SELECT 1 FROM Account_Receipt ar
+                                          WHERE ar.Reservation_ID = r.ID
+                                            AND (ar.Status = 'Normal' OR ar.Status IS NULL))
+                       GROUP BY ph.Reservation_ID", Params(today));
+
+                foreach (DataRow row in Rows(dt))
+                {
+                    int id = Convert.ToInt32(row["Reservation_ID"]);
+                    ReservationBalance b;
+                    if (!bal.TryGetValue(id, out b) || b == null) continue;
+                    if (!b.IsOta || b.CollectMode != ReservationBalance.ModeHotel) continue;
+                    decimal amt = Dec(row["Amt"]);
+                    if (amt <= tol) continue;
+                    int cnt = row["Cnt"] == DBNull.Value ? 0 : Convert.ToInt32(row["Cnt"]);
+                    catNoReceipt.Rows.Add(Line(Find(infos, id), id, b,
+                        "รับแล้ว " + Money(amt) + " (" + cnt + " รายการ) ยังไม่มีใบเสร็จ"));
+                }
+            }
+            catch (Exception ex) { catNoReceipt.Error = ex.Message; }
+
+            // ── ค) OTA ยังไม่ชัดใครเก็บเงิน — เข้าภายใน 3 วัน ───────────────────
             try
             {
                 if (balError != null) throw new Exception(balError);
                 if (loadError != null) throw new Exception(loadError);
+                DateTime lastDay = today.AddDays(UnknownCollectDays);
                 foreach (var info in infos)
                 {
                     if (!info.CheckIn.HasValue) continue;
                     DateTime ci = info.CheckIn.Value.Date;
-                    if (ci != today && ci != tomorrow) continue;
+                    if (ci < today || ci > lastDay) continue;
 
                     ReservationBalance b;
-                    if (!bal.TryGetValue(info.Id, out b) || b == null || b.IsChannelCollect) continue;
-                    if (b.Due <= 0m) continue;
+                    if (!bal.TryGetValue(info.Id, out b) || b == null) continue;
+                    if (!b.IsOta || !b.IsCollectUnknown) continue;
 
-                    catDue.Rows.Add(Line(info, info.Id, b, ci == today ? "เข้าวันนี้" : "เข้าพรุ่งนี้"));
+                    string when = ci == today ? "เข้าวันนี้"
+                        : ci == today.AddDays(1) ? "เข้าพรุ่งนี้"
+                        : "เข้า " + ci.ToString("dd/MM", CultureInfo.InvariantCulture);
+                    catUnknown.Rows.Add(Line(info, info.Id, b, when + " — เช็คอีเมลจอง/OTA ว่าใครเก็บเงินก่อนแขกมาถึง"));
                 }
             }
-            catch (Exception ex) { catDue.Error = ex.Message; }
+            catch (Exception ex) { catUnknown.Error = ex.Message; }
 
-            // ── ค) เศษปัด ──────────────────────────────────────────────────────
+            // ── ง) เศษปัด ──────────────────────────────────────────────────────
             try
             {
                 if (balError != null) throw new Exception(balError);
                 foreach (var kv in bal)
                 {
                     var b = kv.Value;
-                    if (b == null || b.IsChannelCollect) continue;
+                    // Channel Collect: ค่าห้องเป็นเงิน OTA / ยังไม่ชัดใครเก็บ: มีหมวดของตัวเอง — เทียบมัดจำไม่มีความหมาย
+                    if (b == null || b.IsChannelCollect || b.IsCollectUnknown) continue;
                     decimal paid = b.LedgerRows > 0 ? b.PaidLedger : b.Deposit;
                     decimal diff = b.Total - paid;
                     decimal abs = Math.Abs(diff);
-                    if (abs <= 0m || abs > RoundingResidueMax) continue;
+                    // ต่างไม่เกินเกณฑ์ปัดเศษ = ระบบถือว่าครบแล้ว ไม่ต้องรายงาน
+                    if (abs <= tol || abs > RoundingResidueMax) continue;
 
                     catRound.Rows.Add(Line(Find(infos, kv.Key), kv.Key, b,
                         "ต่าง " + Money(diff) + (b.LedgerRows > 0 ? " (เทียบประวัติรับเงิน)" : " (เทียบมัดจำ)")));
@@ -285,7 +348,7 @@ namespace Take_Time_BangPhra.Services
             }
             catch (Exception ex) { catRound.Error = ex.Message; }
 
-            // ── ง) เบอร์ลูกค้าผิดรูปแบบ ─────────────────────────────────────────
+            // ── จ) เบอร์ลูกค้าผิดรูปแบบ ─────────────────────────────────────────
             try
             {
                 if (loadError != null) throw new Exception(loadError);
@@ -300,12 +363,11 @@ namespace Take_Time_BangPhra.Services
             }
             catch (Exception ex) { catPhone.Error = ex.Message; }
 
-            // ── จ) มัดจำ ≠ ประวัติรับเงิน ก่อนเช็คอิน ────────────────────────────
+            // ── ฉ) มัดจำ ≠ ประวัติรับเงิน ก่อนเช็คอิน ────────────────────────────
             try
             {
                 if (balError != null) throw new Exception(balError);
                 if (loadError != null) throw new Exception(loadError);
-                decimal tol = ReservationBalance.RoundingTolerance;
                 foreach (var info in infos)
                 {
                     if (!IsBeforeCheckIn(info.Status)) continue;
@@ -337,6 +399,8 @@ namespace Take_Time_BangPhra.Services
                 sb.AppendLine();
                 sb.AppendLine(no + ") " + cat.Title + ": " + cat.Rows.Count
                     + (cat.Error != null ? " (⚠ ตรวจไม่สำเร็จ: " + cat.Error + ")" : ""));
+                if (cat.Rows.Count > 0 && !string.IsNullOrEmpty(cat.Hint))
+                    sb.AppendLine("  👉 " + cat.Hint);
                 int shown = 0;
                 foreach (string r in cat.Rows)
                 {
@@ -373,7 +437,7 @@ namespace Take_Time_BangPhra.Services
             }
 
             string sql =
-                "SELECT r.ID, r.Customer_MobilePhone, r.CheckinDate, r.Status, cu.Name AS CustName"
+                "SELECT r.ID, r.Customer_MobilePhone, r.CheckinDate, r.CheckoutDate, r.Status, cu.Name AS CustName"
                 + (hasBooking ? ", CAST(r.OTA_Booking_ID AS NVARCHAR(200)) AS OtaBookingId" : ", CAST(NULL AS NVARCHAR(200)) AS OtaBookingId")
                 + (hasPayType ? ", CAST(r.OTA_Payment_Type AS NVARCHAR(100)) AS OtaPaymentType" : ", CAST(NULL AS NVARCHAR(100)) AS OtaPaymentType")
                 + (hasChannel ? ", CAST(r.OTA_Channel AS NVARCHAR(100)) AS OtaChannel" : ", CAST(NULL AS NVARCHAR(100)) AS OtaChannel")
@@ -399,6 +463,7 @@ namespace Take_Time_BangPhra.Services
                 if (name.Length == 0) name = Str(row["OtaGuestName"]).Trim();
                 info.Name = name;
                 if (row["CheckinDate"] != DBNull.Value) info.CheckIn = Convert.ToDateTime(row["CheckinDate"]);
+                if (row["CheckoutDate"] != DBNull.Value) info.CheckOut = Convert.ToDateTime(row["CheckoutDate"]);
                 list.Add(info);
             }
             return list;
@@ -409,7 +474,8 @@ namespace Take_Time_BangPhra.Services
             return new Dictionary<string, object>
             {
                 { "@bcToday", today },
-                { "@bcHorizon", today.AddDays(HorizonDays + 1) }   // CheckinDate < วันที่ (วันนี้+14)+1 = ถึงสิ้นวันที่ 14
+                { "@bcHorizon", today.AddDays(HorizonDays + 1) },  // CheckinDate < วันที่ (วันนี้+14)+1 = ถึงสิ้นวันที่ 14
+                { "@bcBacklog", today.AddDays(-CashBacklogDays) }  // ใช้เฉพาะหมวดเงินสดของใบ OTA (query อื่นไม่อ้างถึง)
             };
         }
 
@@ -466,7 +532,10 @@ namespace Take_Time_BangPhra.Services
 
         // ── จัดรูปแบบ ─────────────────────────────────────────────────────────
 
-        /// <summary>"#ID ชื่อ ช่องทาง ยอด/รับ/ค้าง — หมายเหตุ"</summary>
+        /// <summary>
+        /// "#ID ชื่อ ช่องทาง ยอด/รับ/ค้าง — หมายเหตุ" — เลขใบจองขึ้นต้นบรรทัดเสมอ (ค้นในหน้าตารางจองได้ทันที)
+        /// ระบบไม่มีค่าตั้ง URL เว็บไซต์กลาง (งานเบื้องหลังไม่มี HttpContext ให้เดา) จึงไม่แนบลิงก์
+        /// </summary>
         private static string Line(ResInfo info, int id, ReservationBalance b, string note)
         {
             string name = info != null && !string.IsNullOrEmpty(info.Name) ? info.Name : "-";
