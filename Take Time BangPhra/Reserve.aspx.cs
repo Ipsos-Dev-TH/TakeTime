@@ -6051,7 +6051,9 @@ namespace Take_Time_BangPhra
                         string type = (pc.Type ?? "").Trim().ToUpperInvariant();
                         if (type == "CASH" || type == "DIRECTOR_LOAN" || type == "OTA") continue;
 
-                        bool isGw = IsGatewayChannelType(type);
+                        // ช่องทางผ่านเกตเวย์ = มีผู้ให้บริการ (เช่น PaySo พร้อมเพย์ QR) หรือชนิดบัตร/เกตเวย์
+                        // ⚠ ห้ามดูแค่ชนิด — PAYSO_PROMPTPAY เป็นชนิด QR จะถูกนับเป็น "โอน" แล้วออกใบเสร็จก่อนได้เงิน
+                        bool isGw = pc.IsGateway || IsGatewayChannelType(type);
                         // เกตเวย์ต้องพร้อมทั้งระบบ "จองแล้วรอชำระ" ด้วย (สถานะรอชำระ + ตัวยกเลิกอัตโนมัติ)
                         if (isGw && !gatewayReady) continue;
                         if (!isGw && IsStaffOnlyChannelName(pc.Name)) continue;
@@ -6075,7 +6077,9 @@ namespace Take_Time_BangPhra
                         if (string.IsNullOrWhiteSpace(text)) text = pc.Code ?? value;
 
                         DropDownList2.Items.Add(new ListItem(text, value));
-                        types[value] = isGw ? type : (type.Length == 0 ? "TRANSFER" : type);
+                        types[value] = isGw
+                            ? (IsGatewayChannelType(type) ? type : "GATEWAY_OTHER")
+                            : (type.Length == 0 ? "TRANSFER" : type);
                         codes[value] = pc.Code ?? "";
                     }
                 }
@@ -6101,6 +6105,11 @@ namespace Take_Time_BangPhra
                         string name = dtFallback.Rows[p]["Paid_How"].ToString();
                         string phId = dtFallback.Rows[p]["ID"].ToString();
                         if (IsStaffOnlyChannelName(name)) continue;
+                        // กันแถว OTA / เกตเวย์ (PaySo ฯลฯ) หลุดมาเป็น "โอน" ในรายการสำรอง
+                        string fbProv;
+                        string fbType = Take_Time_BangPhra.Payments.PaymentChannelCatalog.InferType(name, out fbProv);
+                        if (Take_Time_BangPhra.Payments.PaymentChannelCatalog.IsNeverCustomer(fbType)
+                            || !string.IsNullOrEmpty(fbProv)) continue;
                         if (DropDownList2.Items.FindByValue(phId) != null) continue;
                         DropDownList2.Items.Add(new ListItem(name, phId));
                         types[phId] = "TRANSFER";

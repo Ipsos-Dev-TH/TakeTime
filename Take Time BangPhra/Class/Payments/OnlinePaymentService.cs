@@ -606,11 +606,20 @@ namespace Take_Time_BangPhra.Payments
             //    ให้แต่ละช่องผูกบัญชีพักเงินใน NextAcc แยกกันได้
             // 2) ไม่เจอ → แหล่งเงินรายผู้ให้บริการที่ตั้งใน Accounting Integration (PHASE19_21) → 3) ค่าตั้งเดิม
             string methodText = PaymentChannelCatalog.ResolvePaidHowName(txn.Provider, txn.Method, txn.CardBrand);
+            // แหล่งเงินรายเกตเวย์ที่ผู้ดูแลตั้งเองใน Accounting Integration (null = ไม่ได้ตั้ง)
+            string gatewayPaidHow = Take_Time_BangPhra.Integration.AccountingSyncService
+                .ResolveGatewayPaidHowName(_conn, txn.Provider, txn.Method, null);
             if (string.IsNullOrEmpty(methodText))
             {
-                methodText = PaymentGatewayConfig.Get("Payment_PaidHow_Name", "Omise (จ่ายออนไลน์)");
-                methodText = Take_Time_BangPhra.Integration.AccountingSyncService
-                    .ResolveGatewayPaidHowName(_conn, txn.Provider, txn.Method, methodText);
+                methodText = gatewayPaidHow ?? PaymentGatewayConfig.Get("Payment_PaidHow_Name", "Omise (จ่ายออนไลน์)");
+            }
+            else if (!string.IsNullOrEmpty(gatewayPaidHow)
+                     && !string.Equals(gatewayPaidHow, methodText, StringComparison.Ordinal)
+                     && !PaidHowHasNextAccAccount(methodText))
+            {
+                // แถวของแคตตาล็อก (เช่น PaySo VISA ที่ migration เพิ่มให้) ยังไม่ผูกบัญชี NextAcc
+                // แต่ผู้ดูแลตั้งแหล่งเงินรายเกตเวย์ไว้แล้ว → ใช้ค่านั้น ไม่งั้น NextAcc เดาบัญชีเอง (มักเป็นเงินสด)
+                methodText = gatewayPaidHow;
             }
             string notes = "ชำระออนไลน์ผ่าน " + (txn.Provider ?? "-")
                          + " · อ้างอิง " + txn.TxnRef
@@ -638,6 +647,20 @@ namespace Take_Time_BangPhra.Payments
             return "บันทึกเข้าการจอง #" + reservationId + " แล้ว"
                  + (promoted ? " · ยืนยันการจองเรียบร้อย (รอชำระเงิน → มัดจำแล้ว)" : "")
                  + (string.IsNullOrEmpty(receiptId) ? "" : " (ใบเสร็จ " + receiptId + ")");
+        }
+
+        /// <summary>แถว Account_Paid_How ชื่อนี้ผูกบัญชี NextAcc แล้วหรือยัง (อ่านไม่ได้ = ถือว่าผูกแล้ว ไม่เปลี่ยนพฤติกรรม)</summary>
+        private bool PaidHowHasNextAccAccount(string paidHowName)
+        {
+            try
+            {
+                DataTable dt = new code().DatabaseQuerySafe(_conn,
+                    "SELECT TOP 1 CASE WHEN Nexaacc_AccountId IS NULL THEN 0 ELSE 1 END AS L FROM Account_Paid_How WHERE Paid_How = @n AND Status = 'True'",
+                    new Dictionary<string, object> { { "@n", paidHowName } });
+                if (dt == null || dt.Rows.Count == 0) return false;
+                return Convert.ToInt32(dt.Rows[0]["L"]) == 1;
+            }
+            catch { return true; }
         }
 
         /// <summary>กิจกรรม — ใช้เมธอดเดิมของ ActivityService</summary>
