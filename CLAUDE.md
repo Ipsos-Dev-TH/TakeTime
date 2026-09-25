@@ -354,6 +354,18 @@ NextAcc เคย start ไม่ขึ้น (DI circular dependency ใน `Pr
 `BuildApiErrorHint` เพิ่ม hint: `ไม่พบผังบัญชี: <code>` (สร้างบัญชี/แก้ mapping/ปิด GR/IR) และ NextAcc-ล่ม
 Migrations: **PHASE18_30** (index Logs) และ **PHASE18_31** (`Processing_Started` + config + คืนคิวที่ล้มเพราะ NextAcc ล่ม)
 
+## OTA collect mode + ReservationBalance (ก.ย. 2026)
+`Class/ReservationBalance.cs` = กฎกลางยอดค้าง/รับแล้ว (บอร์ด, รายการจอง, เช็คอิน, เช็คเอาท์, Telegram). โหมดเก็บเงินอ่านจาก
+คอลัมน์ `Reservation.OTA_Collect_Mode` (CHANNEL|HOTEL|UNKNOWN) + `OTA_Collect_Source` (EMAIL|GUESS|STAFF|BACKFILL)
+(migration **PHASE19_17**, DryRun=1 default, ต้อง recycle app หลังรัน) ก่อน fallback หมายเหตุ. CHANNEL+GUESS = UNKNOWN
+(intake เขียน Deposit=0; ไม่นับ Deposit) — UNKNOWN ที่ไม่ได้มาจากการเดา นับ Deposit เป็นมัดจำจริง. เปลี่ยนโหมดผ่าน
+`SetCollectMode` เท่านั้น (log `Reservation_Collect_Mode_Log`, ล็อกเมื่อ `Ota_Revenue_Ref` โพสต์แล้ว/ใบเสร็จ sync แล้ว).
+เช็คอิน: Due=0 → ข้ามรับเงิน (ไม่มีแถวเงินสดปลอม), UNKNOWN → บังคับเลือก (CHANNEL = Owner/Admin). ⇒ รายได้ค่าห้อง
+Channel Collect ต้องมาจาก `RevenuePostingService.PostOtaRoomRevenueIfDue` (`Nexaacc_OtaRoomRevenue`, ฐาน
+`Nexaacc_OtaRevenue_Basis` NET|GROSS) — ต้องเปิดพร้อม deploy หลังผู้ทำบัญชีตรวจ dry-run. แถวเงินสดปลอมเก่า: หน้า
+`Payment/PaymentHistory.aspx` แท็บ "⚠ เงินสดของใบ OTA" → Status `OTA_RECLASS` / คิว `OTA_CASH_RECLASS`
+(JE Dr OTA_RECEIVABLE / Cr เงินสด, ref `OTA-RECLASS-{receiptId}`, ตั้ง `Ota_Revenue_Ref=RECLASS-…`).
+
 ## Git / workflow
 Feature branch: `claude/vibrant-davinci-nzwlgq` (based on default branch
 `claude/restructure-system-architecture-szeM0`). Remote: `Ipsos-Dev-TH/TakeTime`
