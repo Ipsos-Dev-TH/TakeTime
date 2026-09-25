@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Data;
 using System.Web.UI;
 using System.Web.Services;
@@ -13,12 +13,16 @@ namespace Take_Time_BangPhra.Admin.RoomService
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.OpsRoomService)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
+            if (!Feature.Guard(this, "RoomService", "~/Default")) return;   // ฟีเจอร์ถูกปิด (ตั้งค่าระบบ → หมวดฟีเจอร์)
             _code = new code();
 
             // Check admin login
-            if (Session["username"] == null)
+            // ตรวจสิทธิ์แบบเดียวกับหน้าผู้ดูแลอื่น ๆ (เดิมเช็คแค่ว่ามีชื่อผู้ใช้ใน session
+            // ไม่ได้เช็คสิทธิ์จริง และใช้คีย์คนละตัวกับทั้งระบบ)
+            if (Session["permission"]?.ToString() != "True")
             {
-                Response.Redirect("~/Admin/Login.aspx");
+                Response.Redirect("~/Admin/Login");
                 return;
             }
 
@@ -139,6 +143,44 @@ namespace Take_Time_BangPhra.Admin.RoomService
         /// <summary>
         /// Load order detail
         /// </summary>
+        /// <summary>
+        /// ลิงก์ให้ลูกค้าจ่ายออเดอร์นี้เอง — โผล่เฉพาะออเดอร์ที่ยังค้างจ่ายจริง ๆ
+        ///
+        /// ฝั่งรับเงิน (Pay.aspx รองรับ src=ROOMSERVICE + ApplyToRoomServiceOrder)
+        /// มีมาตั้งแต่ต้นแล้ว แต่ไม่เคยมีหน้าไหนสร้างลิงก์ให้ ⇒ ช่องทางนี้ตายมาตลอด
+        ///
+        /// เงียบสนิทถ้าปิดฟีเจอร์/ปิดช่องทางรูมเซอร์วิส — หน้าเดิมทำงานเหมือนเดิม
+        /// </summary>
+        private void ShowOnlinePayLink(long orderId, decimal amount,
+            string paymentStatus, string orderStatus, string phone)
+        {
+            try
+            {
+                if (pnlRsPay == null) return;
+                pnlRsPay.Visible = false;
+
+                string ps = (paymentStatus ?? "").ToUpperInvariant();
+                if (ps == "PAID" || ps == "CHARGED") return;      // จ่ายแล้ว/คิดเข้าห้องแล้ว
+                if ((orderStatus ?? "").ToUpperInvariant() == "CANCELLED") return;
+                if (amount <= 0) return;
+
+                var svc = new Take_Time_BangPhra.Payments.OnlinePaymentService(_connectionString);
+                if (svc.AvailableMethods(amount,
+                        Take_Time_BangPhra.Payments.PaymentSource.RoomService).Count == 0) return;
+
+                txtRsPayLink.Text = Take_Time_BangPhra.Payments.PaymentUrls.SiteBase()
+                    + "/Payment/Pay?src=" + Take_Time_BangPhra.Payments.PaymentSource.RoomService
+                    + "&id=" + orderId
+                    + "&ph=" + Uri.EscapeDataString(phone ?? "");
+                pnlRsPay.Visible = true;
+            }
+            catch
+            {
+                // ยังไม่ได้ติดตั้ง/ตั้งค่า → ไม่แสดงอะไร หน้าเดิมทำงานปกติ
+                try { pnlRsPay.Visible = false; } catch { }
+            }
+        }
+
         private void LoadOrderDetail(long orderId)
         {
             try
@@ -168,13 +210,24 @@ namespace Take_Time_BangPhra.Admin.RoomService
                     lblStatus.Text = GetStatusText(order["Order_Status"].ToString());
                     lblPayment.Text = GetPaymentText(order["Payment_Method"].ToString(), order["Payment_Status"].ToString());
                     lblDeliveryNote.Text = string.IsNullOrEmpty(order["Delivery_Instructions"].ToString()) ? "-" : order["Delivery_Instructions"].ToString();
-                    lblTotalAmount.Text = Convert.ToDecimal(order["Total_Amount"]).ToString("N0");
+                    // ยอดรวม + แยกให้เห็นว่ามีค่าบริการรวมอยู่เท่าไหร่ (คอลัมน์จาก PHASE18_21)
+                    decimal totalAmt = Convert.ToDecimal(order["Total_Amount"]);
+                    decimal svcAmt = 0m;
+                    if (order.Table.Columns.Contains("Service_Charge") && order["Service_Charge"] != DBNull.Value)
+                        svcAmt = Convert.ToDecimal(order["Service_Charge"]);
+                    lblTotalAmount.Text = svcAmt > 0m
+                        ? $"{totalAmt:N0} <small style='color:#7a8794; font-weight:400;'>(ค่าสินค้า {(totalAmt - svcAmt):N0} + ค่าบริการ {svcAmt:N0})</small>"
+                        : totalAmt.ToString("N0");
 
                     // Update button visibility based on status
                     string status = order["Order_Status"].ToString();
                     btnClaim.Visible = status == "PENDING";
                     btnDelivered.Visible = status == "CONFIRMED";
                     btnCancel.Visible = status != "DELIVERED" && status != "CANCELLED";
+
+                    ShowOnlinePayLink(orderId, totalAmt,
+                        Convert.ToString(order["Payment_Status"]), status,
+                        Convert.ToString(order["Phone"]));
                 }
 
                 // Get order items

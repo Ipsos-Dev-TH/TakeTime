@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
@@ -17,6 +17,7 @@ namespace Take_Time_BangPhra.Admin
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.MgtDashboard)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             try
             {
                 // Check permission
@@ -674,20 +675,17 @@ namespace Take_Time_BangPhra.Admin
         {
             try
             {
-                string query = @"
-                    SELECT COUNT(*) as OutstandingCount
-                    FROM Reservation
-                    WHERE (TotalPrice - ISNULL(Deposit, 0)) > 0
-                      AND Status IN (N'มัดจำแล้ว', N'เช็คอินแล้ว')";
+                // สูตรกลาง ReservationBalance — เดิมนับ TotalPrice − Deposit > 0 ซึ่งไม่รวมค่าใช้จ่ายในห้อง
+                // และไม่ดู Payment_History; Channel Collect (OTA เก็บแล้ว) ไม่ถือเป็นค้างชำระ
+                Dictionary<int, ReservationBalance> balances = ReservationBalance.LoadMany(conn,
+                    "r.Status IN (N'มัดจำแล้ว', N'เช็คอินแล้ว')", null);
 
-                DataTable dt = codeInstance.DatabaseQuery(conn, query);
-
-                if (dt != null && dt.Rows.Count > 0)
+                int count = 0;
+                foreach (ReservationBalance b in balances.Values)
                 {
-                    return Convert.ToInt32(dt.Rows[0]["OutstandingCount"]);
+                    if (b.Due > 0m) count++;
                 }
-
-                return 0;
+                return count;
             }
             catch (Exception ex)
             {

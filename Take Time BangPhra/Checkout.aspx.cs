@@ -20,7 +20,103 @@ namespace Take_Time_BangPhra
             if (!IsPostBack)
             {
                 LoadReservationData();
+                LoadSecurityHold();
             }
+        }
+
+        // ── วงเงินประกันความเสียหาย ──────────────────────────────────────────
+        // แสดงเฉพาะเมื่อการจองนี้มีวงเงินกันไว้จริง — ฟีเจอร์ปิด/ไม่มีวงเงิน = มองไม่เห็นเลย
+
+        private void LoadSecurityHold()
+        {
+            try
+            {
+                var svc = new Take_Time_BangPhra.Payments.SecurityHoldService(connectionString);
+                if (!svc.TableReady()) return;
+
+                var hold = svc.GetOpenHold(GetReservationId());
+                if (hold == null) return;
+
+                pnlSecurityHold.Visible = true;
+                ViewState["holdId"] = hold.ID;
+
+                if (hold.Status == Take_Time_BangPhra.Payments.HoldStatus.PendingCard)
+                {
+                    litHoldInfo.Text = "ส่งลิงก์กันวงเงิน " + hold.Amount.ToString("N2")
+                        + " บาทให้ลูกค้าแล้ว แต่<b>ยังไม่ได้กรอกบัตร</b> — ตัดค่าเสียหายจากวงเงินไม่ได้";
+                    pnlHoldActions.Visible = false;
+                    return;
+                }
+
+                bool cashHold = string.Equals(hold.Provider, "CASH", StringComparison.OrdinalIgnoreCase);
+                if (hold.IsTransfer)
+                {
+                    // เงินประกันโอน — จัดการนอกเกตเวย์ทั้งหมด: บันทึกโอนคืน/หัก พร้อมเลขอ้างอิง
+                    litHoldInfo.Text = "รับเงินประกันโดย<b>โอน " + hold.Amount.ToString("N2") + " บาท</b>"
+                        + (hold.HeldAt.HasValue ? " (รับเมื่อ " + hold.HeldAt.Value.ToString("dd/MM/yyyy HH:mm") + ")" : "")
+                        + (string.IsNullOrEmpty(hold.TransferRef) ? "" : " · อ้างอิง " + Server.HtmlEncode(hold.TransferRef))
+                        + "<br/>ไม่มีความเสียหาย → <b>โอนคืนลูกค้า</b> แล้วกด \"คืนเงินประกัน (โอนคืน)\" · "
+                        + "มีความเสียหาย → กรอกยอดแล้วกด \"หักค่าเสียหาย\" แล้วโอนคืนส่วนที่เหลือ · "
+                        + "ใส่เลขอ้างอิงการโอนคืนไว้ด้วย (ระบบเก็บผู้ทำ/เวลาให้เอง — ไม่มีการเรียกเกตเวย์)";
+                    btnReleaseHold.Text = "✅ คืนเงินประกัน (โอนคืน " + hold.Amount.ToString("N2") + " บาท)";
+                    btnCaptureHold.Text = "💥 หักค่าเสียหาย";
+                    pnlHoldRefundRef.Visible = true;
+                }
+                else if (cashHold)
+                {
+                    litHoldInfo.Text = "รับเงินประกันเป็น<b>เงินสด " + hold.Amount.ToString("N2") + " บาท</b>"
+                        + (hold.HeldAt.HasValue ? " (รับเมื่อ " + hold.HeldAt.Value.ToString("dd/MM/yyyy HH:mm") + ")" : "")
+                        + "<br/>ไม่มีความเสียหาย → กด \"คืนทั้งหมด\" แล้ว<b>คืนเงินสดให้ลูกค้า</b> · "
+                        + "มีความเสียหาย → กรอกยอดแล้วกด \"หักค่าเสียหาย\" (ระบบบอกยอดเงินสดที่ต้องคืน)";
+                    btnReleaseHold.Text = "✅ คืนทั้งหมด (คืนเงินสด " + hold.Amount.ToString("N2") + " บาท)";
+                    btnCaptureHold.Text = "💥 หักค่าเสียหาย";
+                }
+                else
+                {
+                    litHoldInfo.Text = "กันวงเงินไว้ <b>" + hold.Amount.ToString("N2") + " บาท</b>"
+                        + (string.IsNullOrEmpty(hold.CardLast4) ? "" : " (บัตร ****" + Server.HtmlEncode(hold.CardLast4) + ")")
+                        + (hold.ExpiresAt.HasValue
+                            ? " · วงเงินหมดอายุ " + hold.ExpiresAt.Value.ToString("dd/MM/yyyy HH:mm") : "")
+                        + "<br/>ไม่มีความเสียหาย → กด \"คืนวงเงิน\" · มีความเสียหาย → กรอกยอดแล้วกด \"ตัดค่าเสียหาย\" "
+                        + "(ส่วนที่เหลือคืนลูกค้าอัตโนมัติ)";
+                }
+            }
+            catch { /* ส่วนเสริม — พังต้องไม่กระทบเช็คเอาท์ */ }
+        }
+
+        protected void btnCaptureHold_Click(object sender, EventArgs e)
+        {
+            long holdId = ViewState["holdId"] == null ? 0 : Convert.ToInt64(ViewState["holdId"]);
+            decimal amount;
+            if (!decimal.TryParse(txtCaptureAmount.Text, System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture, out amount) || amount <= 0)
+            {
+                litHoldMsg.Text = "<div class='alert alert-danger'>กรุณากรอกยอดค่าเสียหายให้ถูกต้อง</div>";
+                LoadSecurityHold();
+                return;
+            }
+
+            int? adminId = null;
+            try { if (Session["UserID"] != null) adminId = Convert.ToInt32(Session["UserID"]); } catch { }
+
+            string refundRef = (txtHoldRefundRef.Text ?? "").Trim();   // ใช้เฉพาะเงินประกันโอน (อื่น ๆ service ไม่สนใจ)
+            string msg = new Take_Time_BangPhra.Payments.SecurityHoldService(connectionString)
+                .CaptureDamage(holdId, amount, txtCaptureReason.Text.Trim(), adminId, refundRef, null);
+            litHoldMsg.Text = "<div class='alert alert-info'>" + Server.HtmlEncode(msg) + "</div>";
+            LoadSecurityHold();
+        }
+
+        protected void btnReleaseHold_Click(object sender, EventArgs e)
+        {
+            long holdId = ViewState["holdId"] == null ? 0 : Convert.ToInt64(ViewState["holdId"]);
+            int? adminId = null;
+            try { if (Session["UserID"] != null) adminId = Convert.ToInt32(Session["UserID"]); } catch { }
+
+            string refundRef = (txtHoldRefundRef.Text ?? "").Trim();   // ใช้เฉพาะเงินประกันโอน (อื่น ๆ service ไม่สนใจ)
+            string msg = new Take_Time_BangPhra.Payments.SecurityHoldService(connectionString)
+                .Release(holdId, adminId, refundRef, null);
+            litHoldMsg.Text = "<div class='alert alert-info'>" + Server.HtmlEncode(msg) + "</div>";
+            LoadSecurityHold();
         }
 
         private void LoadReservationData()
@@ -98,32 +194,16 @@ namespace Take_Time_BangPhra
                     lblCheckinDate.Text = Convert.ToDateTime(row["CheckinDate"]).ToString("dd/MM/yyyy");
                     lblCheckoutDate.Text = Convert.ToDateTime(row["CheckoutDate"]).ToString("dd/MM/yyyy");
 
-                    // 🔧 Calculate total price including ALL product charges
-                    decimal baseTotalPrice = Convert.ToDecimal(row["TotalPrice"]);
-                    decimal deposit = row["Deposit"] != DBNull.Value ? Convert.ToDecimal(row["Deposit"]) : 0;
-
-                    // Get product charges from Reservation_Product_Charges
-                    decimal productCharges = 0;
-                    try
+                    // 🔧 ยอดเงิน — สูตรกลาง ReservationBalance (ตรงกับตารางรายวัน/หน้ารายการจอง/หน้ารายละเอียด)
+                    // ค่าห้อง + ค่าใช้จ่ายในห้อง (Reservation_Product_Charges) + ยอดรับแล้ว (Payment_History → fallback Deposit)
+                    // Channel Collect: ค่าห้องถือว่า OTA จ่ายแล้ว
+                    ReservationBalance bal = ReservationBalance.Load(connectionString, reservationId);
+                    if (bal == null)
                     {
-                        var chargesParams = new System.Collections.Generic.Dictionary<string, object>
-                        {
-                            { "@reservationId", reservationId }
-                        };
-                        string chargesQuery = @"
-                            SELECT ISNULL(SUM(TotalAmount), 0) as TotalCharges
-                            FROM Reservation_Product_Charges
-                            WHERE Reservation_ID = @reservationId
-                            AND Status <> 'CANCELLED'";
-                        DataTable dtCharges = codeInstance.DatabaseQuerySafe(connectionString, chargesQuery, chargesParams);
-                        if (dtCharges.Rows.Count > 0 && dtCharges.Rows[0]["TotalCharges"] != DBNull.Value)
-                        {
-                            productCharges = Convert.ToDecimal(dtCharges.Rows[0]["TotalCharges"]);
-                        }
-                    }
-                    catch
-                    {
-                        // Ignore if table doesn't exist
+                        decimal baseTotalPrice = row["TotalPrice"] != DBNull.Value ? Convert.ToDecimal(row["TotalPrice"]) : 0m;
+                        decimal deposit = row["Deposit"] != DBNull.Value ? Convert.ToDecimal(row["Deposit"]) : 0m;
+                        bal = ReservationBalance.Compute(reservationId, ReservationBalance.ModeNone,
+                            baseTotalPrice, 0m, 0m, 0m, 0, deposit);
                     }
 
                     // Get Room Service charges (CHARGE_TO_ROOM orders)
@@ -151,56 +231,29 @@ namespace Take_Time_BangPhra
                         // Ignore if table doesn't exist
                     }
 
-                    // Add room service to product charges
-                    productCharges += roomServiceCharges;
+                    // ยอดรวม = ยอดจากสูตรกลาง + Room Service ที่ชาร์จเข้าห้อง (บวกเพิ่มเหมือนสูตรเดิมของหน้านี้)
+                    decimal totalPriceWithCharges = bal.Total + roomServiceCharges;
 
-                    // Calculate total price with ALL product charges
-                    decimal totalPriceWithCharges = baseTotalPrice + productCharges;
+                    // ยอดรับแล้ว = ยอดที่สูตรกลางนับ (Channel Collect = รวมค่าห้องที่ OTA เก็บไป)
+                    decimal totalPaid = bal.Received;
 
-                    // Get accurate total paid from Payment_History
-                    decimal totalPaid = 0;
-                    try
+                    // คงเหลือ
+                    decimal remainingBalance;
+                    if (bal.IsChannelCollect)
                     {
-                        totalPaid = paymentDataAccess.GetTotalPaidAmount(reservationId);
-
-                        // ✅ FIX: Fallback to Deposit if no payment history (same as ReserveTable)
-                        if (totalPaid == 0 && deposit > 0)
-                        {
-                            totalPaid = deposit;
-                        }
+                        // ค่าห้อง OTA เก็บแล้ว → เก็บแค่ค่าใช้จ่ายในห้องที่ค้าง + Room Service ที่ชาร์จเข้าห้อง
+                        remainingBalance = bal.PendingCharges + roomServiceCharges;
                     }
-                    catch
+                    else
                     {
-                        // Fallback to Deposit if Payment_History not available
-                        totalPaid = deposit;
+                        // สุทธิ = คงเหลือ − ยอดจ่ายเกิน + Room Service (เท่ากับ ยอดรวม − ยอดรับแล้ว)
+                        remainingBalance = Math.Round(bal.Due - bal.Credit + roomServiceCharges, 2, MidpointRounding.AwayFromZero);
+                        if (Math.Abs(remainingBalance) <= ReservationBalance.RoundingTolerance) remainingBalance = 0m;
                     }
+                    if (remainingBalance < 0m) remainingBalance = 0m;   // จ่ายเกิน = ครบแล้ว
 
-                    // Calculate remaining balance
-                    decimal remainingBalance = totalPriceWithCharges - totalPaid;
-
-                    // Check for pending product charges (for warning message)
-                    decimal pendingCharges = 0;
-                    try
-                    {
-                        var pendingParams = new System.Collections.Generic.Dictionary<string, object>
-                        {
-                            { "@reservationId", reservationId }
-                        };
-                        string pendingQuery = @"
-                            SELECT ISNULL(SUM(TotalAmount), 0) as PendingCharges
-                            FROM Reservation_Product_Charges
-                            WHERE Reservation_ID = @reservationId
-                            AND Status = 'PENDING'";
-                        DataTable dtPending = codeInstance.DatabaseQuerySafe(connectionString, pendingQuery, pendingParams);
-                        if (dtPending.Rows.Count > 0 && dtPending.Rows[0]["PendingCharges"] != DBNull.Value)
-                        {
-                            pendingCharges = Convert.ToDecimal(dtPending.Rows[0]["PendingCharges"]);
-                        }
-                    }
-                    catch
-                    {
-                        // Ignore if table doesn't exist
-                    }
+                    // สินค้าชาร์จเข้าห้องที่ยังค้าง (ใช้แสดงคำเตือน)
+                    decimal pendingCharges = bal.PendingCharges;
 
                     // Check for pending Room Service orders (not yet delivered)
                     decimal pendingRoomService = 0;
@@ -349,16 +402,25 @@ namespace Take_Time_BangPhra
                 }
                 int adminId = Convert.ToInt32(Session["UserID"]);
 
+                // ค่าเสียหาย/ของหาย: อ่านจากช่องกรอกจริง (เดิม hardcode 0 → ค่าเสียหายไม่เคยลงบัญชี)
+                // นับเฉพาะเมื่อ checklist ข้อนั้น "ไม่ผ่าน"; ยอดนี้จะถูกแยกจากมัดจำเข้า DAMAGE/OTHER_INCOME
+                // ตอนตัดมัดจำ (MapCheckoutToJournal) แทนที่จะนับเป็นรายได้ห้องทั้งก้อน
+                decimal damageAmt = 0, missingAmt = 0;
+                if (!chkRoomCondition.Checked) decimal.TryParse(txtDamageAmount.Text?.Trim(), out damageAmt);
+                if (!chkMissingItems.Checked) decimal.TryParse(txtMissingAmount.Text?.Trim(), out missingAmt);
+                if (damageAmt < 0) damageAmt = 0;
+                if (missingAmt < 0) missingAmt = 0;
+
                 // Process checkout with checklist data
                 var result = checkoutService.ProcessCheckout(
                     reservationId,
                     adminId,
                     roomDamage: !chkRoomCondition.Checked,  // ไม่ผ่าน = มีความเสียหาย
                     damageDescription: !chkRoomCondition.Checked ? "ตรวจพบความเสียหาย" : null,
-                    damageCharge: 0,
+                    damageCharge: damageAmt,
                     missingItems: !chkMissingItems.Checked, // ไม่ผ่าน = ของหาย
                     missingItemsDescription: !chkMissingItems.Checked ? "อุปกรณ์ไม่ครบ" : null,
-                    missingItemsCharge: 0,
+                    missingItemsCharge: missingAmt,
                     keyReturned: chkKeyReturn.Checked,
                     cleaningStatus: chkCleaning.Checked ? "GOOD" : "DIRTY",
                     guestSatisfaction: (byte)rating,

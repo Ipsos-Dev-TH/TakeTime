@@ -655,12 +655,22 @@
                 </div>
 
                 <div class="filter-group">
-                    <label><i class="fas fa-calendar"></i> จากวันที่</label>
+                    <label><i class="fas fa-bed"></i> เข้าพัก ตั้งแต่</label>
+                    <asp:TextBox ID="txtStayFrom" runat="server" TextMode="Date" ToolTip="แสดงการจองที่มีวันพักทับช่วงนี้ (เช็คอิน–เช็คเอาท์)"></asp:TextBox>
+                </div>
+
+                <div class="filter-group">
+                    <label><i class="fas fa-bed"></i> เข้าพัก ถึง</label>
+                    <asp:TextBox ID="txtStayTo" runat="server" TextMode="Date" ToolTip="แสดงการจองที่มีวันพักทับช่วงนี้ (เช็คอิน–เช็คเอาท์)"></asp:TextBox>
+                </div>
+
+                <div class="filter-group">
+                    <label><i class="fas fa-calendar"></i> วันที่จอง ตั้งแต่</label>
                     <asp:TextBox ID="txtDateFrom" runat="server" TextMode="Date"></asp:TextBox>
                 </div>
 
                 <div class="filter-group">
-                    <label><i class="fas fa-calendar"></i> ถึงวันที่</label>
+                    <label><i class="fas fa-calendar"></i> วันที่จอง ถึง</label>
                     <asp:TextBox ID="txtDateTo" runat="server" TextMode="Date"></asp:TextBox>
                 </div>
 
@@ -691,9 +701,15 @@
                     <i class="fas fa-list"></i> พบ <asp:Label ID="lblResultCount" runat="server" Text="0"></asp:Label> รายการ
                 </div>
                 <div class="results-summary">
-                    <span class="summary-item">ยอดรวม: <strong><asp:Label ID="lblTotalAmount" runat="server" Text="0"></asp:Label></strong> บาท</span>
-                    <span class="summary-item">มัดจำ: <strong><asp:Label ID="lblTotalDeposit" runat="server" Text="0"></asp:Label></strong> บาท</span>
-                    <span class="summary-item">ค้างชำระ: <strong><asp:Label ID="lblTotalRemain" runat="server" Text="0"></asp:Label></strong> บาท</span>
+                    <%-- ยอดรวมคำนวณเฉพาะเมื่อเลือกช่วงวันที่ (เข้าพักหรือวันที่จอง) — ไม่งั้นรวมทั้งประวัติ ตัวเลขไม่มีความหมาย --%>
+                    <asp:PlaceHolder ID="phTotals" runat="server">
+                        <span class="summary-item">ยอดรวม: <strong><asp:Label ID="lblTotalAmount" runat="server" Text="0"></asp:Label></strong> บาท</span>
+                        <span class="summary-item">รับแล้ว: <strong><asp:Label ID="lblTotalDeposit" runat="server" Text="0"></asp:Label></strong> บาท</span>
+                        <span class="summary-item">ค้างชำระ: <strong><asp:Label ID="lblTotalRemain" runat="server" Text="0"></asp:Label></strong> บาท</span>
+                    </asp:PlaceHolder>
+                    <asp:PlaceHolder ID="phTotalsHint" runat="server" Visible="false">
+                        <span class="summary-item"><i class="fas fa-info-circle"></i> เลือกช่วงวันเข้าพักเพื่อดูยอดรวม</span>
+                    </asp:PlaceHolder>
                 </div>
             </div>
 
@@ -752,7 +768,7 @@
                             <ItemTemplate>
                                 <div class="price-total"><%# String.Format("{0:N0}", Eval("TotalPrice")) %></div>
                                 <div class="price-deposit">มัดจำ: <%# String.Format("{0:N0}", Eval("Deposit")) %></div>
-                                <div class="price-remain">ค้าง: <%# String.Format("{0:N0}", Convert.ToDecimal(Eval("TotalPrice")) - Convert.ToDecimal(Eval("Deposit") ?? 0)) %></div>
+                                <div class="price-remain">ค้าง: <%# String.Format("{0:N0}", Eval("BalDue")) %></div>
                             </ItemTemplate>
                         </asp:TemplateField>
 

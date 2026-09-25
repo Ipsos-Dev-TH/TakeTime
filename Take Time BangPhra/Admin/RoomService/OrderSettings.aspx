@@ -76,6 +76,45 @@
                 <asp:TextBox ID="txtClosedMessage" runat="server" CssClass="rs-textarea" TextMode="MultiLine"></asp:TextBox>
             </div>
 
+            <hr style="border:none; border-top:1px solid #e6eaee; margin:26px 0 20px;" />
+
+            <div class="rs-row">
+                <label class="rs-label">💰 ค่าบริการ (Service Charge)</label>
+                <asp:DropDownList ID="ddlServiceChargeMode" runat="server" CssClass="rs-input">
+                    <asp:ListItem Value="NONE" Text="ไม่คิดค่าบริการ" />
+                    <asp:ListItem Value="PERCENT" Text="คิดเป็น % ของยอดสินค้า" />
+                    <asp:ListItem Value="PER_ITEM" Text="คิดเป็นบาท ต่อชิ้น" />
+                    <asp:ListItem Value="PER_ORDER" Text="คิดเป็นบาท ต่อครั้ง (ต่อออเดอร์)" />
+                </asp:DropDownList>
+            </div>
+
+            <div class="rs-row rs-inline">
+                <div>
+                    <label class="rs-label">จำนวน (% หรือ บาท ตามโหมด)</label>
+                    <asp:TextBox ID="txtServiceChargeValue" runat="server" CssClass="rs-input"
+                        TextMode="Number" step="0.01" min="0" placeholder="เช่น 10"></asp:TextBox>
+                </div>
+                <div>
+                    <label class="rs-label">เพดานสูงสุด (บาท) — 0 = ไม่จำกัด</label>
+                    <asp:TextBox ID="txtServiceChargeMax" runat="server" CssClass="rs-input"
+                        TextMode="Number" step="0.01" min="0" placeholder="0"></asp:TextBox>
+                </div>
+            </div>
+
+            <div class="rs-row">
+                <label class="rs-label">ชื่อที่แสดงให้ลูกค้า</label>
+                <asp:TextBox ID="txtServiceChargeLabel" runat="server" CssClass="rs-input"
+                    placeholder="ค่าบริการ"></asp:TextBox>
+            </div>
+
+            <div class="rs-hint" style="margin-top:-6px;">
+                ตัวอย่าง: <b>%</b> → ตั้ง 10 แล้วสั่ง ฿500 บวก ฿50 ·
+                <b>ต่อชิ้น</b> → ตั้ง 5 แล้วสั่ง 3 ชิ้น บวก ฿15 ·
+                <b>ต่อครั้ง</b> → ตั้ง 20 บวก ฿20 ไม่ว่าสั่งกี่ชิ้น<br />
+                ค่าบริการจะโชว์แยกบรรทัดในตะกร้าของลูกค้า และรวมอยู่ในยอดที่ลงบิลห้อง/ใบเสร็จอัตโนมัติ ·
+                <b>ยอดสั่งขั้นต่ำนับเฉพาะค่าสินค้า</b> ไม่รวมค่าบริการ
+            </div>
+
             <div class="rs-row" style="margin-bottom:0;">
                 <asp:Button ID="btnSave" runat="server" CssClass="btn-save" Text="💾 บันทึกการตั้งค่า" OnClick="btnSave_Click" />
                 <asp:Label ID="lblSaved" runat="server" CssClass="rs-saved" Text="" Visible="false"></asp:Label>

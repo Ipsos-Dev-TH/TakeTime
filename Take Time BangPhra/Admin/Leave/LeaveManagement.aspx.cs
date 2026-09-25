@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Data;
 using System.Web.UI;
 using System.Web.UI.WebControls;
@@ -11,6 +11,8 @@ namespace Take_Time_BangPhra.Admin.Leave
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.HrLeave)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
+            if (!Feature.Guard(this, "HR", "~/Default")) return;   // ฟีเจอร์ถูกปิด (ตั้งค่าระบบ → หมวดฟีเจอร์)
             leaveService = new LeaveService();
 
             if (!IsPostBack)
@@ -357,6 +359,9 @@ namespace Take_Time_BangPhra.Admin.Leave
             chkRequiresMedicalCert.Checked = false;
             chkRequiresApproval.Checked = true;
             chkIsActive.Checked = true;
+            txtCertAfterDays.Text = "";
+            ddlNoCertAction.SelectedValue = "DEDUCT";
+            pnlCertRule.Visible = false;
 
             lblLeaveTypeModalTitle.Text = "เพิ่มประเภทการลา";
             pnlLeaveTypeModal.CssClass = "modal-overlay show";
@@ -383,6 +388,17 @@ namespace Take_Time_BangPhra.Admin.Leave
                     chkRequiresMedicalCert.Checked = row["RequiresMedicalCert"] != DBNull.Value && Convert.ToBoolean(row["RequiresMedicalCert"]);
                     chkRequiresApproval.Checked = row["RequiresApproval"] != DBNull.Value && Convert.ToBoolean(row["RequiresApproval"]);
                     chkIsActive.Checked = row["IsActive"] != DBNull.Value && Convert.ToBoolean(row["IsActive"]);
+
+                    // กฎใบรับรองแพทย์ — คอลัมน์อาจยังไม่มีถ้ายังไม่รัน PHASE19_Migration_14
+                    txtCertAfterDays.Text = row.Table.Columns.Contains("MedicalCertAfterDays")
+                        && row["MedicalCertAfterDays"] != DBNull.Value
+                        ? Convert.ToDecimal(row["MedicalCertAfterDays"]).ToString("0.##")
+                        : "";
+                    string act = row.Table.Columns.Contains("NoCertAction")
+                        ? Convert.ToString(row["NoCertAction"]) : "";
+                    ddlNoCertAction.SelectedValue =
+                        string.Equals(act, "BLOCK", StringComparison.OrdinalIgnoreCase) ? "BLOCK" : "DEDUCT";
+                    pnlCertRule.Visible = chkRequiresMedicalCert.Checked;
 
                     lblLeaveTypeModalTitle.Text = "แก้ไขประเภทการลา";
                     pnlLeaveTypeModal.CssClass = "modal-overlay show";
@@ -417,11 +433,29 @@ namespace Take_Time_BangPhra.Admin.Leave
                 bool requiresApproval = chkRequiresApproval.Checked;
                 bool isActive = chkIsActive.Checked;
 
+                // เว้นว่าง = ต้องแนบทุกกรณี (null) · ใส่ 1 = ลาเกิน 1 วันถึงต้องแนบ
+                decimal? certAfterDays = null;
+                string certRaw = (txtCertAfterDays.Text ?? "").Trim();
+                if (requiresMedicalCert && certRaw.Length > 0)
+                {
+                    decimal cd;
+                    if (!decimal.TryParse(certRaw, out cd) || cd < 0)
+                    {
+                        ShowMessage("จำนวนวันของกฎใบรับรองแพทย์ต้องเป็นตัวเลขไม่ติดลบ", "error");
+                        pnlLeaveTypeModal.CssClass = "modal-overlay show";
+                        pnlCertRule.Visible = true;
+                        return;
+                    }
+                    certAfterDays = cd;
+                }
+                string noCertAction = requiresMedicalCert ? ddlNoCertAction.SelectedValue : "BLOCK";
+
                 if (string.IsNullOrEmpty(hdnLeaveTypeId.Value))
                 {
                     // Create new
                     var result = leaveService.CreateLeaveType(name, code, desc, deductSalary,
-                        requiresMedicalCert, quota, requiresApproval, order);
+                        requiresMedicalCert, quota, requiresApproval, order,
+                        certAfterDays, noCertAction);
                     ShowMessage(result.Message, result.Success ? "success" : "error");
                 }
                 else
@@ -429,7 +463,8 @@ namespace Take_Time_BangPhra.Admin.Leave
                     // Update existing
                     byte leaveTypeId = Convert.ToByte(hdnLeaveTypeId.Value);
                     var result = leaveService.UpdateLeaveType(leaveTypeId, name, code, desc, deductSalary,
-                        requiresMedicalCert, quota, requiresApproval, isActive, order);
+                        requiresMedicalCert, quota, requiresApproval, isActive, order,
+                        certAfterDays, noCertAction);
                     ShowMessage(result.Message, result.Success ? "success" : "error");
                 }
 
@@ -441,6 +476,38 @@ namespace Take_Time_BangPhra.Admin.Leave
             {
                 ShowMessage("เกิดข้อผิดพลาด: " + ex.Message, "error");
             }
+        }
+
+        /// <summary>ติ๊ก "ต้องมีใบรับรองแพทย์" แล้วค่อยโชว์กล่องตั้งกฎ — ไม่ติ๊กก็ไม่ต้องรก</summary>
+        protected void chkRequiresMedicalCert_CheckedChanged(object sender, EventArgs e)
+        {
+            pnlCertRule.Visible = chkRequiresMedicalCert.Checked;
+            pnlLeaveTypeModal.CssClass = "modal-overlay show";
+        }
+
+        /// <summary>
+        /// ข้อความช่องใบรับรองแพทย์ในตาราง — เดิมบอกได้แค่ "ต้องการ / -"
+        /// ซึ่งไม่พอสำหรับกฎแบบมีเงื่อนไขจำนวนวัน
+        /// </summary>
+        protected string MedCertText(object requires, object afterDays, object noCertAction)
+        {
+            try
+            {
+                bool req = requires != null && requires != DBNull.Value && Convert.ToBoolean(requires);
+                if (!req) return "-";
+
+                string when = (afterDays == null || afterDays == DBNull.Value)
+                    ? "ต้องใช้ทุกกรณี"
+                    : "ลาเกิน " + Convert.ToDecimal(afterDays).ToString("0.##") + " วัน";
+
+                string act = Convert.ToString(noCertAction) ?? "";
+                bool deduct = !string.Equals(act, "BLOCK", StringComparison.OrdinalIgnoreCase);
+
+                return "<div style='line-height:1.5'>" + Server.HtmlEncode(when)
+                     + "<br/><small style='color:" + (deduct ? "#dc3545" : "#6c757d") + "'>"
+                     + (deduct ? "ไม่แนบ = หักเงิน" : "ไม่แนบ = ยื่นไม่ได้") + "</small></div>";
+            }
+            catch { return "-"; }
         }
 
         protected void btnCloseLeaveTypeModal_Click(object sender, EventArgs e)

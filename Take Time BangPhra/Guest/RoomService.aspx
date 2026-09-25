@@ -1,4 +1,4 @@
-<%@ Page Title="Room Service" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="RoomService.aspx.cs" Inherits="Take_Time_BangPhra.Guest.RoomService" %>
+﻿<%@ Page Title="Room Service" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="RoomService.aspx.cs" Inherits="Take_Time_BangPhra.Guest.RoomService" %>
 
 <asp:Content ID="Content1" ContentPlaceHolderID="MainContent" runat="server">
     <style>
@@ -458,6 +458,9 @@
             justify-content: center;
         }
 
+        .cart-charge-lines { border-top: 1px dashed #d9dee3; margin-top: 8px; padding-top: 8px; }
+        .cart-charge-row { display: flex; justify-content: space-between; font-size: 13.5px;
+                           color: #667; padding: 3px 0; }
         .cart-total {
             padding: 15px 0;
             font-size: 20px;
@@ -894,6 +897,10 @@
                 <div class="cart-summary">
                     <h3><i class="fas fa-shopping-cart"></i> ตะกร้าของคุณ</h3>
                     <div id="cartItemsDesktop"></div>
+                    <div class="cart-charge-lines" id="chargeLinesDesktop" style="display:none;">
+                        <div class="cart-charge-row"><span>ค่าสินค้า</span><span>฿<span id="cartSubtotalDesktop">0</span></span></div>
+                        <div class="cart-charge-row"><span id="cartSvcLabelDesktop">ค่าบริการ</span><span>฿<span id="cartSvcDesktop">0</span></span></div>
+                    </div>
                     <div class="cart-total">
                         รวม: ฿<span id="cartTotalDesktop">0</span>
                     </div>
@@ -1025,6 +1032,10 @@
             <div class="cart-sheet-handle"></div>
             <h3><i class="fas fa-shopping-cart"></i> ตะกร้าของคุณ</h3>
             <div id="cartItemsMobile"></div>
+            <div class="cart-charge-lines" id="chargeLinesMobile" style="display:none;">
+                <div class="cart-charge-row"><span>ค่าสินค้า</span><span>฿<span id="cartSubtotalMobile">0</span></span></div>
+                <div class="cart-charge-row"><span id="cartSvcLabelMobile">ค่าบริการ</span><span>฿<span id="cartSvcMobile">0</span></span></div>
+            </div>
             <div class="cart-total">
                 รวม: ฿<span id="cartTotalMobile">0</span>
             </div>
@@ -1163,11 +1174,57 @@
             return total;
         }
 
+        // ค่าบริการ — คำนวณตามที่แอดมินตั้งไว้ (แสดงผลเท่านั้น เซิร์ฟเวอร์คิดใหม่ตอนกดสั่ง)
+        function getCartQuantity() {
+            var q = 0;
+            for (var i = 0; i < cart.length; i++) q += cart[i].quantity;
+            return q;
+        }
+
+        function getServiceCharge(subtotal) {
+            var cfg = window.rsServiceCharge;
+            if (!cfg || !cfg.mode || cfg.mode === 'NONE' || !(cfg.value > 0) || subtotal <= 0) return 0;
+            var amt = 0;
+            if (cfg.mode === 'PERCENT') amt = subtotal * cfg.value / 100;
+            else if (cfg.mode === 'PER_ITEM') amt = cfg.value * getCartQuantity();
+            else if (cfg.mode === 'PER_ORDER') amt = cfg.value;
+            amt = Math.round(amt * 100) / 100;
+            if (cfg.max > 0 && amt > cfg.max) amt = cfg.max;
+            return amt > 0 ? amt : 0;
+        }
+
+        function renderChargeLines(subtotal, charge) {
+            var cfg = window.rsServiceCharge || {};
+            var show = charge > 0;
+            var ids = ['Desktop', 'Mobile'];
+            for (var i = 0; i < ids.length; i++) {
+                var box = document.getElementById('chargeLines' + ids[i]);
+                if (box) box.style.display = show ? 'block' : 'none';
+                if (!show) continue;
+                var sub = document.getElementById('cartSubtotal' + ids[i]);
+                var svc = document.getElementById('cartSvc' + ids[i]);
+                var lbl = document.getElementById('cartSvcLabel' + ids[i]);
+                if (sub) sub.textContent = subtotal.toLocaleString();
+                if (svc) svc.textContent = charge.toLocaleString();
+                if (lbl) {
+                    var text = cfg.label || 'ค่าบริการ';
+                    if (cfg.mode === 'PERCENT') text += ' ' + cfg.value + '%';
+                    else if (cfg.mode === 'PER_ITEM') text += ' (฿' + cfg.value + '/ชิ้น)';
+                    lbl.textContent = text;
+                }
+            }
+        }
+
         function updateCartDisplay() {
-            var total = getCartTotal();
+            var subtotal = getCartTotal();
+            var serviceCharge = getServiceCharge(subtotal);
+            var total = subtotal + serviceCharge;
             var totalStr = total.toLocaleString();
             var cartHtml = buildCartHtml();
-            var meetsMinimum = total >= MIN_ORDER_AMOUNT;
+            // ขั้นต่ำเทียบกับค่าสินค้า ไม่รวมค่าบริการ (ตรงกับที่เซิร์ฟเวอร์ตรวจ)
+            var meetsMinimum = subtotal >= MIN_ORDER_AMOUNT;
+
+            renderChargeLines(subtotal, serviceCharge);
 
             // Desktop sidebar
             var desktopItems = document.getElementById('cartItemsDesktop');
@@ -1195,7 +1252,7 @@
             var warning = document.getElementById('minOrderWarning');
             var currentAmount = document.getElementById('currentOrderAmount');
             if (warning && currentAmount) {
-                currentAmount.textContent = total.toLocaleString();
+                currentAmount.textContent = subtotal.toLocaleString();
                 if (cart.length === 0) {
                     warning.className = 'min-order-warning';
                 } else if (meetsMinimum) {

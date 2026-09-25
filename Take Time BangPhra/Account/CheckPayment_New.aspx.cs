@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
@@ -21,6 +21,7 @@ namespace Take_Time_BangPhra.Account
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.FinVoucher)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             try
             {
                 // Initialize services
@@ -31,6 +32,11 @@ namespace Take_Time_BangPhra.Account
                 {
                     if (!IsPostBack)
                     {
+                        if (Request.QueryString["deleted"] == "1")
+                            ScriptManager.RegisterStartupScript(this, GetType(), "delok", "alert('✅ ลบเอกสารเรียบร้อยแล้ว');", true);
+                        if (Request.QueryString["cancelled"] == "1")
+                            ScriptManager.RegisterStartupScript(this, GetType(), "cancelok",
+                                "alert('✅ ยกเลิกเอกสารแล้ว — กำลัง void บน NextAcc และจัดทำใบยกเลิก\\nดูใบยกเลิกได้จากปุ่ม \"ดู PDF\" ในมุมมองรวมเอกสารที่ยกเลิก (รอ sync สักครู่)');", true);
                         InitializePage();
 
                         string syncedQ = Request.QueryString["synced"];
@@ -184,7 +190,9 @@ namespace Take_Time_BangPhra.Account
             foreach (DataRow row in allPayments.Rows)
             {
                 string status = row["Status"]?.ToString() ?? "";
-                if (!status.Equals("Normal", StringComparison.OrdinalIgnoreCase)) continue;
+                // นับทุกเอกสารที่ไม่ถูกยกเลิก (รวม "NextAcc" = เอกสารที่สร้างบน NextAcc/OCR ไม่มี row local)
+                // เดิมนับเฉพาะ "Normal" → เอกสาร NextAcc ตกหล่น ทำให้จำนวน/ยอดสรุปไม่ตรงกับตาราง
+                if (status.Equals("Cancel", StringComparison.OrdinalIgnoreCase)) continue;
 
                 string paidHow = row["Paid_How"]?.ToString() ?? "";
                 decimal amount = row["Total_Amount"] != DBNull.Value ? Convert.ToDecimal(row["Total_Amount"]) : 0;
@@ -234,6 +242,7 @@ namespace Take_Time_BangPhra.Account
                            WHEN ap.Paid_Type = N'เงินเดือน' AND pr.EmployeeName IS NOT NULL THEN pr.EmployeeName
                            ELSE ISNULL(v.Name, '-')
                        END as Vendor_Name,
+                       CASE WHEN pr.ID IS NOT NULL THEN 1 ELSE 0 END as IsPayroll,
                        a.Username as Created_By
                 FROM Account_Payment ap
                 LEFT JOIN Vendor v ON ap.Vendor_ID = v.ID
@@ -327,6 +336,11 @@ namespace Take_Time_BangPhra.Account
                 dt = GetAllPayments(startDate, endDate, "%", vendorSearch, expenseType, minAmount);
                 System.Diagnostics.Debug.WriteLine($"   Retrieved {dt?.Rows.Count ?? 0} rows");
 
+                // merge เอกสารจาก NextAcc (รวมที่สร้างบน NextAcc/OCR ที่ไม่มี row local) ก่อน
+                // แล้วค่อยนับ/สรุป → จำนวนเอกสาร + ยอดรวม + VAT ตรงกับที่แสดงในตาราง
+                var nextAccDocs = PrefetchNextAccDocuments(startDate, endDate);
+                if (dt != null) MergeNextAccIntoGrid(dt, nextAccDocs);
+
                 if (dt != null && dt.Rows.Count > 0)
                 {
                     lblDateRange.Text += $" <span style='color: green; font-weight: bold;'>(✓ พบ {dt.Rows.Count} เอกสาร)</span>";
@@ -338,11 +352,16 @@ namespace Take_Time_BangPhra.Account
                     System.Diagnostics.Debug.WriteLine($"   ⚠️ No documents found!");
                 }
 
-                // คำนวณสรุปค่าใช้จ่ายจาก DataTable ที่ดึงมาแล้ว (ไม่ต้อง query ซ้ำ)
+                // คำนวณสรุปค่าใช้จ่ายจาก DataTable หลัง merge (รวมเอกสาร NextAcc ด้วย)
                 if (dt != null) CalculateExpensesFromData(dt);
 
-                var nextAccDocs = PrefetchNextAccDocuments(startDate, endDate);
-                if (dt != null) MergeNextAccIntoGrid(dt, nextAccDocs);
+                // เรียงทั้งตาราง (รวมเอกสารที่ดึง/สร้างบน NextAcc ซึ่งถูก append ท้าย) ตามเลขที่เอกสาร
+                // ที่แสดง (DisplayDoc) — ใหม่สุดอยู่บน. แก้ปัญหาเอกสาร NextAcc ไม่เรียงตามเลขที่เอกสาร
+                if (dt != null && dt.Columns.Contains("DisplayDoc"))
+                {
+                    dt.DefaultView.Sort = "DisplayDoc DESC";
+                    dt = dt.DefaultView.ToTable();
+                }
 
                 if (dt != null) BuildUidCacheFromGrid(dt);
 
@@ -458,7 +477,7 @@ namespace Take_Time_BangPhra.Account
         {
             if (!chkEnableDelete.Checked)
             {
-                ShowError("กรุณาเปิดใช้งานปุ่มลบก่อน");
+                ShowError("กรุณาติ๊ก \"เปิดใช้งานปุ่มยกเลิกเอกสาร\" ก่อน");
                 return;
             }
 
@@ -471,6 +490,8 @@ namespace Take_Time_BangPhra.Account
                     return;
                 }
                 string docNum = keys.Values["ID"]?.ToString() ?? "";
+                Server.ScriptTimeout = 300;
+
                 string docType = docNum.Length >= 3 ? docNum.Substring(0, 3) : "";
                 string docYear = docNum.Length >= 5 ? "20" + docNum.Substring(3, 2) : "";
                 string docMonthPadded = docNum.Length >= 7 ? docNum.Substring(5, 2) : "";
@@ -487,53 +508,64 @@ namespace Take_Time_BangPhra.Account
                     }
                     catch { }
 
-                    string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
-                    string path = basePath + "\\" + docYear + "\\" + docMonth;
-                    string pathPadded = basePath + "\\" + docYear + "\\" + docMonthPadded;
+                    // ── ใบสำคัญจ่ายเงินเดือน (สร้างจากการ "ทำจ่าย") ──
+                    // ใบนี้ไม่ใช่เอกสารบัญชีตัวจริง (GL/payslip ไปอยู่ฝั่ง NextAcc ผ่าน payroll run หรือ journal)
+                    // ใบที่ออกผิด/ไม่ควรสร้าง → "ลบถาวร" เฉพาะตัวใบออกไป (ไม่เก็บเป็นใบยกเลิก)
+                    // **ไม่แตะสถานะ "ทำจ่าย" ใน Payroll_Records** ตามที่ต้องการ — แค่ลบเอกสารที่ออกผิดเท่านั้น
+                    var prChk = codeInstance.DatabaseQuerySafe(conn,
+                        "SELECT TOP 1 ID FROM Payroll_Records WHERE VoucherNumber = @ID",
+                        new Dictionary<string, object> { { "@ID", docNum } });
+                    bool isPayrollVoucher = prChk != null && prChk.Rows.Count > 0;
 
-                    var deleteDetailsParams = new Dictionary<string, object>
+                    if (isPayrollVoucher)
                     {
-                        { "@PaymentID", docNum }
-                    };
-                    codeInstance.DatabaseInsertSafe(conn,
-                        "DELETE FROM [dbo].[Account_Payment_Detail] WHERE Payment_ID = @PaymentID",
-                        deleteDetailsParams);
-
-                    // SECURE: Delete payment record with parameterized query
-                    var deletePaymentParams = new Dictionary<string, object>
-                    {
-                        { "@ID", docNum }
-                    };
-                    codeInstance.DatabaseInsertSafe(conn,
-                        "DELETE FROM [dbo].[Account_Payment] WHERE ID = @ID",
-                        deletePaymentParams);
-
-                    // Delete payment files (check both non-padded and padded paths)
-                    foreach (string checkPath in new[] { path, pathPadded })
-                    {
-                        if (Directory.Exists(checkPath))
+                        try
                         {
-                            string[] files = Directory.GetFiles(checkPath, docNum + "*");
-                            foreach (string file in files)
-                            {
-                                File.Delete(file);
-                            }
+                            codeInstance.DatabaseInsertSafe(conn,
+                                "DELETE FROM [dbo].[Account_Payment_Detail] WHERE Payment_ID = @ID",
+                                new Dictionary<string, object> { { "@ID", docNum } });
                         }
+                        catch (Exception ddx)
+                        {
+                            codeInstance.Logs(conn, "Accounting Sync", $"CheckPayment_New: ลบ detail ของ {docNum} ล้มเหลว: {ddx.Message}", "SYSTEM");
+                        }
+
+                        codeInstance.DatabaseInsertSafe(conn,
+                            "DELETE FROM [dbo].[Account_Payment] WHERE ID = @ID",
+                            new Dictionary<string, object> { { "@ID", docNum } });
+
+                        codeInstance.Logs(conn, "Accounting Sync", $"CheckPayment_New: ลบถาวรใบสำคัญจ่ายเงินเดือน {docNum} (ไม่แตะ Payroll_Records) (by {deletedBy})", "SYSTEM");
+                        Response.Redirect("~/Account/CheckPayment_New?deleted=1", false);
+                        Context.ApplicationInstance.CompleteRequest();
+                        return;
                     }
 
+                    // ลบ → void เอกสารบน NextAcc ด้วย (cascade): enqueue VOID_VOUCHER ก่อนลบ local
+                    // (void process แบบ async + retry ใน queue; ใช้ queue history หา NextAcc doc id ไม่ต้องพึ่ง local row)
+                    // no-op ถ้าเอกสารไม่ได้ sync / NextAcc ไม่มีเอกสาร (ProcessVoidVoucher จัดการ already-gone เอง)
                     try
                     {
-                        var sync = new Integration.AccountingSyncService(conn);
-                        sync.EnqueueVoidPaymentVoucher(docNum);
+                        new Integration.AccountingSyncService(conn).EnqueueVoidPaymentVoucher(docNum);
+                        codeInstance.Logs(conn, "Accounting Sync", $"CheckPayment_New: ลบ {docNum} → enqueue void บน NextAcc (by {deletedBy})", "SYSTEM");
                     }
-                    catch (Exception accEx)
+                    catch (Exception vex)
                     {
-                        codeInstance.Logs(conn, "Accounting Sync", $"Void voucher error (CheckPayment_New): docNum={docNum} {accEx.Message}", "SYSTEM");
+                        codeInstance.Logs(conn, "Accounting Sync", $"CheckPayment_New: enqueue void {docNum} ล้มเหลว: {vex.Message}", "SYSTEM");
                     }
 
-                    // Show success message then redirect
-                    ClientScript.RegisterStartupScript(this.GetType(), "success",
-                        "alert('✅ ลบใบสำคัญจ่ายเรียบร้อยแล้ว'); window.location.href='/Account/CheckPayment_New';", true);
+                    // ยกเลิก (soft) แทนการลบถาวร — เก็บ row ไว้เป็น "เอกสารยกเลิก" เพื่อพิมพ์ส่งบัญชีได้
+                    // (Status='Cancel' → แสดงในมุมมอง "รวมเอกสารที่ยกเลิก", ดู PDF ดึงใบยกเลิกจาก NextAcc)
+                    // ไม่ลบ detail/ไฟล์ เพื่อคงหลักฐาน; void บน NextAcc ถูก enqueue ไว้แล้วด้านบน
+                    codeInstance.DatabaseInsertSafe(conn,
+                        "UPDATE [dbo].[Account_Payment] SET Status = N'Cancel' WHERE ID = @ID",
+                        new Dictionary<string, object> { { "@ID", docNum } });
+
+                    codeInstance.Logs(conn, "Accounting Sync", $"CheckPayment_New: ยกเลิก {docNum} (Status=Cancel) + void NextAcc enqueued (by {deletedBy})", "SYSTEM");
+
+                    // Server-side redirect — โหลดหน้าใหม่ + แจ้งผ่าน query flag
+                    Response.Redirect("~/Account/CheckPayment_New?cancelled=1", false);
+                    Context.ApplicationInstance.CompleteRequest();
+                    return;
                 }
                 else
                 {
@@ -559,19 +591,52 @@ namespace Take_Time_BangPhra.Account
 
                 System.Diagnostics.Debug.WriteLine($"📄 Opening document: {docNum}, Status: {docStatus}, NextAccUrl: {viewUrl}");
 
-                // ── เอกสารที่มีบน NextAcc → เปิด PDF/ลิงก์ NextAcc ที่ cache ไว้ (เลขที่/รูปแบบตาม NextAcc) ──
-                if (!string.IsNullOrEmpty(viewUrl))
+                // ⚠ เดิมตรงนี้มี "ทางลัด": ถ้าแถวมี ViewUrl เป็นไฟล์ local → redirect ทันที
+                //   ผลคือข้ามตัวตรวจความสด/สถานะร่าง/ตัวเทียบเลขเอกสาร **ทุกชั้น** —
+                //   ไฟล์ตัวร่างที่ cache ค้างไว้จึงถูกเสิร์ฟตลอดไป และปุ่มดึงล่าสุดช่วยไม่ได้
+                //   (มันเขียนไฟล์ลงโฟลเดอร์ใหม่ แต่ทางลัดนี้ยังชี้โฟลเดอร์เก่า)
+                //   ตัดทางลัดออก: ทั้งสอง branch ข้างล่างมี smart-cache ในตัวอยู่แล้ว
+                //   (cache ยังสด = คืนไฟล์ทันทีเหมือนเดิม ไม่ช้าขึ้น) — ViewUrl เหลือไว้เป็น
+                //   fallback ท้ายสุดตอนดาวน์โหลดไม่ได้เท่านั้น
+
+                // ── เอกสารที่สร้างบน NextAcc โดยตรง (NextAcc-only) → ดึง PDF จริงมาเปิด local ──
+                // กดดู PDF ต้องได้ "ไฟล์" ไม่เด้งไปหน้า NextAcc. เอกสารพวกนี้ไม่มี entry ใน sync queue
+                // จึงดึงด้วย NextAcc document id (GUID) ที่ติดมากับแถวโดยตรง (smart-cache: ครั้งต่อไปเปิด local เลย)
+                if (isNextAccOnly)
                 {
-                    Response.Redirect(viewUrl);
+                    string naIdStr = keys.Values["NextAccId"]?.ToString() ?? "";
+                    if (Guid.TryParse(naIdStr, out var naGuid) && naGuid != Guid.Empty)
+                    {
+                        Server.ScriptTimeout = 300;
+                        try
+                        {
+                            var dl = System.Threading.Tasks.Task.Run(() =>
+                                new AccountingSyncService(conn).DownloadNextAccDocumentByIdAsync(naGuid, docNum)
+                            ).GetAwaiter().GetResult();
+                            if (dl != null && dl.Found && !string.IsNullOrEmpty(dl.PdfRelativeUrl))
+                            {
+                                Response.Redirect(dl.PdfRelativeUrl);
+                                return;
+                            }
+                        }
+                        catch { /* ดึงไม่ได้ → fallback ลิงก์ NextAcc ด้านล่าง */ }
+                    }
+
+                    // ดึงไฟล์ไม่ได้ (NextAcc ไม่มี template PDF ฯลฯ) → เปิดหน้า NextAcc แทน
+                    string deepLink = keys.Values["NextAccDeepLink"]?.ToString() ?? "";
+                    string fb = !string.IsNullOrEmpty(deepLink) ? deepLink : viewUrl;
+                    if (!string.IsNullOrEmpty(fb))
+                    {
+                        Response.Redirect(fb);
+                        return;
+                    }
+                    ShowError("เอกสารนี้สร้างบน NextAcc แต่ยังไม่มีไฟล์ PDF ให้เปิดดู");
                     return;
                 }
 
-                // เอกสารที่สร้างบน NextAcc แต่ไม่มีลิงก์ — ไม่มี PDF ฝั่งระบบเราให้เปิด
-                if (isNextAccOnly)
-                {
-                    ShowError("เอกสารนี้สร้างบน NextAcc แต่ยังไม่มีไฟล์ให้เปิดดู (ไม่มี template PDF บน NextAcc)");
-                    return;
-                }
+                // เอกสารที่ sync จากระบบเรา (PAY...) ที่ยังไม่ได้ cache local → ตกไปดึง PDF จริงในส่วนล่าง
+                // (PAY branch ทำ smart-cache ผ่าน DownloadVoucherDocumentFromNextAccAsync — ได้ไฟล์ local เช่นกัน
+                //  ไม่เด้งไป NextAcc ตามลิงก์ภายนอกอีกต่อไป)
 
                 // Parse document info
                 string docType = docNum.Length >= 3 ? docNum.Substring(0, 3) : "";
@@ -585,7 +650,7 @@ namespace Take_Time_BangPhra.Account
                 if (docType == "PAY")
                 {
                     // SECURE: Get payment UID from database with parameterized query
-                    string path = ConfigurationManager.AppSettings["PaymentFolderPath"];
+                    string path = AppCfg.Get("PaymentFolderPath");
                     var uidParams = new Dictionary<string, object>
                     {
                         { "@ID", docNum }
@@ -598,6 +663,28 @@ namespace Take_Time_BangPhra.Account
                     if (uidResult != null && uidResult.Rows.Count > 0 && uidResult.Rows[0][0] != DBNull.Value)
                     {
                         uid = uidResult.Rows[0][0].ToString();
+                    }
+
+                    // เอกสารที่ sync กับ NextAcc → NextAcc คือ source of truth (ยอดล่าสุด/หลังแก้ไข)
+                    // ดึง PDF ทางการจาก NextAcc แบบ "smart cache": ใช้ไฟล์ cache ถ้ายังใหม่ (เร็ว ไม่ยิง API),
+                    // ดึงใหม่เฉพาะตอนเอกสารถูกแก้/re-sync หลัง cache (กันค้างยอดเก่า) — เช็คใน IsVoucherPdfCacheStale
+                    string hasNextAcc = keys.Values["HasNextAcc"]?.ToString() ?? "";
+                    if (hasNextAcc == "1")
+                    {
+                        Server.ScriptTimeout = 300;
+                        try
+                        {
+                            bool cancelled = docStatus == "Cancel";
+                            var fresh = System.Threading.Tasks.Task.Run(() =>
+                                new AccountingSyncService(conn).DownloadVoucherDocumentFromNextAccAsync(docNum, false, cancelled)
+                            ).GetAwaiter().GetResult();
+                            if (fresh != null && fresh.Found && !string.IsNullOrEmpty(fresh.PdfRelativeUrl))
+                            {
+                                Response.Redirect(fresh.PdfRelativeUrl);
+                                return;
+                            }
+                        }
+                        catch { /* ดึงจาก NextAcc ไม่ได้ → ใช้ไฟล์ local ด้านล่าง */ }
                     }
 
                     // Build file paths - check both non-padded month (1,2,...) and padded (01,02,...)
@@ -637,6 +724,27 @@ namespace Take_Time_BangPhra.Account
                         }
                     }
 
+                    // เอกสารยกเลิก: ยังไม่มีใบยกเลิกบนดิสก์ → ดึงจาก NextAcc (ใบเพิ่มหนี้/ต้นฉบับ+ลายน้ำ "ยกเลิก")
+                    // เพื่อพิมพ์ส่งบัญชีได้ (DownloadVoucherDocument จะ cache เป็น _Cancel.pdf ให้ครั้งต่อไป)
+                    if (docStatus == "Cancel")
+                    {
+                        Server.ScriptTimeout = 300;
+                        try
+                        {
+                            var cached = System.Threading.Tasks.Task.Run(() =>
+                                new AccountingSyncService(conn).DownloadVoucherDocumentFromNextAccAsync(docNum, false, true)
+                            ).GetAwaiter().GetResult();
+                            if (cached != null && cached.Found && !string.IsNullOrEmpty(cached.PdfRelativeUrl))
+                            {
+                                Response.Redirect(cached.PdfRelativeUrl);
+                                return;
+                            }
+                        }
+                        catch { }
+                        ShowError("ใบยกเลิกยังไม่พร้อม — NextAcc กำลังสร้างเอกสารยกเลิก (void) รอสักครู่แล้วกดดู PDF ใหม่อีกครั้ง");
+                        return;
+                    }
+
                     // PDF not found - redirect to edit mode to regenerate PDF
                     // This is especially important for payroll vouchers created programmatically
                     System.Diagnostics.Debug.WriteLine($"   ⚠️ PDF not found, redirecting to edit mode to regenerate");
@@ -662,6 +770,12 @@ namespace Take_Time_BangPhra.Account
             {
                 string docId = e.CommandArgument.ToString();
                 HandleSyncVoucher(docId);
+                return;
+            }
+
+            if (e.CommandName == "refreshpdf")
+            {
+                HandleRefreshPdf(e.CommandArgument?.ToString());
                 return;
             }
 
@@ -728,6 +842,7 @@ namespace Take_Time_BangPhra.Account
         /// </summary>
         private List<NextAccCachedDocument> PrefetchNextAccDocuments(DateTime fromDate, DateTime toDate)
         {
+            string listCache = GetNextAccListCacheFile(fromDate, toDate);
             try
             {
                 var config = new AccountingConfig(conn);
@@ -736,29 +851,139 @@ namespace Take_Time_BangPhra.Account
                 string cn = conn;
 
                 // 1) รันเบื้องหลัง (fire-and-forget): โหลด PDF/ไฟล์แนบ/WHT จาก NextAcc มาเก็บดิสก์ไว้ใช้รอบถัดไป
-                System.Threading.Tasks.Task.Run(() =>
+                //    ⚠ THROTTLE: เดิมรันทุกครั้งที่โหลดหน้า → กด "ค้นหา" ซ้ำ ๆ ทำให้ background หลายตัวซ้อนกัน
+                //    ถล่ม API/connection pool → list fetch (ข้อ 2) timeout ยิ่งขึ้นทุกครั้ง. จำกัดให้รันครั้งเดียว
+                //    ต่อช่วงวันที่ทุก 2 นาที (marker บนดิสก์) — กด retry ถี่ ๆ ไม่ทับซ้อน
+                string bgMarker = string.IsNullOrEmpty(listCache) ? null : listCache + ".bg";
+                bool bgDue = bgMarker == null
+                    || !File.Exists(bgMarker)
+                    || (DateTime.Now - File.GetLastWriteTime(bgMarker)) > TimeSpan.FromMinutes(2);
+                if (bgDue)
                 {
-                    try { new AccountingSyncService(cn).DownloadVoucherDocumentsForRangeAsync(fromDate, toDate, true, cacheFiles: true).Wait(); }
-                    catch { }
-                });
+                    try { if (bgMarker != null) { Directory.CreateDirectory(Path.GetDirectoryName(bgMarker)); File.WriteAllText(bgMarker, DateTime.Now.ToString("o")); } } catch { }
+                    System.Threading.Tasks.Task.Run(() =>
+                    {
+                        try { new AccountingSyncService(cn).DownloadVoucherDocumentsForRangeAsync(fromDate, toDate, true, cacheFiles: true).Wait(); }
+                        catch { }
+                    });
+                }
 
                 // 2) แสดงผลเร็ว: ดึงเฉพาะ "รายการเอกสาร" (metadata) + ไฟล์ที่ cache ไว้บนดิสก์ — ไม่ยิง API ต่อเอกสาร
                 //    → เอกสารที่สร้างบน NextAcc โดยตรง (เช่น PV-202606-0003) จะโผล่ในตารางทันทีพร้อมลิงก์เปิดดู
+                //    เก็บ instance ไว้อ่าน diagnostic (API คืนกี่ใบ/error/เวลา) มาโชว์บนหน้า
+                var svc = new AccountingSyncService(cn);
                 var task = System.Threading.Tasks.Task.Run(() =>
-                    new AccountingSyncService(cn).DownloadVoucherDocumentsForRangeAsync(fromDate, toDate, true, cacheFiles: false));
+                    svc.DownloadVoucherDocumentsForRangeAsync(fromDate, toDate, true, cacheFiles: false));
 
-                if (task.Wait(TimeSpan.FromSeconds(12)))
-                    return task.Result ?? new List<NextAccCachedDocument>();
+                if (task.Wait(TimeSpan.FromSeconds(18)))
+                {
+                    ShowNextAccDiag(svc.LastRangeFetchInfo);   // โชว์ผลดึงจริงบนหน้า
+                    var res = task.Result ?? new List<NextAccCachedDocument>();
+                    if (res.Count > 0)
+                    {
+                        WriteNextAccListCache(listCache, res);   // เก็บ last-known list กัน timeout รอบหน้า
+                        return res;
+                    }
+                    // API คืน 0 — อาจ blip/ช้า → ถ้ามี cache last-known ให้แสดงแทนตารางว่าง (เอกสารยังอยู่บน NextAcc)
+                    var cached0 = ReadNextAccListCache(listCache);
+                    if (cached0 != null && cached0.Count > 0)
+                    {
+                        lblDateRange.Text += $" <span style='color:#e67e22;'>(แสดง {cached0.Count} รายการล่าสุดจากแคชแทน)</span>";
+                        return cached0;
+                    }
+                    return res;
+                }
 
-                lblDateRange.Text += " <span style='color:#e67e22;'>(NextAcc: แสดงจากแคช — กำลังดึงรายการเบื้องหลัง ลองค้นหาอีกครั้ง)</span>";
+                // timeout (>18s) → แสดง last-known จากแคชแทนตารางว่าง. task ที่ทิ้งไปยังวิ่งต่อ + เขียนแคช+status เองเมื่อเสร็จ
+                // → โชว์ "ผลดึง background ล่าสุด" ที่ service เขียนไว้ → เห็นว่าดึงได้จริงไหม/พังตรงไหน แม้ตัวนี้ timeout
+                ShowNextAccDiag("ดึงรายการไม่ทันใน 18 วิ (NextAcc list API ช้า) — กำลังดึงต่อเบื้องหลัง; กดค้นหาอีกครั้งอีก ~10-20 วิ จะขึ้นจากแคช");
+                string bgStatus = ReadNextAccStatus(fromDate, toDate);
+                if (!string.IsNullOrEmpty(bgStatus))
+                    lblDateRange.Text += $"<br/><span style='color:#8e44ad; font-size:12px;'>🕓 <b>ผลดึง background ล่าสุด:</b> {Server.HtmlEncode(bgStatus)}</span>";
+                var cached = ReadNextAccListCache(listCache);
+                if (cached != null && cached.Count > 0)
+                {
+                    lblDateRange.Text += $" <span style='color:#e67e22;'>(แสดง {cached.Count} รายการล่าสุดจากแคชแทน, กำลังดึงเบื้องหลัง)</span>";
+                    return cached;
+                }
+                lblDateRange.Text += " <span style='color:#e67e22;'>(ยังไม่มีแคช — กดค้นหาอีกครั้งหลัง background ดึงเสร็จ)</span>";
                 return new List<NextAccCachedDocument>();
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine("PrefetchNextAccDocuments error: " + ex.Message);
+                // error → พยายามแสดง last-known จากแคชก่อน (ไม่ปล่อยตารางว่าง)
+                var cached = ReadNextAccListCache(listCache);
+                if (cached != null && cached.Count > 0)
+                {
+                    lblDateRange.Text += $" <span style='color:#c0392b;'>(NextAcc error: {Server.HtmlEncode(ex.Message)} — แสดงรายการล่าสุดจากแคช)</span>";
+                    return cached;
+                }
                 lblDateRange.Text += $" <span style='color:#c0392b;'>(NextAcc error: {Server.HtmlEncode(ex.Message)})</span>";
                 return new List<NextAccCachedDocument>();
             }
+        }
+
+        /// <summary>โชว์ผลการดึงรายการ NextAcc บนหน้า (ใต้ช่วงวันที่) — API คืนกี่ใบ/error/เวลา ให้เห็นทันที
+        /// ไม่ต้องเปิด log. ตัวอย่าง: "API คืน 5 ใบ → แสดง 5 | EXPENSE=5/5 | 3200ms" หรือ "API ล้มเหลว: timeout".</summary>
+        private void ShowNextAccDiag(string info)
+        {
+            if (string.IsNullOrEmpty(info)) return;
+            try
+            {
+                lblDateRange.Text += $"<br/><span style='color:#555; font-size:12px;'>🔎 <b>ตรวจการดึง NextAcc:</b> {Server.HtmlEncode(info)}</span>";
+            }
+            catch { }
+        }
+
+        /// <summary>อ่านสถานะผลดึงล่าสุด (ที่ service เขียนไว้ตอนดึงเสร็จ) — โชว์แม้ foreground timeout.</summary>
+        private string ReadNextAccStatus(DateTime fromDate, DateTime toDate)
+        {
+            try
+            {
+                string basePath = AppCfg.Get("PaymentFolderPath");
+                if (string.IsNullOrEmpty(basePath)) return null;
+                string file = Path.Combine(basePath, "NextAcc", "_list", $"{fromDate:yyyyMMdd}_{toDate:yyyyMMdd}.status.txt");
+                return File.Exists(file) ? File.ReadAllText(file) : null;
+            }
+            catch { return null; }
+        }
+
+        /// <summary>ไฟล์แคช "รายการเอกสาร NextAcc" ต่อช่วงวันที่ — {PaymentFolderPath}\NextAcc\_list\{from}_{to}.json.
+        /// ให้หน้าโชว์รายการล่าสุดได้แม้ดึงสดไม่สำเร็จ (timeout/error/API คืน 0) — กันตารางว่างทั้งที่เอกสารยังอยู่.</summary>
+        private string GetNextAccListCacheFile(DateTime fromDate, DateTime toDate)
+        {
+            try
+            {
+                string basePath = AppCfg.Get("PaymentFolderPath");
+                if (string.IsNullOrEmpty(basePath)) return null;
+                string dir = Path.Combine(basePath, "NextAcc", "_list");
+                return Path.Combine(dir, $"{fromDate:yyyyMMdd}_{toDate:yyyyMMdd}.json");
+            }
+            catch { return null; }
+        }
+
+        private void WriteNextAccListCache(string file, List<NextAccCachedDocument> list)
+        {
+            if (string.IsNullOrEmpty(file) || list == null) return;
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(file));
+                var ser = new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = 32 * 1024 * 1024 };
+                File.WriteAllText(file, ser.Serialize(list), Encoding.UTF8);
+            }
+            catch { }
+        }
+
+        private List<NextAccCachedDocument> ReadNextAccListCache(string file)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(file) || !File.Exists(file)) return null;
+                var ser = new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = 32 * 1024 * 1024 };
+                return ser.Deserialize<List<NextAccCachedDocument>>(File.ReadAllText(file, Encoding.UTF8));
+            }
+            catch { return null; }
         }
 
         /// <summary>
@@ -774,6 +999,7 @@ namespace Take_Time_BangPhra.Account
             if (!dt.Columns.Contains("HasNextAcc")) dt.Columns.Add("HasNextAcc", typeof(string));
             if (!dt.Columns.Contains("NextAccViewUrl")) dt.Columns.Add("NextAccViewUrl", typeof(string));
             if (!dt.Columns.Contains("NextAccDeepLink")) dt.Columns.Add("NextAccDeepLink", typeof(string));
+            if (!dt.Columns.Contains("NextAccId")) dt.Columns.Add("NextAccId", typeof(string));
             if (!dt.Columns.Contains("NextAccAttCount")) dt.Columns.Add("NextAccAttCount", typeof(int));
             if (!dt.Columns.Contains("NextAccAttUrls")) dt.Columns.Add("NextAccAttUrls", typeof(string));
             if (!dt.Columns.Contains("WhtCertUrl")) dt.Columns.Add("WhtCertUrl", typeof(string));
@@ -817,6 +1043,7 @@ namespace Take_Time_BangPhra.Account
                     row["HasNextAcc"] = "1";
                     row["NextAccViewUrl"] = nd.BestViewUrl ?? "";
                     row["NextAccDeepLink"] = nd.DeepLinkUrl ?? "";
+                    row["NextAccId"] = nd.NextAccId != Guid.Empty ? nd.NextAccId.ToString() : "";
                     row["NextAccAttCount"] = nd.AttachmentCount;
                     row["NextAccAttUrls"] = nd.AttachmentRelativeUrls != null && nd.AttachmentRelativeUrls.Count > 0
                         ? string.Join("|", nd.AttachmentRelativeUrls) : "";
@@ -857,6 +1084,7 @@ namespace Take_Time_BangPhra.Account
                 nr["HasNextAcc"] = "1";
                 nr["NextAccViewUrl"] = nd.BestViewUrl ?? "";
                 nr["NextAccDeepLink"] = nd.DeepLinkUrl ?? "";
+                nr["NextAccId"] = nd.NextAccId != Guid.Empty ? nd.NextAccId.ToString() : "";
                 nr["NextAccAttCount"] = nd.AttachmentCount;
                 nr["NextAccAttUrls"] = nd.AttachmentRelativeUrls != null && nd.AttachmentRelativeUrls.Count > 0
                     ? string.Join("|", nd.AttachmentRelativeUrls) : "";
@@ -896,16 +1124,38 @@ namespace Take_Time_BangPhra.Account
             return true;
         }
 
+        // เงินเดือนเป็นโหมด run-based (sync ทั้งงวด) หรือไม่ — cache ต่อ request
+        private bool? _payrollRunBased;
+        private bool PayrollRunBasedMode
+        {
+            get
+            {
+                if (_payrollRunBased == null)
+                {
+                    try
+                    {
+                        var cfg = new Take_Time_BangPhra.Integration.AccountingConfig(conn);
+                        _payrollRunBased = cfg.IsPayrollImportMode || cfg.IsPayrollDocumentMode;
+                    }
+                    catch { _payrollRunBased = false; }
+                }
+                return _payrollRunBased.Value;
+            }
+        }
+
         private void LoadSyncStatusCache()
         {
             _syncStatusCache = new Dictionary<string, DataRow>(StringComparer.OrdinalIgnoreCase);
             try
             {
+                // รวมเงินเดือน (PAYROLL/CREATE_PAYROLL_ENTRY = JOURNAL_ONLY ต่อพนักงาน, documentNumber=เลขใบสำคัญ)
+                // → คอลัมน์ "Sync บัญชี" ของใบเงินเดือนจะแสดงสถานะ sync จริง ไม่ค้าง "ยังไม่ sync"
                 var dt = codeInstance.DatabaseQuerySafe(conn,
                     @"SELECT ID, Entity_Type, Action_Type, Status, Error_Message, Payload, Created_Date,
                              Nexaacc_Response_Id, Nexaacc_Document_Number, Nexaacc_Document_Type
                       FROM Accounting_Sync_Queue
-                      WHERE Entity_Type = 'VOUCHER' AND Action_Type = 'CREATE_VOUCHER_JOURNAL'
+                      WHERE (Entity_Type = 'VOUCHER' AND Action_Type = 'CREATE_VOUCHER_JOURNAL')
+                         OR (Entity_Type = 'PAYROLL' AND Action_Type = 'CREATE_PAYROLL_ENTRY')
                       ORDER BY ID DESC",
                     null);
 
@@ -927,6 +1177,15 @@ namespace Take_Time_BangPhra.Account
             catch { }
         }
 
+        protected void gvDetails_RowEditing(object sender, GridViewEditEventArgs e)
+        {
+            // CommandName="edit" เป็นชื่อสงวนของ GridView → fire RowEditing เสมอ ควบคู่กับ RowCommand.
+            // การแก้ไข (redirect ไปหน้า PaymentVoucher หรือ ShowError สำหรับเอกสาร NextAcc-only)
+            // ถูกจัดการใน gvDetails_RowCommand แล้ว → ที่นี่แค่ยกเลิก edit mode กัน error
+            // "The GridView 'gvDetails' fired event RowEditing which wasn't handled"
+            e.Cancel = true;
+        }
+
         protected void gvDetails_RowDataBound(object sender, GridViewRowEventArgs e)
         {
             if (e.Row.RowType != DataControlRowType.DataRow) return;
@@ -936,7 +1195,21 @@ namespace Take_Time_BangPhra.Account
             {
                 if (ctrl is Button btnDel && btnDel.CommandName == "Delete")
                 {
-                    btnDel.OnClientClick = "return confirm('ยืนยันลบเอกสารนี้? (ลบถาวร ไม่สามารถกู้คืนได้)');";
+                    // ใช้ if(!confirm())return false; แทน return confirm(); — กันกรณีปุ่ม render เป็น __doPostBack
+                    // ที่ "return true" จะตัดไม่ให้ postback ทำงาน (อาการกด OK แล้วเงียบ)
+                    // ยืนยัน 2 ขั้น. ใบเงินเดือน = ลบถาวร (ออกผิด, ไม่เก็บเป็นใบยกเลิก) / อื่น ๆ = ยกเลิก+เก็บใบ
+                    if (SafeEval(e.Row.DataItem, "IsPayroll") == "1")
+                    {
+                        btnDel.OnClientClick =
+                            "if(!confirm('ขั้น 1/2: ลบถาวรใบสำคัญจ่ายเงินเดือนนี้ใช่หรือไม่? (เอกสารจะถูกลบออกจากระบบ ไม่เก็บเป็นใบยกเลิก — เงินเดือนออกเอกสารจริงบน NextAcc)'))return false;" +
+                            "if(!confirm('ขั้น 2/2: ยืนยันอีกครั้ง — ลบถาวร'))return false;";
+                    }
+                    else
+                    {
+                        btnDel.OnClientClick =
+                            "if(!confirm('ขั้น 1/2: ยกเลิกใบสำคัญจ่ายนี้ และ void เอกสารบน NextAcc ใช่หรือไม่? (เอกสารจะกลายเป็น \\\"ยกเลิก\\\" พิมพ์ใบยกเลิกส่งบัญชีได้)'))return false;" +
+                            "if(!confirm('ขั้น 2/2: ยืนยันอีกครั้ง — ยกเลิกถาวร + void บน NextAcc'))return false;";
+                    }
                     break;
                 }
             }
@@ -995,6 +1268,35 @@ namespace Take_Time_BangPhra.Account
             {
                 lblSync.Text = "<span class='sync-badge none'>-</span>";
                 btnSync.Visible = false;
+                return;
+            }
+
+            // ── ใบสำคัญจ่ายเงินเดือน (สร้างจากการ "ทำจ่าย" payroll) ──
+            // GL/เอกสารเงินเดือน sync ผ่าน "งวดเงินเดือน" (run-based: IMPORT_PAYROLL_RUN / SYNC_PAYROLL_RUN
+            // หรือ per-person PAYROLL journal สำหรับ JOURNAL_ONLY) — ไม่ใช่ใบสำคัญจ่ายเดี่ยว ๆ.
+            // จึง **ห้าม** โชว์ปุ่ม Sync ทั่วไป (EnqueuePaymentVoucher) เพราะจะสร้างเอกสารซ้ำบน NextAcc.
+            string isPayroll = SafeEval(e.Row.DataItem, "IsPayroll");
+            if (isPayroll == "1")
+            {
+                btnSync.Visible = false;
+                if (_syncStatusCache == null) LoadSyncStatusCache();
+                // JOURNAL_ONLY → มี entry PAYROLL/CREATE_PAYROLL_ENTRY ต่อคน (key = เลขใบสำคัญ) แสดงสถานะจริง
+                if (!PayrollRunBasedMode && _syncStatusCache.ContainsKey(docId))
+                {
+                    var prow = _syncStatusCache[docId];
+                    string pst = prow["Status"]?.ToString() ?? "";
+                    if (pst == "COMPLETED")
+                        lblSync.Text = "<span class='sync-badge completed'>✓ เงินเดือน (GL)</span>";
+                    else if (pst == "FAILED")
+                        lblSync.Text = $"<span class='sync-badge failed' title='{Server.HtmlEncode(prow["Error_Message"]?.ToString() ?? "")}'>เงินเดือน: Failed</span>";
+                    else
+                        lblSync.Text = "<span class='sync-badge pending'>เงินเดือน: รอดำเนินการ</span>";
+                }
+                else
+                {
+                    // run-based (DOCUMENT_IMPORT/DOCUMENT) — sync ทั้งงวดบนหน้าจัดการเงินเดือน
+                    lblSync.Text = "<span class='sync-badge completed' title='เงินเดือน sync ทั้งงวดผ่านหน้าจัดการเงินเดือน (NextAcc payroll run) — ไม่ sync เป็นใบสำคัญจ่ายเดี่ยว'>ผ่านงวดเงินเดือน</span>";
+                }
                 return;
             }
 
@@ -1081,7 +1383,7 @@ namespace Take_Time_BangPhra.Account
             try
             {
                 if (string.IsNullOrEmpty(docId)) return null;
-                string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
+                string basePath = AppCfg.Get("PaymentFolderPath");
                 if (string.IsNullOrEmpty(basePath)) return null;
 
                 string safe = docId;
@@ -1121,7 +1423,7 @@ namespace Take_Time_BangPhra.Account
                 if (createdDateObj == null || createdDateObj == DBNull.Value) return urls;
 
                 DateTime dt = Convert.ToDateTime(createdDateObj);
-                string basePath = ConfigurationManager.AppSettings["PaymentFolderPath"];
+                string basePath = AppCfg.Get("PaymentFolderPath");
                 if (string.IsNullOrEmpty(basePath)) return urls;
 
                 if (_uidCache == null) return urls;
@@ -1243,6 +1545,16 @@ namespace Take_Time_BangPhra.Account
                 Session[sessionKey] = DateTime.Now;
 
                 var docParams = new Dictionary<string, object> { { "@ID", docId } };
+
+                // กันสร้างเอกสารซ้ำบน NextAcc: ใบสำคัญจ่ายเงินเดือน sync ผ่าน "งวดเงินเดือน"
+                // (payroll run / per-person journal) ไม่ใช่ผ่าน EnqueuePaymentVoucher — ปฏิเสธที่นี่
+                var payrollChk = codeInstance.DatabaseQuerySafe(conn,
+                    "SELECT TOP 1 ID FROM Payroll_Records WHERE VoucherNumber = @ID", docParams);
+                if (payrollChk != null && payrollChk.Rows.Count > 0)
+                {
+                    ShowError("ใบสำคัญจ่ายเงินเดือนจะ sync ผ่านหน้าจัดการเงินเดือน (ทั้งงวด) — ไม่ sync เป็นใบสำคัญจ่ายเดี่ยว เพื่อกันเอกสารซ้ำบน NextAcc");
+                    return;
+                }
                 var dt = codeInstance.DatabaseQuerySafe(conn,
                     @"SELECT ap.ID, ap.Created_Date, ap.Total_Amount, ap.Vat, ap.Paid_How, ap.Paid_Type,
                              ISNULL(ap.WHT_Rate, 0) AS WHT_Rate, ISNULL(ap.WHT_Amount, 0) AS WHT_Amount,
@@ -1340,6 +1652,94 @@ namespace Take_Time_BangPhra.Account
             {
                 try { loggingService.LogException(ex, LoggingService.LogCategory.Accounting, $"Sync error: {docId}", GetCurrentUserId()); } catch { }
                 ShowError("Sync ไม่สำเร็จ กรุณาลองใหม่");
+            }
+        }
+
+        /// <summary>
+        /// ปุ่ม "🔄 ดึงล่าสุด" — ดึง PDF ใบสำคัญจ่ายฉบับล่าสุดจาก NextAcc มาทับ cache ฝั่งเรา
+        /// (แบบเดียวกับหน้าใบกำกับ) ใช้เมื่อแก้เอกสารบน NextAcc แล้วอยากได้ไฟล์ใหม่ทันที
+        /// โดยไม่ต้องรอ cache หมดอายุ
+        /// </summary>
+        private void HandleRefreshPdf(string commandArg)
+        {
+            try
+            {
+                if (!int.TryParse(commandArg, out int rowIndex)
+                    || rowIndex < 0 || rowIndex >= gvDetails.DataKeys.Count)
+                { ShowError("ไม่พบแถวที่เลือก กรุณาค้นหาใหม่แล้วลองอีกครั้ง"); return; }
+
+                var dk = gvDetails.DataKeys[rowIndex];
+                string docNum = dk?["ID"]?.ToString() ?? "";
+                bool cancelled = (dk?["Status"]?.ToString() ?? "") == "Cancel";
+                bool isNaOnly = dk?["IsNextAccOnly"]?.ToString() == "1";
+                string naId = dk?["NextAccId"]?.ToString() ?? "";
+
+                if (string.IsNullOrEmpty(docNum)) { ShowError("ไม่พบเลขที่เอกสารของแถวนี้"); return; }
+
+                var naCfg = new Take_Time_BangPhra.Integration.AccountingConfig(conn);
+                if (!naCfg.IsConfigured || !naCfg.Enabled)
+                { ShowError("ยังไม่ได้เปิดใช้ NextAcc — ดึงไฟล์ล่าสุดไม่ได้"); return; }
+
+                Server.ScriptTimeout = 300;
+                var svc = new AccountingSyncService(conn);
+                Take_Time_BangPhra.Integration.NextAccCachedDocument fresh = null;
+                bool timedOut = false;
+
+                if (isNaOnly && Guid.TryParse(naId, out var gNa) && gNa != Guid.Empty)
+                {
+                    // แถวที่มีเฉพาะบน NextAcc → ดึงตรงด้วย GUID
+                    var t = System.Threading.Tasks.Task.Run(() =>
+                        svc.DownloadNextAccDocumentByIdAsync(gNa, docNum, true, cancelled));
+                    if (t.Wait(45000)) fresh = t.Result; else timedOut = true;
+                }
+                else
+                {
+                    // ใบในระบบที่ sync แล้ว → เส้นทางเลขที่เอกสาร (forceRefresh) แล้ว fallback GUID
+                    var t = System.Threading.Tasks.Task.Run(() =>
+                        svc.DownloadVoucherDocumentFromNextAccAsync(docNum, true, cancelled));
+                    if (t.Wait(45000)) fresh = t.Result; else timedOut = true;
+
+                    if (!timedOut && (fresh == null || !fresh.Found)
+                        && Guid.TryParse(naId, out var g2) && g2 != Guid.Empty)
+                    {
+                        var t2 = System.Threading.Tasks.Task.Run(() =>
+                            svc.DownloadNextAccDocumentByIdAsync(g2, docNum, true, cancelled));
+                        if (t2.Wait(30000)) fresh = t2.Result; else timedOut = true;
+                    }
+                }
+
+                if (timedOut)
+                { ShowError($"ดึงไฟล์ {docNum} ไม่ทันใน 45 วินาที — NextAcc อาจตอบช้า ลองใหม่อีกครั้ง"); return; }
+
+                if (fresh != null && fresh.Found)
+                {
+                    // NextAcc แจ้งเลขที่ของเอกสาร GUID นี้ว่าอะไร — ถ้าไม่ตรงกับที่เราขอ ให้บอกตรง ๆ
+                    // ไม่งั้นผู้ใช้เห็นแค่ "สำเร็จ" แล้วเปิดมาได้เอกสารอื่น โดยไม่รู้ว่าเพราะอะไร
+                    string naNum = fresh.DocumentNumber ?? "";
+                    if (!string.IsNullOrEmpty(naNum)
+                        && !string.Equals(naNum, docNum, StringComparison.OrdinalIgnoreCase))
+                    {
+                        ShowError($"⚠ ดึงไฟล์แล้ว แต่ NextAcc แจ้งว่าเอกสารที่ผูกไว้กับรายการนี้คือ \"{naNum}\" "
+                                + $"ไม่ใช่ \"{docNum}\"\n\n"
+                                + (naNum.StartsWith("DRAFT", StringComparison.OrdinalIgnoreCase)
+                                    ? "เอกสารที่ผูกไว้ยังเป็นฉบับร่างบน NextAcc — ใบที่อนุมัติแล้วเป็นคนละใบ "
+                                      + "กรุณาลบใบร่างที่ค้างบน NextAcc หรือแจ้งให้ผูกรายการนี้กับใบที่อนุมัติแล้ว"
+                                    : "รายการนี้ผูกกับเอกสารผิดใบ — ตรวจสอบบน NextAcc"));
+                        btnSearch_Click(null, EventArgs.Empty);
+                        return;
+                    }
+                    ShowError($"✅ ดึงไฟล์ล่าสุดของ {docNum} จาก NextAcc แล้ว — กด \"📄 ดู PDF\" เพื่อเปิดไฟล์ใหม่");
+                    btnSearch_Click(null, EventArgs.Empty);   // รีเฟรชตารางให้เห็นสถานะไฟล์ล่าสุด
+                }
+                else
+                {
+                    ShowError($"ยังไม่มีเอกสารของ {docNum} บน NextAcc" +
+                              (string.IsNullOrEmpty(fresh?.Message) ? "" : " — " + fresh.Message));
+                }
+            }
+            catch (Exception ex)
+            {
+                ShowError("ดึงไฟล์ล่าสุดไม่สำเร็จ: " + (ex.InnerException ?? ex).Message);
             }
         }
 

@@ -32,6 +32,7 @@ namespace Take_Time_BangPhra.Voucher
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.SalesVoucher)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             // ✨ Initialize Helper Classes
             _addressHelper = new AddressHelper(conn);
             _customerHelper = new CustomerHelper(conn);
@@ -764,7 +765,7 @@ namespace Take_Time_BangPhra.Voucher
                         }
                     }
 
-                    string path = System.Configuration.ConfigurationManager.AppSettings["ReceiptFolderPath"].ToString();
+                    string path = AppCfg.Get("ReceiptFolderPath").ToString();
                     try
                     {
                         System.IO.Directory.CreateDirectory(path + "\\" + Year);
@@ -955,7 +956,7 @@ namespace Take_Time_BangPhra.Voucher
                             try
                             {
                                 string xmlFilePath = path + "\\" + Year + "\\" + Month + "\\" + docNum + "_" + uid + ".xml";
-                                string xmlString = System.IO.File.ReadAllText(ConfigurationManager.AppSettings["BaseFolderPath"].ToString() + "\\Resources\\template.xml");
+                                string xmlString = System.IO.File.ReadAllText(AppCfg.Get("BaseFolderPath").ToString() + "\\Resources\\template.xml");
                                 xmlString = xmlString.Replace("*invoice_id", docNum);
                                 xmlString = xmlString.Replace("*invoice_name", "ใบเสร็จรับเงิน/ใบกำกับภาษี");
                                 xmlString = xmlString.Replace("*invoice_typecode", "T03");
@@ -1090,7 +1091,7 @@ namespace Take_Time_BangPhra.Voucher
                                         }
                                         //DataTable dtReceipt = code.DatabaseQuery(conn, "SELECT  [ID] FROM [Account_Receipt] Where RESERVATION_ID = '" + Reservation_ID + "'");
 
-                                        //string path = System.Configuration.ConfigurationManager.AppSettings["ReceiptFolderPath"].ToString();
+                                        //string path = AppCfg.Get("ReceiptFolderPath").ToString();
                                         //string pdfpath = path + "\\" + docDate.Year.ToString() + "\\" + docDate.Month.ToString() + "\\" + dtReceipt.Rows[0]["ID"].ToString() + "_etax.pdf";
 
                                         //string pdfFilePath = pdfpath;
@@ -1135,7 +1136,7 @@ namespace Take_Time_BangPhra.Voucher
                                         string subject = "[" + docCreateThaiDate + "][INV][" + dtReceipt.Rows[0]["ID"].ToString() + "]";
                                         string body = "เรียน ลูกค้าผู้มีอุปการะคุณ <br /><br /> หจก.แอม แฮปปี้เนส (Take Time) ได้แนบใบกำกับภาษี/ใบเสร็จรับเงินมาพร้อมกับอีเมล์ฉบับนี้ ท่านสามารถเปิดดูได้โดยคลิกไฟล์แนบ (PDF File)<br />ขอแสดงความนับถือ<br /> หจก.แอม แฮปปี้เนส (Take Time) ";
 
-                                        NumberHelper.SendEmail(ConfigurationManager.AppSettings["SMTP"].ToString(), Convert.ToInt32(ConfigurationManager.AppSettings["SMTP_Port"].ToString()), Convert.ToBoolean(ConfigurationManager.AppSettings["SMTP_EnableSsl"].ToString()), Convert.ToBoolean(ConfigurationManager.AppSettings["SMTP_UseDefaultCredentials"].ToString()), ConfigurationManager.AppSettings["Email_From"].ToString(), ConfigurationManager.AppSettings["Email_Password_From"].ToString(), TextBox17.Text, ConfigurationManager.AppSettings["Email_CC"].ToString(), subject, body, dataall);
+                                        NumberHelper.SendEmail(AppCfg.Get("SMTP").ToString(), Convert.ToInt32(AppCfg.Get("SMTP_Port").ToString()), Convert.ToBoolean(AppCfg.Get("SMTP_EnableSsl").ToString()), Convert.ToBoolean(AppCfg.Get("SMTP_UseDefaultCredentials").ToString()), AppCfg.Get("Email_From").ToString(), AppCfg.Get("Email_Password_From").ToString(), TextBox17.Text, AppCfg.Get("Email_CC").ToString(), subject, body, dataall);
 
 
                                     }
@@ -1411,8 +1412,8 @@ namespace Take_Time_BangPhra.Voucher
         protected void Button4_Click1(object sender, EventArgs e)
         {
             string uid = Request.QueryString["uid"];
-            string path = ConfigurationManager.AppSettings["ReceiptFolderPath"].ToString();
-            string Imagespath = ConfigurationManager.AppSettings["ImagesFolderPath"].ToString();
+            string path = AppCfg.Get("ReceiptFolderPath").ToString();
+            string Imagespath = AppCfg.Get("ImagesFolderPath").ToString();
 
             // SECURE: Receipt lookup with parameterized query
             var receiptByUidParams = new Dictionary<string, object>

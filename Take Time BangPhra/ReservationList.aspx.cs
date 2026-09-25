@@ -27,10 +27,12 @@ namespace Take_Time_BangPhra
                     return;
                 }
 
-                // Don't set default date filter initially - let data show to match stats
-                // User can filter by date if needed
+                // เปิดหน้าครั้งแรก: กรองตาม "วันเข้าพัก" ย้อนหลัง 7 วัน → ล่วงหน้า 30 วัน (งานหน้างานใช้ช่วงนี้)
+                // และยอดรวมด้านบนคำนวณจากช่วงนี้ — วันที่จองเว้นว่างไว้ (กรองเพิ่มได้)
                 txtDateFrom.Text = "";
                 txtDateTo.Text = "";
+                txtStayFrom.Text = DateTime.Today.AddDays(-7).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+                txtStayTo.Text = DateTime.Today.AddDays(30).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
 
                 // Initialize
                 ViewState["CurrentPage"] = 1;
@@ -126,17 +128,20 @@ namespace Take_Time_BangPhra
                 int currentPage = ViewState["CurrentPage"] != null ? (int)ViewState["CurrentPage"] : 1;
                 string filterStatus = ViewState["FilterStatus"]?.ToString() ?? "";
 
-                DataTable dt = GetReservationsData(currentPage, out int totalRecords, out decimal totalAmount, out decimal totalDeposit);
+                DataTable dt = GetReservationsData(currentPage, out int totalRecords, out decimal totalAmount, out decimal totalDeposit, out decimal totalDue);
 
                 // Bind data
                 gvReservations.DataSource = dt;
                 gvReservations.DataBind();
 
-                // Update summary
+                // Update summary — ยอดรวมแสดงเฉพาะเมื่อมีช่วงวันที่ (ไม่งั้นแสดงคำแนะนำแทน)
+                bool showTotals = HasDateRange();
                 lblResultCount.Text = totalRecords.ToString("N0");
                 lblTotalAmount.Text = totalAmount.ToString("N0");
                 lblTotalDeposit.Text = totalDeposit.ToString("N0");
-                lblTotalRemain.Text = (totalAmount - totalDeposit).ToString("N0");
+                lblTotalRemain.Text = totalDue.ToString("N0");
+                phTotals.Visible = showTotals;
+                phTotalsHint.Visible = !showTotals;
 
                 // Update pagination
                 int totalPages = (int)Math.Ceiling((double)totalRecords / PageSize);
@@ -152,11 +157,12 @@ namespace Take_Time_BangPhra
             }
         }
 
-        private DataTable GetReservationsData(int page, out int totalRecords, out decimal totalAmount, out decimal totalDeposit)
+        private DataTable GetReservationsData(int page, out int totalRecords, out decimal totalAmount, out decimal totalDeposit, out decimal totalDue)
         {
             totalRecords = 0;
             totalAmount = 0;
             totalDeposit = 0;
+            totalDue = 0;
 
             DataTable dt = new DataTable();
 
@@ -219,6 +225,9 @@ namespace Take_Time_BangPhra
                     parameters.Add(new SqlParameter("@DateTo", SqlDbType.DateTime) { Value = dateTo.AddDays(1).AddSeconds(-1) });
                 }
 
+                // ช่วงวันเข้าพัก (วันพักทับช่วงที่เลือก)
+                AppendStayFilter(whereClause, parameters);
+
                 // Get ORDER BY clause
                 string orderBy = GetOrderByClause();
 
@@ -240,6 +249,32 @@ namespace Take_Time_BangPhra
                             totalAmount = reader[1] != DBNull.Value ? Convert.ToDecimal(reader[1]) : 0;
                             totalDeposit = reader[2] != DBNull.Value ? Convert.ToDecimal(reader[2]) : 0;
                         }
+                    }
+                }
+                totalDue = totalAmount - totalDeposit;   // ค่าเดิม (ใช้เมื่อคำนวณด้วยสูตรกลางไม่สำเร็จ)
+
+                // ยอดสรุปด้วยสูตรกลาง ReservationBalance (รวมค่าใช้จ่ายในห้อง, Payment_History, Channel Collect)
+                // ยอดรวม = Σ Total, รับแล้ว = Σ Received, ค้างชำระ = Σ Due (ไม่เอายอดจ่ายเกินของใบอื่นมาหักกลบ)
+                // คำนวณเฉพาะเมื่อมีช่วงวันที่ — ไม่มีช่วง = ทุกใบในประวัติ (ช้า และตัวเลขไม่มีความหมาย) หน้าจอแสดงคำแนะนำแทน
+                if (HasDateRange())
+                {
+                    try
+                    {
+                        Dictionary<int, ReservationBalance> sumBalances = LoadBalancesForFilter(whereClause.ToString(), parameters);
+                        decimal sAmount = 0, sReceived = 0, sDue = 0;
+                        foreach (ReservationBalance b in sumBalances.Values)
+                        {
+                            sAmount += b.Total;
+                            sReceived += b.Received;
+                            sDue += b.Due;
+                        }
+                        totalAmount = sAmount;
+                        totalDeposit = sReceived;
+                        totalDue = sDue;
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine("ReservationList balance summary Error: " + ex.Message);
                     }
                 }
 
@@ -276,6 +311,7 @@ namespace Take_Time_BangPhra
                 {
                     dataParams.Add(new SqlParameter("@DateTo", SqlDbType.DateTime) { Value = dateTo.AddDays(1).AddSeconds(-1) });
                 }
+                AppendStayFilter(null, dataParams);   // พารามิเตอร์ชุดเดียวกับ whereClause ด้านบน
                 dataParams.Add(new SqlParameter("@Offset", offset));
                 dataParams.Add(new SqlParameter("@PageSize", PageSize));
 
@@ -290,7 +326,115 @@ namespace Take_Time_BangPhra
                 }
             }
 
+            ApplyBalances(dt, null, null);
             return dt;
+        }
+
+        /// <summary>
+        /// โหลดยอดเงิน (สูตรกลาง) ของทุกการจองที่ตรงกับตัวกรองของหน้านี้ — whereClause เป็นข้อความที่หน้านี้
+        /// ประกอบเอง (ค่าจากผู้ใช้อยู่ใน parameters เท่านั้น) ใช้ alias R / C แบบเดียวกับ query หลัก
+        /// </summary>
+        private Dictionary<int, ReservationBalance> LoadBalancesForFilter(string whereClause, List<SqlParameter> parameters)
+        {
+            var p = new Dictionary<string, object>();
+            if (parameters != null)
+            {
+                foreach (SqlParameter sp in parameters)
+                    p[sp.ParameterName] = sp.Value;
+            }
+            string predicate = "r.ID IN (SELECT R.ID FROM Reservation R " +
+                               "LEFT JOIN Customer C ON C.MobilePhone = R.Customer_MobilePhone " +
+                               whereClause + ")";
+            return ReservationBalance.LoadMany(connectionString, predicate, p);
+        }
+
+        /// <summary>
+        /// ใส่ยอดจากสูตรกลางลงในแถว: TotalPrice = ยอดรวม (ค่าห้อง+ค่าใช้จ่ายในห้อง), Deposit = ยอดรับแล้ว,
+        /// BalDue = คงเหลือ — ถ้าไม่ส่ง whereClause จะโหลดตาม ID ของแถวที่มีใน dt (หน้าละไม่เกิน PageSize)
+        /// คำนวณไม่สำเร็จ → BalDue = TotalPrice − Deposit แบบเดิม
+        /// </summary>
+        private void ApplyBalances(DataTable dt, string whereClause, List<SqlParameter> parameters)
+        {
+            if (dt == null) return;
+            if (!dt.Columns.Contains("BalDue")) dt.Columns.Add("BalDue", typeof(decimal));
+
+            Dictionary<int, ReservationBalance> balances = null;
+            try
+            {
+                if (whereClause != null)
+                {
+                    balances = LoadBalancesForFilter(whereClause, parameters);
+                }
+                else if (dt.Rows.Count > 0)
+                {
+                    var ids = new List<string>();
+                    foreach (DataRow row in dt.Rows)
+                    {
+                        if (row["ID"] != DBNull.Value)
+                            ids.Add(Convert.ToInt32(row["ID"]).ToString(System.Globalization.CultureInfo.InvariantCulture));
+                    }
+                    if (ids.Count > 0)
+                        balances = ReservationBalance.LoadMany(connectionString, "r.ID IN (" + string.Join(",", ids) + ")", null);
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("ReservationList ApplyBalances Error: " + ex.Message);
+                balances = null;
+            }
+
+            foreach (DataRow row in dt.Rows)
+            {
+                ReservationBalance b = null;
+                if (balances != null && row["ID"] != DBNull.Value)
+                    balances.TryGetValue(Convert.ToInt32(row["ID"]), out b);
+
+                if (b != null)
+                {
+                    row["TotalPrice"] = b.Total;
+                    row["Deposit"] = b.Received;
+                    row["BalDue"] = b.Due;
+                }
+                else
+                {
+                    decimal total = row["TotalPrice"] != DBNull.Value ? Convert.ToDecimal(row["TotalPrice"]) : 0m;
+                    decimal deposit = row["Deposit"] != DBNull.Value ? Convert.ToDecimal(row["Deposit"]) : 0m;
+                    row["BalDue"] = total - deposit;
+                }
+            }
+        }
+
+        private static bool TryParseFilterDate(string text, out DateTime value)
+        {
+            return DateTime.TryParseExact((text ?? "").Trim(), "yyyy-MM-dd",
+                System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out value);
+        }
+
+        /// <summary>มีช่วงวันที่ (วันเข้าพัก หรือ วันที่จอง ด้านใดด้านหนึ่ง) — ใช้ตัดสินว่าจะคำนวณยอดรวมหรือไม่</summary>
+        private bool HasDateRange()
+        {
+            DateTime d;
+            return TryParseFilterDate(txtStayFrom.Text, out d) || TryParseFilterDate(txtStayTo.Text, out d)
+                || TryParseFilterDate(txtDateFrom.Text, out d) || TryParseFilterDate(txtDateTo.Text, out d);
+        }
+
+        /// <summary>
+        /// ตัวกรองช่วงวันเข้าพัก: การจองที่ "วันพักทับช่วงที่เลือก" (เช็คอินไม่หลังวันสุดท้าย และเช็คเอาท์ไม่ก่อนวันแรก
+        /// — รวมใบที่ออกในวันแรกของช่วง) where = null → เติมเฉพาะพารามิเตอร์ (สำหรับ query ที่ต้องสร้างพารามิเตอร์ชุดใหม่)
+        /// </summary>
+        private void AppendStayFilter(StringBuilder where, List<SqlParameter> ps)
+        {
+            DateTime from, to;
+            if (TryParseFilterDate(txtStayFrom.Text, out from))
+            {
+                if (where != null) where.Append(" AND R.CheckoutDate >= @StayFrom");
+                ps.Add(new SqlParameter("@StayFrom", SqlDbType.DateTime) { Value = from.Date });
+            }
+            if (TryParseFilterDate(txtStayTo.Text, out to))
+            {
+                if (where != null) where.Append(" AND R.CheckinDate < @StayToExcl");
+                ps.Add(new SqlParameter("@StayToExcl", SqlDbType.DateTime) { Value = to.Date.AddDays(1) });
+            }
         }
 
         private string GetOrderByClause()
@@ -375,6 +519,8 @@ namespace Take_Time_BangPhra
             ddlStatus.SelectedIndex = 0;
             txtDateFrom.Text = "";
             txtDateTo.Text = "";
+            txtStayFrom.Text = "";
+            txtStayTo.Text = "";
             ddlSortBy.SelectedIndex = 0;
 
             ViewState["CurrentPage"] = 1;
@@ -397,13 +543,18 @@ namespace Take_Time_BangPhra
                 case "all":
                     ViewState["FilterStatus"] = "";
                     ddlStatus.SelectedIndex = 0;
+                    // "ทั้งหมด" = ไม่จำกัดวันเข้าพัก (ช่วงเริ่มต้น 7 วันก่อน–30 วันหน้า ถูกตั้งตอนเปิดหน้า)
+                    txtStayFrom.Text = "";
+                    txtStayTo.Text = "";
                     break;
                 case "today":
                     ViewState["FilterStatus"] = "today";
                     ddlStatus.SelectedIndex = 0;
-                    // Clear date range for today
+                    // "จองวันนี้" = การจองที่สร้างวันนี้ ไม่ว่าจะเข้าพักวันไหน → ล้างช่วงวันที่ทั้งสองแบบ
                     txtDateFrom.Text = "";
                     txtDateTo.Text = "";
+                    txtStayFrom.Text = "";
+                    txtStayTo.Text = "";
                     break;
                 case "deposit":
                     ViewState["FilterStatus"] = "มัดจำแล้ว";
@@ -470,9 +621,10 @@ namespace Take_Time_BangPhra
 
                 foreach (DataRow row in dt.Rows)
                 {
-                    decimal total = Convert.ToDecimal(row["TotalPrice"]);
-                    decimal deposit = Convert.ToDecimal(row["Deposit"]);
-                    decimal remain = total - deposit;
+                    // ยอดจากสูตรกลาง (ใส่ไว้ใน GetAllReservationsForExport → ApplyBalances)
+                    decimal total = row["TotalPrice"] != DBNull.Value ? Convert.ToDecimal(row["TotalPrice"]) : 0m;
+                    decimal deposit = row["Deposit"] != DBNull.Value ? Convert.ToDecimal(row["Deposit"]) : 0m;
+                    decimal remain = row["BalDue"] != DBNull.Value ? Convert.ToDecimal(row["BalDue"]) : total - deposit;
 
                     sb.AppendLine(string.Format("{0},{1},{2},{3},{4},{5},{6},{7},{8},{9},{10},{11},{12}",
                         row["ID"],
@@ -556,6 +708,8 @@ namespace Take_Time_BangPhra
                     parameters.Add(new SqlParameter("@DateTo", SqlDbType.DateTime) { Value = dateTo.AddDays(1).AddSeconds(-1) });
                 }
 
+                AppendStayFilter(whereClause, parameters);
+
                 string query = $@"
                     SELECT R.ID, R.Created_Date, R.Customer_MobilePhone,
                            ISNULL(C.Name, R.Customer_MobilePhone) as Name,
@@ -574,6 +728,9 @@ namespace Take_Time_BangPhra
                         adapter.Fill(dt);
                     }
                 }
+
+                // ยอดเงินสูตรกลาง — query เดียวด้วยตัวกรองเดียวกับการส่งออก
+                ApplyBalances(dt, whereClause.ToString(), parameters);
             }
 
             return dt;

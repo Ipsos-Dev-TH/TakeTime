@@ -27,14 +27,35 @@ namespace Take_Time_BangPhra
                     // Check if user is Owner to show owner-only menus
                     // Owner sees ALL menus including Hotel Management and System/HR
                     // Owner can see ALL employees without supervisor assignment
-                    bool isOwner = Session["User"]?.ToString() == "Owner";
-                    pnlHotelMgmt.Visible = isOwner;
-                    pnlOwnerOnly.Visible = isOwner;
+                    // สิทธิ์ตามบทบาท:
+                    //   Staff  = งานประจำวัน / บริการลูกค้า / ขายหน้าร้าน (3 คอลัมน์แรก)
+                    //   Admin  = + การเงิน&บัญชี + ลูกค้า&การตลาด
+                    //   Owner  = + รายงาน + บุคคล + ตั้งค่า
+                    // เดิม Staff เห็นเมนูบัญชี/ใบสำคัญจ่าย/ข้อมูลลูกค้าทั้งหมดเท่ากับ Admin
+                    // สิทธิ์มาจาก "กลุ่มสิทธิ์" ของผู้ใช้ (Perm) — ถ้ายังไม่ถูกกำหนดกลุ่ม
+                    // Perm จะย้อนไปใช้ค่าเริ่มต้นตาม Role เดิมให้เอง (Owner/Admin/Staff)
+                    string role = Session["User"]?.ToString() ?? "";
+                    bool isOwner = role == "Owner";
+
+                    // การเงิน / ลูกค้า — เห็นเมื่อมีสิทธิ์ดูอย่างน้อยหนึ่งส่วนในคอลัมน์นั้น
+                    pnlFinanceNav.Visible = Perm.CanView(Perm.FinReceipt) || Perm.CanView(Perm.FinVoucher)
+                                            || Perm.CanView(Perm.FinReport);
+                    pnlCrmNav.Visible = Perm.CanView(Perm.CrmCustomer) || Perm.CanView(Perm.CrmLoyalty)
+                                        || Perm.CanView(Perm.CrmReview) || Perm.CanView(Perm.CrmAffiliate);
+                    pnlHotelMgmt.Visible = Perm.CanView(Perm.MgtDashboard) || Perm.CanView(Perm.MgtReport)
+                                           || Perm.CanView(Perm.MgtChannel);
+                    pnlOwnerOnly.Visible = Perm.CanView(Perm.HrEmployee) || Perm.CanView(Perm.HrLeave)
+                                           || Perm.CanView(Perm.HrPayroll) || Perm.CanView(Perm.HrAsset);
+                    pnlSettingsNav.Visible = Perm.CanView(Perm.SysSettings);
+                    phNavSettingsOwner.Visible = isOwner;
                 }
                 else
                 {
                     // Hide admin controls
                     pnlAdminNav.Visible = false;
+                    pnlFinanceNav.Visible = false;
+                    pnlSettingsNav.Visible = false;
+                    pnlCrmNav.Visible = false;
                     pnlHotelMgmt.Visible = false;
                     pnlOwnerOnly.Visible = false;
                     pnlEmployeeNav.Visible = false;
@@ -47,6 +68,9 @@ namespace Take_Time_BangPhra
             {
                 // Hide admin controls on error
                 pnlAdminNav.Visible = false;
+                pnlFinanceNav.Visible = false;
+                pnlSettingsNav.Visible = false;
+                pnlCrmNav.Visible = false;
                 pnlHotelMgmt.Visible = false;
                 pnlOwnerOnly.Visible = false;
                 pnlEmployeeNav.Visible = false;
@@ -54,6 +78,90 @@ namespace Take_Time_BangPhra
                 btnLogout.Visible = false;
                 hlLogin.Visible = true;
             }
+
+            // ต้องเรียกหลังบล็อกสิทธิ์ด้านบน — ไม่งั้นค่า Visible ของแชท/เมนูถูกบล็อกบนเขียนทับ
+            ApplyFeatureToggles();
+            ApplyPublicChatWidget();
+        }
+
+        /// <summary>
+        /// แชทลูกค้าลอย — โชว์เฉพาะผู้เยี่ยมชม (ไม่ล็อกอิน) และเมื่อช่องทาง WEBCHAT เปิด + ฟีเจอร์ Chat เปิด
+        /// พนักงานที่ล็อกอินไม่เห็น (ใช้กล่องแชทรวมแทน)
+        /// </summary>
+        private void ApplyPublicChatWidget()
+        {
+            try
+            {
+                // แสดงกับทุกคนรวมพนักงานที่ล็อกอินอยู่ — เดิมซ่อนเมื่อล็อกอิน ทำให้เจ้าของ/พนักงาน
+                // เปิดหน้าแรกแล้วไม่เห็นปุ่มแชท (ต้องออกจากระบบก่อนถึงจะเห็น) ซึ่งสับสนและทดสอบยาก
+                if (Feature.Off("Chat")) { phPublicChat.Visible = false; return; }
+
+                string conn = System.Configuration.ConfigurationManager
+                    .ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                var dt = new code().DatabaseQuerySafe(conn,
+                    "SELECT TOP 1 IsEnabled FROM OmniChannel_Channels WHERE ChannelCode = 'WEBCHAT'", null);
+
+                bool rowExists = dt != null && dt.Rows.Count > 0;
+                phPublicChat.Visible = rowExists && Convert.ToBoolean(dt.Rows[0][0]);
+
+                // ช่วยไล่ปัญหา "ทำไมไม่เห็นปุ่มแชท" — บอกเหตุผลใน log ให้ผู้ดูแล (วันละครั้งพอ)
+                if (!phPublicChat.Visible) LogWidgetHidden(conn, rowExists
+                    ? "ช่องทาง WEBCHAT ถูกปิดอยู่ — เปิดที่ Admin → Chat → ตั้งค่าช่องทาง → แชทหน้าเว็บ"
+                    : "ยังไม่มีช่องทาง WEBCHAT ในระบบ — รัน migration PHASE18_Migration_22_WebChat_TikTok.sql");
+            }
+            catch (Exception ex)
+            {
+                phPublicChat.Visible = false;
+                try
+                {
+                    string conn = System.Configuration.ConfigurationManager
+                        .ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                    LogWidgetHidden(conn, "อ่านค่าช่องทางแชทไม่สำเร็จ: " + ex.Message);
+                }
+                catch { }
+            }
+        }
+
+        private static DateTime _lastChatWidgetLog = DateTime.MinValue;
+        private static void LogWidgetHidden(string conn, string reason)
+        {
+            if ((DateTime.Now - _lastChatWidgetLog).TotalHours < 24) return;
+            _lastChatWidgetLog = DateTime.Now;
+            try { new code().Logs(conn, "PublicChatWidget", "ไม่แสดงปุ่มแชทหน้าเว็บ: " + reason, "SYSTEM"); }
+            catch { }
+        }
+
+        /// <summary>
+        /// ซ่อนเมนูของโมดูลที่ถูกปิดใน ศูนย์รวมการตั้งค่าระบบ → หมวด "ฟีเจอร์"
+        /// (Feature flags — ปิด = เมนูหาย, หน้าโมดูลมี Feature.Guard กันเข้าตรงอีกชั้น)
+        /// </summary>
+        private void ApplyFeatureToggles()
+        {
+            try
+            {
+                phNavActivitiesPub.Visible = Feature.On("Activities");
+                phNavActivityMgmt.Visible = Feature.On("Activities") && Perm.CanView(Perm.OpsActivity);
+                phNavAffiliatePub.Visible = Feature.On("Affiliate");
+                phNavAffiliateAdmin.Visible = Feature.On("Affiliate") && Perm.CanView(Perm.CrmAffiliate);
+                phNavGuestPortal.Visible = Feature.On("GuestPortal");
+                phNavMemberPub.Visible = Feature.On("Loyalty");
+                // เมนูจะขึ้นก็ต่อเมื่อ "ฟีเจอร์เปิด" และ "กลุ่มสิทธิ์ให้เห็น" พร้อมกัน
+                phNavHousekeeping.Visible = Feature.On("Housekeeping") && Perm.CanView(Perm.OpsHousekeeping);
+                phNavMaintenance.Visible = Feature.On("Maintenance") && Perm.CanView(Perm.OpsMaintenance);
+                phNavChat.Visible = Feature.On("Chat") && Perm.CanView(Perm.OpsChat);
+                phNavRoomService.Visible = Feature.On("RoomService") && Perm.CanView(Perm.OpsRoomService);
+                phNavLoyalty.Visible = Feature.On("Loyalty") && Perm.CanView(Perm.CrmLoyalty);
+                phNavReviews.Visible = Feature.On("Reviews") && Perm.CanView(Perm.CrmReview);
+                phNavAIReport.Visible = Feature.On("AI") && Perm.CanView(Perm.MgtReport);
+                phNavChannelMgr.Visible = Feature.On("ChannelManager") && Perm.CanView(Perm.MgtChannel);
+                phNavHR.Visible = Feature.On("HR") && Perm.CanView(Perm.HrEmployee);
+                phNavAssets.Visible = Feature.On("Assets") && Perm.CanView(Perm.HrAsset);
+                phNavWebAnalytics.Visible = Feature.On("WebAnalytics") && Perm.CanView(Perm.MgtReport);
+
+                // แชทปิดทั้งโมดูล → กระดิ่งแจ้งเตือนแชทก็ไม่ต้องโชว์
+                if (Feature.Off("Chat")) pnlChatNotification.Visible = false;
+            }
+            catch { /* ตาราง System_Config ยังไม่มี → โชว์ทุกเมนูตาม default เดิม */ }
         }
 
         protected void btnLogout_Click(object sender, EventArgs e)

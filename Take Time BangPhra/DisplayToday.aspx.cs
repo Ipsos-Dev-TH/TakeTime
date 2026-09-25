@@ -41,12 +41,18 @@ namespace Take_Time_BangPhra
                 "WHERE @CurrentDate >= CheckinDate AND @CurrentDate < CheckoutDate ORDER BY Items_ID ASC",
                 dateParams);
 
+            // ยอดเงินของทุกการจองที่แสดง — query เดียว (เดิม query ต่อแถว 2 ครั้ง)
+            Dictionary<int, ReservationBalance> balances = ReservationBalance.LoadMany(conn,
+                "@CurrentDate >= r.CheckinDate AND @CurrentDate < r.CheckoutDate", dateParams);
+
             try
             {
                 dtReservation.Columns.Add("AccomName");
                 dtReservation.Columns.Add("Items");
                 dtReservation.Columns.Add("Remain");
                 dtReservation.Columns.Add("Order");
+                dtReservation.Columns.Add("Received");
+                dtReservation.Columns.Add("GrandTotal");
             }
             catch
             {
@@ -55,7 +61,16 @@ namespace Take_Time_BangPhra
 
             for (int i = 0; i < dtReservation.Rows.Count; i++)
             {
-                dtReservation.Rows[i]["Name"] = dtReservation.Rows[i]["Name"].ToString() + " - " + dtReservation.Rows[i]["NickName"].ToString() + " - " + dtReservation.Rows[i]["Customer_MobilePhone"].ToString();
+                // ชื่อ - ชื่อเล่น - เบอร์  (เว้นท่อนที่ว่าง ไม่ให้เหลือ " - - " ลอย ๆ)
+                // ⚠ ใบจาก OTA อาจไม่มีเบอร์จริง (ผูกด้วยรหัสอ้างอิง OTA_xxx) — อย่าโชว์เป็นเบอร์โทร
+                string dispPhone = dtReservation.Rows[i]["Customer_MobilePhone"].ToString();
+                if (Take_Time_BangPhra.Services.GuestPhone.IsReference(dispPhone))
+                    dispPhone = "ไม่มีเบอร์ (จองผ่าน OTA)";
+                var nameParts = new System.Collections.Generic.List<string>();
+                foreach (string part in new[] { dtReservation.Rows[i]["Name"].ToString(),
+                                                dtReservation.Rows[i]["NickName"].ToString(), dispPhone })
+                    if (!string.IsNullOrWhiteSpace(part)) nameParts.Add(part.Trim());
+                dtReservation.Rows[i]["Name"] = string.Join(" - ", nameParts);
                 string AccomName = "";
                 int order = 99;
                 int orderID = 99;
@@ -92,51 +107,20 @@ namespace Take_Time_BangPhra
                 }
                 dtReservation.Rows[i]["Items"] = Items;
 
-                // Calculate remaining balance using direct query
+                // ยอดเงิน — สูตรกลาง ReservationBalance (รับแล้ว/คงเหลือมาจากก้อนเดียวกัน ไม่ขัดกันเอง)
+                // เดิม "ยอดเงินรับมา" = Deposit ดิบ แต่ "ส่วนที่เหลือ" คิดจาก Payment_History ⇒ สองช่องไม่ตรงกัน
                 int reservationId = Convert.ToInt32(dtReservation.Rows[i]["ID"]);
-
-                // Get base total price
-                decimal baseTotalPrice = Convert.ToDecimal(dtReservation.Rows[i]["TotalPrice"]);
-
-                // SECURE: Get product charges (excluding cancelled) with parameterized query
-                decimal productCharges = 0;
-                var chargesParams = new Dictionary<string, object>
+                ReservationBalance bal;
+                if (!balances.TryGetValue(reservationId, out bal))
                 {
-                    { "@ReservationID", reservationId }
-                };
-                DataTable dtProductCharges = code.DatabaseQuerySafe(conn,
-                    @"SELECT ISNULL(SUM(TotalAmount), 0) as TotalCharges
-                      FROM Reservation_Product_Charges
-                      WHERE Reservation_ID = @ReservationID
-                      AND Status <> 'CANCELLED'",
-                    chargesParams);
-                if (dtProductCharges.Rows.Count > 0 && dtProductCharges.Rows[0]["TotalCharges"] != DBNull.Value)
-                {
-                    productCharges = Convert.ToDecimal(dtProductCharges.Rows[0]["TotalCharges"]);
+                    decimal baseTotal = dtReservation.Rows[i]["TotalPrice"] != DBNull.Value ? Convert.ToDecimal(dtReservation.Rows[i]["TotalPrice"]) : 0m;
+                    decimal dep = dtReservation.Rows[i]["Deposit"] != DBNull.Value ? Convert.ToDecimal(dtReservation.Rows[i]["Deposit"]) : 0m;
+                    bal = ReservationBalance.Compute(reservationId, ReservationBalance.ModeNone, baseTotal, 0m, 0m, 0m, 0, dep);
                 }
 
-                // SECURE: Get total paid with parameterized query
-                decimal totalPaid = 0;
-                var paidParams = new Dictionary<string, object>
-                {
-                    { "@ReservationID", reservationId }
-                };
-                DataTable dtPaid = code.DatabaseQuerySafe(conn,
-                    @"SELECT ISNULL(SUM(PaymentAmount), 0) as TotalPaid
-                      FROM Payment_History
-                      WHERE Reservation_ID = @ReservationID
-                      AND Status = 'COMPLETED'",
-                    paidParams);
-                if (dtPaid.Rows.Count > 0 && dtPaid.Rows[0]["TotalPaid"] != DBNull.Value)
-                {
-                    totalPaid = Convert.ToDecimal(dtPaid.Rows[0]["TotalPaid"]);
-                }
-
-                // Calculate remaining balance
-                decimal totalPrice = baseTotalPrice + productCharges;
-                decimal remainingBalance = totalPrice - totalPaid;
-
-                dtReservation.Rows[i]["Remain"] = remainingBalance.ToString("N0");
+                dtReservation.Rows[i]["GrandTotal"] = bal.Total.ToString("N0");
+                dtReservation.Rows[i]["Received"] = bal.Received.ToString("N0") + (bal.IsChannelCollect ? " (OTA เก็บแล้ว)" : "");
+                dtReservation.Rows[i]["Remain"] = bal.Due.ToString("N0");
             }
 
             DataTable dtAccommodation = code.DatabaseQuery(conn, "Select * From Accommodation Where Status = 1 order by OrderID asc");

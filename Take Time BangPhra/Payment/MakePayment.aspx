@@ -292,6 +292,56 @@
             </div>
         </div>
 
+        <!-- ให้ลูกค้าจ่ายเอง (แสดงเฉพาะเมื่อเปิดฟีเจอร์รับชำระเงินออนไลน์) -->
+        <asp:Panel ID="pnlOnlineLink" runat="server" CssClass="payment-card" Visible="false">
+            <div class="card-header">
+                <h3>ให้ลูกค้าชำระเงินเอง</h3>
+            </div>
+            <div style="padding:15px;">
+                <p style="color:#7f8c8d;margin:0 0 10px;">
+                    ส่งลิงก์นี้ให้ลูกค้าทาง LINE / SMS — ลูกค้าเลือกได้ว่าจะสแกน QR แนบสลิป หรือจ่ายด้วยบัตรเครดิต
+                    เมื่อจ่ายสำเร็จระบบจะบันทึกเข้าการจองนี้ให้อัตโนมัติ
+                </p>
+                <asp:TextBox ID="txtPayLink" runat="server" ReadOnly="true"
+                    style="width:100%;padding:9px 11px;border:1px solid #dbe3de;border-radius:8px;font-family:monospace;font-size:12.5px;" />
+                <div style="margin-top:10px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                    <%-- เดิมมีแต่ช่องอ่านอย่างเดียว ต้องลากเมาส์เลือกเองทั้งเส้น --%>
+                    <button type="button" onclick="mpCopyLink(this)"
+                        style="padding:9px 16px;border:0;border-radius:8px;background:#27ae60;color:#fff;font-weight:600;cursor:pointer;">
+                        📋 คัดลอกลิงก์
+                    </button>
+                    <asp:HyperLink ID="lnkOpenPay" runat="server" Target="_blank" CssClass="btn-secondary">
+                        เปิดหน้าชำระเงิน ↗
+                    </asp:HyperLink>
+                    <span style="font-size:12.5px;color:#7f8c8d;">
+                        ลิงก์นี้<b>ไม่หมดอายุ</b> — เปิดวันไหนระบบคิดยอดคงเหลือ ณ ตอนนั้นให้เอง
+                    </span>
+                </div>
+                <div id="mpQr" style="margin-top:12px;"></div>
+            </div>
+        </asp:Panel>
+
+        <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+        <script>
+            function mpCopyLink(btn) {
+                var el = document.getElementById('<%= txtPayLink.ClientID %>');
+                if (!el) return;
+                el.select(); el.setSelectionRange(0, 99999);
+                try { document.execCommand('copy'); } catch (e) { }
+                if (navigator.clipboard) { try { navigator.clipboard.writeText(el.value); } catch (e) { } }
+                var old = btn.textContent; btn.textContent = '✓ คัดลอกแล้ว';
+                setTimeout(function () { btn.textContent = old; }, 1600);
+            }
+            (function () {
+                var el = document.getElementById('<%= txtPayLink.ClientID %>');
+                var box = document.getElementById('mpQr');
+                if (!el || !box || !el.value || typeof QRCode === 'undefined') return;
+                new QRCode(box, { text: el.value, width: 160, height: 160, correctLevel: QRCode.CorrectLevel.M });
+                box.insertAdjacentHTML('beforeend',
+                    '<div style="font-size:12.5px;color:#7f8c8d;margin-top:6px;">หรือให้ลูกค้าสแกน QR นี้</div>');
+            })();
+        </script>
+
         <!-- Payment History -->
         <div class="payment-card">
             <div class="card-header">

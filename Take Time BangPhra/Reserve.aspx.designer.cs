@@ -402,6 +402,60 @@ namespace Take_Time_BangPhra
         protected global::System.Web.UI.WebControls.TextBox TextBox4;
 
         /// <summary>
+        /// pnlCollectMode control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Panel pnlCollectMode;
+
+        /// <summary>
+        /// txtCollectReason control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.TextBox txtCollectReason;
+
+        /// <summary>
+        /// btnCollectChannel control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Button btnCollectChannel;
+
+        /// <summary>
+        /// btnCollectHotel control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Button btnCollectHotel;
+
+        /// <summary>
+        /// lblCollectModeNote control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Label lblCollectModeNote;
+
+        /// <summary>
+        /// litCollectModeMsg control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Literal litCollectModeMsg;
+
+        /// <summary>
         /// lblAfterDiscount control.
         /// </summary>
         /// <remarks>
@@ -409,6 +463,15 @@ namespace Take_Time_BangPhra
         /// To modify move field declaration from designer file to code-behind file.
         /// </remarks>
         protected global::System.Web.UI.WebControls.Label lblAfterDiscount;
+
+        /// <summary>
+        /// litOtaTotalInfo control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Literal litOtaTotalInfo;
 
         /// <summary>
         /// Label2 control.
@@ -447,6 +510,60 @@ namespace Take_Time_BangPhra
         protected global::System.Web.UI.WebControls.SqlDataSource SqlDataSource1;
 
         /// <summary>
+        /// litChannelInfo control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Literal litChannelInfo;
+
+        /// <summary>
+        /// pnlPolicySection control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Panel pnlPolicySection;
+
+        /// <summary>
+        /// litPolicySummary control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Literal litPolicySummary;
+
+        /// <summary>
+        /// litPolicyModal control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Literal litPolicyModal;
+
+        /// <summary>
+        /// pnlPolicyAccept control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Panel pnlPolicyAccept;
+
+        /// <summary>
+        /// chkAcceptPolicy control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.CheckBox chkAcceptPolicy;
+
+        /// <summary>
         /// Label7 control.
         /// </summary>
         /// <remarks>
@@ -454,6 +571,15 @@ namespace Take_Time_BangPhra
         /// To modify move field declaration from designer file to code-behind file.
         /// </remarks>
         protected global::System.Web.UI.WebControls.Label Label7;
+
+        /// <summary>
+        /// litCheckinDueBanner control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Literal litCheckinDueBanner;
 
         /// <summary>
         /// CheckBox2 control.
@@ -525,6 +651,109 @@ namespace Take_Time_BangPhra
         /// Auto-generated field.
         /// To modify move field declaration from designer file to code-behind file.
         /// </remarks>
+        /// <summary>
+        /// pnlPayNow control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlPayNow;
+
+        /// <summary>
+        /// chkPayNow control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.CheckBox chkPayNow;
+
+        /// <summary>
+        /// rowSlip control.
+        /// </summary>
+        protected global::System.Web.UI.HtmlControls.HtmlGenericControl rowSlip;
+
+        /// <summary>
+        /// divSlipHint control (ข้อความแนะนำการโอน — ซ่อนเมื่อแอดมินลงจอง).
+        /// </summary>
+        protected global::System.Web.UI.HtmlControls.HtmlGenericControl divSlipHint;
+
+        /// <summary>
+        /// divRules control (รูปกฎระเบียบ — ซ่อนเมื่อแอดมินลงจอง).
+        /// </summary>
+        protected global::System.Web.UI.HtmlControls.HtmlGenericControl divRules;
+
+        /// <summary>
+        /// pnlOnlinePay control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlOnlinePay;
+
+        /// <summary>
+        /// txtPayAmount control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtPayAmount;
+
+        /// <summary>
+        /// btnMakePayLink control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Button btnMakePayLink;
+
+        /// <summary>
+        /// pnlPayLink control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlPayLink;
+
+        /// <summary>
+        /// txtPayLinkUrl control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtPayLinkUrl;
+
+        /// <summary>
+        /// pnlDeposit control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlDeposit;
+
+        /// <summary>
+        /// ddlDepositMethod control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.DropDownList ddlDepositMethod;
+
+        /// <summary>
+        /// txtDepositAmount control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtDepositAmount;
+
+        /// <summary>
+        /// btnMakeDeposit control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Button btnMakeDeposit;
+
+        /// <summary>
+        /// pnlDepositTransfer control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlDepositTransfer;
+
+        /// <summary>
+        /// litDepositTransferInfo control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Literal litDepositTransferInfo;
+
+        /// <summary>
+        /// txtDepositRef control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtDepositRef;
+
+        /// <summary>
+        /// litDepositMsg control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Literal litDepositMsg;
+
+        /// <summary>
+        /// pnlDepositLink control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlDepositLink;
+
+        /// <summary>
+        /// txtDepositLink control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtDepositLink;
+
+        /// <summary>
+        /// TextBox6 control.
+        /// </summary>
         protected global::System.Web.UI.WebControls.TextBox TextBox6;
 
         /// <summary>

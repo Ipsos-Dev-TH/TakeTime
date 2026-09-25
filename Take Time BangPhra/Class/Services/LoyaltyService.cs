@@ -1,4 +1,4 @@
-// ===========================================================================
+﻿// ===========================================================================
 // LoyaltyService.cs
 // Loyalty Program Management Service
 // Handles points earning, redemption, tier management, and rewards
@@ -16,6 +16,23 @@ namespace Take_Time_BangPhra.Services
     /// </summary>
     public class LoyaltyService
     {
+        // ตรวจครั้งเดียวต่อ process ว่ามี view สรุปสมาชิกหรือยัง (PHASE13_02)
+        private static int _hasMemberView;   // 0 = ยังไม่ตรวจ, 1 = มี, -1 = ไม่มี
+        private bool HasMemberSummaryView()
+        {
+            if (_hasMemberView != 0) return _hasMemberView == 1;
+            bool exists = false;
+            try
+            {
+                var dt = new code().DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 1 FROM sys.views WHERE name = 'vw_Loyalty_Member_Summary'", null);
+                exists = dt != null && dt.Rows.Count > 0;
+            }
+            catch { }
+            _hasMemberView = exists ? 1 : -1;
+            return exists;
+        }
+
         private readonly string _connectionString;
         private readonly code _code;
 
@@ -542,7 +559,18 @@ namespace Take_Time_BangPhra.Services
             try
             {
                 var parameters = new Dictionary<string, object>();
-                string query = "SELECT * FROM vw_Loyalty_Member_Summary WHERE 1=1";
+                // view มาจาก PHASE13_02 — ฐานที่ยังไม่รัน migration จะพัง
+                // ("Invalid object name") → ใช้ query ตรงจากตารางแทน ได้คอลัมน์เทียบเท่า
+                string baseSource = HasMemberSummaryView()
+                    ? "vw_Loyalty_Member_Summary"
+                    : @"(SELECT cl.Customer_MobilePhone, c.Name AS CustomerName, c.Name,
+                                cl.CurrentTier_ID, t.TierName, t.TierColor,
+                                cl.TotalPoints, cl.AvailablePoints, cl.LifetimePoints,
+                                cl.TotalSpend, cl.TotalReservations, cl.MemberSince, cl.LastUpdated
+                           FROM Customer_Loyalty cl
+                           JOIN Loyalty_Tiers t ON t.ID = cl.CurrentTier_ID
+                           LEFT JOIN Customer c ON c.MobilePhone = cl.Customer_MobilePhone) AS v";
+                string query = "SELECT * FROM " + baseSource + " WHERE 1=1";
 
                 if (!string.IsNullOrEmpty(search))
                 {

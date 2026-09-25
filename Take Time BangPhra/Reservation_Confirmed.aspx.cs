@@ -24,6 +24,9 @@ namespace Take_Time_BangPhra
             {
                 string id = Request.QueryString["id"];
                 string check = Request.QueryString["check"];
+                // เบอร์ต่างประเทศ "+852…" ใน query string ที่ไม่ได้ encode → '+' กลายเป็นช่องว่าง
+                // (แบบเดียวกับ Reserve.aspx) คืนเป็น '+' ก่อนใช้ค้นหา ไม่งั้นหาการจองไม่เจอ
+                if (!string.IsNullOrEmpty(check)) check = check.Replace(" ", "+");
 
                 var accomParams = new Dictionary<string, object> { { "@ReservationID", id }, { "@CustomerPhone", check } };
                 DataTable dtReservationAccommodation = code2.DatabaseQuerySafe(conn,
@@ -135,61 +138,23 @@ namespace Take_Time_BangPhra
                 Label9.Text = string.IsNullOrEmpty(Items) ? "ไม่มีรายการ" : Items;
 
                 // Set payment information
-                // 🔧 Calculate total price including product charges
-
-                // 1. Get base total price from Reservation
-                decimal baseTotalPrice = 0;
-                var priceParams = new Dictionary<string, object> { { "@ReservationID", id } };
-                DataTable dtReservationPrice = code2.DatabaseQuerySafe(conn,
-                    "SELECT TotalPrice FROM Reservation WHERE ID = @ReservationID", priceParams);
-                if (dtReservationPrice.Rows.Count > 0 && dtReservationPrice.Rows[0]["TotalPrice"] != DBNull.Value)
+                // 🔧 ยอดเงิน — สูตรกลาง ReservationBalance (ตรงกับตารางรายวัน/หน้ารายการจอง/เช็คเอาท์)
+                // ค่าห้อง + ค่าใช้จ่ายในห้อง, ยอดรับแล้ว = Payment_History (ไม่มีแถว → Deposit),
+                // Channel Collect: ค่าห้องถือว่า OTA จ่ายแล้ว
+                int resIdNum;
+                int.TryParse(id, out resIdNum);
+                ReservationBalance bal = resIdNum > 0 ? ReservationBalance.Load(conn, resIdNum) : null;
+                if (bal == null)
                 {
-                    baseTotalPrice = Convert.ToDecimal(dtReservationPrice.Rows[0]["TotalPrice"]);
+                    DataRow r0 = dtReservationAccommodation.Rows[0];
+                    decimal baseTotal = r0["TotalPrice"] != DBNull.Value ? Convert.ToDecimal(r0["TotalPrice"]) : 0m;
+                    decimal dep = r0["Deposit"] != DBNull.Value ? Convert.ToDecimal(r0["Deposit"]) : 0m;
+                    bal = ReservationBalance.Compute(resIdNum, ReservationBalance.ModeNone, baseTotal, 0m, 0m, 0m, 0, dep);
                 }
 
-                // 2. Get product charges from Reservation_Product_Charges
-                decimal productCharges = 0;
-                var charges2Params = new Dictionary<string, object> { { "@ReservationID", id } };
-                DataTable dtProductCharges2 = code2.DatabaseQuerySafe(conn,
-                    @"SELECT ISNULL(SUM(TotalAmount), 0) as TotalCharges
-                       FROM Reservation_Product_Charges
-                       WHERE Reservation_ID = @ReservationID
-                       AND Status <> 'CANCELLED'", charges2Params);
-                if (dtProductCharges2.Rows.Count > 0 && dtProductCharges2.Rows[0]["TotalCharges"] != DBNull.Value)
-                {
-                    productCharges = Convert.ToDecimal(dtProductCharges2.Rows[0]["TotalCharges"]);
-                }
-
-                // 3. Calculate total price with charges
-                decimal totalPrice = baseTotalPrice + productCharges;
-
-                // 5. Get total paid from Payment_History
-                decimal totalPaid = 0;
-                var paidParams = new Dictionary<string, object> { { "@ReservationID", id } };
-                DataTable dtPaid = code2.DatabaseQuerySafe(conn,
-                    @"SELECT ISNULL(SUM(PaymentAmount), 0) as TotalPaid
-                       FROM Payment_History
-                       WHERE Reservation_ID = @ReservationID
-                       AND Status = 'COMPLETED'", paidParams);
-                if (dtPaid.Rows.Count > 0 && dtPaid.Rows[0]["TotalPaid"] != DBNull.Value)
-                {
-                    totalPaid = Convert.ToDecimal(dtPaid.Rows[0]["TotalPaid"]);
-                }
-
-                // 6. If no payment history, fallback to Deposit column
-                if (totalPaid == 0)
-                {
-                    var depositParams = new Dictionary<string, object> { { "@ReservationID", id } };
-                    DataTable dtDeposit = code2.DatabaseQuerySafe(conn,
-                        "SELECT ISNULL(Deposit, 0) as Deposit FROM Reservation WHERE ID = @ReservationID", depositParams);
-                    if (dtDeposit.Rows.Count > 0 && dtDeposit.Rows[0]["Deposit"] != DBNull.Value)
-                    {
-                        totalPaid = Convert.ToDecimal(dtDeposit.Rows[0]["Deposit"]);
-                    }
-                }
-
-                // 7. Calculate remaining balance
-                decimal remainingBalance = totalPrice - totalPaid;
+                decimal totalPrice = bal.Total;
+                decimal totalPaid = bal.Received;
+                decimal remainingBalance = bal.Due;
 
                 Label11.Text = totalPrice.ToString("n0");
                 Label12.Text = totalPaid.ToString("n0");
@@ -197,6 +162,9 @@ namespace Take_Time_BangPhra
                 Label14.Text = dtReservationAccommodation.Rows[0]["Remark"].ToString();
 
                 Label10.Text = "ยืนยันการจองสำเร็จ ✓";
+
+                // นโยบายการจอง + ฉบับที่ลูกค้ายอมรับ (ส่วนเสริม — ล้มก็ไม่กระทบหน้ายืนยัน)
+                LoadPolicies(dtReservationAccommodation.Rows[0]);
             }
             catch (Exception ex)
             {
@@ -307,9 +275,9 @@ namespace Take_Time_BangPhra
         {
             try
             {
-                // Query all receipts for this reservation
+                // Query all receipts for this reservation (IsDeposit → เลือกป้ายชื่อ ใบเสร็จ/ใบกำกับ)
                 string query = @"
-                    SELECT ID, UID, Created_Date, Total_Amount, Status
+                    SELECT ID, UID, Created_Date, Total_Amount, Status, ISNULL(IsDeposit, 0) AS IsDeposit
                     FROM Account_Receipt
                     WHERE Reservation_ID = @ReservationId
                       AND Status = 'Normal'
@@ -346,24 +314,91 @@ namespace Take_Time_BangPhra
             }
         }
 
-        // Helper method for generating receipt PDF URL
+        /// <summary>
+        /// แสดงนโยบายการจอง (ยกเลิก / คืนเงิน / เงื่อนไข / ความเป็นส่วนตัว) + วันเวลาและฉบับที่ลูกค้ายอมรับ
+        /// ข้อความแปลงผ่าน BookingPolicy.ToHtml (encode ก่อนเสมอ) — แทรก HTML/สคริปต์ไม่ได้
+        /// </summary>
+        private void LoadPolicies(DataRow res)
+        {
+            try
+            {
+                var sb = new System.Text.StringBuilder();
+                sb.Append("<div style=\"font-size:0.75em; line-height:1.6;\">");
+
+                // ใบจองที่ลูกค้ายอมรับเงื่อนไขไว้ (คอลัมน์จาก PHASE19 migration 22 — ไม่มีคอลัมน์ = ข้าม)
+                try
+                {
+                    if (res != null && res.Table.Columns.Contains("Policy_Accepted_At")
+                        && res["Policy_Accepted_At"] != DBNull.Value)
+                    {
+                        DateTime acceptedAt = Convert.ToDateTime(res["Policy_Accepted_At"]);
+                        string ver = res.Table.Columns.Contains("Policy_Accepted_Version")
+                                     && res["Policy_Accepted_Version"] != DBNull.Value
+                            ? res["Policy_Accepted_Version"].ToString() : "-";
+                        sb.Append("<div style=\"background:#e8f5e9; color:#2e7d32; border-radius:4px; padding:5px 8px; margin-bottom:6px;\">")
+                          .Append("✅ ผู้จองยอมรับเงื่อนไขและนโยบายแล้ว เมื่อ ")
+                          .Append(Server.HtmlEncode(acceptedAt.ToString("dd/MM/yyyy HH:mm")))
+                          .Append(" น. (ฉบับที่ ").Append(Server.HtmlEncode(ver)).Append(")</div>");
+                    }
+                }
+                catch { }
+
+                // นโยบายการยกเลิก = นโยบายหลัก เปิดไว้ให้เห็นเลย ที่เหลือพับไว้
+                foreach (string key in new[] { BookingPolicy.KeyCancellation, BookingPolicy.KeyRefund,
+                                               BookingPolicy.KeyTerms, BookingPolicy.KeyPrivacy })
+                {
+                    string text = BookingPolicy.Get(key);
+                    if (string.IsNullOrWhiteSpace(text)) continue;
+                    bool open = key == BookingPolicy.KeyCancellation;
+                    sb.Append("<details").Append(open ? " open" : "")
+                      .Append(" style=\"margin:4px 0; background:#fafafa; border:1px solid #eee; border-radius:4px; padding:5px 8px;\">")
+                      .Append("<summary style=\"cursor:pointer; font-weight:bold; color:#5d4037;\">")
+                      .Append(Server.HtmlEncode(BookingPolicy.Title(key)))
+                      .Append(" <span style=\"font-weight:normal; color:#999;\">(")
+                      .Append(Server.HtmlEncode(BookingPolicy.TitleEn(key)))
+                      .Append(")</span></summary><div style=\"margin-top:4px; color:#555;\">")
+                      .Append(BookingPolicy.ToHtml(text))
+                      .Append("</div></details>");
+                }
+
+                sb.Append("<div style=\"color:#999; margin-top:4px;\">นโยบายฉบับปัจจุบัน: ")
+                  .Append(BookingPolicy.Version).Append("</div></div>");
+
+                litPolicies.Text = sb.ToString();
+                pnlPolicies.Visible = true;
+            }
+            catch (Exception ex)
+            {
+                pnlPolicies.Visible = false;
+                try { code2.Logs(conn, "Reservation_Confirmed Policies Error", ex.Message, "SYSTEM"); } catch { }
+            }
+        }
+
+        // ลิงก์เอกสาร: ผ่าน handler ที่เสิร์ฟ "เอกสารทางการจาก NextAcc" ก่อน (ใบเสร็จมัดจำ/ใบกำกับภาษี
+        // ที่ออกจริงในโหมด DOCUMENT) แล้วค่อย fallback PDF ที่ระบบ render เอง
         protected string GetReceiptPDFUrl(object receiptId, object uid, object createdDate)
         {
             try
             {
                 string id = receiptId?.ToString() ?? "";
-                string receiptUID = uid?.ToString() ?? "";
-                DateTime created = Convert.ToDateTime(createdDate);
-
-                string year = created.Year.ToString();
-                string month = created.Month.ToString("00");
-
-                return $"/Documents/Receipt/{year}/{month}/{id}_{receiptUID}.pdf";
+                if (string.IsNullOrEmpty(id)) return "#";
+                return "/API/ViewReceiptDoc.ashx?doc=" + HttpUtility.UrlEncode(id);
             }
             catch
             {
                 return "#";
             }
+        }
+
+        // ป้ายชื่อเอกสารตามชนิดจริง: มัดจำ = ใบเสร็จรับเงิน / รับชำระ = ใบกำกับภาษี
+        protected string GetReceiptDocLabel(object isDeposit)
+        {
+            try
+            {
+                bool dep = isDeposit != DBNull.Value && Convert.ToBoolean(isDeposit);
+                return dep ? "ใบเสร็จรับเงิน (มัดจำ)" : "ใบกำกับภาษี";
+            }
+            catch { return "เอกสาร"; }
         }
 
         private void GenerateAndDownloadReceipt(string reservationId)

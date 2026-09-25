@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Data;
 using System.Web.UI;
 
@@ -11,6 +11,7 @@ namespace Take_Time_BangPhra.Admin.GuestExperience
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.MgtDashboard)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             if (Session["permission"]?.ToString() != "True")
             {
                 Response.Redirect("~/Admin/Login");

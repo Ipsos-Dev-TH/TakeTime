@@ -1,4 +1,4 @@
-<%@ Page Title="Order Management" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeFile="OrderManagement.aspx.cs" Inherits="Take_Time_BangPhra.Admin.RoomService.OrderManagement" %>
+﻿<%@ Page Title="Order Management" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeFile="OrderManagement.aspx.cs" Inherits="Take_Time_BangPhra.Admin.RoomService.OrderManagement" %>
 
 <asp:Content ID="Content1" ContentPlaceHolderID="MainContent" runat="server">
     <style>
@@ -536,6 +536,23 @@
                         </table>
                     </div>
 
+                    <%-- ── เก็บเงินออนไลน์ (โผล่เฉพาะออเดอร์ที่ยังค้างจ่ายและเปิดฟีเจอร์ไว้) ──
+                         ตัวรับเงินฝั่ง ROOMSERVICE มีอยู่แล้วตั้งแต่ต้น แต่ไม่เคยมีหน้าไหน
+                         สร้างลิงก์ให้เลย — ช่องทางนี้จึงตายมาตลอด --%>
+                    <asp:Panel ID="pnlRsPay" runat="server" Visible="false"
+                        style="margin:14px 0;padding:14px;background:#E8F5E9;border-radius:10px;">
+                        <div style="font-weight:600;color:#2E7D32;margin-bottom:8px;">
+                            💳 ให้ลูกค้าจ่ายออนไลน์ (สแกน QR หรือกรอกบัตร)
+                        </div>
+                        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                            <asp:TextBox ID="txtRsPayLink" runat="server" ReadOnly="true"
+                                style="flex:1;min-width:240px;padding:8px 11px;border:1px solid #C8E6C9;border-radius:8px;font-family:monospace;font-size:12.5px;" />
+                            <button type="button" onclick="rsCopy(this)"
+                                style="padding:8px 14px;border:0;border-radius:8px;background:#2E7D32;color:#fff;font-weight:600;cursor:pointer;">คัดลอก</button>
+                        </div>
+                        <div id="rsQr" style="margin-top:10px;"></div>
+                    </asp:Panel>
+
                     <!-- Action Buttons -->
                     <div class="action-area">
                         <asp:Button ID="btnClaim" runat="server" Text=" รับออเดอร์" CssClass="btn-action btn-claim" OnClick="btnClaim_Click" />
@@ -740,5 +757,25 @@
             if (checkInterval) clearInterval(checkInterval);
             if (alertInterval) clearInterval(alertInterval);
         };
+    </script>
+
+    <%-- QR + คัดลอกลิงก์จ่ายเงินของออเดอร์ --%>
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+    <script>
+        function rsCopy(btn) {
+            var el = document.getElementById('<%= txtRsPayLink.ClientID %>');
+            if (!el) return;
+            el.select(); el.setSelectionRange(0, 99999);
+            try { document.execCommand('copy'); } catch (e) { }
+            if (navigator.clipboard) { try { navigator.clipboard.writeText(el.value); } catch (e) { } }
+            var old = btn.textContent; btn.textContent = '\u2713 \u0e41\u0e25\u0e49\u0e27';
+            setTimeout(function () { btn.textContent = old; }, 1600);
+        }
+        (function () {
+            var el = document.getElementById('<%= txtRsPayLink.ClientID %>');
+            var box = document.getElementById('rsQr');
+            if (!el || !box || !el.value || typeof QRCode === 'undefined') return;
+            new QRCode(box, { text: el.value, width: 150, height: 150, correctLevel: QRCode.CorrectLevel.M });
+        })();
     </script>
 </asp:Content>

@@ -1,4 +1,4 @@
-// ===========================================================================
+﻿// ===========================================================================
 // TierBenefitsManagement.aspx.cs
 // Admin page for managing loyalty tier benefits and product category discounts
 // ===========================================================================
@@ -24,6 +24,7 @@ namespace Take_Time_BangPhra.Account
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Feature.Guard(this, "Loyalty", "~/Default")) return;   // ฟีเจอร์ถูกปิด (ตั้งค่าระบบ → หมวดฟีเจอร์)
             _code = new code();
             _tierBenefitsService = new TierBenefitsService(_connectionString);
 

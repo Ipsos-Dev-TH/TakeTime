@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Data;
 using System.Web.UI;
 using System.Web.UI.WebControls;
@@ -11,6 +11,7 @@ namespace Take_Time_BangPhra.Admin.Leave
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.HrLeave)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             leaveService = new LeaveService();
 
             if (!IsPostBack)

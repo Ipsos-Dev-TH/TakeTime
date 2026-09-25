@@ -18,6 +18,7 @@ namespace Take_Time_BangPhra.Voucher
         string conn = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
         protected async void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.SalesVoucher)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
           if (Session["permission"].ToString() == "True" && (Session["User"].ToString() == "Owner" || Session["User"].ToString() == "Admin"))
             {
 
