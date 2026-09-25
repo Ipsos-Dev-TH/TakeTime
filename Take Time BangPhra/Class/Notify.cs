@@ -32,6 +32,7 @@ public static class Notify
         public const string BookingEdit = "BOOKING_EDIT";
         public const string BookingPostpone = "BOOKING_POSTPONE";
         public const string BookingCancel = "BOOKING_CANCEL";
+        public const string BookingConsistency = "BOOKING_CONSISTENCY";
 
         public const string OtaBookingOk = "OTA_BOOKING_OK";
         public const string OtaBookingFail = "OTA_BOOKING_FAIL";
@@ -79,6 +80,8 @@ public static class Notify
             "ลูกค้าเลื่อนวันเข้าพักโดยยังไม่กำหนดวันใหม่", "หน้าจอง"),
         new EventInfo(Ev.BookingCancel,   "การจอง", "ยกเลิกการจอง",
             "ยกเลิกจากตารางผู้เข้าพักรายวัน", "ตารางรายวัน"),
+        new EventInfo(Ev.BookingConsistency, "การจอง", "ตรวจความสอดคล้องการจอง (ก่อนรายงานเช้า)",
+            "ตรวจยอดเงิน/เบอร์ลูกค้าของการจอง 14 วันข้างหน้า วันละครั้งก่อนส่งรายงานเช้า — ส่งเฉพาะวันที่พบปัญหา", "ตรวจข้อมูลรายวัน"),
 
         new EventInfo(Ev.OtaBookingOk,    "การจองจาก OTA (อีเมล)", "ลงจองจากอีเมลสำเร็จ",
             "อ่านอีเมล Agoda/Booking แล้วลงจองในระบบได้", "อ่านอีเมลจอง"),

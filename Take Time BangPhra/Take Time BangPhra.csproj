@@ -973,6 +973,7 @@
     <Compile Include="Class\Services\EtaxRdConfirmService.cs" />
     <Compile Include="Class\Services\MemberPortalService.cs" />
     <Compile Include="Class\Services\DailyReportLineService.cs" />
+    <Compile Include="Class\Services\BookingConsistencyCheck.cs" />
     <Compile Include="Class\Services\DeepSeekService.cs" />
     <Compile Include="Class\Services\OmniChannelService.cs" />
     <Compile Include="Class\Services\AIKnowledgeService.cs" />

@@ -153,6 +153,15 @@ namespace Take_Time_BangPhra
                 try { ProcessEmailReservationIntakeIfDue(); }
                 catch (Exception eex) { System.Diagnostics.Trace.TraceError($"EmailReservation timer error: {(eex.InnerException ?? eex).Message}"); }
 
+                // ตรวจความสอดคล้องข้อมูลการจอง (ยอดเงิน OTA / ยอดค้าง / เศษปัด / เบอร์ลูกค้า) วันละครั้ง
+                // ก่อนรายงานเช้า (ค่าตั้งต้น 30 นาทีก่อนเวลาส่ง LINE) — แจ้งเตือนเฉพาะวันที่พบปัญหา
+                try
+                {
+                    string bcConn = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                    BookingConsistencyCheck.RunIfDue(bcConn);
+                }
+                catch (Exception bcx) { System.Diagnostics.Trace.TraceError($"BookingConsistencyCheck timer error: {(bcx.InnerException ?? bcx).Message}"); }
+
                 // ส่งรูปตารางจองรายวันเข้า LINE เมื่อถึงเวลาที่ตั้ง (วันละครั้ง) — no-op ถ้าปิด
                 try { SendDailyLineReportIfDue(); }
                 catch (Exception lex) { System.Diagnostics.Trace.TraceError($"DailyLineReport timer error: {(lex.InnerException ?? lex).Message}"); }
