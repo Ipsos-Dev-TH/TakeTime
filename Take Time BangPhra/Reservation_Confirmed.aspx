@@ -511,6 +511,13 @@
             </div>
         </div>
 
+        <!-- Booking Policies (ตั้งค่าที่ Admin/Settings/BookingPolicies) -->
+        <asp:Panel ID="pnlPolicies" runat="server" Visible="false" CssClass="detail-card"
+            style="margin-top: 8px;">
+            <h3>📜 เงื่อนไขและนโยบายการจอง</h3>
+            <asp:Literal ID="litPolicies" runat="server" />
+        </asp:Panel>
+
         <!-- Action Buttons -->
         <div class="action-buttons">
             <button type="button" class="btn-print" onclick="captureAndDownload()">🖨️ บันทึกหน้านี้เป็นรูป</button>

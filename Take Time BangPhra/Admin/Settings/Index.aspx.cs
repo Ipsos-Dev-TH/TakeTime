@@ -228,6 +228,10 @@ namespace Take_Time_BangPhra.Admin.Settings
                 "เบอร์โทรฉุกเฉินที่แสดงให้ลูกค้า",
                 "~/Admin/ManageEmergency",
                 "ฉุกเฉิน emergency เบอร์โทร โรงพยาบาล"));
+            web.Items.Add(new Item("นโยบายการจอง (เงื่อนไข / ความเป็นส่วนตัว / คืนเงิน / ยกเลิก)",
+                "ข้อความที่ลูกค้าต้องติ๊กยอมรับก่อนจอง + แสดงบนหน้ายืนยันการจอง · นโยบายยกเลิกแสดงคู่ทุกช่องทางชำระเงิน (Owner / Admin)",
+                "~/Admin/Settings/BookingPolicies",
+                "นโยบาย เงื่อนไข ข้อกำหนด terms conditions privacy ความเป็นส่วนตัว pdpa คืนเงิน refund ยกเลิก cancellation การจอง ยอมรับ"));
             web.Items.Add(new Item("เกี่ยวกับเรา",
                 "ข้อความหน้า About Us",
                 "~/Admin/ManageAboutUs",

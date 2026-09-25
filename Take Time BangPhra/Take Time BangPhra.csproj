@@ -510,6 +510,7 @@
     <Content Include="Activities.aspx" />
     <Content Include="DailyBoard.aspx" />
     <Content Include="Admin\Settings\ActivityManagement.aspx" />
+    <Content Include="Admin\Settings\BookingPolicies.aspx" />
     <Content Include="Admin\Settings\LineAccount.aspx" />
     <Content Include="Admin\Settings\Index.aspx" />
     <Content Include="Admin\Settings\PermissionGroups.aspx" />
@@ -1377,6 +1378,13 @@
     <Compile Include="Admin\Settings\ActivityManagement.aspx.designer.cs">
       <DependentUpon>ActivityManagement.aspx</DependentUpon>
     </Compile>
+    <Compile Include="Admin\Settings\BookingPolicies.aspx.cs">
+      <DependentUpon>BookingPolicies.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Settings\BookingPolicies.aspx.designer.cs">
+      <DependentUpon>BookingPolicies.aspx</DependentUpon>
+    </Compile>
     <Compile Include="Admin\Settings\LineAccount.aspx.cs">
       <DependentUpon>LineAccount.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>
@@ -1442,6 +1450,7 @@
     </Compile>
     <Compile Include="Class\AppCfg.cs" />
     <Compile Include="Class\ReservationBalance.cs" />
+    <Compile Include="Class\BookingPolicy.cs" />
     <Compile Include="Admin\LineLinkCallback.aspx.cs">
       <DependentUpon>LineLinkCallback.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>

@@ -278,6 +278,10 @@ namespace Take_Time_BangPhra
 
                 // เสนอทางจ่ายด้วยบัตร/QR ทันที แทนการโอน+แนบสลิป (เงียบถ้าสวิตช์ปิด)
                 SetupPayNowOption();
+
+                // ช่องทางชำระเงินฝั่งลูกค้า (ซ่อนเงินสด/ทดรองกรรมการ, โชว์ช่องทางเกตเวย์เมื่อเปิด)
+                // + นโยบายการจอง/ติ๊กยอมรับ — ส่วนเสริม ล้มแล้วหน้าจองทำงานแบบเดิม
+                SetupBookingChannelsAndPolicies();
             }
 
             // 🔧 IMPORTANT: Rebind product charges on page load, BUT NOT during postback from delete button
@@ -1476,6 +1480,13 @@ namespace Take_Time_BangPhra
                     }
                 }
                 catch { }
+
+                // 📜 ลูกค้าจองเอง: ต้องติ๊กยอมรับนโยบาย + ช่องทางออนไลน์ที่เลือกต้องยังเปิดอยู่
+                // (ตรวจฝั่ง server เสมอ ไม่เชื่อสถานะปุ่มบนหน้าเว็บ)
+                if (command == "reserve" && !ValidateCustomerBookingGate())
+                {
+                    return;
+                }
 
                 // 🏷 ใบจอง OTA ตอนเช็คอิน — ตรวจฝั่ง server ใหม่ทุกครั้งที่กดยืนยัน (ไม่เชื่อค่าที่ส่งมาจากหน้าเว็บ)
                 //   · ยังไม่ชัดว่าใครเก็บค่าห้อง (UNKNOWN) → ห้ามเช็คอินจนกว่าพนักงานเลือก + ระบุเหตุผล
@@ -3574,6 +3585,10 @@ namespace Take_Time_BangPhra
                                             ClientScript.RegisterStartupScript(this.GetType(), "myalert", $"alert('เกิดข้อผิดพลาดในการสร้างการจอง: {ex.Message}');", true);
                                             return;
                                         }
+
+                                        // 📜 ลูกค้าจองเอง: บันทึกเวลา + ฉบับนโยบายที่ยอมรับไว้บนใบจอง (ไม่มีคอลัมน์ → Logs)
+                                        RecordPolicyAcceptanceIfCustomer(Reservation_ID);
+
                                         string ID = "";
                                         try
                                         {
@@ -3818,7 +3833,15 @@ namespace Take_Time_BangPhra
                                         }
                                         catch { }
 
-                                        if (TextBox1.Text != "02" && CheckBox4.Checked == false)
+                                        // จ่ายออนไลน์ทันที (บัตร/เกตเวย์) = ยังไม่ได้รับเงิน → ห้ามออกใบเสร็จ/ส่งบัญชีตอนนี้
+                                        // ใบเสร็จจะออกเองเมื่อเกตเวย์ยืนยันการชำระ (OnlinePaymentService.ApplyToReservation)
+                                        if (PayNowChosen)
+                                        {
+                                            code2.Logs(conn, "Reserve - Pay Online Pending",
+                                                $"Reservation {ID}: ลูกค้าเลือกชำระออนไลน์ ({DropDownList2.SelectedItem?.Text ?? "-"}) — ยังไม่ออกใบเสร็จ รอเกตเวย์ยืนยัน",
+                                                Session["User"]?.ToString() ?? "Customer");
+                                        }
+                                        else if (TextBox1.Text != "02" && CheckBox4.Checked == false)
                                         {
                                             if (CheckBox4.Checked == false)
                                             {
@@ -3900,7 +3923,7 @@ namespace Take_Time_BangPhra
 💰 ยอดรวมทั้งหมด: {Convert.ToDecimal(TextBox4.Text):N2} บาท
 💵 มัดจำ: {Convert.ToDecimal(TextBox5.Text):N2} บาท
 💳 ยอดคงเหลือ: {(Convert.ToDecimal(TextBox4.Text) - Convert.ToDecimal(TextBox5.Text)):N2} บาท
-
+{(PayNowChosen ? "⏳ รอลูกค้าชำระออนไลน์ (" + (DropDownList2.SelectedItem?.Text ?? "-") + ") — ยังไม่ได้รับเงิน\n" : "")}
 {(!string.IsNullOrWhiteSpace(TextBox6.Text) ? $"💬 หมายเหตุ: {TextBox6.Text}\n" : "")}👨‍💼 ลงจองโดย: {Session["UserName"]?.ToString() ?? "System"}
 ━━━━━━━━━━━━━━━━━";
 
@@ -3914,6 +3937,12 @@ namespace Take_Time_BangPhra
                                                 // Reload the same reserve page to show the slip
                                                 Response.Redirect($"./Reserve?command=reserve&date={TextBox12.Text}", false);
                                                 HttpContext.Current.ApplicationInstance.CompleteRequest();
+                                            }
+                                            else if (PayNowChosen)
+                                            {
+                                                // เลือกจ่ายออนไลน์ → พาไปหน้าชำระเงินต่อทันที
+                                                // (เดิมทางนี้ไปหน้ายืนยันเลย ลูกค้าไม่เคยถูกพาไปจ่าย — ทำไว้เฉพาะใน catch)
+                                                RedirectToBookingPay(ID);
                                             }
                                             else
                                             {
@@ -3934,21 +3963,7 @@ namespace Take_Time_BangPhra
                                             {
                                                 // เลือกจ่ายทันที → พาไปหน้าชำระเงินต่อเลย
                                                 // ใบจองอยู่สถานะ "รอชำระเงิน" กันห้องไว้ให้แล้ว
-                                                int ridPay;
-                                                decimal payAmt = 0m;
-                                                decimal.TryParse(TextBox5.Text ?? "0", out payAmt);
-                                                if (int.TryParse(ID, out ridPay) && ridPay > 0)
-                                                {
-                                                    Response.Redirect(
-                                                        Take_Time_BangPhra.Payments.BookingPayment.PayUrl(
-                                                            ridPay, TextBox1.Text, payAmt), false);
-                                                    HttpContext.Current.ApplicationInstance.CompleteRequest();
-                                                }
-                                                else
-                                                {
-                                                    Response.Redirect("https://taketimebangphra.com/Reservation_Confirmed?id=" + ID + "&check=" + TextBox1.Text, false);
-                                                    HttpContext.Current.ApplicationInstance.CompleteRequest();
-                                                }
+                                                RedirectToBookingPay(ID);
                                             }
                                             else
                                             {
@@ -5865,18 +5880,483 @@ namespace Take_Time_BangPhra
 
         // ── ลูกค้าจองเอง แล้วจ่ายด้วยบัตร/QR ทันที ────────────────────────────
 
-        /// <summary>ผู้ใช้เลือก "จ่ายทันที" อยู่ไหม (ต้องเปิดสวิตช์ด้วย ห้ามเชื่อ checkbox เดี่ยว ๆ)</summary>
+        /// <summary>
+        /// ผู้ใช้เลือก "จ่ายทันที" อยู่ไหม (ต้องเปิดสวิตช์ด้วย ห้ามเชื่อ checkbox เดี่ยว ๆ)
+        /// ทางเลือก: ติ๊ก chkPayNow แบบเดิม หรือ ลูกค้าเลือกช่องทางบัตร/เกตเวย์ในรายการวิธีชำระ
+        /// </summary>
         private bool PayNowChosen
         {
             get
             {
                 try
                 {
-                    return pnlPayNow != null && pnlPayNow.Visible
-                        && chkPayNow != null && chkPayNow.Checked
-                        && Take_Time_BangPhra.Payments.BookingPayment.IsEnabled;
+                    if (!Take_Time_BangPhra.Payments.BookingPayment.IsEnabled) return false;
+                    if (pnlPayNow != null && pnlPayNow.Visible && chkPayNow != null && chkPayNow.Checked)
+                        return true;
+                    return IsCustomerGatewayChannelSelected;
                 }
                 catch { return false; }
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════════════
+        //  ช่องทางชำระเงินของลูกค้า + นโยบายการจอง (หน้าจองใหม่)
+        //
+        //  · ลูกค้า (ไม่ได้ล็อกอินพนักงาน): รายการวิธีชำระมาจาก PaymentChannelCatalog.ForCustomer("BOOKING")
+        //    — ไม่มีเงินสด / เงินทดรองกรรมการ / Omise; ช่องทางเกตเวย์ (บัตร VISA/AMEX …) โผล่เองเมื่อเปิด
+        //    เกตเวย์ + สวิตช์จองแล้วจ่ายออนไลน์ (Payment_Booking_PayOnline) ⇒ ปิดอยู่ = ไม่มีอะไรเกี่ยวกับเกตเวย์
+        //    โหลด catalog ไม่ได้ → ใช้ Account_Paid_How เดิมแต่กรองชื่อเงินสด/ทดรอง/กรรมการ/Omise ออก
+        //  · ค่าในรายการ = Account_Paid_How.ID (ช่องทางโอน) → ตรรกะบันทึกเดิมใช้ได้เหมือนเดิม
+        //    ช่องทางเกตเวย์ = "CH:{Code}" (หลายช่องทางอาจผูกแหล่งเงินเดียวกัน) และไม่ออกใบเสร็จตอนจอง
+        //  · พนักงาน: รายการเดิมทั้งหมด (เงินสด, ทดรองกรรมการ ฯลฯ) ไม่เปลี่ยน
+        // ══════════════════════════════════════════════════════════════════════
+
+        private const string ChTypesKey = "rvChTypes";
+        private const string ChCodesKey = "rvChCodes";
+        private const string ChFromCatalogKey = "rvChFromCatalog";
+
+        /// <summary>ผู้ใช้ปัจจุบันเป็นพนักงาน (ล็อกอินหลังบ้าน) หรือไม่</summary>
+        private bool IsStaffUser
+        {
+            get { return Session["permission"] != null && Session["permission"].ToString() == "True"; }
+        }
+
+        private static bool IsGatewayChannelType(string type)
+        {
+            return type == "CARD" || type == "GATEWAY_OTHER";
+        }
+
+        /// <summary>ชื่อช่องทางที่ห้ามโชว์ลูกค้า (ใช้ตอน catalog ใช้ไม่ได้ / กันพลาดกับช่องทางที่ไม่ใช่เกตเวย์)</summary>
+        private static bool IsStaffOnlyChannelName(string name)
+        {
+            string n = (name ?? "").Trim();
+            if (n.Length == 0) return true;
+            return n.IndexOf("เงินสด", StringComparison.Ordinal) >= 0
+                || n.IndexOf("ทดรอง", StringComparison.Ordinal) >= 0
+                || n.IndexOf("กรรมการ", StringComparison.Ordinal) >= 0
+                || n.IndexOf("omise", StringComparison.OrdinalIgnoreCase) >= 0
+                || n.Equals("cash", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>ชนิดช่องทางของรายการที่เลือก (TRANSFER/QR/CARD/…) — ว่าง = ไม่ใช่รายการลูกค้า</summary>
+        private string SelectedChannelType()
+        {
+            try
+            {
+                if (DropDownList2 == null || DropDownList2.SelectedItem == null) return "";
+                var types = ViewState[ChTypesKey] as System.Collections.Hashtable;
+                if (types == null) return "";
+                object t = types[DropDownList2.SelectedValue];
+                return t == null ? "" : t.ToString();
+            }
+            catch { return ""; }
+        }
+
+        /// <summary>ลูกค้าเลือกช่องทางบัตร/เกตเวย์ในหน้าจองใหม่</summary>
+        private bool IsCustomerGatewayChannelSelected
+        {
+            get
+            {
+                try
+                {
+                    if (IsStaffUser || Request.QueryString["command"] != "reserve") return false;
+                    return IsGatewayChannelType(SelectedChannelType());
+                }
+                catch { return false; }
+            }
+        }
+
+        /// <summary>ติ๊กยอมรับนโยบายครบแล้ว (หรือไม่ต้องติ๊ก — พนักงาน/โหมดอื่น)</summary>
+        private bool PolicyAcceptSatisfied
+        {
+            get
+            {
+                try
+                {
+                    return pnlPolicyAccept == null || !pnlPolicyAccept.Visible
+                        || (chkAcceptPolicy != null && chkAcceptPolicy.Checked);
+                }
+                catch { return true; }
+            }
+        }
+
+        private void SetupBookingChannelsAndPolicies()
+        {
+            try
+            {
+                if (!IsStaffUser)
+                {
+                    if (!IsPostBack) PopulateCustomerChannels();
+
+                    // รายการมาจาก catalog แล้ว → catalog เป็นตัวตัดสินว่ามีช่องทางออนไลน์ไหม
+                    // (ช่องทางบัตร/เกตเวย์อยู่ในรายการเอง) ไม่ต้องมี checkbox "จ่ายทันที" แบบเดิมซ้ำ
+                    // ใช้รายการสำรอง (catalog ล้ม) → คง checkbox เดิมไว้ให้จ่ายออนไลน์ได้ตามสวิตช์เดิม
+                    object fromCatalog = ViewState[ChFromCatalogKey];
+                    if (fromCatalog is bool && (bool)fromCatalog && pnlPayNow != null)
+                    {
+                        pnlPayNow.Visible = false;
+                        if (chkPayNow != null) chkPayNow.Checked = false;
+                    }
+                    DropDownList2.Enabled = DropDownList2.Items.Count > 0;
+                    ApplyCustomerChannelUi();
+                }
+            }
+            catch (Exception chEx)
+            {
+                try { code2.Logs(conn, "Reserve - Customer Channels", chEx.Message, "SYSTEM"); } catch { }
+            }
+
+            SetupPolicySection();
+        }
+
+        /// <summary>เติมรายการวิธีชำระสำหรับลูกค้า (เรียกครั้งแรกที่เปิดหน้า)</summary>
+        private void PopulateCustomerChannels()
+        {
+            var types = new System.Collections.Hashtable();
+            var codes = new System.Collections.Hashtable();
+            bool ok = false;
+
+            // ชื่อแหล่งเงินจริงตาม ID — ข้อความในรายการต้องตรง Account_Paid_How.Paid_How
+            // เพราะการบันทึกใบเสร็จ/บัญชีค้นแหล่งเงินด้วยข้อความนี้
+            var paidHowText = new Dictionary<int, string>();
+            try
+            {
+                DataTable dtNames = code2.DatabaseQuerySafe(conn, "SELECT ID, Paid_How FROM Account_Paid_How", null);
+                if (dtNames != null)
+                {
+                    foreach (DataRow r in dtNames.Rows)
+                    {
+                        int pid;
+                        if (int.TryParse(Convert.ToString(r["ID"]), out pid))
+                            paidHowText[pid] = Convert.ToString(r["Paid_How"]);
+                    }
+                }
+            }
+            catch { }
+
+            DropDownList2.Items.Clear();
+            try
+            {
+                IList<Take_Time_BangPhra.Payments.PaymentChannel> list =
+                    Take_Time_BangPhra.Payments.PaymentChannelCatalog.ForCustomer("BOOKING");
+                bool gatewayReady = false;
+                try { gatewayReady = Take_Time_BangPhra.Payments.BookingPayment.IsEnabled; } catch { }
+
+                if (list != null)
+                {
+                    var used = new HashSet<string>();
+                    foreach (Take_Time_BangPhra.Payments.PaymentChannel pc in list)
+                    {
+                        if (pc == null || !pc.CustomerVisible) continue;
+                        string type = (pc.Type ?? "").Trim().ToUpperInvariant();
+                        if (type == "CASH" || type == "DIRECTOR_LOAN" || type == "OTA") continue;
+
+                        bool isGw = IsGatewayChannelType(type);
+                        // เกตเวย์ต้องพร้อมทั้งระบบ "จองแล้วรอชำระ" ด้วย (สถานะรอชำระ + ตัวยกเลิกอัตโนมัติ)
+                        if (isGw && !gatewayReady) continue;
+                        if (!isGw && IsStaffOnlyChannelName(pc.Name)) continue;
+
+                        string value = (!isGw && pc.PaidHowId > 0)
+                            ? pc.PaidHowId.ToString()
+                            : (string.IsNullOrEmpty(pc.Code) ? "" : "CH:" + pc.Code);
+                        if (value.Length == 0) continue;
+                        if (used.Contains(value))
+                        {
+                            if (string.IsNullOrEmpty(pc.Code) || used.Contains("CH:" + pc.Code)) continue;
+                            value = "CH:" + pc.Code;
+                        }
+                        used.Add(value);
+
+                        string text = pc.Name;
+                        string realName;
+                        if (!isGw && pc.PaidHowId > 0 && paidHowText.TryGetValue(pc.PaidHowId, out realName)
+                            && !string.IsNullOrWhiteSpace(realName))
+                            text = realName;
+                        if (string.IsNullOrWhiteSpace(text)) text = pc.Code ?? value;
+
+                        DropDownList2.Items.Add(new ListItem(text, value));
+                        types[value] = isGw ? type : (type.Length == 0 ? "TRANSFER" : type);
+                        codes[value] = pc.Code ?? "";
+                    }
+                }
+                ok = DropDownList2.Items.Count > 0;
+            }
+            catch (Exception catEx)
+            {
+                ok = false;
+                try { code2.Logs(conn, "Reserve - PaymentChannelCatalog", "ใช้รายการสำรอง: " + catEx.Message, "SYSTEM"); } catch { }
+            }
+
+            if (!ok)
+            {
+                // สำรอง: แหล่งเงินที่เปิดใช้ทั้งหมด ยกเว้นช่องทางของพนักงาน (เงินสด/ทดรอง/กรรมการ/Omise)
+                DropDownList2.Items.Clear();
+                types.Clear();
+                codes.Clear();
+                try
+                {
+                    DataTable dtFallback = code.DatabaseQuery(SqlDataSource1.ConnectionString, SqlDataSource1.SelectCommand);
+                    for (int p = 0; p < dtFallback.Rows.Count; p++)
+                    {
+                        string name = dtFallback.Rows[p]["Paid_How"].ToString();
+                        string phId = dtFallback.Rows[p]["ID"].ToString();
+                        if (IsStaffOnlyChannelName(name)) continue;
+                        if (DropDownList2.Items.FindByValue(phId) != null) continue;
+                        DropDownList2.Items.Add(new ListItem(name, phId));
+                        types[phId] = "TRANSFER";
+                        codes[phId] = "";
+                    }
+                }
+                catch (Exception fbEx)
+                {
+                    try { code2.Logs(conn, "Reserve - Customer Channels Fallback", fbEx.Message, "SYSTEM"); } catch { }
+                }
+            }
+
+            ViewState[ChTypesKey] = types;
+            ViewState[ChCodesKey] = codes;
+            ViewState[ChFromCatalogKey] = ok;
+            if (DropDownList2.Items.Count > 0) DropDownList2.SelectedIndex = 0;
+        }
+
+        /// <summary>ข้อมูลเต็มของช่องทางที่เลือกจาก catalog (null = ไม่มี/ใช้รายการสำรอง)</summary>
+        private Take_Time_BangPhra.Payments.PaymentChannel FindSelectedCatalogChannel()
+        {
+            try
+            {
+                if (DropDownList2 == null || DropDownList2.SelectedItem == null) return null;
+                string value = DropDownList2.SelectedValue ?? "";
+                var codes = ViewState[ChCodesKey] as System.Collections.Hashtable;
+                string chCode = codes == null ? null : codes[value] as string;
+                if (!string.IsNullOrEmpty(chCode))
+                    return Take_Time_BangPhra.Payments.PaymentChannelCatalog.Get(chCode);
+                int pid;
+                if (int.TryParse(value, out pid) && pid > 0)
+                    return Take_Time_BangPhra.Payments.PaymentChannelCatalog.GetByPaidHowId(pid);
+            }
+            catch { }
+            return null;
+        }
+
+        /// <summary>สลับหน้าตาตามช่องทาง: โอน/QR → QR+บัญชี+แนบสลิป, บัตร/เกตเวย์ → เงื่อนไข+ไปหน้าชำระเงิน</summary>
+        private void ApplyCustomerChannelUi()
+        {
+            try
+            {
+                if (IsStaffUser || Request.QueryString["command"] != "reserve" || litChannelInfo == null) return;
+                string type = SelectedChannelType();
+                if (type.Length == 0) { litChannelInfo.Text = ""; return; }
+
+                bool isGw = IsGatewayChannelType(type);
+                Take_Time_BangPhra.Payments.PaymentChannel pc = FindSelectedCatalogChannel();
+                string name = DropDownList2.SelectedItem != null ? DropDownList2.SelectedItem.Text : "";
+                litChannelInfo.Text = BuildChannelInfoHtml(pc, isGw, name);
+
+                Button1.Text = isGw ? "ยืนยันการจองและไปชำระเงิน (Submit & Pay)" : "ยืนยันการจอง(Submit)";
+                ApplyPayNowUi();   // ซ่อน/แสดงช่องแนบสลิป + เติมยอดมัดจำขั้นต่ำให้ช่องทางออนไลน์
+            }
+            catch (Exception uiEx)
+            {
+                try { code2.Logs(conn, "Reserve - Channel UI", uiEx.Message, "SYSTEM"); } catch { }
+            }
+        }
+
+        private string BuildChannelInfoHtml(Take_Time_BangPhra.Payments.PaymentChannel pc, bool isGw, string name)
+        {
+            var sb = new StringBuilder();
+            sb.Append("<div style=\"margin-top:10px; background:#fff; border:1px solid #D7CCC8; border-radius:8px; ")
+              .Append("padding:10px 12px; line-height:1.65; font-size:0.95em; max-width:560px;\">");
+
+            string instructions = pc != null ? pc.Instructions : null;
+            string conditions = pc != null ? pc.Conditions : null;
+
+            if (isGw)
+            {
+                bool ready = false;
+                try { ready = Take_Time_BangPhra.Payments.BookingPayment.IsEnabled; } catch { }
+                if (!ready)
+                {
+                    sb.Append("<div style=\"color:#C62828; font-weight:bold; margin-bottom:6px;\">")
+                      .Append("⚠ ช่องทางชำระออนไลน์ปิดชั่วคราว กรุณาเลือกช่องทางโอนเงิน</div>");
+                }
+                int holdMin = 60;
+                try { holdMin = Take_Time_BangPhra.Payments.BookingPayment.HoldMinutes; } catch { }
+
+                sb.Append("<div style=\"font-weight:bold; color:#2E7D32;\">💳 ชำระออนไลน์: ")
+                  .Append(Server.HtmlEncode(name ?? "")).Append("</div>")
+                  .Append("<div style=\"color:#558B2F;\">ไม่ต้องโอนและแนบสลิป — กดยืนยันการจองแล้วระบบจะพาไปหน้าชำระเงิน ")
+                  .Append("จ่ายสำเร็จ การจองยืนยันทันที<br/><b>ห้องถูกกันไว้ให้ ")
+                  .Append(holdMin)
+                  .Append(" นาที</b> หากไม่ชำระภายในเวลา การจองจะถูกยกเลิกอัตโนมัติ</div>");
+                if (!string.IsNullOrWhiteSpace(conditions))
+                {
+                    sb.Append("<div style=\"margin-top:6px;\"><b>เงื่อนไขของช่องทางนี้</b><br/>")
+                      .Append(BookingPolicy.ToHtml(conditions)).Append("</div>");
+                }
+                if (!string.IsNullOrWhiteSpace(instructions))
+                {
+                    sb.Append("<div style=\"margin-top:6px;\">").Append(BookingPolicy.ToHtml(instructions)).Append("</div>");
+                }
+            }
+            else
+            {
+                sb.Append("<div style=\"font-weight:bold; color:#5D4037;\">🏦 โอนเงิน / สแกน QR: ")
+                  .Append(Server.HtmlEncode(name ?? "")).Append("</div>");
+
+                string qr = SafeImageUrl(pc != null ? pc.QrImageUrl : null);
+                if (qr.Length > 0)
+                {
+                    sb.Append("<div style=\"margin:8px 0;\"><img src=\"").Append(HttpUtility.HtmlAttributeEncode(qr))
+                      .Append("\" alt=\"QR\" style=\"max-width:220px; width:100%; border:1px solid #D7CCC8; border-radius:6px;\" /></div>");
+                }
+                if (!string.IsNullOrWhiteSpace(instructions))
+                    sb.Append("<div>").Append(BookingPolicy.ToHtml(instructions)).Append("</div>");
+                else
+                    sb.Append("<div>โอนยอดมัดจำตามจำนวนด้านบนเข้าบัญชีนี้ แล้ว<b>อัปโหลดสลิป</b>ในช่องด้านล่าง</div>");
+                if (!string.IsNullOrWhiteSpace(conditions))
+                {
+                    sb.Append("<div style=\"margin-top:6px;\"><b>เงื่อนไข</b><br/>")
+                      .Append(BookingPolicy.ToHtml(conditions)).Append("</div>");
+                }
+            }
+
+            // นโยบายการยกเลิก (นโยบายหลัก) ใช้กับทุกช่องทาง — แสดงคู่ทุกครั้ง
+            sb.Append("<div style=\"margin-top:8px; border-top:1px dashed #D7CCC8; padding-top:8px;\">")
+              .Append("<b>📅 นโยบายการยกเลิก</b> <span style=\"color:#8D6E63;\">(ใช้กับทุกช่องทางการชำระเงิน)</span>")
+              .Append("<div style=\"max-height:140px; overflow:auto; color:#5D4037; font-size:0.95em;\">")
+              .Append(BookingPolicy.ToHtml(BookingPolicy.Get(BookingPolicy.KeyCancellation)))
+              .Append("</div><a href=\"#\" onclick=\"rvPolicyOpen('cancel');return false;\" style=\"font-size:0.9em;\">")
+              .Append("อ่านนโยบายการยกเลิก / คืนเงินทั้งหมด</a></div>");
+
+            sb.Append("</div>");
+            return sb.ToString();
+        }
+
+        /// <summary>รับเฉพาะรูปจาก path ภายใน (~/ หรือ /) หรือ http(s) — กัน javascript: / data: แปลก ๆ</summary>
+        private string SafeImageUrl(string url)
+        {
+            string u = (url ?? "").Trim();
+            if (u.Length == 0) return "";
+            if (u.StartsWith("~/", StringComparison.Ordinal)) return ResolveUrl(u);
+            if (u.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+                || u.StartsWith("http://", StringComparison.OrdinalIgnoreCase)) return u;
+            if (u.IndexOf(':') >= 0) return "";
+            return u;   // path สัมพัทธ์ เช่น ./Images/qr.png หรือ /Images/qr.png
+        }
+
+        /// <summary>กล่องนโยบาย + modal (ทุกคนเห็นในโหมดจองใหม่) และช่องติ๊กยอมรับ (เฉพาะลูกค้า)</summary>
+        private void SetupPolicySection()
+        {
+            try
+            {
+                if (pnlPolicySection == null) return;
+
+                litPolicySummary.Text =
+                    "<div class=\"rv-pol-summary\"><b>📅 นโยบายการยกเลิกการจอง</b> "
+                    + "<span style=\"color:#8D6E63;\">(ใช้กับทุกช่องทางการชำระเงิน)</span><br/>"
+                    + BookingPolicy.ToHtml(BookingPolicy.Get(BookingPolicy.KeyCancellation))
+                    + "</div>";
+
+                var sb = new StringBuilder();
+                foreach (string key in BookingPolicy.TextKeys)
+                {
+                    sb.Append("<div class=\"rv-pol-pane\" data-pol=\"").Append(BookingPolicy.Slug(key))
+                      .Append("\" style=\"display:none;\"><h4>")
+                      .Append(Server.HtmlEncode(BookingPolicy.Title(key)))
+                      .Append(" <span style=\"font-weight:normal; color:#8D6E63; font-size:0.85em;\">(")
+                      .Append(Server.HtmlEncode(BookingPolicy.TitleEn(key)))
+                      .Append(")</span></h4>")
+                      .Append(BookingPolicy.ToHtml(BookingPolicy.Get(key)))
+                      .Append("</div>");
+                }
+                sb.Append("<div style=\"margin-top:12px; color:#A1887F; font-size:0.85em;\">นโยบายฉบับที่ ")
+                  .Append(BookingPolicy.Version).Append("</div>");
+                litPolicyModal.Text = sb.ToString();
+
+                pnlPolicySection.Visible = true;
+                if (pnlPolicyAccept != null) pnlPolicyAccept.Visible = !IsStaffUser;
+            }
+            catch (Exception polEx)
+            {
+                try { pnlPolicySection.Visible = false; } catch { }
+                try { if (pnlPolicyAccept != null) pnlPolicyAccept.Visible = false; } catch { }
+                try { code2.Logs(conn, "Reserve - Booking Policies", polEx.Message, "SYSTEM"); } catch { }
+            }
+        }
+
+        /// <summary>
+        /// ด่านสุดท้ายก่อนสร้างใบจอง (ฝั่ง server): ลูกค้าต้องยอมรับนโยบาย และช่องทางออนไลน์ที่เลือกต้องยังเปิดอยู่
+        /// คืน false = หยุด (แจ้งเตือนแล้ว)
+        /// </summary>
+        private bool ValidateCustomerBookingGate()
+        {
+            try
+            {
+                if (IsStaffUser) return true;
+
+                if (!PolicyAcceptSatisfied)
+                {
+                    ClientScript.RegisterStartupScript(this.GetType(), "policyNotAccepted",
+                        "alert('กรุณาอ่านและติ๊กยอมรับ ข้อกำหนดและเงื่อนไข / นโยบายความเป็นส่วนตัว / นโยบายการคืนเงิน / นโยบายการยกเลิก ก่อนยืนยันการจอง');", true);
+                    return false;
+                }
+
+                if (IsGatewayChannelType(SelectedChannelType()) && !PayNowChosen)
+                {
+                    ClientScript.RegisterStartupScript(this.GetType(), "gatewayOff",
+                        "alert('ช่องทางชำระออนไลน์ปิดชั่วคราว กรุณาเลือกช่องทางโอนเงินแล้วแนบสลิป');", true);
+                    ApplyCustomerChannelUi();
+                    return false;
+                }
+            }
+            catch { }
+            return true;
+        }
+
+        /// <summary>บันทึกการยอมรับนโยบายของลูกค้าบนใบจองที่เพิ่งสร้าง (ล้มไม่กระทบการจอง)</summary>
+        private void RecordPolicyAcceptanceIfCustomer(int reservationId)
+        {
+            try
+            {
+                if (reservationId <= 0 || IsStaffUser) return;
+                if (pnlPolicyAccept == null || !pnlPolicyAccept.Visible || chkAcceptPolicy == null || !chkAcceptPolicy.Checked)
+                    return;
+
+                string ip = Request.ServerVariables["HTTP_X_FORWARDED_FOR"];
+                if (!string.IsNullOrWhiteSpace(ip)) ip = ip.Split(',')[0].Trim();
+                if (string.IsNullOrWhiteSpace(ip)) ip = Request.UserHostAddress;
+
+                BookingPolicy.RecordAcceptance(reservationId, BookingPolicy.Version, ip,
+                    "Customer " + (TextBox1.Text ?? ""));
+            }
+            catch { }
+        }
+
+        /// <summary>พาลูกค้าไปหน้าชำระเงินของใบจองที่เพิ่งสร้าง (สถานะ "รอชำระเงิน")</summary>
+        private void RedirectToBookingPay(string reservationId)
+        {
+            int ridPay;
+            decimal payAmt = 0m;
+            decimal.TryParse(TextBox5.Text ?? "0", out payAmt);
+            if (int.TryParse(reservationId, out ridPay) && ridPay > 0)
+            {
+                string url = Take_Time_BangPhra.Payments.BookingPayment.PayUrl(ridPay, TextBox1.Text, payAmt);
+                // บอกหน้าชำระเงินว่าลูกค้าเลือกช่องทางไหน (หน้าที่ยังไม่รองรับจะไม่สนพารามิเตอร์นี้)
+                try
+                {
+                    var codes = ViewState[ChCodesKey] as System.Collections.Hashtable;
+                    string chCode = codes == null ? null : codes[DropDownList2.SelectedValue] as string;
+                    if (!string.IsNullOrEmpty(chCode) && IsCustomerGatewayChannelSelected)
+                        url += "&ch=" + Uri.EscapeDataString(chCode);
+                }
+                catch { }
+                Response.Redirect(url, false);
+                HttpContext.Current.ApplicationInstance.CompleteRequest();
+            }
+            else
+            {
+                Response.Redirect("https://taketimebangphra.com/Reservation_Confirmed?id=" + reservationId + "&check=" + TextBox1.Text, false);
+                HttpContext.Current.ApplicationInstance.CompleteRequest();
             }
         }
 
@@ -6859,7 +7339,8 @@ namespace Take_Time_BangPhra
         protected void CheckBox1_CheckedChanged(object sender, EventArgs e)
         {
             // CheckBox1 is for accepting terms and conditions on first-time booking
-            if (CheckBox1.Checked == true)
+            // ลูกค้าจองเอง: ต้องติ๊กยอมรับนโยบาย (chkAcceptPolicy) ด้วยถึงจะกดยืนยันได้
+            if (CheckBox1.Checked == true && PolicyAcceptSatisfied)
             {
                 Button1.Enabled = true;
             }
@@ -6867,6 +7348,12 @@ namespace Take_Time_BangPhra
             {
                 Button1.Enabled = false;
             }
+        }
+
+        protected void chkAcceptPolicy_CheckedChanged(object sender, EventArgs e)
+        {
+            // ใช้กติกาเดียวกับ CheckBox1 — ต้องครบทั้งสองช่อง
+            CheckBox1_CheckedChanged(sender, e);
         }
 
         protected void Button4_Click(object sender, EventArgs e)
@@ -6978,6 +7465,9 @@ namespace Take_Time_BangPhra
                 CheckBox4.Checked = false;
                 CheckBox4.DataBind();
             }
+
+            // ลูกค้าจองเอง: สลับรายละเอียดตามช่องทาง (โอน → QR+สลิป / บัตร → ไปหน้าชำระเงิน)
+            ApplyCustomerChannelUi();
         }
 
         protected void CheckBox3_CheckedChanged(object sender, EventArgs e)

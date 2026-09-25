@@ -764,6 +764,8 @@
                             </SelectParameters>
                         </asp:SqlDataSource>
                     </div>
+                    <%-- รายละเอียดของช่องทางที่ลูกค้าเลือก (QR/บัญชี, เงื่อนไขบัตร, นโยบายยกเลิก) — ว่าง = ไม่แสดงอะไร --%>
+                    <asp:Literal ID="litChannelInfo" runat="server" />
                     <asp:Label ID="Label7" runat="server" Text="" Visible="false"></asp:Label>
                     <%-- ใบจอง OTA ตอนเช็คอิน: "ไม่มียอดต้องเก็บ" / "ต้องเก็บ ฿…" --%>
                     <asp:Literal ID="litCheckinDueBanner" runat="server" />
@@ -984,13 +986,91 @@
                 </div>
             </div>
         </div>
-        
+
+        <%-- ══ นโยบายการจอง (แก้ข้อความที่ ศูนย์ตั้งค่า → นโยบายการจอง) — แสดงเฉพาะโหมดจองใหม่ ══ --%>
+        <asp:Panel ID="pnlPolicySection" runat="server" Visible="false" CssClass="form-panel">
+            <style>
+                .rv-pol-summary { background:#FFF8E1; border-left:4px solid #FFB300; border-radius:6px;
+                                  padding:10px 14px; color:#5D4037; line-height:1.7; font-size:0.95em; }
+                .rv-pol-links { margin-top:10px; display:flex; flex-wrap:wrap; gap:8px; }
+                .rv-pol-links a { display:inline-block; padding:6px 12px; border-radius:16px; background:#EFEBE9;
+                                  color:#5D4037; text-decoration:none; font-size:0.92em; }
+                .rv-pol-links a:hover { background:#D7CCC8; }
+                .rv-pol-overlay { display:none; position:fixed; left:0; top:0; right:0; bottom:0; z-index:10000;
+                                  background:rgba(0,0,0,.55); align-items:center; justify-content:center; padding:12px; }
+                .rv-pol-box { background:#fff; border-radius:12px; width:100%; max-width:760px; max-height:88vh;
+                              display:flex; flex-direction:column; box-shadow:0 10px 40px rgba(0,0,0,.3); }
+                .rv-pol-tabs { display:flex; flex-wrap:wrap; gap:6px; padding:12px 14px 8px; border-bottom:1px solid #eee; }
+                .rv-pol-tabs button { border:0; border-radius:16px; padding:6px 12px; background:#EFEBE9;
+                                      color:#5D4037; cursor:pointer; font-size:0.9em; }
+                .rv-pol-tabs button.on { background:#5D4037; color:#fff; }
+                .rv-pol-body { overflow-y:auto; padding:12px 16px; line-height:1.75; color:#3E2723; font-size:0.95em; }
+                .rv-pol-pane h4 { margin:0 0 8px; color:#5D4037; }
+                .rv-pol-foot { padding:10px 14px; border-top:1px solid #eee; text-align:right; }
+            </style>
+            <h3 class="section-header">เงื่อนไขและนโยบายการจอง (Booking Policies)</h3>
+            <asp:Literal ID="litPolicySummary" runat="server" />
+            <div class="rv-pol-links">
+                <a href="#" onclick="rvPolicyOpen('terms');return false;">📜 ข้อกำหนดและเงื่อนไข</a>
+                <a href="#" onclick="rvPolicyOpen('privacy');return false;">🔒 นโยบายความเป็นส่วนตัว</a>
+                <a href="#" onclick="rvPolicyOpen('refund');return false;">💸 นโยบายการคืนเงิน</a>
+                <a href="#" onclick="rvPolicyOpen('cancel');return false;">📅 นโยบายการยกเลิก</a>
+            </div>
+
+            <div id="rvPolicyModal" class="rv-pol-overlay" onclick="if (event.target === this) rvPolicyClose();">
+                <div class="rv-pol-box" role="dialog" aria-modal="true">
+                    <div class="rv-pol-tabs">
+                        <button type="button" data-pol="terms" onclick="rvPolicyOpen('terms')">ข้อกำหนดและเงื่อนไข</button>
+                        <button type="button" data-pol="privacy" onclick="rvPolicyOpen('privacy')">ความเป็นส่วนตัว</button>
+                        <button type="button" data-pol="refund" onclick="rvPolicyOpen('refund')">การคืนเงิน</button>
+                        <button type="button" data-pol="cancel" onclick="rvPolicyOpen('cancel')">การยกเลิก</button>
+                    </div>
+                    <div class="rv-pol-body">
+                        <asp:Literal ID="litPolicyModal" runat="server" />
+                    </div>
+                    <div class="rv-pol-foot">
+                        <button type="button" class="reservation-button" onclick="rvPolicyClose()" style="padding:8px 22px;">ปิด / Close</button>
+                    </div>
+                </div>
+            </div>
+            <script>
+                function rvPolicyOpen(key) {
+                    var m = document.getElementById('rvPolicyModal');
+                    if (!m) return;
+                    var panes = m.querySelectorAll('.rv-pol-pane');
+                    for (var i = 0; i < panes.length; i++)
+                        panes[i].style.display = panes[i].getAttribute('data-pol') === key ? 'block' : 'none';
+                    var tabs = m.querySelectorAll('.rv-pol-tabs button');
+                    for (var j = 0; j < tabs.length; j++)
+                        tabs[j].className = tabs[j].getAttribute('data-pol') === key ? 'on' : '';
+                    m.style.display = 'flex';
+                }
+                function rvPolicyClose() {
+                    var m = document.getElementById('rvPolicyModal');
+                    if (m) m.style.display = 'none';
+                }
+                document.addEventListener('keydown', function (e) {
+                    if (e.key === 'Escape' || e.keyCode === 27) rvPolicyClose();
+                });
+            </script>
+        </asp:Panel>
+
         <div class="rules-section">
             <img src="./Images/กฏระเบียบ.png" width="90%" style="max-width: 800px;"/>
         </div>
         
         <div class="form-row" style="justify-content: center; margin-top: 20px;">
             <div style="text-align: center; width: 100%;">
+                <%-- ลูกค้าจองเอง: ต้องยอมรับนโยบายก่อน (บันทึกเวลา + ฉบับที่ยอมรับไว้บนใบจอง) --%>
+                <asp:Panel ID="pnlPolicyAccept" runat="server" Visible="false" style="margin-bottom: 12px;">
+                    <asp:CheckBox ID="chkAcceptPolicy" runat="server" AutoPostBack="True" OnCheckedChanged="chkAcceptPolicy_CheckedChanged" CssClass="mycheckbox" style="margin-right: 10px;"/>
+                    <span style="font-size: 1.1em; color: #5D4037;">***ข้าพเจ้าได้อ่านและยอมรับ
+                        <a href="#" onclick="rvPolicyOpen('terms');return false;">ข้อกำหนดและเงื่อนไข</a>,
+                        <a href="#" onclick="rvPolicyOpen('privacy');return false;">นโยบายความเป็นส่วนตัว</a>,
+                        <a href="#" onclick="rvPolicyOpen('refund');return false;">นโยบายการคืนเงิน</a> และ
+                        <a href="#" onclick="rvPolicyOpen('cancel');return false;">นโยบายการยกเลิกการจอง</a>
+                        (I accept the Terms &amp; Conditions, Privacy, Refund and Cancellation policies)</span>
+                </asp:Panel>
                 <asp:CheckBox ID="CheckBox1" runat="server" AutoPostBack="True" OnCheckedChanged="CheckBox1_CheckedChanged" CssClass="mycheckbox" style="margin-right: 10px;"/>
                 <span style="font-size: 1.1em; color: #5D4037;">***ติ๊กเลือกเพื่อยอมรับกติกาด้านบน และรับทราบเรื่องการห้ามใช้เสียงดังหลัง 22.30 น. (Accept the rule)</span>
                 <div style="margin-top: 20px;">

@@ -162,6 +162,9 @@ namespace Take_Time_BangPhra
                 Label14.Text = dtReservationAccommodation.Rows[0]["Remark"].ToString();
 
                 Label10.Text = "ยืนยันการจองสำเร็จ ✓";
+
+                // นโยบายการจอง + ฉบับที่ลูกค้ายอมรับ (ส่วนเสริม — ล้มก็ไม่กระทบหน้ายืนยัน)
+                LoadPolicies(dtReservationAccommodation.Rows[0]);
             }
             catch (Exception ex)
             {
@@ -308,6 +311,66 @@ namespace Take_Time_BangPhra
                 pnlReceiptLinks.Visible = false;
 
                 code2.Logs(conn, "LoadReceipts Error", ex.Message + " - " + ex.StackTrace, "SYSTEM");
+            }
+        }
+
+        /// <summary>
+        /// แสดงนโยบายการจอง (ยกเลิก / คืนเงิน / เงื่อนไข / ความเป็นส่วนตัว) + วันเวลาและฉบับที่ลูกค้ายอมรับ
+        /// ข้อความแปลงผ่าน BookingPolicy.ToHtml (encode ก่อนเสมอ) — แทรก HTML/สคริปต์ไม่ได้
+        /// </summary>
+        private void LoadPolicies(DataRow res)
+        {
+            try
+            {
+                var sb = new System.Text.StringBuilder();
+                sb.Append("<div style=\"font-size:0.75em; line-height:1.6;\">");
+
+                // ใบจองที่ลูกค้ายอมรับเงื่อนไขไว้ (คอลัมน์จาก PHASE19 migration 22 — ไม่มีคอลัมน์ = ข้าม)
+                try
+                {
+                    if (res != null && res.Table.Columns.Contains("Policy_Accepted_At")
+                        && res["Policy_Accepted_At"] != DBNull.Value)
+                    {
+                        DateTime acceptedAt = Convert.ToDateTime(res["Policy_Accepted_At"]);
+                        string ver = res.Table.Columns.Contains("Policy_Accepted_Version")
+                                     && res["Policy_Accepted_Version"] != DBNull.Value
+                            ? res["Policy_Accepted_Version"].ToString() : "-";
+                        sb.Append("<div style=\"background:#e8f5e9; color:#2e7d32; border-radius:4px; padding:5px 8px; margin-bottom:6px;\">")
+                          .Append("✅ ผู้จองยอมรับเงื่อนไขและนโยบายแล้ว เมื่อ ")
+                          .Append(Server.HtmlEncode(acceptedAt.ToString("dd/MM/yyyy HH:mm")))
+                          .Append(" น. (ฉบับที่ ").Append(Server.HtmlEncode(ver)).Append(")</div>");
+                    }
+                }
+                catch { }
+
+                // นโยบายการยกเลิก = นโยบายหลัก เปิดไว้ให้เห็นเลย ที่เหลือพับไว้
+                foreach (string key in new[] { BookingPolicy.KeyCancellation, BookingPolicy.KeyRefund,
+                                               BookingPolicy.KeyTerms, BookingPolicy.KeyPrivacy })
+                {
+                    string text = BookingPolicy.Get(key);
+                    if (string.IsNullOrWhiteSpace(text)) continue;
+                    bool open = key == BookingPolicy.KeyCancellation;
+                    sb.Append("<details").Append(open ? " open" : "")
+                      .Append(" style=\"margin:4px 0; background:#fafafa; border:1px solid #eee; border-radius:4px; padding:5px 8px;\">")
+                      .Append("<summary style=\"cursor:pointer; font-weight:bold; color:#5d4037;\">")
+                      .Append(Server.HtmlEncode(BookingPolicy.Title(key)))
+                      .Append(" <span style=\"font-weight:normal; color:#999;\">(")
+                      .Append(Server.HtmlEncode(BookingPolicy.TitleEn(key)))
+                      .Append(")</span></summary><div style=\"margin-top:4px; color:#555;\">")
+                      .Append(BookingPolicy.ToHtml(text))
+                      .Append("</div></details>");
+                }
+
+                sb.Append("<div style=\"color:#999; margin-top:4px;\">นโยบายฉบับปัจจุบัน: ")
+                  .Append(BookingPolicy.Version).Append("</div></div>");
+
+                litPolicies.Text = sb.ToString();
+                pnlPolicies.Visible = true;
+            }
+            catch (Exception ex)
+            {
+                pnlPolicies.Visible = false;
+                try { code2.Logs(conn, "Reservation_Confirmed Policies Error", ex.Message, "SYSTEM"); } catch { }
             }
         }
 
