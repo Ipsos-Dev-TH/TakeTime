@@ -239,9 +239,21 @@ namespace Take_Time_BangPhra
                 string storedMode = hasCMode ? Str(row["OTA_Collect_Mode"]) : "";
                 string storedSrc = hasCSrc ? Str(row["OTA_Collect_Source"]) : "";
 
-                bool isOta = otaCh.Trim().Length > 0 || otaBk.Trim().Length > 0 || HasRemarkCollectMarker(remark);
+                bool realOta = otaCh.Trim().Length > 0 || otaBk.Trim().Length > 0;
+                bool isOta = realOta || HasRemarkCollectMarker(remark);
                 string mode, source;
-                ResolveMode(storedMode, storedSrc, remark, otaPay, isOta, out mode, out source);
+                if (hasCMode && storedMode.Trim().Length == 0 && !realOta)
+                {
+                    // หลังรัน migration 17 ใบที่มีเครื่องหมายในหมายเหตุถูก backfill ลงคอลัมน์หมดแล้ว — ใบที่ไม่ใช่ OTA
+                    // แต่มีคนพิมพ์ "(Channel Collect)" ในหมายเหตุภายหลัง ต้องไม่กลายเป็น "OTA เก็บแล้ว" (ข้ามสิทธิ์ผู้จัดการ)
+                    mode = ModeNone;
+                    source = "";
+                    isOta = false;
+                }
+                else
+                {
+                    ResolveMode(storedMode, storedSrc, remark, otaPay, isOta, out mode, out source);
+                }
 
                 var b = Compute(id,
                     mode,
@@ -415,7 +427,10 @@ namespace Take_Time_BangPhra
                                   ") — กรุณาแจ้งฝ่ายบัญชีให้ตรวจสอบ/กลับรายการก่อน";
                     return res;
                 }
-                if (syncedReceiptCond != null && r["SyncedReceipt"] != DBNull.Value && Convert.ToInt32(r["SyncedReceipt"]) > 0)
+                // ล็อกใบเสร็จที่ sync แล้ว ใช้เฉพาะเมื่อ "รู้โหมดอยู่แล้ว" — ใบที่ยังไม่ชัด (UNKNOWN) ต้องเลือกได้เสมอ
+                // ไม่งั้นเช็คอินไม่ได้ตลอดไป (หน้าเช็คอินบังคับเลือกโหมดก่อน)
+                bool applyReceiptLock = syncedReceiptCond != null && res.OldMode != ModeUnknown && res.OldMode.Length > 0;
+                if (applyReceiptLock && r["SyncedReceipt"] != DBNull.Value && Convert.ToInt32(r["SyncedReceipt"]) > 0)
                 {
                     res.Message = "เปลี่ยนวิธีเก็บเงินไม่ได้: การจองนี้มีใบเสร็จที่ส่งเข้าระบบบัญชี (NextAcc) แล้ว " +
                                   "— กรุณาแจ้งฝ่ายบัญชีให้ตรวจสอบก่อน";
@@ -433,7 +448,10 @@ namespace Take_Time_BangPhra
                 decimal otaAmt = hasOtaAmt && r["OtaAmount"] != DBNull.Value ? Dec(r["OtaAmount"]) : -1m;
                 bool depositIsOtaMoney = deposit > 0m
                     && ((otaAmt >= 0m && Math.Abs(deposit - otaAmt) <= 0.01m) || Math.Abs(deposit - totalPrice) <= 0.01m);
-                bool zeroDeposit = mode == ModeHotel && isOta && ledgerRows == 0 && depositIsOtaMoney;
+                // ล้างเฉพาะใบที่เดิมเป็น CHANNEL (ระบบรับอีเมลตั้ง Deposit = ยอด OTA ให้) — ใบ UNKNOWN จาก backfill /
+                // คีย์เอง Deposit คือมัดจำที่รับจริง (ReservationBalance นับเป็นชำระแล้ว) ห้ามล้าง ไม่งั้นเก็บเงินซ้ำ
+                bool zeroDeposit = mode == ModeHotel && isOta && ledgerRows == 0 && depositIsOtaMoney
+                                   && oldModeRaw == ModeChannel;
 
                 string logReason = why;
                 if (zeroDeposit)
@@ -458,7 +476,7 @@ namespace Take_Time_BangPhra
                     (hasRevRef
                         ? " AND (Ota_Revenue_Ref IS NULL OR Ota_Revenue_Ref = N'LEGACY' OR Ota_Revenue_Ref LIKE N'SKIP%')"
                         : "") +
-                    (syncedReceiptCond != null
+                    (applyReceiptLock
                         ? " AND NOT EXISTS (" + string.Format(syncedReceiptCond, "Reservation.ID") + ")"
                         : "") + @";
                       SET @n = @@ROWCOUNT;

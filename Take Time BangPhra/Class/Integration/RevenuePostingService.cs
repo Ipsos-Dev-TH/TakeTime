@@ -300,21 +300,24 @@ namespace Take_Time_BangPhra.Integration
                          AND ISNULL(r.TotalPrice, 0) > 0
                          AND r.Status NOT LIKE N'ยกเลิก%'
                          AND r.Status NOT LIKE N'ลบ%'
-                         AND r.Status <> N'ไม่มาเช็คอิน'
-                         AND NOT EXISTS (
-                               SELECT 1
+                         AND r.Status <> N'ไม่มาเช็คอิน'";
+
+                // ค่าห้องที่ใบเสร็จรับรู้ไปแล้ว "สุทธิ" = Σ บรรทัด ProductType 1 รวมบรรทัด "ส่วนลด" (ยอดติดลบ, ProductType 1)
+                //   ใบเช็คอิน Channel Collect ที่เพิ่มคืนหลังจอง: ค่าห้อง 2,156 + ส่วนลด (OTA จ่ายแล้ว) −1,619.01 = 537
+                //   = รับรู้เฉพาะส่วนที่ลูกค้าจ่ายหน้างาน → ส่วน OTA ยังต้องโพสต์ (เดิม "มีบรรทัดค่าห้องบวก" = ข้ามตลอดไป)
+                //   ใบเสร็จเงินสดปลอมรุ่นเก่า (ค่าห้องเต็ม ไม่มีส่วนลด) → สุทธิ ≈ ราคาห้อง → ข้าม (รับรู้ไปแล้ว)
+                const string receiptRoomNetSql = @"(SELECT ISNULL(SUM(TRY_CONVERT(DECIMAL(18, 2), ard.Price_Amount)), 0)
                                  FROM Account_Receipt ar
                                  JOIN Account_Receipt_Detail ard ON ard.Receipt_ID = ar.ID
                                 WHERE TRY_CONVERT(INT, ar.Reservation_ID) = r.ID
                                   AND (ar.Status = 'Normal' OR ar.Status IS NULL)
                                   AND ISNULL(ar.IsDeposit, 0) = 0
-                                  AND TRY_CONVERT(INT, ard.ProductType_ID) = 1
-                                  AND ISNULL(ard.Product_Data, N'') NOT LIKE N'ส่วนลด%'
-                                  AND TRY_CONVERT(DECIMAL(18, 2), ard.Price_Amount) > 0)";
+                                  AND TRY_CONVERT(INT, ard.ProductType_ID) = 1)";
 
                 var dt = _code.DatabaseQuerySafe(_conn,
                     @"SELECT r.ID, r.CheckoutDate, r.OTA_Channel, r.OTA_Booking_ID, r.OTA_Guest_Name,
-                             r.OTA_Net_Amount, r.OTA_Gross_Amount
+                             r.OTA_Net_Amount, r.OTA_Gross_Amount,
+                             " + receiptRoomNetSql + @" AS ReceiptRoomNet
                         FROM Reservation r
                        WHERE " + candidateWhere + @"
                        ORDER BY r.CheckoutDate, r.ID",
@@ -335,6 +338,19 @@ namespace Take_Time_BangPhra.Integration
                     {
                         decimal amount;
                         if (!TryResolveOtaRevenueAmount(r, resId, balances, grossBasis, out amount)) continue;
+
+                        // ใบเสร็จรับรู้ส่วนของ OTA ไปแล้วหรือยัง: สุทธิค่าห้องในใบเสร็จ > (ราคาห้อง − ยอด OTA) = รวมส่วน OTA แล้ว
+                        Take_Time_BangPhra.ReservationBalance bRcpt;
+                        decimal roomTotal = balances.TryGetValue(resId, out bRcpt) && bRcpt != null ? bRcpt.RoomTotal : 0m;
+                        decimal receiptRoomNet = SafeDec(r["ReceiptRoomNet"]);
+                        decimal otaPortionLimit = Math.Max(0m, roomTotal - amount) + Take_Time_BangPhra.ReservationBalance.RoundingTolerance;
+                        if (receiptRoomNet > otaPortionLimit)
+                        {
+                            LogOnce("OtaRoomRevenue_Receipted_" + resId,
+                                $"OtaRoomRevenue: การจอง #{resId} ใบเสร็จรับรู้ค่าห้องสุทธิ {receiptRoomNet:N2} แล้ว " +
+                                $"(ราคาห้อง {roomTotal:N2}, ยอด OTA {amount:N2}) — ข้าม กันรายได้ซ้ำ");
+                            continue;
+                        }
                         ProcessOneOtaReservation(r, resId, amount, grossBasis ? "GROSS" : "NET", arAccountId);
                         posted++;
                     }

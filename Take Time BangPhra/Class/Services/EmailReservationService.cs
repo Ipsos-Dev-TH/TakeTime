@@ -2245,11 +2245,17 @@ namespace Take_Time_BangPhra.Services
             // (SET ทุกนิพจน์ใน UPDATE เห็นค่า "ก่อนแก้" ของแถว จึงอ้าง OTA_Collect_Source เดิมได้ทุกตัว)
             if (cols.Contains("OTA_Collect_Mode") && cols.Contains("OTA_Collect_Source"))
             {
+                // คงค่าเดิมเมื่อ: เจ้าหน้าที่ยืนยันแล้ว (STAFF) หรือ อีเมลแก้ไขนี้ "เดา" (ไม่มีประเภทการชำระ) แต่ของเดิมรู้แน่แล้ว
+                // จากอีเมล/backfill — การเดาต้องไม่ลดระดับโหมดที่รู้แน่ (ไม่งั้น Deposit กลายเป็น 0 และเช็คอินถูกบล็อกให้เลือกใหม่)
+                const string keepExisting =
+                    "(ISNULL(OTA_Collect_Source, N'') = N'STAFF' OR (@CSrc = N'GUESS' " +
+                    "AND ISNULL(OTA_Collect_Source, N'') IN (N'EMAIL', N'BACKFILL') " +
+                    "AND ISNULL(OTA_Collect_Mode, N'') IN (N'CHANNEL', N'HOTEL')))";
                 sets[sets.IndexOf("[Deposit] = @Dep")] =
-                    "[Deposit] = CASE WHEN ISNULL(OTA_Collect_Source, N'') = N'STAFF' " +
+                    "[Deposit] = CASE WHEN " + keepExisting + " " +
                     "THEN (CASE WHEN OTA_Collect_Mode = N'CHANNEL' THEN @Total ELSE 0 END) ELSE @Dep END";
-                sets.Add("OTA_Collect_Mode = CASE WHEN ISNULL(OTA_Collect_Source, N'') = N'STAFF' THEN OTA_Collect_Mode ELSE @CMode END");
-                sets.Add("OTA_Collect_Source = CASE WHEN ISNULL(OTA_Collect_Source, N'') = N'STAFF' THEN OTA_Collect_Source ELSE @CSrc END");
+                sets.Add("OTA_Collect_Mode = CASE WHEN " + keepExisting + " THEN OTA_Collect_Mode ELSE @CMode END");
+                sets.Add("OTA_Collect_Source = CASE WHEN " + keepExisting + " THEN OTA_Collect_Source ELSE @CSrc END");
             }
             _reservationUpdateSet = string.Join(", ", sets);
             return _reservationUpdateSet;

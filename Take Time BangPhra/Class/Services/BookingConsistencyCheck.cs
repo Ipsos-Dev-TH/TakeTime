@@ -196,10 +196,10 @@ namespace Take_Time_BangPhra.Services
             decimal tol = ReservationBalance.RoundingTolerance;
 
             const string whereSql =
-                "r.CheckoutDate >= @bcToday AND r.CheckinDate < @bcHorizon AND ISNULL(r.Status, N'') NOT LIKE N'ยกเลิก%'";
+                "r.CheckoutDate >= @bcToday AND r.CheckinDate < @bcHorizon AND ISNULL(r.Status, N'') NOT LIKE N'ยกเลิก%' AND ISNULL(r.Status, N'') NOT LIKE N'ลบ%'";
             // เฉพาะหมวด "บันทึกเงิน OTA เป็นเงินสด": รวมใบที่เช็คเอาท์ไปแล้วย้อนหลัง (งานค้างที่ยังไม่ได้แก้)
             const string whereCashSql =
-                "r.CheckoutDate >= @bcBacklog AND r.CheckinDate < @bcHorizon AND ISNULL(r.Status, N'') NOT LIKE N'ยกเลิก%'";
+                "r.CheckoutDate >= @bcBacklog AND r.CheckinDate < @bcHorizon AND ISNULL(r.Status, N'') NOT LIKE N'ยกเลิก%' AND ISNULL(r.Status, N'') NOT LIKE N'ลบ%'";
 
             var catCash = new Category("บันทึกเงิน OTA เป็นเงินสด (รวมใบที่ออกไปแล้วย้อนหลัง " + CashBacklogDays + " วัน)",
                 "ตรวจ/แก้ที่ หน้าประวัติการชำระ → แท็บ ⚠ เงินสดของใบ OTA");

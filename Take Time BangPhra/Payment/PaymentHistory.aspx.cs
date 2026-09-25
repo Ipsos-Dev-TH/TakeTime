@@ -662,7 +662,10 @@ namespace Take_Time_BangPhra.Payment
                 bool notesCheckin = notes.TrimStart().StartsWith("เช็คอิน", StringComparison.Ordinal);
                 decimal ota = b.OtaAmount >= 0m ? b.OtaAmount
                     : (r["SqlOtaAmount"] != DBNull.Value ? Convert.ToDecimal(r["SqlOtaAmount"]) : -1m);
-                bool amountMatch = ota > 0m && Math.Abs(amount - ota) <= tol;
+                // ราคาต่อคืนเก็บเป็นบาทเต็ม (ปัดลง) → แถวเงินสดปลอม = ยอดรวมในหน้า (เช่น 1,617) ต่ำกว่ายอด OTA (1,619.01)
+                // เกิน tolerance ได้ — นับว่าตรงถ้าเท่ากับราคาห้องในระบบ และราคานั้นต่างจากยอด OTA ไม่เกิน 1%
+                bool amountMatch = ota > 0m && (Math.Abs(amount - ota) <= tol
+                    || (Math.Abs(amount - b.RoomTotal) <= tol && Math.Abs(ota - b.RoomTotal) <= Math.Max(tol, ota * 0.01m)));
 
                 if (!done)
                 {
@@ -790,6 +793,38 @@ namespace Take_Time_BangPhra.Payment
             return tag.Length > 250 ? tag.Substring(0, 249) + "]" : tag;
         }
 
+        /// <summary>
+        /// การจองที่ยังไม่ชัดว่าใครเก็บเงิน (UNKNOWN) — การยืนยันว่า "เงินนี้ OTA เก็บ" = ยืนยันว่า Channel Collect ด้วย
+        /// ต้องบันทึกโหมดก่อนเปลี่ยนสถานะแถว ไม่งั้นหลังตัดแถวเงินสดออก ยอดค้างกลับเป็นเต็มราคาห้อง (UNKNOWN ไม่นับยอด OTA)
+        /// และหลัง JE ตั้ง Ota_Revenue_Ref แล้วจะเปลี่ยนโหมดไม่ได้อีก (ผู้ใช้หน้านี้ = เจ้าของ/แอดมิน จึงเลือก CHANNEL ได้)
+        /// </summary>
+        private bool EnsureChannelModeForReclass(DataRow r, System.Collections.Generic.Dictionary<int, string> done,
+            string user, System.Collections.Generic.List<string> notes)
+        {
+            if (!string.Equals(Convert.ToString(r["Mode"]), ReservationBalance.ModeUnknown, StringComparison.Ordinal)) return true;
+            int resId = (int)r["ResId"];
+            string prev;
+            if (done.TryGetValue(resId, out prev))
+            {
+                if (prev == null) return true;
+                notes.Add($"#{r["PhId"]}: {prev}");
+                return false;
+            }
+            var res = ReservationBalance.SetCollectMode(connectionString, resId, ReservationBalance.ModeChannel, "STAFF", user,
+                "ตรวจเงินสดใบ OTA: ยืนยันว่าเป็นเงินที่ OTA เก็บ (Payment_History #" + r["PhId"] + ")");
+            if (res.Ok)
+            {
+                done[resId] = null;
+                codeInstance.Logs(connectionString, "OTA-Cash-Reclass",
+                    $"การจอง #{resId} → OTA เก็บเงินแล้ว (CHANNEL) ก่อนปรับแถว #{r["PhId"]}", user);
+                return true;
+            }
+            string msg = "การจอง #" + resId + " ตั้งเป็น \"OTA เก็บเงินแล้ว\" ไม่ได้ — " + res.Message;
+            done[resId] = msg;
+            notes.Add($"#{r["PhId"]}: {msg}");
+            return false;
+        }
+
         /// <summary>1) ยืนยัน: เป็นเงินที่ OTA เก็บ (ไม่ได้รับเงินสด) — เฉพาะแถวที่ไม่มีใบเสร็จ</summary>
         protected void btnOtaConfirm_Click(object sender, EventArgs e)
         {
@@ -804,6 +839,7 @@ namespace Take_Time_BangPhra.Payment
                 var notes = new System.Collections.Generic.List<string>();
                 string user = CurrentUserName;
                 string tag = BuildNoteTag($"OTA-RECLASS {DateTime.Now.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)} by {user}: เงิน OTA เก็บ ไม่ใช่เงินสดรับ");
+                var modeDone = new System.Collections.Generic.Dictionary<int, string>();
                 foreach (DataRow r in rows)
                 {
                     long phId = (long)r["PhId"];
@@ -813,6 +849,7 @@ namespace Take_Time_BangPhra.Payment
                         notes.Add($"#{phId}: มีใบเสร็จ {r["ReceiptId"]} — ใช้ปุ่ม \"ส่งกลับรายการบัญชี\" แทน");
                         continue;
                     }
+                    if (!EnsureChannelModeForReclass(r, modeDone, user, notes)) { skipped++; continue; }
                     int n = codeInstance.DatabaseInsertSafe(connectionString,
                         @"UPDATE Payment_History
                              SET Status = 'OTA_RECLASS',
@@ -924,6 +961,7 @@ namespace Take_Time_BangPhra.Payment
                 int ok = 0, skipped = 0;
                 var notes = new System.Collections.Generic.List<string>();
                 string user = CurrentUserName;
+                var modeDone = new System.Collections.Generic.Dictionary<int, string>();
                 foreach (DataRow r in rows)
                 {
                     long phId = (long)r["PhId"];
@@ -948,6 +986,7 @@ namespace Take_Time_BangPhra.Payment
                         notes.Add($"#{phId}: ยอด {amount:N2} มากกว่ายอดใบเสร็จ {receiptTotal:N2} — ตรวจมือ");
                         continue;
                     }
+                    if (!EnsureChannelModeForReclass(r, modeDone, user, notes)) { skipped++; continue; }
                     long qid = sync.EnqueueOtaCashReclass(phId, (int)r["ResId"], receiptId, amount, DateTime.Today,
                         r["OtaChannel"].ToString(), r["OtaBookingId"].ToString(), (DateTime)r["PaymentDate"], user);
                     if (qid > 0)
