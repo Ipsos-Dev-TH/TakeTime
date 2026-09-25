@@ -336,6 +336,17 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    admin toggles. ข้อจำกัด: pull เป็น per-product polling (รอ NextAcc เพิ่ม global `?since=` cursor),
    inbound Product_Out omit Account_Paid_How_ID. Needs Windows build + live test.
 
+10. **หัวกระดาษเอกสารขาย (`Nexaacc_Receipt_Header_Type` AUTO|ABBREVIATED, PHASE19_18):** NextAcc คำนวณหัวตอนพิมพ์
+   (`PdfGenerationService.ComputeDocumentTitle`) — "ใบเสร็จรับเงิน/ใบกำกับภาษีอย่างย่อ" เฉพาะเมื่อผ่าน
+   `AbbreviatedTaxInvoiceRule` (จด VAT + `Company.IsRetailApproved`/`PhoR06ApprovedDate` หรือ site-settings
+   `RequirePhoR06ForAbbreviatedTaxInvoice=false`) ไม่งั้น TaxInvoice ของผู้ซื้อ declined/ไม่ครบ = "ใบเสร็จรับเงิน".
+   TakeTime บังคับหัวไม่ได้ — ปลดที่ NextAcc. หลัง sync log `หัวเอกสาร NextAcc:` (อ่าน documentTitle กลับ).
+11. **ใบรับรองแทนใบเสร็จรับเงิน (type 15, PHASE19_19):** หน้า `Account/PaymentVoucher.aspx` ติ๊ก "ผู้รับเงินออกใบเสร็จไม่ได้"
+   → payload `CREATE_VOUCHER_JOURNAL` มี certificateInLieu → `ProcessCertificateInLieu` (company `/document` type 15 +
+   approve: Dr ค่าใช้จ่าย / Cr แหล่งเงิน (+Cr WHT), Paid ทันที). **ห้ามใช้** `/integration/certificates-in-lieu`
+   (ตั้งเจ้าหนี้ 21220 ค้าง). ข้อมูลเก็บใน `Account_Payment.Is_Certificate_In_Lieu`/`Cil_*`; `EnqueuePaymentVoucher`
+   อ่านจาก DB เองเมื่อผู้เรียกไม่ส่ง (กันปุ่มซิงค์ใหม่ส่งเป็น PV ซ้ำ).
+
 ## Queue resilience (ส.ค. 2026 — หลังเคส NextAcc ล่มทั้งแอป)
 
 NextAcc เคย start ไม่ขึ้น (DI circular dependency ใน `Program.cs`) → ทุก endpoint ตอบ HTTP 500
