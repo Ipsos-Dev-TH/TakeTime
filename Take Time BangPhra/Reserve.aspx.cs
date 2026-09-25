@@ -835,7 +835,10 @@ namespace Take_Time_BangPhra
                         {
                             decimal pageTotal = 0m;
                             decimal.TryParse(TextBox4.Text, out pageTotal);
-                            decimal otaAmount = otaBal.Deposit > 0 ? otaBal.Deposit : otaBal.RoomTotal;
+                            // ยอด OTA จาก "อีเมลจอง" (OtaAmount) — ห้ามใช้ Deposit: หน้าแก้ไขการจองเขียน Deposit
+                            // เป็นยอด Payment_History (= 0 สำหรับใบ OTA) → เดิม fallback ไปใช้ราคาห้องทั้งหมด
+                            // ⇒ คืนที่เพิ่มหลังแก้ไขถูกนับว่า OTA จ่ายแล้ว ไม่ได้เก็บเงินลูกค้า
+                            decimal otaAmount = otaBal.OtaAmount >= 0 ? otaBal.OtaAmount : otaBal.RoomTotal;
                             decimal covered = Math.Min(otaAmount, pageTotal);
                             if (covered > totalPaid)
                             {
@@ -8217,6 +8220,9 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
                     string command = Request.QueryString["command"];
                     string id = Request.QueryString["id"];
                     string check = Request.QueryString["check"];
+                    // เบอร์ต่างชาติ "+852…" ใน query string (ไม่ได้ encode) กลายเป็นช่องว่างนำหน้า — คืนเป็น "+"
+                    // เหมือน Page_Load ไม่งั้นหาลูกค้าไม่เจอ ยอดรวมไม่อัปเดตหลังลบรายการชาร์จ
+                    if (!string.IsNullOrEmpty(check) && check[0] == ' ') check = "+" + check.Replace(" ", "");
 
                     if (!string.IsNullOrEmpty(id))
                     {

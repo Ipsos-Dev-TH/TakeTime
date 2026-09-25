@@ -95,8 +95,10 @@ namespace Take_Time_BangPhra
                 {
                     var validation = AccountingArithmeticValidator.ValidationResult.Fail(
                         "CHECKOUT_UNDERPAID",
-                        $"ลูกค้า checkout โดยยอดชำระไม่ครบ: ราคาห้อง+ค่าเสียหาย {expectedPayable:N2} - ชำระแล้ว {totalPaid:N2} = ค้างชำระ {outstanding:N2} บาท" +
-                        (bal != null && bal.IsChannelCollect ? " (ใบ OTA Channel Collect — ค่าห้อง OTA เก็บแล้ว ยอดนี้คือของเสริม/ค่าเสียหาย)" : ""),
+                        bal != null
+                            ? $"ลูกค้า checkout โดยยอดชำระไม่ครบ: ยอดรวม+ค่าเสียหาย {bal.Total + damageCharge + missingItemsCharge:N2} - รับแล้ว {bal.Received:N2} = ค้างชำระ {outstanding:N2} บาท" +
+                              (bal.IsChannelCollect ? $" (ใบ OTA Channel Collect — OTA เก็บแล้ว {bal.OtaCovered:N2} ยอดค้างคือส่วนเกิน/ของเสริม/ค่าเสียหาย)" : "")
+                            : $"ลูกค้า checkout โดยยอดชำระไม่ครบ: ราคาห้อง+ค่าเสียหาย {expectedPayable:N2} - ชำระแล้ว {totalPaid:N2} = ค้างชำระ {outstanding:N2} บาท",
                         expectedPayable, totalPaid, blocking: false);
                     AccountingArithmeticValidator.LogValidationFailure("CHECKOUT", reservationId.ToString(), validation, adminId.ToString());
                     _code.Logs(_connectionString, "Checkout",

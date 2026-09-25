@@ -235,6 +235,10 @@ namespace Take_Time_BangPhra.Services
                     ReservationBalance b;
                     if (!bal.TryGetValue(id, out b) || b == null || !b.IsChannelCollect) continue;
                     decimal cash = Dec(row["CashAmt"]);
+                    // ลูกค้าจ่ายของเสริม/ค่าชาร์จเป็นเงินสดเองได้ปกติ — ธงนี้หมายถึง "ลงเงิน OTA เป็นเงินสด"
+                    // (หน้าเช็คอินรุ่นเก่าบังคับลงเต็มยอดค่าห้อง) → เตือนเฉพาะเมื่อเงินสดครอบคลุมยอด OTA
+                    decimal otaPart = b.OtaAmount >= 0 ? b.OtaAmount : b.RoomTotal;
+                    if (cash + ReservationBalance.RoundingTolerance < otaPart) continue;
                     int cnt = row["Cnt"] == DBNull.Value ? 0 : Convert.ToInt32(row["Cnt"]);
                     catCash.Rows.Add(Line(Find(infos, id), id, b,
                         "เงินสด " + Money(cash) + " (" + cnt + " รายการ)"));

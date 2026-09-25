@@ -35,7 +35,14 @@ namespace Take_Time_BangPhra
         public decimal PaidLedger;       // SUM(Payment_History.PaymentAmount) Status='COMPLETED' (refund rows are negative)
         public int LedgerRows;           // COUNT of those rows
         public decimal Deposit;          // Reservation.Deposit
-        public decimal OtaCovered;       // CHANNEL: RoomTotal; else 0
+        public decimal OtaCovered;       // CHANNEL: ยอดที่ OTA เก็บแทนโรงแรม (ไม่เกินยอดรวม); else 0
+        /// <summary>
+        /// ยอดที่ OTA เก็บจากลูกค้าไปแล้ว ตาม "อีเมลจอง" (OTA_Net_Amount / OTA_Gross_Amount ตาม Email_Rsv_TotalSource)
+        /// ไม่ใช่ Reservation.Deposit — Deposit ถูกเขียนทับได้หลายทาง (หน้าแก้ไขการจองตั้งเป็นยอด Payment_History
+        /// = 0, เช็คอินตั้งเป็น TotalPrice) ถ้าใช้ Deposit คืนที่เพิ่มหลังแก้ไขจะถูกนับว่า OTA จ่ายแล้ว (เก็บเงินไม่ครบ)
+        /// −1 = ไม่มีข้อมูล (ใบเก่าก่อนมีคอลัมน์ OTA_*)
+        /// </summary>
+        public decimal OtaAmount = -1m;
         public decimal Due;              // what the front desk still has to collect (>= 0)
         public decimal Credit;           // overpaid amount (>= 0)
         public decimal Received;         // for display = Total - Due + Credit
@@ -62,7 +69,7 @@ namespace Take_Time_BangPhra
 
         /// <summary>คำนวณยอด — ไม่แตะฐานข้อมูล (ยกเว้นอ่านค่า tolerance ผ่าน AppCfg ที่ cache ไว้)</summary>
         public static ReservationBalance Compute(int reservationId, string collectMode, decimal roomTotal, decimal charges,
-            decimal pendingCharges, decimal paidLedger, int ledgerRows, decimal deposit)
+            decimal pendingCharges, decimal paidLedger, int ledgerRows, decimal deposit, decimal otaAmount = -1m)
         {
             var b = new ReservationBalance();
             b.ReservationId = reservationId;
@@ -78,11 +85,21 @@ namespace Take_Time_BangPhra
             decimal paid = ledgerRows > 0 ? paidLedger : deposit;
 
             decimal due;
-            if (b.CollectMode == ModeChannel)
+            bool channel = b.CollectMode == ModeChannel;
+            if (channel)
             {
-                // OTA เก็บค่าห้องไปแล้ว — หน้างานเก็บเฉพาะค่าใช้จ่ายในห้องที่ยังค้าง
-                b.OtaCovered = roomTotal;
-                due = pendingCharges;
+                // OTA เก็บค่าห้อง "ตามที่จองไว้" ไปแล้ว — ลูกค้ายังต้องจ่ายหน้างาน:
+                //   ส่วนที่ราคาห้องเกินยอด OTA (เพิ่มคืน/อัปเกรดหลังจอง) + ค่าใช้จ่ายในห้อง − ที่ลูกค้าจ่ายโรงแรมเองแล้ว
+                //   ⚠ ยอด OTA มาจากอีเมลจอง (OtaAmount) ไม่ใช่ Deposit — ดูคำอธิบายที่ฟิลด์ OtaAmount
+                //   ใบเก่าที่ไม่มีข้อมูลนี้ → ถอยไปใช้ Deposit (ตั้งตอนรับอีเมล) แล้วค่อยราคาห้อง
+                decimal ota = otaAmount >= 0m ? otaAmount : (deposit > 0m ? deposit : roomTotal);
+                b.OtaAmount = ota;
+                b.OtaCovered = Math.Min(ota, b.Total);
+                decimal paidByGuest = ledgerRows > 0 ? paidLedger : 0m;   // Deposit ของใบ OTA = เงิน OTA ไม่ใช่ลูกค้าจ่าย
+                due = roomTotal + charges - ota - paidByGuest;
+                // ค่าชาร์จที่ยัง PENDING = ยังไม่ได้จ่ายแน่นอน — ต้องไม่ถูกกลบโดยแถว "เงินสดปลอม" ที่หน้าเช็คอินรุ่นเก่า
+                // บังคับลงเต็มยอดค่าห้อง (Payment_History ของใบ OTA ที่เช็คอินก่อนแก้)
+                if (due < pendingCharges) due = pendingCharges;
             }
             else
             {
@@ -95,7 +112,8 @@ namespace Take_Time_BangPhra
 
             if (due < 0m)
             {
-                b.Credit = -due;
+                // ใบ OTA ไม่รายงาน "จ่ายเกิน" — ยอดติดลบมาจากแถวเงินสดปลอมของหน้าเช็คอินรุ่นเก่า ไม่ใช่เงินที่ต้องคืนลูกค้า
+                b.Credit = channel ? 0m : -due;
                 b.Due = 0m;
             }
             else
@@ -161,6 +179,7 @@ namespace Take_Time_BangPhra
 
             if (dt == null) return result;
             bool hasOtaCol = dt.Columns.Contains("OTA_Payment_Type");
+            bool hasOtaAmt = dt.Columns.Contains("OtaAmount");
 
             foreach (DataRow row in dt.Rows)
             {
@@ -177,13 +196,16 @@ namespace Take_Time_BangPhra
                     Dec(row["PendingCharges"]),
                     Dec(row["PaidLedger"]),
                     row["LedgerRows"] == DBNull.Value ? 0 : Convert.ToInt32(row["LedgerRows"]),
-                    Dec(row["Deposit"]));
+                    Dec(row["Deposit"]),
+                    hasOtaAmt && row["OtaAmount"] != DBNull.Value ? Dec(row["OtaAmount"]) : -1m);
 
                 // ใบจองที่ยกเลิกแล้วไม่มียอดค้างเก็บจากลูกค้า และ "รับแล้ว" = เงินที่รับจริง
                 // (ไม่ใช่ Total − 0 = ราคาเต็ม) — ไม่งั้นหน้ารายการจองรวมยอดค้างของใบที่ยกเลิกไปด้วย
                 string status = dt.Columns.Contains("Status") && row["Status"] != DBNull.Value
                     ? Convert.ToString(row["Status"]) : "";
-                if (status.StartsWith("ยกเลิก", StringComparison.Ordinal))
+                // "ลบจากการเลื่อนวันเข้าพัก" = ใบที่ถูกย้ายไปใบใหม่ตอนเลื่อนวัน — ไม่มียอดค้างเช่นกัน
+                if (status.StartsWith("ยกเลิก", StringComparison.Ordinal)
+                    || status.StartsWith("ลบ", StringComparison.Ordinal))
                 {
                     decimal paidActual = b.LedgerRows > 0 ? b.PaidLedger : b.Deposit;
                     b.Due = 0m;
@@ -216,7 +238,15 @@ namespace Take_Time_BangPhra
 
             string sql =
                 "SELECT r.ID, ISNULL(r.TotalPrice, 0) AS TotalPrice, ISNULL(r.Deposit, 0) AS Deposit, r.Remark, r.Status" +
-                (withOta ? ", r.OTA_Payment_Type" : "") +
+                (withOta
+                    ? @", r.OTA_Payment_Type,
+                         CASE WHEN ISNULL((SELECT TOP 1 ConfigValue FROM Accounting_Integration_Config
+                                           WHERE ConfigKey = 'Email_Rsv_TotalSource'), 'AMOUNT') = 'REFSELL'
+                                   AND ISNULL(r.OTA_Gross_Amount, 0) > 0 THEN r.OTA_Gross_Amount
+                              WHEN ISNULL(r.OTA_Net_Amount, 0) > 0 THEN r.OTA_Net_Amount
+                              WHEN ISNULL(r.OTA_Gross_Amount, 0) > 0 THEN r.OTA_Gross_Amount
+                              ELSE NULL END AS OtaAmount"
+                    : "") +
                 ", " + chargeCols + ", " + payCols + @"
                   FROM Reservation r";
 

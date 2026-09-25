@@ -34,7 +34,8 @@
 SET NOCOUNT ON;
 
 -- ⚙️ ตั้ง 1 = ดูอย่างเดียวไม่แก้ / 0 = แก้จริง
-DECLARE @DryRun BIT = 0;
+-- ค่าเริ่มต้น = ดูอย่างเดียว (ปลอดภัย) — ตรวจรายการที่จะแก้แล้วค่อยเปลี่ยนเป็น 0 รันซ้ำ
+DECLARE @DryRun BIT = 1;
 
 IF COL_LENGTH('Reservation', 'OTA_Booking_ID') IS NULL
 BEGIN
