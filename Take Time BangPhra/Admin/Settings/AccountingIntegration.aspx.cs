@@ -76,6 +76,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "etaxRdWatch", config.IsEtaxRdWatchEnabled },
                     { "etaxRdFrom", config.EtaxRdFromContains },
                     { "otaRoomRevenue", config.IsOtaRoomRevenueEnabled },
+                    { "otaDocumentMode", config.OtaDocumentMode },
                     { "stockInUseGRNI", config.IsStockInUseGRNI },
                     { "stockInSkipJournal", config.IsStockInSkipJournal },
                     { "stockQtySync", config.IsStockQtySyncEnabled },
@@ -248,6 +249,18 @@ namespace Take_Time_BangPhra.Admin.Settings
                 case "updatePaidTypeAccount":
                     result = UpdatePaidTypeAccount();
                     break;
+                case "syncWallets":
+                    result = SyncNexaaccWallets();
+                    break;
+                case "walletOptions":
+                    result = GetWalletOptions();
+                    break;
+                case "getGatewayPaidHow":
+                    result = GetGatewayPaidHow();
+                    break;
+                case "getOtaChannelMap":
+                    result = GetOtaChannelMap();
+                    break;
                 case "lookupDocSource":
                     result = LookupDocumentSource();
                     break;
@@ -340,6 +353,12 @@ namespace Take_Time_BangPhra.Admin.Settings
                 case "saveLineDaily":
                     result = SaveLineDailyConfig(data);
                     break;
+                case "saveGatewayPaidHow":
+                    result = SaveGatewayPaidHow(data);
+                    break;
+                case "saveOtaChannelMap":
+                    result = SaveOtaChannelMap(data);
+                    break;
                 default:
                     result = new Dictionary<string, object> { { "success", false }, { "message", "Unknown action" } };
                     break;
@@ -390,6 +409,21 @@ namespace Take_Time_BangPhra.Admin.Settings
                 if (data.ContainsKey("etaxRdWatch")) config.SetConfig("Etax_Rd_Watch_Enabled", BoolToFlag(data["etaxRdWatch"]));
                 if (data.ContainsKey("etaxRdFrom")) config.SetConfig("Etax_Rd_FromContains", data["etaxRdFrom"]?.ToString() ?? "rd.go.th, etax, teda.th");
                 if (data.ContainsKey("otaRoomRevenue")) config.SetConfig("Nexaacc_OtaRoomRevenue", BoolToFlag(data["otaRoomRevenue"]));
+                // โหมดเอกสาร OTA = นโยบายบัญชี → เขียนเฉพาะเมื่อเปลี่ยนจริง + log (หน้าเว็บส่งมาเฉพาะเมื่อโหลดค่าจริงสำเร็จ)
+                if (data.ContainsKey("otaDocumentMode"))
+                {
+                    string odm = (data["otaDocumentMode"]?.ToString() ?? "OFF").Trim().ToUpperInvariant();
+                    if (odm != "RECEIPT_DOC") odm = "OFF";
+                    string curOdm = config.OtaDocumentMode;
+                    if (!string.Equals(curOdm, odm, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _code.Logs(ConnStr, "AccountingConfig",
+                            $"โหมดเอกสาร OTA ถูกเปลี่ยน: Nexaacc_OtaDocument_Mode {curOdm} → {odm} " +
+                            $"โดย {Session["UserName"] ?? "?"} — มีผลกับการจอง Channel Collect ที่ยังไม่เคยโพสต์ (Ota_Revenue_Ref ว่าง) เท่านั้น",
+                            Session["UserName"]?.ToString() ?? "SYSTEM");
+                        config.SetConfig("Nexaacc_OtaDocument_Mode", odm);
+                    }
+                }
                 if (data.ContainsKey("stockInUseGRNI")) config.SetConfig("Nexaacc_StockIn_UseGRNI", BoolToFlag(data["stockInUseGRNI"]));
                 if (data.ContainsKey("stockInSkipJournal")) config.SetConfig("Nexaacc_StockIn_SkipJournal", BoolToFlag(data["stockInSkipJournal"]));
                 if (data.ContainsKey("stockQtySync")) config.SetConfig("Nexaacc_StockQtySync", BoolToFlag(data["stockQtySync"]));
@@ -1633,6 +1667,98 @@ namespace Take_Time_BangPhra.Admin.Settings
                 }
                 catch { /* ตารางอาจยังไม่มีคอลัมน์นี้ */ }
 
+                // ── 4b) แหล่งเงินที่ผูกไว้ "ผิดชนิด/ตายแล้ว" (กระเป๋าเงิน NextAcc) + เกตเวย์ + OTA ─────
+                try
+                {
+                    var ph = GetPaidHowMapping();
+                    var phItems = ph.ContainsKey("items") ? ph["items"] as List<Dictionary<string, object>> : null;
+                    if (phItems != null)
+                    {
+                        var bad = new List<string>();
+                        foreach (var it in phItems)
+                        {
+                            string w = it["warning"]?.ToString() ?? "";
+                            string acc = it["accountId"]?.ToString() ?? "";
+                            if (w.Length > 0 && acc.Length > 0)   // ยังไม่ผูก = รายงานในข้อ 4 แล้ว
+                                bad.Add($"{it["name"]} → {it["accountCode"]}: {w}");
+                        }
+                        if (bad.Count > 0)
+                            add("error", $"แหล่งเงินผูกบัญชีผิดชนิด/บัญชีใช้ไม่ได้ ({bad.Count} รายการ)",
+                                string.Join("\n", bad)
+                                + "\n\nวิธีแก้: หัวข้อ 'วิธีจ่ายเงิน → บัญชี NextAcc' กด \"ดึงรายการจาก NextAcc\" แล้วเลือกกระเป๋าเงิน/บัญชีใหม่");
+                    }
+
+                    // เกตเวย์ที่เปิดใช้อยู่ → ยอดรับลงแหล่งเงินชื่ออะไร และแหล่งเงินนั้นผูกบัญชีหรือยัง
+                    string gwFallback = Take_Time_BangPhra.Payments.PaymentGatewayConfig.Get("Payment_PaidHow_Name", "Omise (จ่ายออนไลน์)");
+                    string gwActive = "";
+                    try
+                    {
+                        // ตรวจเฉพาะเมื่อเปิดใช้เกตเวย์จริง (ตั้งคีย์ครบ) — ไม่งั้นเตือนรกทั้งที่ไม่ได้รับเงินออนไลน์
+                        if (Take_Time_BangPhra.Payments.PaymentGatewayConfig.IsGatewayReady)
+                            gwActive = Take_Time_BangPhra.Payments.PaymentGatewayConfig.ActiveProvider;
+                    }
+                    catch { }
+                    if (!string.IsNullOrEmpty(gwActive))
+                    {
+                        string gwName = Integration.AccountingSyncService.ResolveGatewayPaidHowName(ConnStr, gwActive, null, gwFallback);
+                        var gwRow = _code.DatabaseQuerySafe(ConnStr,
+                            @"SELECT TOP 1 ISNULL(CAST(Nexaacc_AccountId AS NVARCHAR(50)), '') AS Acc, ISNULL(Nexaacc_AccountCode, '') AS Code
+                                FROM Account_Paid_How WHERE Paid_How = @n AND Status = 'True'",
+                            new Dictionary<string, object> { { "@n", gwName } });
+                        if (gwRow == null || gwRow.Rows.Count == 0)
+                            add("error", $"เกตเวย์ {gwActive}: ไม่มีแหล่งเงินชื่อ \"{gwName}\"",
+                                "ยอดที่ลูกค้าจ่ายออนไลน์ถูกบันทึกด้วยชื่อแหล่งเงินนี้ แต่ไม่มีแถวที่เปิดใช้ใน Account_Paid_How → "
+                                + "NextAcc จะเดาบัญชีเอง (มักเป็นเงินสด) — สร้างแหล่งเงินชื่อนี้ หรือเลือกแหล่งเงินรายเกตเวย์ในหน้านี้");
+                        else if (string.IsNullOrEmpty(gwRow.Rows[0]["Acc"]?.ToString()))
+                            add("error", $"เกตเวย์ {gwActive}: แหล่งเงิน \"{gwName}\" ยังไม่ผูกบัญชี NextAcc",
+                                "เงินที่เกตเวย์รับแทน (ยังไม่เข้าธนาคารจนกว่าจะ payout) ควรลงบัญชีพักเงิน/ลูกหนี้ผู้ให้บริการรับชำระเงิน "
+                                + "(ผังมาตรฐาน NextAcc 11340) หรือกระเป๋าเงิน Digital (11113) — ผูกที่ 'วิธีจ่ายเงิน → บัญชี NextAcc'");
+                        else
+                            add("info", $"เกตเวย์ {gwActive}: ยอดรับลงแหล่งเงิน \"{gwName}\" → บัญชี {gwRow.Rows[0]["Code"]}",
+                                "ค่าธรรมเนียมเกตเวย์/ส่วนต่างตอนโอนเข้าธนาคาร (payout) ยังไม่ลงอัตโนมัติ — ผู้ทำบัญชีบันทึกตอนกระทบยอด "
+                                + "(Dr ธนาคาร + Dr ค่าธรรมเนียม + Dr ภาษีซื้อ / Cr บัญชีพักเงินเกตเวย์)");
+                    }
+
+                    // OTA: โหมดเอกสาร + ช่องทางที่ยังไม่มีบัญชี
+                    var ocfg = new Integration.AccountingConfig(ConnStr);
+                    if (ocfg.IsOtaDocumentMode)
+                    {
+                        var om = GetOtaChannelMap();
+                        if (!(om.ContainsKey("success") && Convert.ToBoolean(om["success"])))
+                            add("error", "โหมดเอกสาร OTA เปิดอยู่ แต่อ่านตาราง mapping ช่องทางไม่ได้",
+                                (om.ContainsKey("message") ? om["message"]?.ToString() : "") + "\nรัน migration PHASE19_21 แล้วตรวจอีกครั้ง");
+                        var oItems = om.ContainsKey("items") ? om["items"] as List<Dictionary<string, object>> : null;
+                        bool haveArFallback = false;
+                        try
+                        {
+                            var ar = _code.DatabaseQuerySafe(ConnStr,
+                                @"SELECT TOP 1 1 FROM Accounting_Account_Mapping
+                                   WHERE TakeTime_Code = 'OTA_RECEIVABLE' AND Is_Active = 1
+                                     AND (Nexaacc_AccountId IS NOT NULL OR ISNULL(Nexaacc_AccountCode, '') <> '')", null);
+                            haveArFallback = ar != null && ar.Rows.Count > 0;
+                        }
+                        catch { }
+                        var missing = new List<string>();
+                        if (oItems != null)
+                            foreach (var it in oItems)
+                                if (Convert.ToBoolean(it["isActive"]) && !Convert.ToBoolean(it["linked"]) && Convert.ToInt32(it["bookings"]) > 0)
+                                    missing.Add($"{it["displayName"]} ({it["channelKey"]}, {it["bookings"]} การจอง)");
+                        if (missing.Count > 0)
+                            add(haveArFallback ? "warn" : "error",
+                                $"โหมดเอกสาร OTA: {missing.Count} ช่องทางยังไม่ผูกบัญชีพักเงิน/ลูกหนี้รายช่องทาง",
+                                string.Join("\n", missing)
+                                + (haveArFallback
+                                    ? "\n\nระหว่างนี้ใช้ลูกหนี้ OTA กลาง (OTA_RECEIVABLE) แทน — กระทบยอด payout รายช่องทางไม่ได้"
+                                    : "\n\nและไม่ได้ map OTA_RECEIVABLE → การจองของช่องทางเหล่านี้จะถูกข้าม (ไม่ลงบัญชี)")
+                                + "\nตั้งที่หัวข้อ 'OTA → บัญชี/ผู้ซื้อ'");
+                        else if (oItems != null)
+                            add("info", "โหมดเอกสาร OTA เปิดอยู่ (RECEIPT_DOC)",
+                                "การจอง Channel Collect ที่เลยเช็คเอาท์ → ใบเสร็จรับเงินใน NextAcc ต่อการจอง (ผู้ซื้อ = OTA, "
+                                + "Dr บัญชีพักเงิน/ลูกหนี้ของ OTA / Cr รายได้ห้อง + ภาษีขาย) — โหมดเดิม (Nexaacc_OtaRoomRevenue) ถูกแทนที่ ไม่โพสต์ซ้ำ");
+                    }
+                }
+                catch { }
+
                 // ── 5) คิวที่ตายค้าง / ค้างนาน ─────────────────────────────────
                 var q = _code.DatabaseQuerySafe(ConnStr,
                     @"SELECT
@@ -2696,37 +2822,124 @@ namespace Take_Time_BangPhra.Admin.Settings
         // Payment Method → Account Mapping (Account_Paid_How)
         // ──────────────────────────────────────────────
 
+        private bool ColumnExists(string table, string column)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(ConnStr,
+                    "SELECT COL_LENGTH(@t, @c) AS L",
+                    new Dictionary<string, object> { { "@t", "dbo." + table }, { "@c", column } });
+                return dt != null && dt.Rows.Count > 0 && dt.Rows[0]["L"] != DBNull.Value;
+            }
+            catch { return false; }
+        }
+
+        private bool TableExists(string table)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(ConnStr,
+                    "SELECT OBJECT_ID(@t, 'U') AS O",
+                    new Dictionary<string, object> { { "@t", "dbo." + table } });
+                return dt != null && dt.Rows.Count > 0 && dt.Rows[0]["O"] != DBNull.Value;
+            }
+            catch { return false; }
+        }
+
         private Dictionary<string, object> GetPaidHowMapping()
         {
             try
             {
-                DataTable dt = _code.DatabaseQuerySafe(ConnStr,
-                    @"SELECT ID, Paid_How,
-                             ISNULL(CAST(Nexaacc_AccountId AS NVARCHAR(50)), '') AS Nexaacc_AccountId,
-                             ISNULL(Nexaacc_AccountCode, '') AS Nexaacc_AccountCode,
-                             Status
-                      FROM Account_Paid_How WHERE Status = 'True' ORDER BY ID", null);
+                // คอลัมน์เสริม (มีหรือไม่มีก็ได้): Nexaacc_BankAccountId (PHASE19_21), Channel_Type (PHASE19_20 ของทีมช่องทาง)
+                bool hasBankCol = ColumnExists("Account_Paid_How", "Nexaacc_BankAccountId");
+                bool hasChannelType = ColumnExists("Account_Paid_How", "Channel_Type");
+                bool hasBankCache = TableExists("Accounting_Nexaacc_BankAccounts");
+                bool hasCoaCache = TableExists("Accounting_Nexaacc_Accounts");
+
+                string sql = @"SELECT p.ID, p.Paid_How,
+                             ISNULL(CAST(p.Nexaacc_AccountId AS NVARCHAR(50)), '') AS Nexaacc_AccountId,
+                             ISNULL(p.Nexaacc_AccountCode, '') AS Nexaacc_AccountCode,
+                             p.Status"
+                    + (hasBankCol ? ", ISNULL(CAST(p.Nexaacc_BankAccountId AS NVARCHAR(50)), '') AS BankId" : ", '' AS BankId")
+                    + (hasChannelType ? ", ISNULL(CAST(p.Channel_Type AS NVARCHAR(50)), '') AS ChannelType" : ", '' AS ChannelType")
+                    + (hasCoaCache ? ", a.Account_Type AS AccType, a.Account_Name AS AccName, a.Is_Active AS AccActive, CASE WHEN a.Nexaacc_AccountId IS NULL THEN 0 ELSE 1 END AS AccFound"
+                                   : ", NULL AS AccType, NULL AS AccName, NULL AS AccActive, 0 AS AccFound")
+                    + (hasBankCol && hasBankCache ? ", b.Bank_Name, b.Account_Number, b.Is_Active AS BankActive, b.Is_Present AS BankPresent"
+                                                  : ", NULL AS Bank_Name, NULL AS Account_Number, NULL AS BankActive, NULL AS BankPresent")
+                    + " FROM Account_Paid_How p"
+                    + (hasCoaCache ? " LEFT JOIN Accounting_Nexaacc_Accounts a ON a.Nexaacc_AccountId = p.Nexaacc_AccountId" : "")
+                    + (hasBankCol && hasBankCache ? " LEFT JOIN Accounting_Nexaacc_BankAccounts b ON b.Nexaacc_BankAccountId = p.Nexaacc_BankAccountId" : "")
+                    + " WHERE p.Status = 'True' ORDER BY p.ID";
+
+                DataTable dt = _code.DatabaseQuerySafe(ConnStr, sql, null);
 
                 var items = new List<Dictionary<string, object>>();
                 if (dt?.Rows.Count > 0)
                 {
                     foreach (DataRow row in dt.Rows)
                     {
+                        string accId = row["Nexaacc_AccountId"]?.ToString() ?? "";
+                        bool linked = accId.Length > 0 && accId != Guid.Empty.ToString();
+                        string accType = row["AccType"] == DBNull.Value ? "" : row["AccType"].ToString();
+                        string chType = row["ChannelType"]?.ToString() ?? "";
+                        string warn = PaidHowAccountWarning(linked, hasCoaCache && Convert.ToInt32(row["AccFound"]) == 1,
+                            hasCoaCache, accType,
+                            row["AccActive"] == DBNull.Value || Convert.ToBoolean(row["AccActive"]),
+                            row["BankActive"] == DBNull.Value || Convert.ToBoolean(row["BankActive"]),
+                            row["BankPresent"] == DBNull.Value || Convert.ToBoolean(row["BankPresent"]),
+                            chType, row["Paid_How"]?.ToString() ?? "");
                         items.Add(new Dictionary<string, object>
                         {
                             { "id", Convert.ToInt32(row["ID"]) },
                             { "name", row["Paid_How"]?.ToString() ?? "" },
-                            { "accountId", row["Nexaacc_AccountId"]?.ToString() ?? "" },
-                            { "accountCode", row["Nexaacc_AccountCode"]?.ToString() ?? "" }
+                            { "accountId", accId },
+                            { "accountCode", row["Nexaacc_AccountCode"]?.ToString() ?? "" },
+                            { "accountName", row["AccName"] == DBNull.Value ? "" : row["AccName"].ToString() },
+                            { "accountType", accType },
+                            { "bankAccountId", row["BankId"]?.ToString() ?? "" },
+                            { "bankName", row["Bank_Name"] == DBNull.Value ? "" : row["Bank_Name"].ToString() },
+                            { "bankNumber", row["Account_Number"] == DBNull.Value ? "" : row["Account_Number"].ToString() },
+                            { "channelType", chType },
+                            { "warning", warn ?? "" }
                         });
                     }
                 }
-                return new Dictionary<string, object> { { "success", true }, { "items", items } };
+                return new Dictionary<string, object> { { "success", true }, { "items", items }, { "hasBankColumn", hasBankCol } };
             }
             catch (Exception ex)
             {
                 return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
             }
+        }
+
+        /// <summary>ช่องทาง "เงินเข้าจากลูกค้า" (เกตเวย์/OTA/e-Wallet/บัตร/QR) — ต้องลงบัญชีสินทรัพย์เท่านั้น.
+        /// ดูจาก Channel_Type (ถ้ามี) หรือชื่อแถว</summary>
+        private static bool IsCustomerInflowChannel(string channelType, string paidHowName)
+        {
+            string t = (channelType ?? "").Trim().ToUpperInvariant();
+            string[] inflowTypes = { "GATEWAY", "ONLINE", "OTA", "EWALLET", "E_WALLET", "WALLET", "CARD", "CREDIT_CARD", "PROMPTPAY", "QR" };
+            foreach (string k in inflowTypes) if (t == k || t.Contains(k)) return true;
+            string n = (paidHowName ?? "").ToLowerInvariant();
+            return n.Contains("omise") || n.Contains("payso") || n.Contains("ออนไลน์") || n.Contains("online")
+                || n.Contains("agoda") || n.Contains("booking") || n.Contains("expedia") || n.Contains("trip.com")
+                || n.Contains("wallet") || n.Contains("promptpay") || n.Contains("พร้อมเพย์") || n.Contains("บัตร");
+        }
+
+        /// <summary>ข้อความเตือน mapping แหล่งเงิน (null = ปกติ)</summary>
+        private static string PaidHowAccountWarning(bool linked, bool foundInCoa, bool haveCoa, string accType,
+            bool accActive, bool bankActive, bool bankPresent, string channelType, string paidHowName)
+        {
+            if (!linked) return "ยังไม่ผูก — NextAcc จะเดาบัญชีเงินจากวิธีชำระเอง";
+            if (haveCoa && !foundInCoa) return "บัญชีที่ผูกไม่อยู่ในผังบัญชี NextAcc ล่าสุด (ถูกลบ/เปลี่ยน?) — กดดึงรายการแล้วเลือกใหม่";
+            if (!accActive) return "บัญชีที่ผูกถูกปิดใช้งานใน NextAcc";
+            if (!bankPresent) return "บัญชีธนาคาร/กระเป๋าเงินที่เลือกไม่อยู่ใน NextAcc แล้ว";
+            if (!bankActive) return "บัญชีธนาคาร/กระเป๋าเงินที่เลือกถูกปิดใช้งานใน NextAcc";
+            string t = (accType ?? "").Trim();
+            if (t.Length > 0 && !t.Equals("Asset", StringComparison.OrdinalIgnoreCase) && !t.Equals("Liability", StringComparison.OrdinalIgnoreCase))
+                return $"ผูกกับบัญชีประเภท {t} — แหล่งเงินต้องเป็นสินทรัพย์ (เงินสด/ธนาคาร/e-Wallet/พักเงิน) หรือหนี้สิน (เจ้าหนี้กรรมการ) เท่านั้น";
+            if (t.Equals("Liability", StringComparison.OrdinalIgnoreCase) && IsCustomerInflowChannel(channelType, paidHowName))
+                return "ช่องทางรับเงินลูกค้า/เกตเวย์/OTA ผูกกับบัญชีหนี้สิน — ควรเป็นบัญชีพักเงิน/ลูกหนี้ผู้ให้บริการ (11xxx)";
+            return null;
         }
 
         private Dictionary<string, object> UpdatePaidHowAccount()
@@ -2736,28 +2949,587 @@ namespace Take_Time_BangPhra.Admin.Settings
                 int id = int.Parse(Request.QueryString["id"]);
                 string accountId = Request.QueryString["accountId"] ?? "";
                 string accountCode = Request.QueryString["accountCode"] ?? "";
+                string bankAccountId = Request.QueryString["bankAccountId"] ?? "";
 
-                if (string.IsNullOrEmpty(accountId))
+                Guid accGuid;
+                if (string.IsNullOrEmpty(accountId) || !Guid.TryParse(accountId, out accGuid) || accGuid == Guid.Empty)
                     return new Dictionary<string, object> { { "success", false }, { "message", "ไม่ได้เลือกบัญชี" } };
-
-                _code.DatabaseInsertSafe(ConnStr,
-                    @"UPDATE Account_Paid_How SET Nexaacc_AccountId = @accId, Nexaacc_AccountCode = @accCode WHERE ID = @id",
-                    new Dictionary<string, object>
-                    {
-                        { "@accId", Guid.Parse(accountId) },
-                        { "@accCode", accountCode },
-                        { "@id", id }
-                    });
 
                 DataTable name = _code.DatabaseQuerySafe(ConnStr,
                     "SELECT Paid_How FROM Account_Paid_How WHERE ID = @id",
                     new Dictionary<string, object> { { "@id", id } });
                 string paidHowName = name?.Rows.Count > 0 ? name.Rows[0]["Paid_How"]?.ToString() : "";
+                string channelType = "";
+                if (ColumnExists("Account_Paid_How", "Channel_Type"))
+                {
+                    var ct = _code.DatabaseQuerySafe(ConnStr,
+                        "SELECT ISNULL(CAST(Channel_Type AS NVARCHAR(50)), '') FROM Account_Paid_How WHERE ID = @id",
+                        new Dictionary<string, object> { { "@id", id } });
+                    if (ct?.Rows.Count > 0) channelType = ct.Rows[0][0]?.ToString() ?? "";
+                }
+
+                // ── ตรวจประเภทบัญชีจาก cache ผังบัญชี: แหล่งเงินห้ามเป็นรายได้/ค่าใช้จ่าย/ทุน ──
+                string accType = null;
+                if (TableExists("Accounting_Nexaacc_Accounts"))
+                {
+                    var at = _code.DatabaseQuerySafe(ConnStr,
+                        "SELECT TOP 1 Account_Type, Account_Code FROM Accounting_Nexaacc_Accounts WHERE Nexaacc_AccountId = @id",
+                        new Dictionary<string, object> { { "@id", accGuid } });
+                    if (at?.Rows.Count > 0)
+                    {
+                        accType = at.Rows[0]["Account_Type"]?.ToString();
+                        if (string.IsNullOrEmpty(accountCode)) accountCode = at.Rows[0]["Account_Code"]?.ToString() ?? "";
+                    }
+                }
+                if (!string.IsNullOrEmpty(accType)
+                    && !accType.Equals("Asset", StringComparison.OrdinalIgnoreCase)
+                    && !accType.Equals("Liability", StringComparison.OrdinalIgnoreCase))
+                    return new Dictionary<string, object>
+                    {
+                        { "success", false },
+                        { "message", $"บัญชี {accountCode} เป็นประเภท {accType} — แหล่งเงินต้องเป็นบัญชีสินทรัพย์ (เงินสด/ธนาคาร/e-Wallet/พักเงินเกตเวย์/ลูกหนี้ OTA) หรือหนี้สิน (เจ้าหนี้กรรมการ) เท่านั้น" }
+                    };
+                string warn = null;
+                if (accType != null && accType.Equals("Liability", StringComparison.OrdinalIgnoreCase)
+                    && IsCustomerInflowChannel(channelType, paidHowName))
+                    warn = "⚠ \"" + paidHowName + "\" เป็นช่องทางรับเงินจากลูกค้า แต่ผูกกับบัญชีหนี้สิน — โดยปกติควรเป็นบัญชีพักเงิน/ลูกหนี้ผู้ให้บริการ (11xxx)";
+
+                // ── เลือกจาก "กระเป๋าเงิน" (NextAcc BankAccount) → ต้องยังเปิดใช้ และผังที่ผูกต้องตรงกับที่ส่งมา ──
+                Guid bankGuid = Guid.Empty;
+                bool hasBankCol = ColumnExists("Account_Paid_How", "Nexaacc_BankAccountId");
+                if (!string.IsNullOrEmpty(bankAccountId) && Guid.TryParse(bankAccountId, out bankGuid) && bankGuid != Guid.Empty
+                    && TableExists("Accounting_Nexaacc_BankAccounts"))
+                {
+                    var bk = _code.DatabaseQuerySafe(ConnStr,
+                        @"SELECT TOP 1 Is_Active, Is_Present, CAST(Linked_Account_Id AS NVARCHAR(50)) AS Linked, Bank_Name, Account_Number
+                            FROM Accounting_Nexaacc_BankAccounts WHERE Nexaacc_BankAccountId = @id",
+                        new Dictionary<string, object> { { "@id", bankGuid } });
+                    if (bk == null || bk.Rows.Count == 0)
+                        return new Dictionary<string, object> { { "success", false }, { "message", "ไม่พบบัญชีธนาคาร/กระเป๋าเงินนี้ใน cache — กด \"ดึงรายการจาก NextAcc\" ก่อน" } };
+                    if (!Convert.ToBoolean(bk.Rows[0]["Is_Active"]) || !Convert.ToBoolean(bk.Rows[0]["Is_Present"]))
+                        return new Dictionary<string, object> { { "success", false }, { "message", "บัญชีธนาคาร/กระเป๋าเงินนี้ถูกปิดใช้งานหรือถูกลบใน NextAcc แล้ว — เลือกบัญชีอื่น" } };
+                    string linked = bk.Rows[0]["Linked"] == DBNull.Value ? "" : bk.Rows[0]["Linked"].ToString();
+                    if (!string.Equals(linked, accGuid.ToString(), StringComparison.OrdinalIgnoreCase))
+                        return new Dictionary<string, object> { { "success", false }, { "message", "บัญชีธนาคารนี้ผูกผังบัญชีคนละตัวกับที่เลือก — กดดึงรายการจาก NextAcc ใหม่แล้วเลือกอีกครั้ง" } };
+                }
+                else bankGuid = Guid.Empty;
+
+                if (hasBankCol)
+                    _code.DatabaseInsertSafe(ConnStr,
+                        @"UPDATE Account_Paid_How SET Nexaacc_AccountId = @accId, Nexaacc_AccountCode = @accCode,
+                                 Nexaacc_BankAccountId = @bankId WHERE ID = @id",
+                        new Dictionary<string, object>
+                        {
+                            { "@accId", accGuid },
+                            { "@accCode", accountCode },
+                            { "@bankId", bankGuid == Guid.Empty ? (object)DBNull.Value : bankGuid },
+                            { "@id", id }
+                        });
+                else
+                    _code.DatabaseInsertSafe(ConnStr,
+                        @"UPDATE Account_Paid_How SET Nexaacc_AccountId = @accId, Nexaacc_AccountCode = @accCode WHERE ID = @id",
+                        new Dictionary<string, object>
+                        {
+                            { "@accId", accGuid },
+                            { "@accCode", accountCode },
+                            { "@id", id }
+                        });
+
+                try
+                {
+                    _code.Logs(ConnStr, "AccountingConfig",
+                        $"แหล่งเงิน \"{paidHowName}\" (#{id}) → บัญชี NextAcc {accountCode} ({accGuid})"
+                        + (bankGuid != Guid.Empty ? $" กระเป๋าเงิน {bankGuid}" : "")
+                        + $" โดย {Session["UserName"] ?? "?"}", Session["UserName"]?.ToString() ?? "SYSTEM");
+                }
+                catch { }
 
                 return new Dictionary<string, object>
                 {
                     { "success", true },
-                    { "message", $"ผูก \"{paidHowName}\" กับบัญชี {accountCode} เรียบร้อย" }
+                    { "message", $"ผูก \"{paidHowName}\" กับบัญชี {accountCode} เรียบร้อย" + (warn != null ? "\n" + warn : "") }
+                };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        // ──────────────────────────────────────────────
+        // "กระเป๋าเงิน" จาก NextAcc (BankAccount + ผังเงินสด/พักเงิน) → dropdown แหล่งเงิน
+        // ──────────────────────────────────────────────
+
+        /// <summary>
+        /// ปุ่ม "ดึงรายการจาก NextAcc": (1) Sync ผังบัญชี (2) GET /api/companies/{cid}/bank/accounts →
+        /// cache Accounting_Nexaacc_BankAccounts (3) ซ่อมแหล่งเงินที่เลือกกระเป๋าเงินไว้ แต่ฝั่ง NextAcc
+        /// เปลี่ยนผังที่ผูก (LinkedAccountId) → อัปเดต Nexaacc_AccountId ให้ตรง (JE ลงตามผังที่ผูกจริง)
+        /// </summary>
+        private Dictionary<string, object> SyncNexaaccWallets()
+        {
+            try
+            {
+                var config = new Integration.AccountingConfig(ConnStr);
+                if (!config.IsConfigured || !config.CanUseCompanyEndpoints)
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ต้องตั้ง Base URL + API Key + Company ID (company endpoints เปิด) ก่อน" } };
+
+                var coa = SyncChartOfAccounts();
+                string coaMsg = coa != null && coa.ContainsKey("message") ? coa["message"]?.ToString() : "";
+                bool coaOk = coa != null && coa.ContainsKey("success") && Convert.ToBoolean(coa["success"]);
+
+                if (!TableExists("Accounting_Nexaacc_BankAccounts"))
+                    return new Dictionary<string, object>
+                    {
+                        { "success", false },
+                        { "message", (coaOk ? "✓ " + coaMsg + "\n" : "") + "ยังไม่มีตาราง Accounting_Nexaacc_BankAccounts — รัน migration PHASE19_21 ก่อน" }
+                    };
+
+                var client = new Integration.AccountingApiClient(config, ConnStr);
+                var res = System.Threading.Tasks.Task.Run(() => client.GetBankAccountsAsync()).Result;
+                if (res == null || res.data == null)
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ดึงบัญชีธนาคาร/กระเป๋าเงินจาก NextAcc ไม่สำเร็จ" + (res?.message != null ? ": " + res.message : "") } };
+
+                _code.DatabaseInsertSafe(ConnStr, "UPDATE Accounting_Nexaacc_BankAccounts SET Is_Present = 0", null);
+                int n = 0, active = 0;
+                foreach (var b in res.data)
+                {
+                    if (b == null || b.Id == Guid.Empty) continue;
+                    _code.DatabaseInsertSafe(ConnStr, @"
+                        IF EXISTS (SELECT 1 FROM Accounting_Nexaacc_BankAccounts WHERE Nexaacc_BankAccountId = @id)
+                            UPDATE Accounting_Nexaacc_BankAccounts
+                               SET Account_Name = @name, Bank_Name = @bank, Account_Number = @num, Branch_Name = @branch,
+                                   Account_Type = @type, Currency = @cur, Linked_Account_Id = @lid,
+                                   Linked_Account_Code = @lcode, Linked_Account_Name = @lname,
+                                   Is_Active = @active, Is_Present = 1, Last_Synced = GETDATE()
+                             WHERE Nexaacc_BankAccountId = @id
+                        ELSE
+                            INSERT INTO Accounting_Nexaacc_BankAccounts
+                                (Nexaacc_BankAccountId, Account_Name, Bank_Name, Account_Number, Branch_Name, Account_Type,
+                                 Currency, Linked_Account_Id, Linked_Account_Code, Linked_Account_Name, Is_Active, Is_Present, Last_Synced)
+                            VALUES (@id, @name, @bank, @num, @branch, @type, @cur, @lid, @lcode, @lname, @active, 1, GETDATE())",
+                        new Dictionary<string, object>
+                        {
+                            { "@id", b.Id },
+                            { "@name", (object)b.AccountName ?? DBNull.Value },
+                            { "@bank", (object)b.BankName ?? DBNull.Value },
+                            { "@num", (object)b.AccountNumber ?? DBNull.Value },
+                            { "@branch", (object)b.BranchName ?? DBNull.Value },
+                            { "@type", (object)b.AccountType ?? DBNull.Value },
+                            { "@cur", (object)b.Currency ?? DBNull.Value },
+                            { "@lid", b.LinkedAccountId.HasValue && b.LinkedAccountId.Value != Guid.Empty ? (object)b.LinkedAccountId.Value : DBNull.Value },
+                            { "@lcode", (object)b.LinkedAccountCode ?? DBNull.Value },
+                            { "@lname", (object)b.LinkedAccountName ?? DBNull.Value },
+                            { "@active", b.IsActive }
+                        });
+                    n++;
+                    if (b.IsActive) active++;
+                }
+
+                // ซ่อม mapping: เลือกกระเป๋าเงินไว้ แต่ผังที่ผูกฝั่ง NextAcc เปลี่ยน → ตามผังใหม่
+                int healed = 0;
+                if (ColumnExists("Account_Paid_How", "Nexaacc_BankAccountId"))
+                {
+                    var drift = _code.DatabaseQuerySafe(ConnStr,
+                        @"SELECT p.ID, p.Paid_How, b.Linked_Account_Id, b.Linked_Account_Code
+                            FROM Account_Paid_How p
+                            JOIN Accounting_Nexaacc_BankAccounts b ON b.Nexaacc_BankAccountId = p.Nexaacc_BankAccountId
+                           WHERE p.Status = 'True' AND b.Is_Present = 1 AND b.Linked_Account_Id IS NOT NULL
+                             AND (p.Nexaacc_AccountId IS NULL OR p.Nexaacc_AccountId <> b.Linked_Account_Id)", null);
+                    if (drift != null)
+                        foreach (DataRow r in drift.Rows)
+                        {
+                            _code.DatabaseInsertSafe(ConnStr,
+                                "UPDATE Account_Paid_How SET Nexaacc_AccountId = @acc, Nexaacc_AccountCode = @code WHERE ID = @id",
+                                new Dictionary<string, object>
+                                {
+                                    { "@acc", r["Linked_Account_Id"] }, { "@code", r["Linked_Account_Code"] ?? "" }, { "@id", r["ID"] }
+                                });
+                            healed++;
+                            try
+                            {
+                                _code.Logs(ConnStr, "AccountingConfig",
+                                    $"แหล่งเงิน \"{r["Paid_How"]}\" ตามผังที่ผูกกับกระเป๋าเงินใน NextAcc ใหม่ → {r["Linked_Account_Code"]}", "SYSTEM");
+                            }
+                            catch { }
+                        }
+                }
+
+                string msg = (coaOk ? "✓ " : "⚠ ") + coaMsg
+                    + $"\n✓ ดึงบัญชีธนาคาร/กระเป๋าเงินจาก NextAcc {n} บัญชี (เปิดใช้ {active})"
+                    + (healed > 0 ? $"\n✓ ซ่อมแหล่งเงินที่ผังใน NextAcc เปลี่ยน {healed} รายการ" : "");
+                return new Dictionary<string, object> { { "success", true }, { "message", msg }, { "banks", n }, { "healed", healed } };
+            }
+            catch (AggregateException aex)
+            {
+                var inner = aex.InnerException ?? aex;
+                var apiEx = inner as Integration.AccountingApiException;
+                if (apiEx != null)
+                    return new Dictionary<string, object> { { "success", false }, { "message", $"NextAcc ตอบ {apiEx.StatusCode}: {apiEx.ResponseBody}" } };
+                return new Dictionary<string, object> { { "success", false }, { "message", inner.Message } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        /// <summary>ตัวเลือกบัญชีเงินสำหรับ dropdown แหล่งเงิน: กระเป๋าเงิน (BankAccount) + ผังบัญชีสินทรัพย์/หนี้สิน</summary>
+        private Dictionary<string, object> GetWalletOptions()
+        {
+            try
+            {
+                var banks = new List<Dictionary<string, object>>();
+                DateTime? lastSync = null;
+                if (TableExists("Accounting_Nexaacc_BankAccounts"))
+                {
+                    var dt = _code.DatabaseQuerySafe(ConnStr,
+                        @"SELECT Nexaacc_BankAccountId, Account_Name, Bank_Name, Account_Number, Account_Type,
+                                 CAST(Linked_Account_Id AS NVARCHAR(50)) AS Linked, Linked_Account_Code, Linked_Account_Name,
+                                 Is_Active, Last_Synced
+                            FROM Accounting_Nexaacc_BankAccounts
+                           WHERE Is_Present = 1
+                           ORDER BY Is_Active DESC, Bank_Name, Account_Name", null);
+                    if (dt != null)
+                        foreach (DataRow r in dt.Rows)
+                        {
+                            banks.Add(new Dictionary<string, object>
+                            {
+                                { "id", r["Nexaacc_BankAccountId"].ToString() },
+                                { "name", r["Account_Name"]?.ToString() ?? "" },
+                                { "bank", r["Bank_Name"]?.ToString() ?? "" },
+                                { "number", r["Account_Number"]?.ToString() ?? "" },
+                                { "type", r["Account_Type"]?.ToString() ?? "" },
+                                { "linkedId", r["Linked"] == DBNull.Value ? "" : r["Linked"].ToString() },
+                                { "linkedCode", r["Linked_Account_Code"]?.ToString() ?? "" },
+                                { "linkedName", r["Linked_Account_Name"]?.ToString() ?? "" },
+                                { "active", Convert.ToBoolean(r["Is_Active"]) }
+                            });
+                            if (r["Last_Synced"] != DBNull.Value)
+                            {
+                                var ls = Convert.ToDateTime(r["Last_Synced"]);
+                                if (lastSync == null || ls > lastSync) lastSync = ls;
+                            }
+                        }
+                }
+
+                var accounts = new List<Dictionary<string, object>>();
+                if (TableExists("Accounting_Nexaacc_Accounts"))
+                {
+                    var dt = _code.DatabaseQuerySafe(ConnStr,
+                        @"SELECT Nexaacc_AccountId, Account_Code, Account_Name, Account_Name_En, Account_Type, Account_Level
+                            FROM Accounting_Nexaacc_Accounts
+                           WHERE Is_Active = 1 AND Account_Type IN ('Asset', 'Liability')
+                           ORDER BY Account_Code", null);
+                    if (dt != null)
+                        foreach (DataRow r in dt.Rows)
+                        {
+                            string accCode = r["Account_Code"]?.ToString() ?? "";
+                            // กลุ่มตามหน้าที่ของเงิน (ผังมาตรฐาน NextAcc ChartOfAccountTemplates): 111xx เงินสด/ธนาคาร/
+                            // กระเป๋าเงิน Digital, 113xx ลูกหนี้ (รวม 11340 พักเงินเกตเวย์ / ลูกหนี้ OTA), อื่น ๆ
+                            string group = accCode.StartsWith("111") ? "CASH"
+                                : accCode.StartsWith("113") ? "RECEIVABLE"
+                                : (r["Account_Type"]?.ToString() == "Liability" ? "LIABILITY" : "OTHER_ASSET");
+                            accounts.Add(new Dictionary<string, object>
+                            {
+                                { "id", r["Nexaacc_AccountId"].ToString() },
+                                { "code", accCode },
+                                { "name", r["Account_Name"]?.ToString() ?? (r["Account_Name_En"]?.ToString() ?? "") },
+                                { "type", r["Account_Type"]?.ToString() ?? "" },
+                                { "level", r["Account_Level"] == DBNull.Value ? 0 : Convert.ToInt32(r["Account_Level"]) },
+                                { "group", group }
+                            });
+                        }
+                }
+
+                return new Dictionary<string, object>
+                {
+                    { "success", true },
+                    { "banks", banks },
+                    { "accounts", accounts },
+                    { "bankCacheReady", TableExists("Accounting_Nexaacc_BankAccounts") },
+                    { "lastSync", lastSync?.ToString("dd/MM/yyyy HH:mm") ?? "ยังไม่เคยดึง" }
+                };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        // ──────────────────────────────────────────────
+        // เกตเวย์รับชำระออนไลน์ → แหล่งเงินรายผู้ให้บริการ (Nexaacc_Gateway_PaidHow_{PROVIDER})
+        // ──────────────────────────────────────────────
+
+        private static readonly string[] GatewayProviders = { "OMISE", "PAYSO", "MANUAL_QR" };
+
+        private Dictionary<string, object> GetGatewayPaidHow()
+        {
+            try
+            {
+                var config = new Integration.AccountingConfig(ConnStr);
+                string fallback = Take_Time_BangPhra.Payments.PaymentGatewayConfig.Get("Payment_PaidHow_Name", "Omise (จ่ายออนไลน์)");
+                string activeProvider = "";
+                try { activeProvider = Take_Time_BangPhra.Payments.PaymentGatewayConfig.ActiveProvider; } catch { }
+
+                var rows = new List<Dictionary<string, object>>();
+                foreach (string p in GatewayProviders)
+                {
+                    string cur = config.GetConfigValue("Nexaacc_Gateway_PaidHow_" + p, "");
+                    string effective = Integration.AccountingSyncService.ResolveGatewayPaidHowName(ConnStr, p, null, fallback);
+                    rows.Add(new Dictionary<string, object>
+                    {
+                        { "provider", p },
+                        { "paidHow", cur },
+                        { "effective", effective },
+                        { "active", string.Equals(p, activeProvider, StringComparison.OrdinalIgnoreCase) }
+                    });
+                }
+
+                var options = new List<Dictionary<string, object>>();
+                var dt = _code.DatabaseQuerySafe(ConnStr,
+                    @"SELECT Paid_How, ISNULL(Nexaacc_AccountCode, '') AS Code,
+                             CASE WHEN Nexaacc_AccountId IS NULL THEN 0 ELSE 1 END AS Linked
+                        FROM Account_Paid_How WHERE Status = 'True' ORDER BY ID", null);
+                if (dt != null)
+                    foreach (DataRow r in dt.Rows)
+                        options.Add(new Dictionary<string, object>
+                        {
+                            { "name", r["Paid_How"]?.ToString() ?? "" },
+                            { "code", r["Code"]?.ToString() ?? "" },
+                            { "linked", Convert.ToInt32(r["Linked"]) == 1 }
+                        });
+
+                return new Dictionary<string, object>
+                {
+                    { "success", true }, { "rows", rows }, { "options", options }, { "fallback", fallback }
+                };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        private Dictionary<string, object> SaveGatewayPaidHow(Dictionary<string, object> data)
+        {
+            try
+            {
+                string provider = Integration.AccountingSyncService.NormalizeConfigToken(data.ContainsKey("provider") ? data["provider"]?.ToString() : "");
+                if (Array.IndexOf(GatewayProviders, provider) < 0)
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ผู้ให้บริการไม่ถูกต้อง" } };
+                string paidHow = (data.ContainsKey("paidHow") ? data["paidHow"]?.ToString() : "") ?? "";
+                paidHow = paidHow.Trim();
+                if (paidHow.Length > 0)
+                {
+                    var chk = _code.DatabaseQuerySafe(ConnStr,
+                        "SELECT TOP 1 1 FROM Account_Paid_How WHERE Paid_How = @n AND Status = 'True'",
+                        new Dictionary<string, object> { { "@n", paidHow } });
+                    if (chk == null || chk.Rows.Count == 0)
+                        return new Dictionary<string, object> { { "success", false }, { "message", $"ไม่พบแหล่งเงิน \"{paidHow}\" ที่เปิดใช้อยู่" } };
+                }
+                var config = new Integration.AccountingConfig(ConnStr);
+                config.SetConfig("Nexaacc_Gateway_PaidHow_" + provider, paidHow);
+                try
+                {
+                    _code.Logs(ConnStr, "AccountingConfig",
+                        $"เกตเวย์ {provider} → แหล่งเงิน \"{(paidHow.Length > 0 ? paidHow : "(ค่าเดิม Payment_PaidHow_Name)")}\" โดย {Session["UserName"] ?? "?"}",
+                        Session["UserName"]?.ToString() ?? "SYSTEM");
+                }
+                catch { }
+                return new Dictionary<string, object>
+                {
+                    { "success", true },
+                    { "message", paidHow.Length > 0
+                        ? $"ยอดรับผ่าน {provider} จะลงแหล่งเงิน \"{paidHow}\" (มีผลกับรายการที่ชำระหลังจากนี้)"
+                        : $"{provider}: กลับไปใช้แหล่งเงินกลาง (Payment_PaidHow_Name)" }
+                };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        // ──────────────────────────────────────────────
+        // OTA รายช่องทาง → แหล่งเงิน + ผู้ซื้อ (Accounting_Ota_Channel_Map, PHASE19_21)
+        // ──────────────────────────────────────────────
+
+        private Dictionary<string, object> GetOtaChannelMap()
+        {
+            try
+            {
+                if (!TableExists("Accounting_Ota_Channel_Map"))
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ยังไม่มีตาราง Accounting_Ota_Channel_Map — รัน migration PHASE19_21 ก่อน" } };
+
+                var byKey = new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase);
+                var order = new List<string>();
+                var dt = _code.DatabaseQuerySafe(ConnStr,
+                    @"SELECT m.Channel_Key, m.Display_Name, m.Paid_How_ID, m.Buyer_Name, m.Buyer_Tax_Id, m.Buyer_Address,
+                             m.Buyer_Branch, m.Is_Active, CASE WHEN m.Nexaacc_Contact_Id IS NULL THEN 0 ELSE 1 END AS HasContact,
+                             p.Paid_How, ISNULL(p.Nexaacc_AccountCode, '') AS Code,
+                             CASE WHEN p.Nexaacc_AccountId IS NULL THEN 0 ELSE 1 END AS Linked
+                        FROM Accounting_Ota_Channel_Map m
+                        LEFT JOIN Account_Paid_How p ON p.ID = m.Paid_How_ID AND p.Status = 'True'
+                       ORDER BY m.Channel_Key", null);
+                if (dt != null)
+                    foreach (DataRow r in dt.Rows)
+                    {
+                        string k = r["Channel_Key"].ToString();
+                        byKey[k] = new Dictionary<string, object>
+                        {
+                            { "channelKey", k },
+                            { "displayName", r["Display_Name"]?.ToString() ?? k },
+                            { "paidHowId", r["Paid_How_ID"] == DBNull.Value ? 0 : Convert.ToInt32(r["Paid_How_ID"]) },
+                            { "paidHowName", r["Paid_How"] == DBNull.Value ? "" : r["Paid_How"].ToString() },
+                            { "accountCode", r["Code"]?.ToString() ?? "" },
+                            { "linked", Convert.ToInt32(r["Linked"]) == 1 },
+                            { "buyerName", r["Buyer_Name"]?.ToString() ?? "" },
+                            { "buyerTaxId", r["Buyer_Tax_Id"]?.ToString() ?? "" },
+                            { "buyerAddress", r["Buyer_Address"]?.ToString() ?? "" },
+                            { "buyerBranch", r["Buyer_Branch"]?.ToString() ?? "" },
+                            { "isActive", Convert.ToBoolean(r["Is_Active"]) },
+                            { "hasContact", Convert.ToInt32(r["HasContact"]) == 1 },
+                            { "saved", true },
+                            { "bookings", 0 }
+                        };
+                        order.Add(k);
+                    }
+
+                // ช่องทางที่เจอจริงในการจอง (ยังไม่มีแถว mapping ก็โผล่ให้ตั้ง)
+                try
+                {
+                    var seen = _code.DatabaseQuerySafe(ConnStr,
+                        @"SELECT LTRIM(RTRIM(OTA_Channel)) AS Ch, COUNT(*) AS N
+                            FROM Reservation
+                           WHERE OTA_Channel IS NOT NULL AND LTRIM(RTRIM(OTA_Channel)) <> ''
+                           GROUP BY LTRIM(RTRIM(OTA_Channel))", null);
+                    if (seen != null)
+                        foreach (DataRow r in seen.Rows)
+                        {
+                            string ch = r["Ch"].ToString();
+                            string k = Integration.AccountingSyncService.OtaChannelKey(ch);
+                            if (string.IsNullOrEmpty(k)) continue;
+                            int cnt = Convert.ToInt32(r["N"]);
+                            if (!byKey.ContainsKey(k))
+                            {
+                                byKey[k] = new Dictionary<string, object>
+                                {
+                                    { "channelKey", k }, { "displayName", ch }, { "paidHowId", 0 }, { "paidHowName", "" },
+                                    { "accountCode", "" }, { "linked", false }, { "buyerName", "" }, { "buyerTaxId", "" },
+                                    { "buyerAddress", "" }, { "buyerBranch", "" }, { "isActive", true },
+                                    { "hasContact", false }, { "saved", false }, { "bookings", 0 }
+                                };
+                                order.Add(k);
+                            }
+                            byKey[k]["bookings"] = Convert.ToInt32(byKey[k]["bookings"]) + cnt;
+                        }
+                }
+                catch { /* คอลัมน์ OTA_Channel ยังไม่มี */ }
+
+                var paidHows = new List<Dictionary<string, object>>();
+                var ph = _code.DatabaseQuerySafe(ConnStr,
+                    @"SELECT ID, Paid_How, ISNULL(Nexaacc_AccountCode, '') AS Code,
+                             CASE WHEN Nexaacc_AccountId IS NULL THEN 0 ELSE 1 END AS Linked
+                        FROM Account_Paid_How WHERE Status = 'True' ORDER BY ID", null);
+                if (ph != null)
+                    foreach (DataRow r in ph.Rows)
+                        paidHows.Add(new Dictionary<string, object>
+                        {
+                            { "id", Convert.ToInt32(r["ID"]) }, { "name", r["Paid_How"]?.ToString() ?? "" },
+                            { "code", r["Code"]?.ToString() ?? "" }, { "linked", Convert.ToInt32(r["Linked"]) == 1 }
+                        });
+
+                var items = new List<Dictionary<string, object>>();
+                foreach (string k in order) items.Add(byKey[k]);
+                var config = new Integration.AccountingConfig(ConnStr);
+                return new Dictionary<string, object>
+                {
+                    { "success", true }, { "items", items }, { "paidHows", paidHows },
+                    { "mode", config.OtaDocumentMode }
+                };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        private Dictionary<string, object> SaveOtaChannelMap(Dictionary<string, object> data)
+        {
+            try
+            {
+                if (!TableExists("Accounting_Ota_Channel_Map"))
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ยังไม่มีตาราง Accounting_Ota_Channel_Map — รัน migration PHASE19_21 ก่อน" } };
+
+                Func<string, string> s = k => data.ContainsKey(k) && data[k] != null ? data[k].ToString().Trim() : "";
+                string key = Integration.AccountingSyncService.OtaChannelKey(s("channelKey"));
+                if (string.IsNullOrEmpty(key))
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ไม่มีรหัสช่องทาง" } };
+                int paidHowId; int.TryParse(s("paidHowId"), out paidHowId);
+                string taxId = s("buyerTaxId");
+                if (taxId.Length > 0 && !System.Text.RegularExpressions.Regex.IsMatch(taxId, @"^\d{13}$"))
+                    return new Dictionary<string, object> { { "success", false }, { "message", "เลขผู้เสียภาษีผู้ซื้อต้องเป็นตัวเลข 13 หลัก (หรือเว้นว่าง สำหรับ OTA ต่างประเทศ)" } };
+                string branch = s("buyerBranch");
+                if (branch.Length > 0 && !System.Text.RegularExpressions.Regex.IsMatch(branch, @"^\d{5}$"))
+                    return new Dictionary<string, object> { { "success", false }, { "message", "รหัสสาขาต้องเป็นตัวเลข 5 หลัก (00000 = สำนักงานใหญ่)" } };
+                bool isActive = !data.ContainsKey("isActive") || Convert.ToBoolean(data["isActive"]);
+
+                string warn = null;
+                if (paidHowId > 0)
+                {
+                    bool coa = TableExists("Accounting_Nexaacc_Accounts");
+                    var p = _code.DatabaseQuerySafe(ConnStr,
+                        @"SELECT TOP 1 p.Paid_How, CAST(p.Nexaacc_AccountId AS NVARCHAR(50)) AS Acc, "
+                        + (coa ? "a.Account_Type" : "CAST(NULL AS NVARCHAR(50)) AS Account_Type") + @"
+                            FROM Account_Paid_How p "
+                        + (coa ? "LEFT JOIN Accounting_Nexaacc_Accounts a ON a.Nexaacc_AccountId = p.Nexaacc_AccountId " : "") + @"
+                           WHERE p.ID = @id AND p.Status = 'True'",
+                        new Dictionary<string, object> { { "@id", paidHowId } });
+                    if (p == null || p.Rows.Count == 0)
+                        return new Dictionary<string, object> { { "success", false }, { "message", "ไม่พบแหล่งเงินที่เลือก (หรือถูกปิดใช้)" } };
+                    if (p.Rows[0]["Acc"] == DBNull.Value)
+                        warn = $"⚠ แหล่งเงิน \"{p.Rows[0]["Paid_How"]}\" ยังไม่ได้ผูกบัญชี NextAcc — ผูกที่ตาราง 'วิธีจ่ายเงิน → บัญชี NextAcc' ก่อน ไม่งั้นระบบใช้ OTA_RECEIVABLE แทน";
+                    else if (p.Rows[0]["Account_Type"] != DBNull.Value
+                             && !p.Rows[0]["Account_Type"].ToString().Equals("Asset", StringComparison.OrdinalIgnoreCase))
+                        return new Dictionary<string, object> { { "success", false }, { "message", $"แหล่งเงิน \"{p.Rows[0]["Paid_How"]}\" ผูกกับบัญชีประเภท {p.Rows[0]["Account_Type"]} — เงินที่ OTA เก็บแทนต้องเป็นบัญชีสินทรัพย์ (พักเงิน/ลูกหนี้ OTA)" } };
+                }
+
+                string user = Session["UserName"]?.ToString() ?? "";
+                _code.DatabaseInsertSafe(ConnStr, @"
+                    IF EXISTS (SELECT 1 FROM Accounting_Ota_Channel_Map WHERE Channel_Key = @k)
+                        UPDATE Accounting_Ota_Channel_Map
+                           SET Display_Name = @dn, Paid_How_ID = @ph, Buyer_Name = @bn, Buyer_Tax_Id = @bt,
+                               Buyer_Address = @ba, Buyer_Branch = @bb, Is_Active = @act,
+                               Nexaacc_Contact_Id = NULL,   -- ข้อมูลผู้ซื้ออาจเปลี่ยน → upsert ผู้ติดต่อใหม่ตอนออกเอกสารถัดไป
+                               Updated_Date = GETDATE(), Updated_By = @u
+                         WHERE Channel_Key = @k
+                    ELSE
+                        INSERT INTO Accounting_Ota_Channel_Map
+                            (Channel_Key, Display_Name, Paid_How_ID, Buyer_Name, Buyer_Tax_Id, Buyer_Address, Buyer_Branch, Is_Active, Updated_Date, Updated_By)
+                        VALUES (@k, @dn, @ph, @bn, @bt, @ba, @bb, @act, GETDATE(), @u)",
+                    new Dictionary<string, object>
+                    {
+                        { "@k", key },
+                        { "@dn", s("displayName").Length > 0 ? (object)s("displayName") : key },
+                        { "@ph", paidHowId > 0 ? (object)paidHowId : DBNull.Value },
+                        { "@bn", s("buyerName").Length > 0 ? (object)s("buyerName") : DBNull.Value },
+                        { "@bt", taxId.Length > 0 ? (object)taxId : DBNull.Value },
+                        { "@ba", s("buyerAddress").Length > 0 ? (object)s("buyerAddress") : DBNull.Value },
+                        { "@bb", branch.Length > 0 ? (object)branch : DBNull.Value },
+                        { "@act", isActive },
+                        { "@u", user }
+                    });
+                try
+                {
+                    _code.Logs(ConnStr, "AccountingConfig",
+                        $"OTA {key}: แหล่งเงิน #{paidHowId} ผู้ซื้อ \"{s("buyerName")}\" {(isActive ? "เปิด" : "ปิด")} โดย {(user.Length > 0 ? user : "?")}",
+                        user.Length > 0 ? user : "SYSTEM");
+                }
+                catch { }
+                return new Dictionary<string, object>
+                {
+                    { "success", true },
+                    { "message", $"บันทึกช่องทาง {key} แล้ว" + (warn != null ? "\n" + warn : "") }
                 };
             }
             catch (Exception ex)

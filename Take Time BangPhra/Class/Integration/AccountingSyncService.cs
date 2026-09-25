@@ -2349,6 +2349,311 @@ namespace Take_Time_BangPhra.Integration
             return false;
         }
 
+        // ══════════════════════════════════════════════════════════════════════
+        //  เกตเวย์รับชำระออนไลน์ → แหล่งเงิน (Account_Paid_How) รายผู้ให้บริการ (PHASE19_21)
+        //
+        //  เดิมทุกเกตเวย์ (Omise / Payso / QR ตรวจสลิป) ใช้ชื่อแหล่งเงินเดียว "Payment_PaidHow_Name"
+        //  → ทุกยอดลงบัญชีพักเงินบัญชีเดียวใน NextAcc ทั้งที่แต่ละเจ้าโอนเข้าคนละรอบ/หักค่าธรรมเนียมคนละแบบ
+        //  (กระทบยอดกับ payout ไม่ได้). ตอนนี้ผู้ดูแลเลือกแถว Account_Paid_How ต่อผู้ให้บริการ (และต่อวิธีจ่าย)
+        //  ได้ที่หน้า Accounting Integration — แถวนั้นผูกกับ "กระเป๋าเงิน" ที่ดึงมาจาก NextAcc
+        //  (NextAcc COA 11340 ลูกหนี้ผู้ให้บริการรับชำระเงิน / 11113 กระเป๋าเงิน Digital —
+        //   Services/ChartOfAccountTemplates.cs:26,41)
+        //  ลำดับ: Nexaacc_Gateway_PaidHow_{PROVIDER}_{METHOD} → Nexaacc_Gateway_PaidHow_{PROVIDER} → fallbackName
+        //  ค่าใน config ต้องเป็นชื่อแถวที่ยังเปิดใช้ (Status='True') ไม่งั้นใช้ fallback (ไม่ส่งชื่อที่ไม่มีจริง)
+        // ══════════════════════════════════════════════════════════════════════
+
+        /// <summary>ชื่อแหล่งเงิน (Account_Paid_How.Paid_How) ที่ต้องใช้บันทึกยอดรับผ่านเกตเวย์ provider/method
+        /// — ปลอดภัยเสมอ: อ่าน config/DB ไม่ได้ = คืน fallbackName (พฤติกรรมเดิม)</summary>
+        public static string ResolveGatewayPaidHowName(string connectionString, string provider, string method, string fallbackName)
+        {
+            try
+            {
+                string p = NormalizeConfigToken(provider);
+                if (string.IsNullOrEmpty(p) || string.IsNullOrEmpty(connectionString)) return fallbackName;
+                string m = NormalizeConfigToken(method);
+                var cfg = new AccountingConfig(connectionString);
+
+                var candidates = new List<string>();
+                if (!string.IsNullOrEmpty(m)) candidates.Add(cfg.GetConfigValue("Nexaacc_Gateway_PaidHow_" + p + "_" + m, null));
+                candidates.Add(cfg.GetConfigValue("Nexaacc_Gateway_PaidHow_" + p, null));
+
+                var c = new code();
+                foreach (string name in candidates)
+                {
+                    if (string.IsNullOrWhiteSpace(name)) continue;
+                    var dt = c.DatabaseQuerySafe(connectionString,
+                        "SELECT TOP 1 Paid_How FROM Account_Paid_How WHERE Paid_How = @n AND Status = 'True'",
+                        new Dictionary<string, object> { { "@n", name.Trim() } });
+                    if (dt != null && dt.Rows.Count > 0) return dt.Rows[0][0].ToString();
+                }
+            }
+            catch { /* ห้ามทำให้การรับเงินล้ม — ใช้ชื่อเดิม */ }
+            return fallbackName;
+        }
+
+        /// <summary>ตัวพิมพ์ใหญ่ + เก็บเฉพาะ A-Z 0-9 _ (ใช้ต่อท้ายชื่อคีย์ config)</summary>
+        internal static string NormalizeConfigToken(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return "";
+            var sb = new System.Text.StringBuilder();
+            foreach (char ch in s.Trim().ToUpperInvariant())
+                if ((ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_') sb.Append(ch);
+            return sb.ToString();
+        }
+
+        // ══════════════════════════════════════════════════════════════════════
+        //  OTA (Channel Collect) → เอกสารรับเงินใน NextAcc รายช่องทาง (Nexaacc_OtaDocument_Mode=RECEIPT_DOC)
+        //
+        //  ตาราง Accounting_Ota_Channel_Map (PHASE19_21): Channel_Key (เช่น AGODA / BOOKINGCOM) →
+        //   Paid_How_ID = แถว Account_Paid_How ที่ผูก "บัญชีพักเงิน/ลูกหนี้ของ OTA รายนั้น" ใน NextAcc
+        //   Buyer_* = ผู้ซื้อบนเอกสาร (บริษัท OTA) — ว่าง = ใช้ชื่อช่องทาง
+        //   Is_Active = 0 → ข้ามช่องทางนี้ (ไม่โพสต์อัตโนมัติ)
+        // ══════════════════════════════════════════════════════════════════════
+
+        public class OtaChannelMapping
+        {
+            public string ChannelKey { get; set; }
+            public string DisplayName { get; set; }
+            public int? PaidHowId { get; set; }
+            public string PaidHowName { get; set; }
+            /// <summary>Account_Paid_How.Nexaacc_AccountId ของแถวที่ผูก (GUID ผังบัญชี NextAcc) — null = ยังไม่ผูก</summary>
+            public string AccountId { get; set; }
+            public string AccountCode { get; set; }
+            public string BuyerName { get; set; }
+            public string BuyerTaxId { get; set; }
+            public string BuyerAddress { get; set; }
+            public string BuyerBranch { get; set; }
+            public Guid? ContactId { get; set; }
+            public bool IsActive { get; set; }
+        }
+
+        /// <summary>ชื่อช่องทาง OTA อิสระ ("Booking.com", "Booking dot com", "Agoda") → คีย์คงที่ (BOOKINGCOM, AGODA)</summary>
+        public static string OtaChannelKey(string channel)
+        {
+            string k = NormalizeConfigToken(channel).Replace("_", "");
+            if (k.EndsWith("DOTCOM")) k = k.Substring(0, k.Length - "DOTCOM".Length) + "COM";
+            return k;
+        }
+
+        /// <summary>อ่าน mapping ของช่องทาง (null = ไม่มีแถว/ยังไม่รัน PHASE19_21) — ไม่กรอง Is_Active (ผู้เรียกตัดสิน)</summary>
+        public OtaChannelMapping LookupOtaChannelMapping(string channel)
+        {
+            string key = OtaChannelKey(channel);
+            if (string.IsNullOrEmpty(key)) return null;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 m.Channel_Key, m.Display_Name, m.Paid_How_ID, m.Buyer_Name, m.Buyer_Tax_Id,
+                             m.Buyer_Address, m.Buyer_Branch, m.Nexaacc_Contact_Id, ISNULL(m.Is_Active, 1) AS Is_Active,
+                             p.Paid_How, CAST(p.Nexaacc_AccountId AS NVARCHAR(50)) AS AccId, p.Nexaacc_AccountCode
+                        FROM Accounting_Ota_Channel_Map m
+                        LEFT JOIN Account_Paid_How p ON p.ID = m.Paid_How_ID AND p.Status = 'True'
+                       WHERE m.Channel_Key = @k",
+                    new Dictionary<string, object> { { "@k", key } });
+                if (dt == null || dt.Rows.Count == 0) return null;
+                var r = dt.Rows[0];
+                Guid acc; Guid cid;
+                string accStr = r["AccId"] == DBNull.Value ? null : r["AccId"].ToString();
+                return new OtaChannelMapping
+                {
+                    ChannelKey = key,
+                    DisplayName = r["Display_Name"] == DBNull.Value ? channel : r["Display_Name"].ToString(),
+                    PaidHowId = r["Paid_How_ID"] == DBNull.Value ? (int?)null : Convert.ToInt32(r["Paid_How_ID"]),
+                    PaidHowName = r["Paid_How"] == DBNull.Value ? null : r["Paid_How"].ToString(),
+                    AccountId = (!string.IsNullOrEmpty(accStr) && Guid.TryParse(accStr, out acc) && acc != Guid.Empty) ? accStr : null,
+                    AccountCode = r["Nexaacc_AccountCode"] == DBNull.Value ? null : r["Nexaacc_AccountCode"].ToString(),
+                    BuyerName = r["Buyer_Name"] == DBNull.Value ? null : r["Buyer_Name"].ToString(),
+                    BuyerTaxId = r["Buyer_Tax_Id"] == DBNull.Value ? null : r["Buyer_Tax_Id"].ToString(),
+                    BuyerAddress = r["Buyer_Address"] == DBNull.Value ? null : r["Buyer_Address"].ToString(),
+                    BuyerBranch = r["Buyer_Branch"] == DBNull.Value ? null : r["Buyer_Branch"].ToString(),
+                    ContactId = (r["Nexaacc_Contact_Id"] != DBNull.Value && Guid.TryParse(r["Nexaacc_Contact_Id"].ToString(), out cid) && cid != Guid.Empty)
+                        ? (Guid?)cid : null,
+                    IsActive = Convert.ToBoolean(r["Is_Active"])
+                };
+            }
+            catch { return null; }   // ตารางยังไม่มี (ยังไม่รัน PHASE19_21)
+        }
+
+        /// <summary>
+        /// เข้าคิวสร้างเอกสารรับเงินค่าห้อง OTA (Channel Collect) — ผู้เรียก (RevenuePostingService) ต้อง
+        /// "จอง" Reservation.Ota_Revenue_Ref + สร้างแถว Account_Receipt (receiptNumber) ก่อนเสมอ
+        /// (แถวนั้นเก็บ marker DOC:/APR:/{docId} กันสร้างเอกสารซ้ำตอน retry — ดู SettleReceiptDocAsync)
+        /// </summary>
+        public long EnqueueOtaSalesDocument(int reservationId, string receiptNumber, decimal totalAmount, DateTime docDate,
+            string channel, string bookingId, string guestName, string basisLabel, string fallbackAccountId)
+        {
+            if (!_config.IsConfigured) return -1;
+            if (totalAmount <= 0 || string.IsNullOrEmpty(receiptNumber)) return -1;
+
+            var payload = new Dictionary<string, object>
+            {
+                { "reservationId", reservationId },
+                { "receiptNumber", receiptNumber },
+                { "totalAmount", totalAmount },
+                { "receiptDate", AcctDate(docDate) },
+                { "channel", channel ?? "" },
+                { "channelKey", OtaChannelKey(channel) },
+                { "bookingId", bookingId ?? "" },
+                { "guestName", guestName ?? "" },
+                { "basis", basisLabel ?? "" }
+            };
+            if (!string.IsNullOrEmpty(fallbackAccountId)) payload["fallbackAccountId"] = fallbackAccountId;
+
+            string unsentStatus;
+            long existing = FindUnsentEntry("RESERVATION", "CREATE_OTA_SALES_DOCUMENT", "receiptNumber", receiptNumber, out unsentStatus);
+            if (existing > 0)
+            {
+                TryRefreshQueuePayload(existing, payload, $"CREATE_OTA_SALES_DOCUMENT receipt={receiptNumber}");
+                return existing;
+            }
+            // เคยสำเร็จแล้ว (ย้อนได้ 10 ปีแบบเดียวกับ OTA_CASH_RECLASS) = ห้ามเข้าคิวซ้ำ
+            long done = FindRecentCompletedEntry("RESERVATION", "CREATE_OTA_SALES_DOCUMENT", "receiptNumber", receiptNumber, 315360000);
+            if (done > 0) return done;
+
+            return InsertQueue("RESERVATION", reservationId, "CREATE_OTA_SALES_DOCUMENT", payload);
+        }
+
+        /// <summary>
+        /// ประมวลผลคิว CREATE_OTA_SALES_DOCUMENT — สร้าง "ใบเสร็จรับเงิน" (Receipt type 3) ผ่าน company /document
+        /// แล้วอนุมัติ (verified vs Wachira-d/Accounting):
+        ///   • DocumentService.cs:1337-1346 — Receipt บังคับ PaymentType=Cash (รับเงินแล้วจริง ไม่มียอดค้าง)
+        ///   • DocumentService.cs:14458-14473 — บัญชีเงินของ JE = PaymentAccountId ก่อน > BankAccount.LinkedAccount > 111
+        ///   • DocumentService.cs:15253-15258 — AutoPost Receipt = CashReceipts: Dr บัญชีเงิน / Cr รายได้ราย line / Cr ภาษีขาย
+        /// ⇒ ส่ง PaymentAccountId = บัญชีพักเงิน/ลูกหนี้ของ OTA รายช่องทาง → "เงินที่ OTA เก็บแทนเรา" ลงถูกบัญชี
+        ///   (ไม่ใช่เงินสด) และปิดยอดตอน OTA โอน payout (JE/รับชำระแยก ฝั่งผู้ทำบัญชี)
+        /// idempotent: marker บน Account_Receipt ของ receiptNumber (DOC:→APR:→{docId}) ผ่าน SettleReceiptDocAsync
+        /// </summary>
+        private async Task<string> ProcessOtaSalesDocument(Dictionary<string, object> p)
+        {
+            if (!_config.CanUseCompanyEndpoints)
+                throw new InvalidOperationException(
+                    "สร้างเอกสาร OTA ต้องใช้ company endpoint (/api/companies/{id}/document) — ตั้ง Company ID + เปิด Nexaacc_Company_Endpoints");
+
+            int reservationId = p.ContainsKey("reservationId") ? Convert.ToInt32(p["reservationId"]) : 0;
+            string receiptNumber = p.ContainsKey("receiptNumber") ? p["receiptNumber"]?.ToString() : null;
+            decimal totalAmount = p.ContainsKey("totalAmount") ? Convert.ToDecimal(p["totalAmount"]) : 0m;
+            DateTime docDate = ParseAcctDate(p.ContainsKey("receiptDate") ? p["receiptDate"]?.ToString() : null);
+            string channel = p.ContainsKey("channel") ? p["channel"]?.ToString() : "OTA";
+            string bookingId = p.ContainsKey("bookingId") ? p["bookingId"]?.ToString() : "";
+            string guest = p.ContainsKey("guestName") ? p["guestName"]?.ToString() : "";
+            string basis = p.ContainsKey("basis") ? p["basis"]?.ToString() : "";
+            string fallbackAccountId = p.ContainsKey("fallbackAccountId") ? p["fallbackAccountId"]?.ToString() : null;
+
+            if (string.IsNullOrEmpty(receiptNumber) || totalAmount <= 0)
+                throw new ArgumentException($"CREATE_OTA_SALES_DOCUMENT: payload ไม่ครบ (receipt={receiptNumber}, amount={totalAmount})");
+            if (string.IsNullOrWhiteSpace(channel)) channel = "OTA";
+
+            // แถว Account_Receipt = ที่เก็บ marker กันสร้างซ้ำ — ไม่มีแถว = ห้ามยิง (retry จะสร้างเอกสารซ้ำได้)
+            var rowChk = _code.DatabaseQuerySafe(_connectionString,
+                "SELECT TOP 1 ID FROM Account_Receipt WHERE ID = @id",
+                new Dictionary<string, object> { { "@id", receiptNumber } });
+            if (rowChk == null || rowChk.Rows.Count == 0)
+                throw new InvalidOperationException(
+                    $"ไม่พบแถว Account_Receipt '{receiptNumber}' (ใช้เก็บสถานะกันเอกสารซ้ำ) — ไม่สร้างเอกสาร OTA");
+
+            // บัญชีเงิน: อ่าน mapping "สด" ตอนประมวลผล (ผู้ดูแลแก้ mapping แล้วกด Retry ต้องได้ค่าใหม่)
+            var map = LookupOtaChannelMapping(channel);
+            string accountId = map != null ? map.AccountId : null;
+            string accSource = accountId != null ? $"ช่องทาง {map.ChannelKey} → {map.PaidHowName} ({map.AccountCode})" : null;
+            if (accountId == null)
+            {
+                Guid fb;
+                if (!string.IsNullOrEmpty(fallbackAccountId) && Guid.TryParse(fallbackAccountId, out fb) && fb != Guid.Empty)
+                {
+                    accountId = fallbackAccountId;
+                    accSource = "ลูกหนี้ OTA กลาง (OTA_RECEIVABLE)";
+                }
+            }
+            if (accountId == null)
+                throw new InvalidOperationException(
+                    $"ช่องทาง '{channel}' ยังไม่ได้ผูกบัญชีพักเงิน/ลูกหนี้ OTA — ตั้งที่ Admin → Accounting Integration → " +
+                    "'OTA → บัญชี/ผู้ซื้อ' (เลือกแหล่งเงินที่ผูกบัญชี NextAcc แล้ว) หรือ map OTA_RECEIVABLE แล้วกด Retry");
+
+            // กันลงผิดประเภท: บัญชีเงินของใบเสร็จต้องเป็น "สินทรัพย์" (พักเงิน/ลูกหนี้/ธนาคาร/e-Wallet)
+            string accType = LookupCachedAccountType(accountId);
+            if (!string.IsNullOrEmpty(accType) && !accType.Equals("Asset", StringComparison.OrdinalIgnoreCase)
+                && accType != "1")
+                throw new InvalidOperationException(
+                    $"บัญชีที่ผูกกับช่องทาง '{channel}' เป็นประเภท {accType} ไม่ใช่สินทรัพย์ — เงินที่ OTA เก็บแทนต้องลง " +
+                    "บัญชีพักเงิน/ลูกหนี้ OTA (หมวด 11x) แก้ mapping แล้วกด Retry");
+
+            // ผู้ซื้อ = บริษัท OTA รายช่องทาง (ผู้ติดต่อกลางต่อช่องทาง ไม่ใช่ลูกค้าแต่ละราย —
+            // การจองจากอีเมล OTA มักไม่มีเบอร์/เลขภาษีจริงของผู้เข้าพัก)
+            Guid contactId = await EnsureOtaChannelContactAsync(map, channel);
+
+            bool hasVat = LookupBusinessHasVat();
+            string guestLabel = string.IsNullOrWhiteSpace(guest) ? ("ลูกค้า " + channel) : guest.Trim();
+            var doc = _mapper.MapReceiptToDocument(reservationId, null, totalAmount, "ROOM_REVENUE",
+                channel, docDate, guestLabel, contactId, accountId, hasVat, receiptNumber);
+            string bookingTxt = string.IsNullOrWhiteSpace(bookingId) ? "" : " " + bookingId.Trim();
+            doc.Notes = $"ค่าห้องพักที่ {channel} เก็บเงินแทนโรงแรม (Channel Collect) — การจอง #{reservationId}{bookingTxt} " +
+                        $"ผู้เข้าพัก {guestLabel}" + (string.IsNullOrEmpty(basis) ? "" : $" · ฐานรายได้ {basis}");
+            if (doc.Lines != null && doc.Lines.Count > 0)
+                doc.Lines[0].Description = $"ค่าห้องพัก {guestLabel} ({channel}{bookingTxt})";
+
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ProcessOtaSalesDocument: receipt={receiptNumber} resId={reservationId} {channel} {totalAmount:N2} → " +
+                $"Receipt(3) Dr {accSource} / Cr รายได้ห้อง{(hasVat ? " + ภาษีขาย" : "")} contact={contactId}", "SYSTEM");
+
+            Guid docId = await SettleReceiptDocAsync(doc, receiptNumber, reservationId, 0m,
+                channel, docDate, guestLabel, hasVat, accountId);
+            try { SetReceiptNextAccDoc(receiptNumber, docId.ToString(), _lastDocNumber); } catch { }
+            return docId.ToString();
+        }
+
+        /// <summary>ผู้ติดต่อ NextAcc ของช่องทาง OTA — ใช้ id ที่แคชไว้ใน Accounting_Ota_Channel_Map ก่อน
+        /// ไม่มี → upsert ผ่าน /api/integration/customers (ExternalId = OTA-{KEY}, idempotent) แล้วแคช</summary>
+        private async Task<Guid> EnsureOtaChannelContactAsync(OtaChannelMapping map, string channel)
+        {
+            if (map != null && map.ContactId.HasValue) return map.ContactId.Value;
+
+            string key = map != null ? map.ChannelKey : OtaChannelKey(channel);
+            if (string.IsNullOrEmpty(key)) key = "OTA";
+            string name = map != null && !string.IsNullOrWhiteSpace(map.BuyerName) ? map.BuyerName.Trim()
+                        : (map != null && !string.IsNullOrWhiteSpace(map.DisplayName) ? map.DisplayName.Trim() : channel);
+            var info = new ContactInfo
+            {
+                ExternalId = "OTA-" + key,
+                Name = name,
+                TaxId = map != null ? map.BuyerTaxId : null,
+                Address = map != null ? map.BuyerAddress : null,
+                BranchCode = map != null ? map.BuyerBranch : null,
+                IsJuristic = true   // OTA = นิติบุคคลเสมอ
+            };
+            string err = await PushCustomerContactAsync(info, "OtaChannelContact");
+            if (err != null || !info.NexaaccContactId.HasValue)
+                throw new Exception($"สร้าง/อัปเดตผู้ติดต่อ OTA '{name}' บน NextAcc ไม่สำเร็จ (จะลองใหม่อัตโนมัติ): {err ?? "contact id ว่าง"}");
+
+            try
+            {
+                _code.DatabaseInsertSafe(_connectionString,
+                    "UPDATE Accounting_Ota_Channel_Map SET Nexaacc_Contact_Id = @cid, Updated_Date = GETDATE() WHERE Channel_Key = @k",
+                    new Dictionary<string, object> { { "@cid", info.NexaaccContactId.Value }, { "@k", key } });
+            }
+            catch { /* ไม่มีแถว mapping — ครั้งหน้า upsert ซ้ำได้ (idempotent ตาม ExternalId) */ }
+            return info.NexaaccContactId.Value;
+        }
+
+        /// <summary>ประเภทบัญชีจาก cache ผังบัญชี (Accounting_Nexaacc_Accounts) — null = ไม่รู้ (ยังไม่ Sync บัญชี)</summary>
+        internal string LookupCachedAccountType(string accountId)
+        {
+            Guid g;
+            if (string.IsNullOrEmpty(accountId) || !Guid.TryParse(accountId, out g)) return null;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 Account_Type FROM Accounting_Nexaacc_Accounts WHERE Nexaacc_AccountId = @id",
+                    new Dictionary<string, object> { { "@id", g } });
+                if (dt != null && dt.Rows.Count > 0 && dt.Rows[0][0] != DBNull.Value)
+                {
+                    string t = dt.Rows[0][0].ToString().Trim();
+                    return t.Length == 0 ? null : t;
+                }
+            }
+            catch { }
+            return null;
+        }
+
         // ──────────────────────────────────────────────
         // Queue Processing (called by background timer/scheduler)
         // ──────────────────────────────────────────────
@@ -3233,6 +3538,10 @@ namespace Take_Time_BangPhra.Integration
                 // ── Active processors (ผูกกับเอกสารจริง) ──
                 case "CREATE_RECEIPT_DOCUMENT":
                     return await ProcessReceiptDocument(payload);
+
+                // เงินค่าห้องที่ OTA เก็บแทน (Channel Collect) → ใบเสร็จรับเงินรายช่องทาง (PHASE19_21)
+                case "CREATE_OTA_SALES_DOCUMENT":
+                    return await ProcessOtaSalesDocument(payload);
 
                 case "CREATE_VOUCHER_JOURNAL":
                     return await ProcessVoucherJournal(payload);

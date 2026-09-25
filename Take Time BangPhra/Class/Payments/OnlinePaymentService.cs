@@ -602,6 +602,9 @@ namespace Take_Time_BangPhra.Payments
             // ข้อความนี้ (LookupPaidHowAccountId) เพื่อบังคับ Dr เข้าบัญชีพักเงินเกตเวย์ใน NextAcc
             // ถ้าส่งชื่อสวย ๆ ("บัตรเครดิต / เดบิต") จะหาไม่เจอ แล้วบัญชีจะเดาเป็นเงินสด
             string methodText = PaymentGatewayConfig.Get("Payment_PaidHow_Name", "Omise (จ่ายออนไลน์)");
+            // แหล่งเงินรายผู้ให้บริการ/วิธีจ่าย (ตั้งที่ Accounting Integration, PHASE19_21) — ไม่ได้ตั้ง = ชื่อเดิม
+            methodText = Take_Time_BangPhra.Integration.AccountingSyncService
+                .ResolveGatewayPaidHowName(_conn, txn.Provider, txn.Method, methodText);
             string notes = "ชำระออนไลน์ผ่าน " + (txn.Provider ?? "-")
                          + " · อ้างอิง " + txn.TxnRef
                          + (string.IsNullOrEmpty(txn.ProviderTxnId) ? "" : " · เลขที่เกตเวย์ " + txn.ProviderTxnId)

@@ -229,7 +229,7 @@ namespace Take_Time_BangPhra.Integration
         }
 
         /// <summary>วิธีจ่ายของรูมเซอร์วิส → ชื่อแหล่งรับเงินใน Account_Paid_How (ใช้หาบัญชี NextAcc)</summary>
-        private static string MapPaymentMethodToPaidHow(string paymentMethod)
+        private string MapPaymentMethodToPaidHow(string paymentMethod)
         {
             switch ((paymentMethod ?? "").ToUpperInvariant())
             {
@@ -237,9 +237,16 @@ namespace Take_Time_BangPhra.Integration
                 case "TRANSFER": return "เงินโอน";
                 // จ่ายออนไลน์ผ่านเกตเวย์ → แหล่งเงินของเกตเวย์ (ผูกบัญชีพักเงินใน NextAcc)
                 // ต้องตรงกับชื่อแถวใน Account_Paid_How เป๊ะ ๆ — ตั้งทับได้ที่ Payment_PaidHow_Name
+                // หรือรายผู้ให้บริการที่ Accounting Integration (Nexaacc_Gateway_PaidHow_{PROVIDER}, PHASE19_21) —
+                // ออเดอร์ไม่ได้เก็บว่าจ่ายผ่านเจ้าไหน → ใช้เกตเวย์ที่เปิดใช้อยู่ (ใบสรุปรายวันรวบตามวัน)
                 case "ONLINE":
-                    return Take_Time_BangPhra.Payments.PaymentGatewayConfig
+                {
+                    string fallback = Take_Time_BangPhra.Payments.PaymentGatewayConfig
                         .Get("Payment_PaidHow_Name", "Omise (จ่ายออนไลน์)");
+                    string provider = null;
+                    try { provider = Take_Time_BangPhra.Payments.PaymentGatewayConfig.ActiveProvider; } catch { }
+                    return AccountingSyncService.ResolveGatewayPaidHowName(_conn, provider, null, fallback);
+                }
                 default: return "เงินสด";
             }
         }
@@ -257,11 +264,15 @@ namespace Take_Time_BangPhra.Integration
         /// </summary>
         public void PostOtaRoomRevenueIfDue(int maxPerRun = 20)
         {
-            if (!_config.IsConfigured || !_config.Enabled || !_config.IsOtaRoomRevenueEnabled) return;
+            // โหมดเอกสาร OTA (Nexaacc_OtaDocument_Mode = RECEIPT_DOC) เปิดตัวเดียวก็ทำงาน และ "ชนะ" โหมดเดิม:
+            // การจองหนึ่งรายการถูกโพสต์ทางเดียวเสมอ (marker เดียวกัน Reservation.Ota_Revenue_Ref)
+            bool docMode = _config.IsOtaDocumentMode;
+            if (!_config.IsConfigured || !_config.Enabled || (!_config.IsOtaRoomRevenueEnabled && !docMode)) return;
 
             // ต้องบังคับขา Dr ให้เป็น "ลูกหนี้ OTA" ให้ได้ ไม่งั้น NextAcc จะลงเป็นเงินสด (ผิด — ยังไม่ได้รับเงิน)
+            // โหมดเอกสาร: บัญชีรายช่องทาง (Accounting_Ota_Channel_Map) มาก่อน — OTA_RECEIVABLE เป็นแค่ค่าสำรอง
             string arAccountId = ResolveRealAccountId("OTA_RECEIVABLE");
-            if (string.IsNullOrEmpty(arAccountId))
+            if (string.IsNullOrEmpty(arAccountId) && !docMode)
             {
                 LogOnce("OtaRoomRevenue_NoMapping",
                     "OtaRoomRevenue: ยังไม่ได้ map บัญชี 'ลูกหนี้ OTA' (OTA_RECEIVABLE) กับผังบัญชี NextAcc " +
@@ -351,8 +362,16 @@ namespace Take_Time_BangPhra.Integration
                                 $"(ราคาห้อง {roomTotal:N2}, ยอด OTA {amount:N2}) — ข้าม กันรายได้ซ้ำ");
                             continue;
                         }
-                        ProcessOneOtaReservation(r, resId, amount, grossBasis ? "GROSS" : "NET", arAccountId);
-                        posted++;
+                        if (docMode)
+                        {
+                            if (ProcessOneOtaDocument(r, resId, amount, grossBasis ? "GROSS" : "NET", arAccountId))
+                                posted++;
+                        }
+                        else
+                        {
+                            ProcessOneOtaReservation(r, resId, amount, grossBasis ? "GROSS" : "NET", arAccountId);
+                            posted++;
+                        }
                     }
                     catch (Exception exOne)
                     {
@@ -470,6 +489,108 @@ namespace Take_Time_BangPhra.Integration
             _code.DatabaseInsertSafe(_conn,
                 "UPDATE Reservation SET Ota_Revenue_Ref = @ref WHERE ID = @id AND Ota_Revenue_Ref IS NULL",
                 new Dictionary<string, object> { { "@ref", reference }, { "@id", reservationId } });
+        }
+
+        /// <summary>
+        /// โหมดเอกสาร OTA (RECEIPT_DOC): สร้าง "ใบเสร็จรับเงิน" ใน NextAcc ต่อการจอง Channel Collect —
+        /// ผู้ซื้อ = ผู้ติดต่อของ OTA, แหล่งเงิน = บัญชีพักเงิน/ลูกหนี้ของ OTA รายช่องทาง (ประมวลผลในคิว
+        /// CREATE_OTA_SALES_DOCUMENT → AccountingSyncService.ProcessOtaSalesDocument).
+        ///
+        /// กันซ้ำกับโหมดเดิม (JE/ใบเสร็จผ่าน OTA_RECEIVABLE) และ reclass เงินสดปลอม: "จอง" marker
+        /// Reservation.Ota_Revenue_Ref = 'OTADOC-{id}' แบบ atomic (UPDATE … WHERE IS NULL + @@ROWCOUNT)
+        /// **ก่อน** สร้างอะไรทั้งนั้น — ใครจองได้ก่อนคนนั้นโพสต์ อีกทางจะไม่เห็นการจองนี้ใน candidate อีก.
+        /// ล้มก่อน enqueue สำเร็จ → คืน marker + ลบแถวสรุป เพื่อให้รอบหน้าลองใหม่ได้.
+        /// คืน true = เข้าคิวแล้ว
+        /// </summary>
+        private bool ProcessOneOtaDocument(DataRow r, int resId, decimal amount, string basisLabel, string fallbackAccountId)
+        {
+            if (amount <= 0m) return false;
+
+            DateTime docDate = r["CheckoutDate"] != DBNull.Value
+                ? Convert.ToDateTime(r["CheckoutDate"]) : DateTime.Today;
+            string channel = r["OTA_Channel"]?.ToString() ?? "OTA";
+            string bookingId = r["OTA_Booking_ID"]?.ToString() ?? "";
+            string guest = r["OTA_Guest_Name"]?.ToString();
+            if (string.IsNullOrWhiteSpace(guest)) guest = $"ลูกค้า {channel}";
+
+            var map = _sync.LookupOtaChannelMapping(channel);
+            string key = AccountingSyncService.OtaChannelKey(channel);
+            if (map != null && !map.IsActive)
+            {
+                LogOnce("OtaDoc_Disabled_" + key,
+                    $"OtaDocument: ช่องทาง {channel} ({key}) ถูกปิดใน 'OTA → บัญชี/ผู้ซื้อ' — ข้าม (ไม่โพสต์อัตโนมัติ)");
+                return false;
+            }
+            string accountId = map != null && !string.IsNullOrEmpty(map.AccountId) ? map.AccountId : fallbackAccountId;
+            if (string.IsNullOrEmpty(accountId))
+            {
+                LogOnce("OtaDoc_NoAccount_" + key,
+                    $"OtaDocument: ช่องทาง {channel} ({key}) ยังไม่ได้ผูกบัญชีพักเงิน/ลูกหนี้ OTA และไม่ได้ map OTA_RECEIVABLE " +
+                    "— ข้าม (ตั้งที่ Accounting Integration → 'OTA → บัญชี/ผู้ซื้อ')");
+                return false;
+            }
+
+            string docRef = $"OTADOC-{resId}";
+
+            // 1) จอง marker แบบ atomic — ได้ 0 แถว = ถูกโพสต์/จองไปแล้วโดยทางอื่น
+            if (!TryClaimOtaRevenueRef(resId, docRef)) return false;
+
+            try
+            {
+                // 2) แถวสรุปในระบบ (เก็บ marker DOC:/APR:/{docId} ของ NextAcc กันสร้างซ้ำตอน retry)
+                string paidType = map != null && !string.IsNullOrEmpty(map.PaidHowName) ? map.PaidHowName : channel;
+                CreateSummaryReceiptRow(docRef, resId, docDate, amount, paidType,
+                    $"ค่าห้องพัก {channel} (OTA เก็บเงินแทน) การจอง #{resId}" + (string.IsNullOrEmpty(bookingId) ? "" : $" ({bookingId})"), "0");
+                if (!ReceiptExists(docRef))
+                    throw new Exception("สร้างแถว Account_Receipt ไม่สำเร็จ");
+
+                // 3) เข้าคิว
+                long qid = _sync.EnqueueOtaSalesDocument(resId, docRef, amount, docDate.Date, channel, bookingId, guest,
+                    basisLabel, fallbackAccountId);
+                if (qid <= 0) throw new Exception("เข้าคิวไม่สำเร็จ (qid=" + qid + ")");
+
+                Log($"OtaDocument: การจอง #{resId} {channel} {amount:N2} (ฐาน {basisLabel}) → คิว #{qid} " +
+                    $"ใบเสร็จรับเงิน ref={docRef} แหล่งเงิน={(map != null && !string.IsNullOrEmpty(map.AccountId) ? map.PaidHowName + " " + map.AccountCode : "OTA_RECEIVABLE")}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ReleaseOtaRevenueRef(resId, docRef);
+                Log($"OtaDocument: การจอง #{resId} ล้มเหลว → คืนสถานะให้ลองรอบหน้า: {ex.Message}");
+                return false;
+            }
+        }
+
+        private bool TryClaimOtaRevenueRef(int reservationId, string reference)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_conn,
+                    @"UPDATE Reservation SET Ota_Revenue_Ref = @ref WHERE ID = @id AND Ota_Revenue_Ref IS NULL;
+                      SELECT @@ROWCOUNT AS N;",
+                    new Dictionary<string, object> { { "@ref", reference }, { "@id", reservationId } });
+                return dt != null && dt.Rows.Count > 0 && Convert.ToInt32(dt.Rows[0]["N"]) > 0;
+            }
+            catch { return false; }
+        }
+
+        /// <summary>คืน marker + ลบแถวสรุปที่ยังไม่เคยขึ้น NextAcc (ใช้ตอน enqueue ล้ม)</summary>
+        private void ReleaseOtaRevenueRef(int reservationId, string reference)
+        {
+            try
+            {
+                _code.DatabaseInsertSafe(_conn,
+                    @"DELETE FROM Account_Receipt_Detail
+                       WHERE Receipt_ID = @ref
+                         AND EXISTS (SELECT 1 FROM Account_Receipt WHERE ID = @ref AND Nexaacc_Receipt_Payment_Id IS NULL);
+                      DELETE FROM Account_Receipt WHERE ID = @ref AND Nexaacc_Receipt_Payment_Id IS NULL;
+                      UPDATE Reservation SET Ota_Revenue_Ref = NULL WHERE ID = @id AND Ota_Revenue_Ref = @ref;",
+                    new Dictionary<string, object> { { "@ref", reference }, { "@id", reservationId } });
+            }
+            catch (Exception ex)
+            {
+                Log($"OtaDocument: คืนสถานะการจอง #{reservationId} ({reference}) ไม่สำเร็จ: {ex.Message}");
+            }
         }
 
         // ═══════════════════════════════════════════════════════════════════

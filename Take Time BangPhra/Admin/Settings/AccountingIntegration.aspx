@@ -259,6 +259,21 @@
                         (ไม่ลงเป็นเงินสดผิด ๆ). ต้องรัน migration <code>PHASE18_20</code> และ <code>PHASE18_11</code>
                     </div>
                 </div>
+                <div class="config-item" style="margin-left:20px;">
+                    <label>เงินค่าห้องที่ OTA เก็บแทน (Channel Collect) → สร้างเอกสารใน NextAcc</label>
+                    <select id="cfgOtaDocumentMode" onchange="this.setAttribute('data-loaded','1');">
+                        <option value="OFF">OFF — ตามเดิม (ใช้ตัวเลือกด้านบน: ลงลูกหนี้ OTA กลางบัญชีเดียว)</option>
+                        <option value="RECEIPT_DOC">RECEIPT_DOC — ออก "ใบเสร็จรับเงิน" ใน NextAcc ต่อการจอง (ผู้ซื้อ = OTA · บัญชีพักเงินรายช่องทาง)</option>
+                    </select>
+                    <div class="help-text">
+                        <b>RECEIPT_DOC</b>: หลังเลยวันเช็คเอาท์ ระบบสร้าง<b>ใบเสร็จรับเงิน</b> (NextAcc Receipt) ต่อการจอง Channel Collect —
+                        <b>Dr บัญชีพักเงิน/ลูกหนี้ของ OTA รายช่องทาง · Cr รายได้ห้อง · Cr ภาษีขาย</b> ผู้ซื้อ = บริษัท OTA
+                        (ตั้งบัญชี/ผู้ซื้อรายช่องทางที่หัวข้อ <b>"OTA → บัญชี/ผู้ซื้อ"</b> ด้านล่าง; ช่องทางที่ยังไม่ตั้งใช้ OTA_RECEIVABLE แทน)<br />
+                        เปิดตัวนี้อย่างเดียวก็ทำงาน และ<b>แทนที่</b>ตัวเลือกด้านบน — การจองหนึ่งรายการถูกโพสต์ทางเดียวเสมอ
+                        (ใช้เครื่องหมาย <code>Ota_Revenue_Ref</code> ร่วมกัน ไม่ลงซ้ำ). การจองที่เคยโพสต์ไปแล้วไม่ถูกทำซ้ำ.
+                        ต้องรัน migration <code>PHASE19_21</code> + ตั้ง Company ID (company endpoint)
+                    </div>
+                </div>
                 <div class="config-item">
                     <label>Sync จำนวนสต๊อก → NextAcc (ขาออก)</label>
                     <select id="cfgStockQtySync">
@@ -1277,16 +1292,20 @@
         <div class="journey-card">
             <h3><i class="fas fa-credit-card"></i> วิธีจ่ายเงิน &rarr; บัญชี NextAcc</h3>
             <p style="font-size:13px; color:#666; margin-bottom:10px;">
-                ผูกวิธีจ่ายเงินแต่ละรายการกับบัญชี NextAcc โดยตรง — ระบบจะส่งไปบัญชีที่เลือกไว้ทุกครั้ง (ไม่ต้องพึ่ง text matching)
+                ผูกวิธีรับ/จ่ายเงินแต่ละรายการกับ <b>"กระเป๋าเงิน" ที่เปิดอยู่จริงใน NextAcc</b> — บัญชีธนาคาร/e-Wallet (เมนู Bank ของ NextAcc),
+                เงินสด, บัญชีพักเงินเกตเวย์ (11340 ลูกหนี้ผู้ให้บริการรับชำระเงิน), ลูกหนี้ OTA — ระบบส่งบัญชีที่เลือกเป็นฝั่งเงิน (PaymentAccountId)
+                ของเอกสารทุกครั้ง. เลือกได้เฉพาะบัญชีสินทรัพย์/หนี้สิน (ระบบปฏิเสธรายได้/ค่าใช้จ่าย)
             </p>
+            <button type="button" class="btn-primary" onclick="syncWallets()" style="margin-bottom:10px;"><i class="fas fa-cloud-download-alt"></i> ดึงรายการจาก NextAcc</button>
             <button type="button" class="btn-primary" onclick="loadPaidHowMapping()" style="margin-bottom:10px;"><i class="fas fa-sync"></i> โหลดวิธีจ่ายเงิน</button>
+            <span id="walletLastSync" style="font-size:12px; color:#7f8c8d; margin-left:6px;"></span>
             <div style="overflow-x:auto;">
                 <table class="queue-table" id="paidHowTable">
                     <thead>
                         <tr>
                             <th>ID</th>
                             <th>วิธีจ่ายเงิน</th>
-                            <th style="min-width:280px;">บัญชี NextAcc</th>
+                            <th style="min-width:320px;">กระเป๋าเงิน / บัญชี NextAcc</th>
                             <th>สถานะ</th>
                         </tr>
                     </thead>
@@ -1296,6 +1315,51 @@
                 </table>
             </div>
             <div class="test-result" id="paidHowResult"></div>
+        </div>
+
+        <!-- Online gateway → แหล่งเงินรายผู้ให้บริการ -->
+        <div class="journey-card">
+            <h3><i class="fas fa-globe"></i> รับชำระออนไลน์ (เกตเวย์) &rarr; แหล่งเงิน</h3>
+            <p style="font-size:13px; color:#666; margin-bottom:10px;">
+                ยอดที่ลูกค้าจ่ายผ่านเกตเวย์ยังไม่เข้าธนาคารจนกว่าผู้ให้บริการโอน (payout หลังหักค่าธรรมเนียม) — ควรลง
+                <b>บัญชีพักเงินของเกตเวย์นั้น</b> ไม่ใช่ธนาคาร/เงินสด. เลือกแหล่งเงิน (ที่ผูกกระเป๋าเงินไว้ในตารางด้านบน) ต่อผู้ให้บริการ;
+                ว่าง = ใช้แหล่งเงินกลาง <code id="gwFallbackName">Payment_PaidHow_Name</code>
+            </p>
+            <button type="button" class="btn-primary" onclick="loadGatewayPaidHow()" style="margin-bottom:10px;"><i class="fas fa-sync"></i> โหลด</button>
+            <div style="overflow-x:auto;">
+                <table class="queue-table">
+                    <thead><tr><th>ผู้ให้บริการ</th><th style="min-width:260px;">แหล่งเงิน</th><th>ที่ใช้จริงตอนนี้</th></tr></thead>
+                    <tbody id="gwPaidHowBody"><tr><td colspan="3" style="text-align:center; color:#999;">กด "โหลด"</td></tr></tbody>
+                </table>
+            </div>
+            <div class="test-result" id="gwPaidHowResult"></div>
+        </div>
+
+        <!-- OTA → บัญชี/ผู้ซื้อ (Channel Collect documents) -->
+        <div class="journey-card">
+            <h3><i class="fas fa-hotel"></i> OTA &rarr; บัญชี/ผู้ซื้อ (เงินที่ OTA เก็บแทน)</h3>
+            <p style="font-size:13px; color:#666; margin-bottom:10px;">
+                ใช้กับโหมด <b>RECEIPT_DOC</b> (ตั้งที่ Sync Settings): การจอง Channel Collect ของช่องทางนี้จะออกใบเสร็จรับเงินใน NextAcc
+                โดย <b>Dr แหล่งเงินที่เลือก</b> (ควรเป็นบัญชีพักเงิน/ลูกหนี้ของ OTA รายนั้น หมวด 11x) และผู้ซื้อ = ข้อมูลด้านล่าง
+                (ว่าง = ชื่อช่องทาง). ปิดช่องทาง = ไม่โพสต์อัตโนมัติ. โหมดปัจจุบัน: <b id="otaModeLabel">-</b>
+            </p>
+            <button type="button" class="btn-primary" onclick="loadOtaChannelMap()" style="margin-bottom:10px;"><i class="fas fa-sync"></i> โหลดช่องทาง OTA</button>
+            <div style="overflow-x:auto;">
+                <table class="queue-table">
+                    <thead>
+                        <tr>
+                            <th>ช่องทาง</th>
+                            <th style="min-width:220px;">แหล่งเงิน (บัญชีพักเงิน OTA)</th>
+                            <th style="min-width:200px;">ผู้ซื้อบนเอกสาร</th>
+                            <th>เลขภาษี / สาขา</th>
+                            <th>เปิด</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="otaMapBody"><tr><td colspan="6" style="text-align:center; color:#999;">กด "โหลดช่องทาง OTA"</td></tr></tbody>
+                </table>
+            </div>
+            <div class="test-result" id="otaMapResult"></div>
         </div>
 
         <!-- Expense Category → Account Mapping -->
@@ -1410,6 +1474,9 @@
                 document.getElementById('cfgEtaxRdWatch').value = cfg.etaxRdWatch ? 'true' : 'false';
                 document.getElementById('cfgEtaxRdFrom').value = cfg.etaxRdFrom || '';
                 document.getElementById('cfgOtaRoomRevenue').value = cfg.otaRoomRevenue ? 'true' : 'false';
+                // โหมดเอกสาร OTA: ส่งกลับตอนบันทึกเฉพาะเมื่อโหลดค่าจริงแล้ว (กันรีเซ็ตนโยบายเงียบ ๆ)
+                var odmSel = document.getElementById('cfgOtaDocumentMode');
+                if (odmSel && cfg.otaDocumentMode) { odmSel.value = cfg.otaDocumentMode; odmSel.setAttribute('data-loaded', '1'); }
                 document.getElementById('cfgStockQtySync').value = cfg.stockQtySync ? 'true' : 'false';
                 document.getElementById('cfgStockQtyPull').value = cfg.stockQtyPull ? 'true' : 'false';
                 document.getElementById('cfgAttachFiles').value = cfg.attachFiles ? 'true' : 'false';
@@ -1569,6 +1636,8 @@
             };
             var rhtEl = document.getElementById('cfgReceiptHeaderType');
             if (rhtEl && rhtEl.getAttribute('data-loaded') === '1') data.receiptHeaderType = rhtEl.value;
+            var odmEl = document.getElementById('cfgOtaDocumentMode');
+            if (odmEl && odmEl.getAttribute('data-loaded') === '1') data.otaDocumentMode = odmEl.value;
             postAction(data, 'syncTestResult');
         }
 
@@ -2777,68 +2846,138 @@
                 });
         }
 
+        // ── "กระเป๋าเงิน" จาก NextAcc (บัญชีธนาคาร/e-Wallet + ผังเงินสด/พักเงิน/ลูกหนี้) ──
+        var walletOptions = null;   // { banks: [...], accounts: [...] } จาก action=walletOptions
+
+        function waEsc(s) {
+            return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        function loadWalletOptions(callback) {
+            fetch(pageUrl + '?action=walletOptions&_=' + Date.now())
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    walletOptions = data.success ? data : { banks: [], accounts: [] };
+                    var ls = document.getElementById('walletLastSync');
+                    if (ls) ls.textContent = data.success
+                        ? ('กระเป๋าเงิน NextAcc ' + (data.banks || []).length + ' บัญชี · ดึงล่าสุด ' + (data.lastSync || '-')
+                           + (data.bankCacheReady ? '' : ' (ยังไม่ได้รัน PHASE19_21)'))
+                        : '';
+                    callback();
+                })
+                .catch(function() { walletOptions = { banks: [], accounts: [] }; callback(); });
+        }
+
+        function syncWallets() {
+            var el = document.getElementById('paidHowResult');
+            el.className = 'test-result loading';
+            el.textContent = 'กำลังดึงผังบัญชี + บัญชีธนาคาร/กระเป๋าเงินจาก NextAcc...';
+            var controller = new AbortController();
+            var timer = setTimeout(function() { controller.abort(); }, 90000);
+            fetch(pageUrl + '?action=syncWallets&_=' + Date.now(), { signal: controller.signal })
+                .then(function(r) { clearTimeout(timer); return r.json(); })
+                .then(function(data) {
+                    el.className = 'test-result ' + (data.success ? 'success' : 'error');
+                    el.innerHTML = (data.success ? '✓ ' : '✗ ') + waEsc(data.message).replace(/\n/g, '<br/>');
+                    nexaaccAccountsCache = [];
+                    loadPaidHowMapping();
+                })
+                .catch(function(err) {
+                    clearTimeout(timer);
+                    el.className = 'test-result error';
+                    el.innerHTML = '✗ ' + (err.name === 'AbortError' ? 'หมดเวลา (90 วินาที)' : waEsc(err.message));
+                });
+        }
+
         function loadPaidHowMapping() {
             var body = document.getElementById('paidHowBody');
             body.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#999;">กำลังโหลด...</td></tr>';
 
-            ensureAccountsLoaded(function() {
+            loadWalletOptions(function() {
                 fetch(pageUrl + '?action=getPaidHowMapping&_=' + Date.now())
                     .then(function(r) { return r.json(); })
                     .then(function(data) {
-                        if (!data.success) { body.innerHTML = '<tr><td colspan="4" class="text-center" style="color:red;">' + data.message + '</td></tr>'; return; }
+                        if (!data.success) { body.innerHTML = '<tr><td colspan="4" class="text-center" style="color:red;">' + waEsc(data.message) + '</td></tr>'; return; }
                         var items = data.items || [];
                         if (items.length === 0) { body.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#999;">ไม่พบข้อมูลวิธีจ่ายเงิน</td></tr>'; return; }
                         var html = '';
                         items.forEach(function(item) {
                             var linked = item.accountId && item.accountId !== '' && item.accountId !== '00000000-0000-0000-0000-000000000000';
                             var badge = linked
-                                ? '<span class="status-badge status-connected">' + (item.accountCode || '') + ' ✓</span>'
+                                ? '<span class="status-badge status-connected">' + waEsc(item.accountCode || '') + ' ✓</span>'
                                 : '<span class="status-badge status-not-configured">ยังไม่ผูก</span>';
+                            if (linked && item.bankName)
+                                badge += '<div style="font-size:11px;color:#555;margin-top:3px;">' + waEsc(item.bankName) + ' ' + waEsc(item.bankNumber || '') + '</div>';
+                            if (item.warning && linked)
+                                badge += '<div style="font-size:11px;color:#c0392b;margin-top:3px;">⚠ ' + waEsc(item.warning) + '</div>';
                             html += '<tr>'
                                 + '<td>' + item.id + '</td>'
-                                + '<td><strong>' + (item.name || '') + '</strong></td>'
-                                + '<td>' + buildPaidHowSelect(item.id, item.accountCode, item.accountId) + '</td>'
+                                + '<td><strong>' + waEsc(item.name || '') + '</strong>'
+                                + (item.channelType ? '<div style="font-size:11px;color:#7f8c8d;">' + waEsc(item.channelType) + '</div>' : '') + '</td>'
+                                + '<td>' + buildPaidHowSelect(item.id, item.accountCode, item.accountId, item.bankAccountId) + '</td>'
                                 + '<td>' + badge + '</td>'
                                 + '</tr>';
                         });
                         body.innerHTML = html;
                     })
-                    .catch(function(err) { body.innerHTML = '<tr><td colspan="4" style="color:red;">' + err.message + '</td></tr>'; });
+                    .catch(function(err) { body.innerHTML = '<tr><td colspan="4" style="color:red;">' + waEsc(err.message) + '</td></tr>'; });
             });
         }
 
-        function buildPaidHowSelect(itemId, currentCode, currentAccountId) {
-            if (!nexaaccAccountsCache || nexaaccAccountsCache.length === 0) {
-                return '<span style="color:#e65100;font-size:12px;">กรุณากด "Sync บัญชี" ด้านบน แล้วรีเฟรชหน้านี้</span>';
+        // option value = accountId|accountCode|bankAccountId (bank ว่าง = เลือกจากผังบัญชีโดยตรง)
+        function buildPaidHowSelect(itemId, currentCode, currentAccountId, currentBankId) {
+            var wo = walletOptions || { banks: [], accounts: [] };
+            var banks = wo.banks || [], accs = wo.accounts || [];
+            if (banks.length === 0 && accs.length === 0) {
+                return '<span style="color:#e65100;font-size:12px;">กด "ดึงรายการจาก NextAcc" ก่อน</span>';
             }
-            var accs = nexaaccAccountsCache;
-            var groups = {};
-            accs.forEach(function(a) { var t = a.type || 'OTHER'; if (!groups[t]) groups[t] = []; groups[t].push(a); });
-            var typeOrder = ['Asset', 'Liability'];
+            var chosen = false;
+            // GUID จาก SQL CAST เป็นตัวพิมพ์ใหญ่ ส่วน Guid.ToString() เป็นตัวเล็ก → เทียบแบบไม่สนตัวพิมพ์
+            currentAccountId = (currentAccountId || '').toLowerCase();
+            currentBankId = (currentBankId || '').toLowerCase();
+            if (currentAccountId === '00000000-0000-0000-0000-000000000000') currentAccountId = '';
             var html = '<select id="phSelect_' + itemId + '" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;font-size:12px;" onchange="updatePaidHowAccount(' + itemId + ')">';
-            html += '<option value="">-- เลือกบัญชี --</option>';
-            typeOrder.forEach(function(t) {
-                if (!groups[t]) return;
-                html += '<optgroup label="' + t + '">';
-                groups[t].forEach(function(acc) {
+            html += '<option value="">-- เลือกกระเป๋าเงิน / บัญชี --</option>';
+
+            if (banks.length > 0) {
+                html += '<optgroup label="บัญชีธนาคาร / กระเป๋าเงิน (NextAcc)">';
+                banks.forEach(function(b) {
+                    var usable = b.active && b.linkedId;
+                    var sel = (!chosen && currentBankId && String(b.id).toLowerCase() === currentBankId) ? ' selected' : '';
+                    if (sel) chosen = true;
+                    var label = (b.bank || '') + ' ' + (b.number || '') + (b.name ? ' · ' + b.name : '')
+                        + (b.type ? ' (' + b.type + ')' : '')
+                        + (b.linkedCode ? ' → ' + b.linkedCode : ' → ยังไม่ผูกผังบัญชีใน NextAcc')
+                        + (b.active ? '' : ' [ปิดใช้งาน]');
+                    html += '<option value="' + waEsc((b.linkedId || '') + '|' + (b.linkedCode || '') + '|' + b.id) + '"'
+                        + sel + (usable ? '' : ' disabled') + '>' + waEsc(label) + '</option>';
+                });
+                html += '</optgroup>';
+            }
+
+            var groupLabels = [
+                ['CASH', 'เงินสด / เงินฝาก / กระเป๋าเงิน Digital (111xx)'],
+                ['RECEIVABLE', 'พักเงินเกตเวย์ / ลูกหนี้ OTA / ลูกหนี้อื่น (113xx)'],
+                ['OTHER_ASSET', 'สินทรัพย์อื่น'],
+                ['LIABILITY', 'หนี้สิน (เช่น เจ้าหนี้กรรมการ — ใช้กับฝั่งจ่ายเท่านั้น)']
+            ];
+            groupLabels.forEach(function(g) {
+                var list = accs.filter(function(a) { return a.group === g[0]; });
+                if (list.length === 0) return;
+                html += '<optgroup label="' + waEsc(g[1]) + '">';
+                list.forEach(function(a) {
                     var sel = '';
-                    if (currentAccountId && acc.id === currentAccountId) sel = ' selected';
-                    else if (!currentAccountId && currentCode && acc.code === currentCode) sel = ' selected';
-                    html += '<option value="' + acc.id + '|' + acc.code + '"' + sel + '>' + acc.code + ' - ' + (acc.name || acc.nameEn || '') + '</option>';
+                    if (!chosen && !currentBankId) {
+                        if (currentAccountId && String(a.id).toLowerCase() === currentAccountId) sel = ' selected';
+                        else if (!currentAccountId && currentCode && a.code === currentCode) sel = ' selected';
+                        if (sel) chosen = true;
+                    }
+                    html += '<option value="' + waEsc(a.id + '|' + a.code + '|') + '"' + sel + '>'
+                        + waEsc(a.code + ' - ' + (a.name || '')) + '</option>';
                 });
                 html += '</optgroup>';
             });
-            for (var t in groups) {
-                if (typeOrder.indexOf(t) === -1) {
-                    html += '<optgroup label="' + t + '">';
-                    groups[t].forEach(function(acc) {
-                        var sel = '';
-                        if (currentAccountId && acc.id === currentAccountId) sel = ' selected';
-                        html += '<option value="' + acc.id + '|' + acc.code + '"' + sel + '>' + acc.code + ' - ' + (acc.name || acc.nameEn || '') + '</option>';
-                    });
-                    html += '</optgroup>';
-                }
-            }
             html += '</select>';
             return html;
         }
@@ -2847,20 +2986,127 @@
             var sel = document.getElementById('phSelect_' + itemId);
             if (!sel || !sel.value) return;
             var parts = sel.value.split('|');
-            var accountId = parts[0], accountCode = parts[1] || '';
+            var accountId = parts[0], accountCode = parts[1] || '', bankId = parts[2] || '';
             var el = document.getElementById('paidHowResult');
+            if (!accountId) { el.className = 'test-result error'; el.textContent = '✗ บัญชีธนาคารนี้ยังไม่ผูกผังบัญชีใน NextAcc'; return; }
             el.className = 'test-result loading'; el.textContent = 'กำลังบันทึก...';
 
             fetch(pageUrl + '?action=updatePaidHowAccount&id=' + itemId
                 + '&accountId=' + encodeURIComponent(accountId)
-                + '&accountCode=' + encodeURIComponent(accountCode) + '&_=' + Date.now())
+                + '&accountCode=' + encodeURIComponent(accountCode)
+                + '&bankAccountId=' + encodeURIComponent(bankId) + '&_=' + Date.now())
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     el.className = 'test-result ' + (data.success ? 'success' : 'error');
-                    el.innerHTML = (data.success ? '✓ ' : '✗ ') + data.message;
-                    if (data.success) loadPaidHowMapping();
+                    el.innerHTML = (data.success ? '✓ ' : '✗ ') + waEsc(data.message).replace(/\n/g, '<br/>');
+                    loadPaidHowMapping();
                 })
-                .catch(function(err) { el.className = 'test-result error'; el.innerHTML = '✗ ' + err.message; });
+                .catch(function(err) { el.className = 'test-result error'; el.innerHTML = '✗ ' + waEsc(err.message); });
+        }
+
+        // ── เกตเวย์ → แหล่งเงิน ──
+        function loadGatewayPaidHow() {
+            var body = document.getElementById('gwPaidHowBody');
+            body.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#999;">กำลังโหลด...</td></tr>';
+            fetch(pageUrl + '?action=getGatewayPaidHow&_=' + Date.now())
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (!data.success) { body.innerHTML = '<tr><td colspan="3" style="color:red;">' + waEsc(data.message) + '</td></tr>'; return; }
+                    var fb = document.getElementById('gwFallbackName'); if (fb) fb.textContent = data.fallback || '';
+                    var html = '';
+                    (data.rows || []).forEach(function(row) {
+                        var s = '<select id="gwSel_' + row.provider + '" style="width:100%;padding:5px;font-size:12px;" onchange="saveGatewayPaidHow(\'' + row.provider + '\')">'
+                            + '<option value="">(ใช้แหล่งเงินกลาง)</option>';
+                        (data.options || []).forEach(function(o) {
+                            s += '<option value="' + waEsc(o.name) + '"' + (o.name === row.paidHow ? ' selected' : '') + '>'
+                                + waEsc(o.name + (o.linked ? ' → ' + o.code : ' (ยังไม่ผูกบัญชี)')) + '</option>';
+                        });
+                        s += '</select>';
+                        html += '<tr><td><strong>' + waEsc(row.provider) + '</strong>' + (row.active ? ' <span class="status-badge status-connected">ใช้อยู่</span>' : '') + '</td>'
+                            + '<td>' + s + '</td><td>' + waEsc(row.effective || '') + '</td></tr>';
+                    });
+                    body.innerHTML = html;
+                })
+                .catch(function(err) { body.innerHTML = '<tr><td colspan="3" style="color:red;">' + waEsc(err.message) + '</td></tr>'; });
+        }
+
+        function saveGatewayPaidHow(provider) {
+            var sel = document.getElementById('gwSel_' + provider);
+            var el = document.getElementById('gwPaidHowResult');
+            el.className = 'test-result loading'; el.textContent = 'กำลังบันทึก...';
+            fetch(pageUrl + '?action=saveGatewayPaidHow', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'saveGatewayPaidHow', provider: provider, paidHow: sel ? sel.value : '' })
+            })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    el.className = 'test-result ' + (data.success ? 'success' : 'error');
+                    el.innerHTML = (data.success ? '✓ ' : '✗ ') + waEsc(data.message);
+                    loadGatewayPaidHow();
+                })
+                .catch(function(err) { el.className = 'test-result error'; el.innerHTML = '✗ ' + waEsc(err.message); });
+        }
+
+        // ── OTA → บัญชี/ผู้ซื้อ ──
+        var otaMapItems = [];
+        function loadOtaChannelMap() {
+            var body = document.getElementById('otaMapBody');
+            body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#999;">กำลังโหลด...</td></tr>';
+            fetch(pageUrl + '?action=getOtaChannelMap&_=' + Date.now())
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (!data.success) { body.innerHTML = '<tr><td colspan="6" style="color:red;">' + waEsc(data.message) + '</td></tr>'; return; }
+                    var ml = document.getElementById('otaModeLabel');
+                    if (ml) ml.textContent = data.mode === 'RECEIPT_DOC' ? 'RECEIPT_DOC (สร้างเอกสาร)' : 'OFF (ยังไม่สร้างเอกสาร)';
+                    otaMapItems = data.items || [];
+                    if (otaMapItems.length === 0) { body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#999;">ยังไม่พบช่องทาง OTA</td></tr>'; return; }
+                    var html = '';
+                    otaMapItems.forEach(function(it, idx) {
+                        var s = '<select id="otaPh_' + idx + '" style="width:100%;padding:5px;font-size:12px;">'
+                            + '<option value="0">(ใช้ลูกหนี้ OTA กลาง OTA_RECEIVABLE)</option>';
+                        (data.paidHows || []).forEach(function(p) {
+                            s += '<option value="' + p.id + '"' + (p.id === it.paidHowId ? ' selected' : '') + '>'
+                                + waEsc(p.name + (p.linked ? ' → ' + p.code : ' (ยังไม่ผูกบัญชี)')) + '</option>';
+                        });
+                        s += '</select>';
+                        html += '<tr>'
+                            + '<td><strong>' + waEsc(it.displayName) + '</strong><div style="font-size:11px;color:#7f8c8d;">' + waEsc(it.channelKey)
+                            + (it.bookings ? ' · ' + it.bookings + ' การจอง' : '') + (it.saved ? '' : ' · ยังไม่บันทึก') + '</div></td>'
+                            + '<td>' + s + (it.paidHowId && !it.linked ? '<div style="font-size:11px;color:#c0392b;">⚠ แหล่งเงินยังไม่ผูกบัญชี NextAcc</div>' : '') + '</td>'
+                            + '<td><input type="text" id="otaBn_' + idx + '" value="' + waEsc(it.buyerName) + '" placeholder="' + waEsc(it.displayName) + '" style="width:100%;font-size:12px;" />'
+                            + '<input type="text" id="otaBa_' + idx + '" value="' + waEsc(it.buyerAddress) + '" placeholder="ที่อยู่ (ไม่บังคับ)" style="width:100%;font-size:12px;margin-top:3px;" /></td>'
+                            + '<td><input type="text" id="otaBt_' + idx + '" value="' + waEsc(it.buyerTaxId) + '" placeholder="13 หลัก / ว่าง" style="width:120px;font-size:12px;" />'
+                            + '<input type="text" id="otaBb_' + idx + '" value="' + waEsc(it.buyerBranch) + '" placeholder="00000" style="width:70px;font-size:12px;margin-top:3px;" /></td>'
+                            + '<td><input type="checkbox" id="otaAct_' + idx + '"' + (it.isActive ? ' checked' : '') + ' /></td>'
+                            + '<td><button type="button" class="btn-success" onclick="saveOtaChannelMap(' + idx + ')">บันทึก</button></td>'
+                            + '</tr>';
+                    });
+                    body.innerHTML = html;
+                })
+                .catch(function(err) { body.innerHTML = '<tr><td colspan="6" style="color:red;">' + waEsc(err.message) + '</td></tr>'; });
+        }
+
+        function saveOtaChannelMap(idx) {
+            var it = otaMapItems[idx]; if (!it) return;
+            var v = function(id) { var e = document.getElementById(id + '_' + idx); return e ? e.value.trim() : ''; };
+            var el = document.getElementById('otaMapResult');
+            el.className = 'test-result loading'; el.textContent = 'กำลังบันทึก...';
+            fetch(pageUrl + '?action=saveOtaChannelMap', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'saveOtaChannelMap', channelKey: it.channelKey, displayName: it.displayName,
+                    paidHowId: v('otaPh'), buyerName: v('otaBn'), buyerAddress: v('otaBa'),
+                    buyerTaxId: v('otaBt'), buyerBranch: v('otaBb'),
+                    isActive: document.getElementById('otaAct_' + idx).checked
+                })
+            })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    el.className = 'test-result ' + (data.success ? 'success' : 'error');
+                    el.innerHTML = (data.success ? '✓ ' : '✗ ') + waEsc(data.message).replace(/\n/g, '<br/>');
+                    if (data.success) loadOtaChannelMap();
+                })
+                .catch(function(err) { el.className = 'test-result error'; el.innerHTML = '✗ ' + waEsc(err.message); });
         }
 
         // ═══════════ Expense Category → Account Mapping ═══════════

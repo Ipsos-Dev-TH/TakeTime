@@ -146,6 +146,30 @@ namespace Take_Time_BangPhra.Integration
     }
 
     // ──────────────────────────────────────────────
+    // Bank / e-Wallet accounts (ตรงตาม Nexaacc Models/DTOs/Bank/BankDtos.cs:26-44 BankAccountResponse)
+    // GET /api/companies/{cid}/bank/accounts — "กระเป๋าเงิน" ที่เปิดไว้ใน NextAcc
+    // ──────────────────────────────────────────────
+
+    public class BankAccountResponse
+    {
+        public Guid Id { get; set; }
+        public string AccountName { get; set; }
+        public string BankName { get; set; }
+        public string AccountNumber { get; set; }
+        public string BranchName { get; set; }
+        /// <summary>Savings / Current / Fixed (NextAcc เก็บเป็น string อิสระ — BankAccount.cs:14)</summary>
+        public string AccountType { get; set; }
+        public string Currency { get; set; }
+        public decimal CurrentBalance { get; set; }
+        /// <summary>ผังบัญชี (ChartOfAccount id) ที่บัญชีธนาคารนี้ผูกไว้ — ตัวที่ JE ลงจริง
+        /// (DocumentService: PaymentAccountId > BankAccount.LinkedAccount > 111)</summary>
+        public Guid? LinkedAccountId { get; set; }
+        public string LinkedAccountCode { get; set; }
+        public string LinkedAccountName { get; set; }
+        public bool IsActive { get; set; }
+    }
+
+    // ──────────────────────────────────────────────
     // Documents (ตรงตาม Nexaacc DocumentDtos.cs)
     // ──────────────────────────────────────────────
 

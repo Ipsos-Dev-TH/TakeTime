@@ -164,6 +164,32 @@ namespace Take_Time_BangPhra.Integration
         /// </summary>
         public bool IsOtaRoomRevenueEnabled => GetConfig("Nexaacc_OtaRoomRevenue", "0") == "1";
 
+        /// <summary>
+        /// วิธีลงบัญชีเงินค่าห้องที่ OTA เก็บแทนโรงแรม (Channel Collect) — <c>Nexaacc_OtaDocument_Mode</c>
+        /// (migration PHASE19_21, ค่าเริ่มต้น OFF):
+        ///   <b>OFF</b> (default = พฤติกรรมเดิม) — ถ้าเปิด <see cref="IsOtaRoomRevenueEnabled"/> job
+        ///     RevenuePostingService โพสต์ผ่านคิวใบเสร็จปกติ (CREATE_RECEIPT_DOCUMENT) Dr ลูกหนี้ OTA
+        ///     (OTA_RECEIVABLE บัญชีเดียวทุกช่องทาง) — รูปเอกสารขึ้นกับโหมดใบเสร็จ/ผู้จอง
+        ///   <b>RECEIPT_DOC</b> — สร้าง "ใบเสร็จรับเงิน" (NextAcc Receipt type 3) ผ่าน company /document
+        ///     ต่อการจองหนึ่งใบ: ผู้ซื้อ = ผู้ติดต่อของ OTA รายช่องทาง, แหล่งเงิน (PaymentAccountId) =
+        ///     บัญชีพักเงิน/ลูกหนี้ของ OTA รายช่องทาง (Accounting_Ota_Channel_Map → Account_Paid_How) →
+        ///     NextAcc AutoPost Receipt branch: Dr บัญชีนั้น / Cr รายได้ห้อง / Cr ภาษีขาย ในเอกสารเดียว.
+        ///     เปิดโหมดนี้อย่างเดียวก็พอ (ไม่ต้องเปิด Nexaacc_OtaRoomRevenue ซ้ำ).
+        /// ⚠ สองโหมดใช้ marker เดียวกัน (Reservation.Ota_Revenue_Ref) — การจองหนึ่งรายการถูกโพสต์ได้ทางเดียวเสมอ.
+        /// ค่าอื่น/ว่าง = OFF
+        /// </summary>
+        public string OtaDocumentMode
+        {
+            get
+            {
+                string v = (GetConfig("Nexaacc_OtaDocument_Mode", "OFF") ?? "").Trim().ToUpperInvariant();
+                return v == "RECEIPT_DOC" ? "RECEIPT_DOC" : "OFF";
+            }
+        }
+
+        /// <summary>true = โหมดสร้างเอกสารรับเงิน OTA (<see cref="OtaDocumentMode"/> = RECEIPT_DOC)</summary>
+        public bool IsOtaDocumentMode => OtaDocumentMode == "RECEIPT_DOC";
+
         /// <summary>อ่านอีเมลตอบกลับจากกรมสรรพากรแล้วมาร์ค e-Tax ว่านำส่งสำเร็จ (PHASE18_28). default ปิด</summary>
         public bool IsEtaxRdWatchEnabled => GetConfig("Etax_Rd_Watch_Enabled", "0") == "1";
         /// <summary>โดเมน/คำในผู้ส่งที่ถือว่าเป็นอีเมลจากกรมสรรพากร (คั่นจุลภาค)</summary>
@@ -525,6 +551,15 @@ namespace Take_Time_BangPhra.Integration
         {
             EnsureCache();
             return _configCache.ContainsKey(key) ? _configCache[key] : defaultValue;
+        }
+
+        /// <summary>อ่านค่า config ตามชื่อคีย์ (สำหรับคีย์ที่ตั้งชื่อแบบไดนามิก เช่น
+        /// Nexaacc_Gateway_PaidHow_{PROVIDER}) — ไม่มี/ว่าง = defaultValue</summary>
+        public string GetConfigValue(string key, string defaultValue)
+        {
+            if (string.IsNullOrEmpty(key)) return defaultValue;
+            string v = GetConfig(key, null);
+            return string.IsNullOrWhiteSpace(v) ? defaultValue : v.Trim();
         }
 
         private void EnsureCache()

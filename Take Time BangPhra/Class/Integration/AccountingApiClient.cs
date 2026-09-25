@@ -597,6 +597,19 @@ namespace Take_Time_BangPhra.Integration
         }
 
         /// <summary>
+        /// รายการ "กระเป๋าเงิน" ฝั่ง NextAcc = บัญชีธนาคาร/e-Wallet/บัญชีพักเงินที่ผู้ทำบัญชีสร้างไว้
+        /// (entity BankAccount — ผูกผังบัญชีผ่าน LinkedAccountId). verified vs Wachira-d/Accounting:
+        /// <c>BankController</c> [Route("api/companies/{companyId:guid}/[controller]")] + [HttpGet("accounts")]
+        /// (Controllers/BankController.cs:16,31) → <c>BankService.GetBankAccountsAsync</c> คืนทุกบัญชีที่ไม่ถูกลบ
+        /// รวมที่ปิดใช้งาน (IsActive=false) — ผู้เรียกต้องกรองเอง (Services/Implementations/BankService.cs:163-208).
+        /// ใช้คีย์ X-Api-Key (acc_ หรือ int_ ผ่าน fallback) เหมือน company endpoint อื่น
+        /// </summary>
+        public async Task<ApiResponse<List<BankAccountResponse>>> GetBankAccountsAsync()
+        {
+            return await GetAsync<ApiResponse<List<BankAccountResponse>>>($"{CompanyPath}/bank/accounts");
+        }
+
+        /// <summary>
         /// สร้าง Journal Entry — ใช้ /api/integration/journals (X-Integration-Key auth, auto-Posted)
         /// แปลง legacy CreateJournalEntryRequest (Guid AccountId) → CreateIntegrationJournalRequest (string AccountCode)
         /// ภายใน เพื่อรักษา API surface เดิมของ caller
