@@ -818,6 +818,39 @@ namespace Take_Time_BangPhra
                     // Fallback to Deposit if Payment_History not available
                     totalPaid = Convert.ToDecimal(dtCustomer.Rows[0]["Deposit"] ?? "0");
                 }
+
+                // 🏷 OTA Channel Collect: OTA เก็บค่าห้องจากลูกค้าไปแล้ว — ต้องนับเป็น "ชำระแล้ว" ตอนเช็คอิน
+                //   เดิมช่องนี้อ่านแค่ Payment_History ซึ่งใบจองจากอีเมล OTA ไม่มี (มีแต่ Reservation.Deposit)
+                //   ⇒ ยอดคงเหลือ = ราคาเต็ม → หน้างานถูกบังคับกรอกรับเงินเต็มยอด (ค่าเริ่มต้น "เงินสด")
+                //   = บันทึกเงินสดที่โรงแรมไม่เคยได้รับ + ตรรกะ "ตัดรายการที่ OTA จ่ายล่วงหน้า" ด้านล่างไม่เคยทำงาน
+                //   จำกัดไม่เกินยอดรวมในหน้า (ราคาต่อคืนเก็บเป็นจำนวนเต็ม → 539.67×3 เก็บเป็น 1,617 ขณะที่
+                //   OTA แจ้ง 1,619.01) เพื่อไม่ให้ยอดคงเหลือติดลบ; ของเสริมที่เพิ่มหน้างานยังต้องเก็บตามปกติ
+                bool otaChannelCovered = false;
+                if (command == "checkin")
+                {
+                    try
+                    {
+                        var otaBal = ReservationBalance.Load(conn, Convert.ToInt32(id));
+                        if (otaBal != null && otaBal.IsChannelCollect)
+                        {
+                            decimal pageTotal = 0m;
+                            decimal.TryParse(TextBox4.Text, out pageTotal);
+                            decimal otaAmount = otaBal.Deposit > 0 ? otaBal.Deposit : otaBal.RoomTotal;
+                            decimal covered = Math.Min(otaAmount, pageTotal);
+                            if (covered > totalPaid)
+                            {
+                                totalPaid = covered;
+                                otaChannelCovered = true;
+                            }
+                        }
+                    }
+                    catch (Exception otaEx)
+                    {
+                        code2.Logs(conn, "Reserve CheckIn - OTA Channel Collect",
+                            $"Reservation {id}: ตรวจยอด OTA เก็บแล้วไม่สำเร็จ ({otaEx.Message}) — ใช้ยอดชำระตามเดิม",
+                            Session["User"]?.ToString());
+                    }
+                }
                 TextBox5.Text = totalPaid.ToString();
 
                 // Update remaining balance label
@@ -829,7 +862,9 @@ namespace Take_Time_BangPhra
                 {
                     string paidType = dtCustomer.Rows[0]["Paid_Type"]?.ToString() ?? "เงินสด";
                     if (string.IsNullOrWhiteSpace(paidType) || paidType.Length <= 5) paidType = "เงินสด";
-                    Label7.Text += " ยอดเดิมลูกค้าชำระโดยวิธี " + paidType;
+                    Label7.Text += otaChannelCovered
+                        ? " — ค่าห้อง OTA เก็บเงินแล้ว (Channel Collect) ไม่ต้องรับเงินค่าห้องซ้ำ"
+                        : " ยอดเดิมลูกค้าชำระโดยวิธี " + paidType;
 
                     // เก็บยอดคงเหลือด้วย QR/ลิงก์ + รับเงินประกัน ตรงนี้เลย ไม่ต้องเปิดหน้าอื่น
                     int ridForPay;

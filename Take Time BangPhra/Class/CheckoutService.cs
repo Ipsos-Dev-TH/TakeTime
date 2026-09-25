@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
@@ -81,12 +81,22 @@ namespace Take_Time_BangPhra
                 // Detect under-paid checkout: ลูกค้าจองห้อง 1600 จ่ายมัดจำ 500 แล้วเช็คเอาท์โดยไม่จ่ายเพิ่ม
                 // → รายได้ที่ยังไม่ได้รับ = TotalPrice - TotalPaid → log warning + validation
                 decimal expectedPayable = totalPrice + damageCharge + missingItemsCharge;
-                if (totalPaid + 0.01m < expectedPayable)
+                // ยอดค้างจริงใช้กฎเดียวกับทุกหน้าจอ (ReservationBalance): ใบ OTA Channel Collect ค่าห้องถูก
+                // OTA เก็บแล้ว — เดิมเทียบกับ Payment_History ล้วน ⇒ เตือน "ชำระไม่ครบ" เท็จทุกใบ OTA ที่ไม่มี
+                // แถวรับเงิน (หลังแก้หน้าเช็คอินไม่ให้ลงเงินสดปลอมแล้ว จะเป็นทุกใบ)
+                decimal outstanding;
+                ReservationBalance bal = null;
+                try { bal = ReservationBalance.Load(_connectionString, reservationId); } catch { }
+                if (bal != null)
+                    outstanding = Math.Max(0m, bal.Due + damageCharge + missingItemsCharge - bal.Credit);
+                else
+                    outstanding = Math.Max(0m, expectedPayable - totalPaid);
+                if (outstanding > 0.01m)
                 {
-                    decimal outstanding = expectedPayable - totalPaid;
                     var validation = AccountingArithmeticValidator.ValidationResult.Fail(
                         "CHECKOUT_UNDERPAID",
-                        $"ลูกค้า checkout โดยยอดชำระไม่ครบ: ราคาห้อง+ค่าเสียหาย {expectedPayable:N2} - ชำระแล้ว {totalPaid:N2} = ค้างชำระ {outstanding:N2} บาท",
+                        $"ลูกค้า checkout โดยยอดชำระไม่ครบ: ราคาห้อง+ค่าเสียหาย {expectedPayable:N2} - ชำระแล้ว {totalPaid:N2} = ค้างชำระ {outstanding:N2} บาท" +
+                        (bal != null && bal.IsChannelCollect ? " (ใบ OTA Channel Collect — ค่าห้อง OTA เก็บแล้ว ยอดนี้คือของเสริม/ค่าเสียหาย)" : ""),
                         expectedPayable, totalPaid, blocking: false);
                     AccountingArithmeticValidator.LogValidationFailure("CHECKOUT", reservationId.ToString(), validation, adminId.ToString());
                     _code.Logs(_connectionString, "Checkout",

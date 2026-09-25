@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Web;
@@ -613,8 +613,15 @@ namespace Take_Time_BangPhra
                 { "@deposit", depositAmount }
             };
 
+            // ⚠ ใบ OTA Channel Collect: Deposit = ยอดที่ OTA เก็บแทนโรงแรม (ตั้งตอนรับอีเมลจอง)
+            //   เดิมเขียนทับด้วยยอดรวม Payment_History ⇒ ลูกค้าจ่ายของเสริม 450 ผ่านลิงก์ → Deposit ร่วงจาก
+            //   3,719 เหลือ 450 → หน้ารายละเอียดโชว์ "ยอดเงินรับมา 450" ค่าห้องกลายเป็นค้างทั้งที่ OTA เก็บแล้ว
+            //   → ห้ามลดต่ำกว่ายอดเดิมสำหรับใบที่ระบุว่า Channel Collect
             _code.DatabaseInsertSafe(_connectionString,
-                "UPDATE Reservation SET Deposit = @deposit WHERE ID = @reservationId",
+                @"UPDATE Reservation SET Deposit = CASE
+                        WHEN ISNULL(Remark, N'') LIKE N'%(Channel Collect)%' AND ISNULL(Deposit, 0) > @deposit
+                        THEN Deposit ELSE @deposit END
+                  WHERE ID = @reservationId",
                 parameters);
         }
 
