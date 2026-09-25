@@ -708,6 +708,30 @@
                 </div>
             </asp:Panel>
 
+            <%-- ══ ใบจอง OTA ที่ระบบยังไม่แน่ใจว่าใครเก็บค่าห้อง (โผล่เฉพาะโหมดเช็คอิน) ══
+                 ต้องให้พนักงานตรวจอีเมล OTA แล้วเลือกก่อนเช็คอิน + ระบุเหตุผล
+                 "OTA เก็บเงินแล้ว" (หยุดเก็บเงินลูกค้า) ใช้ได้เฉพาะ Admin/Owner --%>
+            <asp:Panel ID="pnlCollectMode" runat="server" Visible="false" CssClass="form-row"
+                style="display:block; background:#FFF8E1; border:1px solid #FFB300; border-radius:10px; padding:14px; margin:10px 0;">
+                <div style="font-weight:bold; color:#E65100; margin-bottom:6px;">
+                    ⚪ ยังไม่ชัดว่าใครเก็บค่าห้อง — ตรวจอีเมล OTA / Extranet แล้วเลือกก่อนเช็คอิน
+                </div>
+                <div style="margin-bottom:8px;">
+                    <span style="font-weight:600;">เหตุผล (บังคับ):</span>
+                    <asp:TextBox ID="txtCollectReason" runat="server" Width="100%" MaxLength="500"
+                        CssClass="rounded-textbox" placeholder="เช่น อีเมล Agoda แจ้ง Prepaid / ลูกค้าแจ้งว่าจ่ายที่โรงแรม" />
+                </div>
+                <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                    <asp:Button ID="btnCollectChannel" runat="server" Text="OTA เก็บเงินแล้ว"
+                        OnClick="btnCollectChannel_Click" CausesValidation="false" CssClass="reservation-button" />
+                    <asp:Button ID="btnCollectHotel" runat="server" Text="เก็บเงินหน้างาน"
+                        OnClick="btnCollectHotel_Click" CausesValidation="false" CssClass="reservation-button" />
+                </div>
+                <asp:Label ID="lblCollectModeNote" runat="server" Text=""
+                    style="display:block; margin-top:6px; font-size:0.9em; color:#8D6E63;"></asp:Label>
+                <asp:Literal ID="litCollectModeMsg" runat="server" />
+            </asp:Panel>
+
             <div class="form-row">
                 <div class="form-label">ราคารวม:<br />Total price:</div>
                 <div class="form-controls">
@@ -717,6 +741,8 @@
                         style="margin-left: 10px; color: #27ae60; font-weight: bold;">
                         (หลังหักส่วนลดสมาชิก)
                     </asp:Label>
+                    <%-- ใบจอง OTA: ป้ายใครเก็บเงิน + ยอดตามอีเมล OTA (ว่างสำหรับใบจองปกติ) --%>
+                    <asp:Literal ID="litOtaTotalInfo" runat="server" />
                     <div style="margin-top: 5px;">
                         ยอดมัดจำจองขั้นต่ำ Minimum Deposit:
                         <asp:Label ID="Label2" runat="server" Text="" CssClass="price-display"></asp:Label>
@@ -739,6 +765,8 @@
                         </asp:SqlDataSource>
                     </div>
                     <asp:Label ID="Label7" runat="server" Text="" Visible="false"></asp:Label>
+                    <%-- ใบจอง OTA ตอนเช็คอิน: "ไม่มียอดต้องเก็บ" / "ต้องเก็บ ฿…" --%>
+                    <asp:Literal ID="litCheckinDueBanner" runat="server" />
                 </div>
             </div>
             

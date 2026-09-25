@@ -818,6 +818,8 @@ namespace Take_Time_BangPhra
                     // Fallback to Deposit if Payment_History not available
                     totalPaid = Convert.ToDecimal(dtCustomer.Rows[0]["Deposit"] ?? "0");
                 }
+                // ยอดที่ลูกค้าจ่ายโรงแรมจริง (ก่อนนับยอด OTA) — ApplyOtaCheckinState ท้ายบล็อกใช้คำนวณซ้ำ
+                decimal ledgerPaid = totalPaid;
 
                 // 🏷 OTA Channel Collect: OTA เก็บค่าห้องจากลูกค้าไปแล้ว — ต้องนับเป็น "ชำระแล้ว" ตอนเช็คอิน
                 //   เดิมช่องนี้อ่านแค่ Payment_History ซึ่งใบจองจากอีเมล OTA ไม่มี (มีแต่ Reservation.Deposit)
@@ -865,9 +867,12 @@ namespace Take_Time_BangPhra
                 {
                     string paidType = dtCustomer.Rows[0]["Paid_Type"]?.ToString() ?? "เงินสด";
                     if (string.IsNullOrWhiteSpace(paidType) || paidType.Length <= 5) paidType = "เงินสด";
-                    Label7.Text += otaChannelCovered
-                        ? " — ค่าห้อง OTA เก็บเงินแล้ว (Channel Collect) ไม่ต้องรับเงินค่าห้องซ้ำ"
-                        : " ยอดเดิมลูกค้าชำระโดยวิธี " + paidType;
+                    // ไม่มีประวัติการชำระ (Payment_History ว่าง) = ลูกค้ายังไม่เคยจ่าย → ไม่ต้องบอก "ชำระโดยวิธี …"
+                    // (เดิมขึ้น "เงินสด" เสมอ ทำให้เข้าใจผิดว่าลูกค้าจ่ายเงินสดไว้แล้ว) — divPaymentHistory ตั้งจาก LoadPaymentHistory()
+                    if (otaChannelCovered)
+                        Label7.Text += " — ค่าห้อง OTA เก็บเงินแล้ว (Channel Collect) ไม่ต้องรับเงินค่าห้องซ้ำ";
+                    else if (divPaymentHistory.Visible)
+                        Label7.Text += " ยอดเดิมลูกค้าชำระโดยวิธี " + paidType;
 
                     // เก็บยอดคงเหลือด้วย QR/ลิงก์ + รับเงินประกัน ตรงนี้เลย ไม่ต้องเปิดหน้าอื่น
                     int ridForPay;
@@ -1202,6 +1207,13 @@ namespace Take_Time_BangPhra
                 }
                 // Note: TextBox4, TextBox5, Label7 are now loaded outside if (!IsPostBack) above
 
+                // 🏷 ใบจอง OTA ตอนเช็คอิน — ต้องทำ "ท้ายบล็อก" เพราะโหลดครั้งแรก TextBox4 เพิ่งได้ยอดจริงในบล็อก
+                //   !IsPostBack ด้านบน (ก่อนหน้านั้นยังไม่ได้ติ๊กห้อง) — ใบจองปกติ (ไม่ใช่ OTA) ไม่ถูกแตะ
+                if (command == "checkin")
+                {
+                    ApplyOtaCheckinState(Convert.ToInt32(id), ledgerPaid, dtCustomer);
+                }
+
             }
             else
             {
@@ -1459,6 +1471,44 @@ namespace Take_Time_BangPhra
                     }
                 }
                 catch { }
+
+                // 🏷 ใบจอง OTA ตอนเช็คอิน — ตรวจฝั่ง server ใหม่ทุกครั้งที่กดยืนยัน (ไม่เชื่อค่าที่ส่งมาจากหน้าเว็บ)
+                //   · ยังไม่ชัดว่าใครเก็บค่าห้อง (UNKNOWN) → ห้ามเช็คอินจนกว่าพนักงานเลือก + ระบุเหตุผล
+                //   · ไม่มียอดต้องเก็บ (OTA เก็บครบ ไม่มีค่าชาร์จค้าง) → ข้ามขั้นตอนรับเงิน ไม่ต้องลงเงินสดปลอม
+                //   โหลดยอดไม่ได้ = ใช้ขั้นตอนเดิมทุกประการ
+                bool otaZeroDueCheckin = false;
+                ReservationBalance otaGateBal = null;
+                if (command == "checkin")
+                {
+                    try
+                    {
+                        otaGateBal = ReservationBalance.Load(conn, Convert.ToInt32(id));
+                        if (otaGateBal != null && otaGateBal.IsOta && otaGateBal.IsCollectUnknown)
+                        {
+                            ClientScript.RegisterStartupScript(this.GetType(), "otaCollectUnknown",
+                                "alert('⚠️ ยังเช็คอินไม่ได้!\\n\\nใบจอง OTA นี้ยังไม่ชัดว่าใครเก็บค่าห้อง\\n" +
+                                "กรุณาตรวจอีเมล OTA แล้วกดเลือก \\'OTA เก็บเงินแล้ว\\' หรือ \\'เก็บเงินหน้างาน\\'\\n" +
+                                "พร้อมระบุเหตุผลก่อน\\n\\nสถานะการจองยังไม่เปลี่ยนแปลง');", true);
+                            code2.Logs(conn, "Reserve CheckIn - OTA Collect Unknown",
+                                $"Reservation {id}: blocked check-in, collect mode unknown (source {otaGateBal.CollectSource ?? "-"})",
+                                Session["User"]?.ToString());
+                            return;
+                        }
+                        otaZeroDueCheckin = IsOtaZeroDueCheckin(otaGateBal);
+                    }
+                    catch (Exception otaGateEx)
+                    {
+                        otaZeroDueCheckin = false;
+                        try
+                        {
+                            code2.Logs(conn, "Reserve CheckIn - OTA Gate",
+                                $"Reservation {id}: ตรวจยอด OTA ไม่สำเร็จ ({otaGateEx.Message}) — ใช้ขั้นตอนรับเงินตามเดิม",
+                                Session["User"]?.ToString());
+                        }
+                        catch { }
+                    }
+                }
+
                 int Reservation_ID = 0; ;
                 DataTable dtAccommodation = (DataTable)Session["dtAccommodation"];
                 DataTable dtItems = (DataTable)Session["dtItems"];
@@ -1505,7 +1555,8 @@ namespace Take_Time_BangPhra
                 int checkpaymentselect = 0;
                 try
                 {
-                    if (Session["permission"].ToString() == "True" && (command == "reserve" || command == "checkin" || (command == "edit" && CheckBox2.Checked == true)))
+                    // ใบ OTA ที่ไม่มียอดต้องเก็บ (otaZeroDueCheckin) ไม่ต้องเลือกวิธีชำระ — ไม่มีการรับเงิน
+                    if (Session["permission"].ToString() == "True" && (command == "reserve" || (command == "checkin" && !otaZeroDueCheckin) || (command == "edit" && CheckBox2.Checked == true)))
                     {
                         if (DropDownList2.SelectedIndex == 0)
                         {
@@ -2884,16 +2935,18 @@ namespace Take_Time_BangPhra
                                             decimal Deposit = Convert.ToDecimal(TextBox5.Text);
                                             decimal totalAmount = Convert.ToDecimal(TextBox4.Text);
                                             decimal remainingAmount = totalAmount - Deposit;
+                                            // เศษสตางค์ไม่เกิน Balance_Rounding_Tolerance ถือว่าเท่ากัน (สูตรเดียวกับ ReservationBalance)
+                                            decimal checkinTol = ReservationBalance.RoundingTolerance;
 
                                             // 🔒 Validate: payment must equal remaining amount (prevent manual editing)
-                                            if (paymentAmount != remainingAmount && remainingAmount > 0)
+                                            if (Math.Abs(paymentAmount - remainingAmount) > checkinTol && remainingAmount > 0)
                                             {
                                                 ClientScript.RegisterStartupScript(this.GetType(), "myalert",
                                                     "alert('ยอดชำระต้องเท่ากับยอดคงเหลือ " + remainingAmount.ToString("N0") + " บาทเท่านั้น\\nไม่สามารถแก้ไขยอดได้');", true);
                                                 return;
                                             }
 
-                                            if (Convert.ToDecimal(TextBox4.Text) == Convert.ToDecimal(TextBox5.Text))
+                                            if (Math.Abs(Convert.ToDecimal(TextBox4.Text) - Convert.ToDecimal(TextBox5.Text)) <= checkinTol)
                                             {
                                                 // Already paid in full - just check in
                                                 reservationDA.CheckInReservation(Convert.ToInt32(id));
@@ -2932,6 +2985,15 @@ namespace Take_Time_BangPhra
                                                     IsDeposit = false;
                                                     dtReserve.Rows.Add(dtReserve.Rows.Count + 1, "", "2", dtItems.Rows[row.RowIndex]["ID"].ToString(), dtItems.Rows[row.RowIndex]["ItemName"].ToString() + " เช็คอิน " + code2.ParseDate(TextBox12.Text).Value.ToString("dd MMMM yyyy") + " เช็คเอ้าท์ " + code2.ParseDate(TextBox12.Text).Value.AddDays(Convert.ToDouble(DropDownList1.SelectedValue.ToString())).ToString("dd MMMM yyyy"), txtAmount.Text, dtItems.Rows[row.RowIndex]["Unit"].ToString(), row.Cells[4].Text, (Convert.ToInt32(row.Cells[4].Text) * Convert.ToInt32(DropDownList1.SelectedValue) * Convert.ToInt32(txtAmount.Text)));
                                                 }
+                                            }
+                                            // 🏷 OTA Hotel Collect: ราคาต่อคืนเก็บเป็นจำนวนเต็ม (ปัดลง) → ยอดห้องในหน้าต่ำกว่ายอดอีเมล OTA
+                                            //   ไม่กี่สตางค์/บาท (3×539 = 1,617 vs 1,619.01) — Page_Load (คำขอนี้) บวกส่วนต่างเข้า TextBox4 แล้ว
+                                            //   ใบเสร็จจึงต้องมีรายการปรับเศษให้ยอดรายการ = ยอดที่เก็บจริง (ทศนิยมตรงตัว)
+                                            if (_otaRoundingAdjust > 0m)
+                                            {
+                                                dtReserve.Rows.Add(dtReserve.Rows.Count + 1, "", "1",
+                                                    string.IsNullOrEmpty(_otaRoundingRoomId) ? "17" : _otaRoundingRoomId,
+                                                    "ปรับเศษค่าห้องตามยอด OTA", "1", "ครั้ง", _otaRoundingAdjust, _otaRoundingAdjust);
                                             }
                                             decimal DepositAmount = 0;
                                             if (dtfindDeposit.Rows.Count <= 0)
@@ -3274,6 +3336,33 @@ namespace Take_Time_BangPhra
                                                 }
                                             }
                                             }
+                                        }
+                                        else if (otaZeroDueCheckin && otaGateBal != null)
+                                        {
+                                            // ✅ ใบจอง OTA ไม่มียอดต้องเก็บ (ตรวจฝั่ง server ตอนกดยืนยัน: Due = 0, ไม่มีค่าชาร์จค้าง,
+                                            //   รู้แน่ว่าใครเก็บเงิน, ยอดในหน้า − ที่ชำระแล้ว ≤ เศษที่ยอมรับ) → เช็คอินได้เลย
+                                            //   ไม่ต้องติ๊ก "ชำระเงิน"/เลือกวิธีชำระ/แนบสลิป — ไม่ลง Payment_History ไม่ออกใบเสร็จ
+                                            //   (เดิมหน้างานถูกบังคับติ๊กแล้วเลือก "เงินสด" = บันทึกเงินสดที่ไม่เคยได้รับ)
+                                            reservationDA.CheckInReservation(Convert.ToInt32(id));
+
+                                            string zeroDueDetail = $"Reservation {id}: check-in without payment step — " +
+                                                $"OTA covered {otaGateBal.OtaCovered:N2}, OTA amount {otaGateBal.OtaAmount:N2}, " +
+                                                $"mode {otaGateBal.CollectMode} (source {otaGateBal.CollectSource ?? "-"}), " +
+                                                $"page total {TextBox4.Text}, paid {TextBox5.Text}. " +
+                                                $"User: {Session["UserName"]?.ToString() ?? Session["User"]?.ToString() ?? "Unknown"}";
+                                            try
+                                            {
+                                                var zeroDueLog = new LoggingService(conn);
+                                                zeroDueLog.LogAccountingOperation(
+                                                    "CheckInZeroDue",
+                                                    zeroDueDetail,
+                                                    true,
+                                                    Session["UserID"] != null ? (int?)Convert.ToInt32(Session["UserID"]) : null,
+                                                    Convert.ToInt64(id));
+                                            }
+                                            catch { }
+                                            try { code2.Logs(conn, "CheckInZeroDue", zeroDueDetail, Session["User"]?.ToString()); }
+                                            catch { }
                                         }
                                         else
                                         {
@@ -5772,6 +5861,383 @@ namespace Take_Time_BangPhra
             if (int.TryParse((Request.QueryString["id"] ?? "").Trim(), out rid) && rid > 0) return rid;
             if (ViewState["rvResId"] != null && int.TryParse(ViewState["rvResId"].ToString(), out rid)) return rid;
             return 0;
+        }
+
+        // ══════════════════════════════════════════════════════════════════════
+        //  ใบจอง OTA ตอนเช็คอิน
+        //
+        //  · ไม่มียอดต้องเก็บ → ซ่อนขั้นตอนรับเงิน (ต้นเหตุ "เงินสดปลอม": หน้างานถูกบังคับติ๊ก "ชำระเงิน"
+        //    เลือกวิธีชำระ และวิธีที่ไม่ใช่เงินสดต้องแนบสลิปแม้ยอด 0 → เลือก "เงินสด")
+        //  · Hotel Collect: ปรับเศษค่าห้องให้ตรงยอดอีเมล OTA (ราคาต่อคืนเก็บเป็นจำนวนเต็ม)
+        //  · ยังไม่ชัดว่าใครเก็บเงิน → บังคับเลือกก่อนเช็คอิน
+        //  ใบจองปกติ (ไม่ใช่ OTA) ไม่ถูกแตะ; อ่านยอดไม่ได้ = หน้าทำงานแบบเดิมทุกประการ
+        // ══════════════════════════════════════════════════════════════════════
+
+        /// <summary>ส่วนต่างที่บวกเข้ายอดรวม (Hotel Collect ปรับเศษตามยอด OTA) — คำนวณใน Page_Load ของคำขอนี้</summary>
+        private decimal _otaRoundingAdjust = 0m;
+        /// <summary>รหัสที่พักสำหรับบรรทัด "ปรับเศษค่าห้องตามยอด OTA" ในใบเสร็จ</summary>
+        private string _otaRoundingRoomId = "";
+
+        /// <summary>
+        /// เงื่อนไข "ไม่มียอดต้องเก็บ" ของใบจอง OTA — ใช้ทั้งตอนแสดงผลและตอนกดยืนยัน (ฝั่ง server เท่านั้น):
+        /// Due = 0, ไม่มีค่าชาร์จ PENDING, รู้แน่ว่าใครเก็บเงิน และยอดรวมในหน้า (TextBox4) − ที่ชำระแล้ว (TextBox5)
+        /// ไม่เกินเศษที่ยอมรับ — TextBox4/5 ในโหมดเช็คอินถูกตั้งจากฝั่ง server ทุกครั้ง (ปิดแก้ไข, Page_Load เขียนทับ)
+        /// </summary>
+        private bool IsOtaZeroDueCheckin(ReservationBalance b)
+        {
+            try
+            {
+                if (b == null || !b.IsOta || b.IsCollectUnknown) return false;
+                if (b.Due != 0m || b.PendingCharges != 0m) return false;
+                decimal pageTotal, pagePaid;
+                if (!decimal.TryParse(TextBox4.Text, out pageTotal)) return false;
+                if (!decimal.TryParse(TextBox5.Text, out pagePaid)) return false;
+                return (pageTotal - pagePaid) <= ReservationBalance.RoundingTolerance;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>Admin/Owner — เงื่อนไขเดียวกับที่หน้านี้ใช้เปิด CheckBox6 (แก้ราคา)</summary>
+        private bool IsAdminOrOwner()
+        {
+            try
+            {
+                string u = Session["User"]?.ToString() ?? "";
+                return u == "Owner" || u == "Admin";
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>ชื่อช่องทาง + ยอดตามอีเมล OTA (ใช้เมื่อ ReservationBalance ไม่ได้ให้ยอดมา) — อ่านไม่ได้คืน "" / −1</summary>
+        private void LoadOtaEmailInfo(int reservationId, out string channel, out decimal emailAmount)
+        {
+            channel = "";
+            emailAmount = -1m;
+            try
+            {
+                DataTable dt = code2.DatabaseQuerySafe(conn,
+                    @"SELECT r.OTA_Channel,
+                             CASE WHEN ISNULL((SELECT TOP 1 ConfigValue FROM Accounting_Integration_Config
+                                               WHERE ConfigKey = 'Email_Rsv_TotalSource'), 'AMOUNT') = 'REFSELL'
+                                       AND ISNULL(r.OTA_Gross_Amount, 0) > 0 THEN r.OTA_Gross_Amount
+                                  WHEN ISNULL(r.OTA_Net_Amount, 0) > 0 THEN r.OTA_Net_Amount
+                                  WHEN ISNULL(r.OTA_Gross_Amount, 0) > 0 THEN r.OTA_Gross_Amount
+                                  ELSE NULL END AS OtaAmount
+                        FROM Reservation r WHERE r.ID = @rid",
+                    new Dictionary<string, object> { { "@rid", reservationId } });
+                if (dt != null && dt.Rows.Count > 0)
+                {
+                    if (dt.Rows[0]["OTA_Channel"] != DBNull.Value)
+                        channel = Convert.ToString(dt.Rows[0]["OTA_Channel"]).Trim();
+                    if (dt.Rows[0]["OtaAmount"] != DBNull.Value)
+                        emailAmount = Convert.ToDecimal(dt.Rows[0]["OtaAmount"]);
+                }
+            }
+            catch { /* คอลัมน์ OTA_* ยังไม่มี (migration รุ่นเก่า) → ไม่มีข้อมูล */ }
+        }
+
+        /// <summary>รหัสที่พักของห้องแรกที่ติ๊กในหน้า (สำหรับบรรทัดปรับเศษในใบเสร็จ)</summary>
+        private string FirstCheckedAccommodationId()
+        {
+            try
+            {
+                DataTable dtAccom = Session["dtAccommodation"] as DataTable;
+                if (dtAccom == null) return "";
+                foreach (GridViewRow row in GridView1.Rows)
+                {
+                    CheckBox chk = row.Cells[0].FindControl("chkSelect") as CheckBox;
+                    if (chk != null && chk.Checked && row.RowIndex < dtAccom.Rows.Count)
+                        return dtAccom.Rows[row.RowIndex]["ID"].ToString();
+                }
+            }
+            catch { }
+            return "";
+        }
+
+        private static decimal ToDecimalSafe(object v)
+        {
+            if (v == null || v == DBNull.Value) return 0m;
+            decimal d;
+            return decimal.TryParse(Convert.ToString(v), out d) ? d : 0m;
+        }
+
+        private static string OtaBadgeHtml(string text, string bg, string fg)
+        {
+            return "<span style=\"display:inline-block; margin:6px 6px 0 0; padding:3px 10px; border-radius:12px; font-size:0.9em; font-weight:600; background:"
+                + bg + "; color:" + fg + ";\">" + text + "</span>";
+        }
+
+        /// <summary>
+        /// เรียกท้ายบล็อกโหลดข้อมูลโหมดเช็คอินใน Page_Load (ทุกคำขอ รวม postback) — เฉพาะใบจอง OTA
+        /// ledgerPaid = ยอด Payment_History (ก่อนนับยอด OTA)
+        /// </summary>
+        private void ApplyOtaCheckinState(int reservationId, decimal ledgerPaid, DataTable dtCustomer)
+        {
+            _otaRoundingAdjust = 0m;
+            _otaRoundingRoomId = "";
+            try { litOtaTotalInfo.Text = ""; litCheckinDueBanner.Text = ""; pnlCollectMode.Visible = false; }
+            catch { }
+
+            ReservationBalance bal = null;
+            try
+            {
+                bal = ReservationBalance.Load(conn, reservationId);
+            }
+            catch (Exception loadEx)
+            {
+                try
+                {
+                    code2.Logs(conn, "Reserve CheckIn - OTA State",
+                        $"Reservation {reservationId}: โหลดยอดไม่สำเร็จ ({loadEx.Message}) — ใช้หน้าเช็คอินแบบเดิม",
+                        Session["User"]?.ToString());
+                }
+                catch { }
+                return;
+            }
+            if (bal == null || !bal.IsOta) return;   // ใบจองปกติ — ไม่แตะ
+
+            try
+            {
+                string channel;
+                decimal emailAmount;
+                LoadOtaEmailInfo(reservationId, out channel, out emailAmount);
+                bool fromBalance = bal.OtaAmount >= 0m;
+                decimal otaAmount = fromBalance ? bal.OtaAmount : emailAmount;
+                bool estimated = fromBalance && bal.OtaAmountEstimated;
+                bool unknown = bal.IsCollectUnknown;
+                bool isHotel = bal.CollectMode == ReservationBalance.ModeHotel;
+                decimal tol = ReservationBalance.RoundingTolerance;
+
+                decimal pageTotal;
+                if (!decimal.TryParse(TextBox4.Text, out pageTotal)) return;
+
+                // ── D3: Hotel Collect ปรับเศษค่าห้องตามยอด OTA ──
+                //   ราคาต่อคืนเก็บเป็นจำนวนเต็ม (ปัดลง) → Σ ในหน้าต่ำกว่ายอด OTA ได้ไม่เกิน ~1 บาท/คืน
+                //   (3 × 539 = 1,617 vs 1,619.01) — บวกเฉพาะเมื่อ 0 < ส่วนต่าง ≤ จำนวนคืน และยอด OTA มาจากอีเมลจริง
+                if (isHotel && !unknown && otaAmount >= 0m && !estimated)
+                {
+                    decimal gridRoomTotal = ToDecimalSafe(Session["PriceAccom"]) + ToDecimalSafe(Session["PriceItems"]);
+                    int nights;
+                    if (!int.TryParse(DropDownList1.SelectedValue, out nights)) nights = 0;
+                    decimal roundDiff = Math.Round(otaAmount - gridRoomTotal, 2, MidpointRounding.AwayFromZero);
+                    if (nights > 0 && roundDiff > 0m && roundDiff <= nights)
+                    {
+                        pageTotal += roundDiff;
+                        TextBox4.Text = pageTotal.ToString();
+                        Session["OldPrice"] = TextBox4.Text;   // Button1_Click ตั้ง TextBox4 จากค่านี้
+                        _otaRoundingAdjust = roundDiff;
+                        _otaRoundingRoomId = FirstCheckedAccommodationId();
+                    }
+                }
+
+                // ── Channel Collect: ยอด OTA เก็บแล้ว = "ชำระแล้ว" (สูตรเดียวกับบล็อกด้านบน แต่ใช้ยอดรวมสุดท้าย —
+                //    โหลดครั้งแรกบล็อกด้านบนยังเห็นยอดก่อนติ๊กห้อง) ──
+                bool channelCovered = false;
+                if (bal.IsChannelCollect)
+                {
+                    decimal otaForPage = bal.OtaAmount >= 0m ? bal.OtaAmount : bal.RoomTotal;
+                    decimal covered = Math.Min(otaForPage, pageTotal);
+                    channelCovered = covered > ledgerPaid;
+                    TextBox5.Text = (channelCovered ? covered : ledgerPaid).ToString();
+                }
+
+                decimal pagePaid;
+                if (!decimal.TryParse(TextBox5.Text, out pagePaid)) pagePaid = ledgerPaid;
+                decimal remaining = pageTotal - pagePaid;
+
+                // ป้ายยอดคงเหลือ (เขียนใหม่ด้วยยอดสุดท้าย)
+                Label7.Visible = true;
+                Label7.Text = "ยอดเงินส่วนที่เหลือที่จะต้องชำระตอนเช็คอิน = " + remaining.ToString("N2") + " บาท";
+                if (channelCovered)
+                {
+                    Label7.Text += " — ค่าห้อง OTA เก็บเงินแล้ว (Channel Collect) ไม่ต้องรับเงินค่าห้องซ้ำ";
+                }
+                else if (divPaymentHistory.Visible)
+                {
+                    string paidType = "เงินสด";
+                    try
+                    {
+                        if (dtCustomer != null && dtCustomer.Rows.Count > 0)
+                            paidType = dtCustomer.Rows[0]["Paid_Type"]?.ToString() ?? "เงินสด";
+                    }
+                    catch { }
+                    if (string.IsNullOrWhiteSpace(paidType) || paidType.Length <= 5) paidType = "เงินสด";
+                    Label7.Text += " ยอดเดิมลูกค้าชำระโดยวิธี " + paidType;
+                }
+                SetupOnlinePayPanel(reservationId, remaining);
+
+                // ── ป้ายใครเก็บเงิน + ยอดตามอีเมล OTA (ใต้ยอดรวม) ──
+                string channelText = string.IsNullOrWhiteSpace(channel) ? "OTA" : channel;
+                var info = new StringBuilder();
+                info.Append("<div style=\"margin-top:4px;\">");
+                if (unknown)
+                    info.Append(OtaBadgeHtml("⚪ ยังไม่ชัด — ตรวจอีเมล OTA", "#ECEFF1", "#455A64"));
+                else if (bal.IsChannelCollect)
+                    info.Append(OtaBadgeHtml("🟢 OTA เก็บเงินแล้ว", "#E8F5E9", "#2E7D32"));
+                else if (isHotel)
+                    info.Append(OtaBadgeHtml("🟠 เก็บเงินหน้างาน", "#FFF3E0", "#E65100"));
+                else
+                    info.Append(OtaBadgeHtml("⚪ ยังไม่ชัด — ตรวจอีเมล OTA", "#ECEFF1", "#455A64"));
+                info.Append("<span style=\"font-size:0.9em; color:#6D4C41;\">")
+                    .Append(Server.HtmlEncode(channelText)).Append("</span>");
+                if (bal.OtaAmountEstimated)
+                    info.Append(" <span style=\"font-size:0.85em; color:#C62828;\">(ยอด OTA โดยประมาณ — ตรวจกับ Extranet)</span>");
+                info.Append("</div>");
+                if (otaAmount >= 0m)
+                {
+                    info.Append("<div style=\"font-size:0.9em; color:#6D4C41; margin-top:2px;\">ยอดตามอีเมล OTA ฿")
+                        .Append(otaAmount.ToString("N2")).Append("</div>");
+                }
+                if (_otaRoundingAdjust > 0m)
+                {
+                    info.Append("<div style=\"font-size:0.85em; color:#8D6E63;\">รวมปรับเศษค่าห้อง +฿")
+                        .Append(_otaRoundingAdjust.ToString("N2"))
+                        .Append(" ให้ตรงยอด OTA (ราคาต่อคืนในระบบเป็นจำนวนเต็ม)</div>");
+                }
+                litOtaTotalInfo.Text = info.ToString();
+
+                // ── D4: ยังไม่ชัดว่าใครเก็บเงิน → ห้ามเช็คอินจนกว่าจะเลือก ──
+                if (unknown)
+                {
+                    pnlCollectMode.Visible = true;
+                    bool admin = IsAdminOrOwner();
+                    btnCollectChannel.Enabled = admin;
+                    lblCollectModeNote.Text = admin
+                        ? "\"OTA เก็บเงินแล้ว\" = หยุดเก็บค่าห้องจากลูกค้า — ยืนยันกับอีเมล OTA/Extranet ก่อนกด"
+                        : "ปุ่ม \"OTA เก็บเงินแล้ว\" (หยุดเก็บค่าห้องจากลูกค้า) ใช้ได้เฉพาะ Admin/Owner — ไม่แน่ใจให้เลือก \"เก็บเงินหน้างาน\" หรือแจ้งผู้ดูแล";
+                    Button1.Enabled = false;
+                    litCheckinDueBanner.Text =
+                        "<div style=\"margin-top:10px; padding:10px 13px; border-radius:8px; background:#FFF8E1; color:#E65100; font-weight:600;\">"
+                        + "⛔ ยังเช็คอินไม่ได้ — เลือกก่อนว่า \"OTA เก็บเงินแล้ว\" หรือ \"เก็บเงินหน้างาน\" (กล่องสีเหลืองด้านบน)</div>";
+                    return;
+                }
+
+                // ── D1: ไม่มียอดต้องเก็บ → ซ่อนขั้นตอนรับเงินทั้งหมด ──
+                if (IsOtaZeroDueCheckin(bal))
+                {
+                    CheckBox2.Checked = false;
+                    CheckBox2.Visible = false;
+                    TextBox10.Visible = false;
+                    DropDownList2.Visible = false;
+                    FileUpload1.Visible = false;
+                    Button3.Visible = false;
+                    string zeroText = bal.IsChannelCollect
+                        ? "✅ ไม่มียอดต้องเก็บ — OTA เก็บค่าห้องแล้ว ฿" + bal.OtaCovered.ToString("N2")
+                            + " (" + Server.HtmlEncode(channelText) + ")"
+                        : "✅ ไม่มียอดต้องเก็บ — ชำระครบแล้ว";
+                    litCheckinDueBanner.Text =
+                        "<div style=\"margin-top:10px; padding:10px 13px; border-radius:8px; background:#E8F5E9; color:#2E7D32; font-weight:600;\">"
+                        + zeroText + "<br /><span style=\"font-weight:normal; font-size:0.9em;\">กด \"ยืนยันการเช็คอิน\" ได้เลย — ไม่ต้องติ๊กชำระเงิน/เลือกวิธีชำระ/แนบสลิป</span></div>";
+                }
+                else if (bal.IsChannelCollect && (bal.Due > 0m || remaining > tol))
+                {
+                    string dueText = "💰 ต้องเก็บ ฿" + bal.Due.ToString("N2") + " — ส่วนเกินจากยอดที่ OTA เก็บ/ของเสริม";
+                    if (Math.Abs(remaining - bal.Due) > tol)
+                        dueText += " (ยอดคงเหลือในหน้านี้ ฿" + remaining.ToString("N2") + ")";
+                    litCheckinDueBanner.Text =
+                        "<div style=\"margin-top:10px; padding:10px 13px; border-radius:8px; background:#FFF3E0; color:#E65100; font-weight:600;\">"
+                        + dueText + "</div>";
+                }
+            }
+            catch (Exception stateEx)
+            {
+                try
+                {
+                    code2.Logs(conn, "Reserve CheckIn - OTA State",
+                        $"Reservation {reservationId}: {stateEx.Message}", Session["User"]?.ToString());
+                }
+                catch { }
+            }
+        }
+
+        protected void btnCollectHotel_Click(object sender, EventArgs e)
+        {
+            ChangeCollectMode(ReservationBalance.ModeHotel);
+        }
+
+        protected void btnCollectChannel_Click(object sender, EventArgs e)
+        {
+            ChangeCollectMode(ReservationBalance.ModeChannel);
+        }
+
+        /// <summary>
+        /// พนักงานยืนยันว่าใครเก็บค่าห้อง — HOTEL (เก็บหน้างาน) ใครก็ได้; CHANNEL (OTA เก็บแล้ว = หยุดเก็บเงินลูกค้า)
+        /// เฉพาะ Admin/Owner. ReservationBalance.SetCollectMode ตรวจล็อก "ลงรายได้แล้ว" เอง
+        /// </summary>
+        private void ChangeCollectMode(string newMode)
+        {
+            try
+            {
+                if (Request.QueryString["command"] != "checkin" || Session["permission"]?.ToString() != "True")
+                {
+                    ShowCollectModeMessage("ไม่มีสิทธิ์เปลี่ยนวิธีเก็บเงิน", false);
+                    return;
+                }
+                int rid = ReservationIdFromRequest();
+                if (rid <= 0) { ShowCollectModeMessage("ไม่พบเลขที่การจอง", false); return; }
+
+                string reason = (txtCollectReason.Text ?? "").Trim();
+                if (reason.Length == 0)
+                {
+                    ShowCollectModeMessage("กรุณาระบุเหตุผลก่อน (เช่น อีเมล OTA แจ้งว่าอย่างไร)", false);
+                    return;
+                }
+                if (newMode == ReservationBalance.ModeChannel && !IsAdminOrOwner())
+                {
+                    ShowCollectModeMessage("\"OTA เก็บเงินแล้ว\" ใช้ได้เฉพาะ Admin/Owner — กรุณาแจ้งผู้ดูแล", false);
+                    return;
+                }
+
+                string changedBy = Session["UserName"]?.ToString();
+                if (string.IsNullOrWhiteSpace(changedBy)) changedBy = Session["User"]?.ToString() ?? "Unknown";
+
+                var result = ReservationBalance.SetCollectMode(conn, rid, newMode, "STAFF", changedBy, reason);
+                object resultBox = result;   // เทียบ null ผ่าน object — ใช้ได้ทั้งผลลัพธ์แบบ class และ struct
+                if (resultBox == null)
+                {
+                    ShowCollectModeMessage("เปลี่ยนวิธีเก็บเงินไม่สำเร็จ", false);
+                    return;
+                }
+                if (!result.Ok)
+                {
+                    ShowCollectModeMessage(string.IsNullOrWhiteSpace(result.Message) ? "เปลี่ยนวิธีเก็บเงินไม่สำเร็จ" : result.Message, false);
+                    return;
+                }
+
+                try
+                {
+                    code2.Logs(conn, "Reserve CheckIn - OTA Collect Mode",
+                        $"Reservation {rid}: {result.OldMode} → {result.NewMode} by {changedBy}, reason: {reason}",
+                        Session["User"]?.ToString());
+                }
+                catch { }
+
+                // โหลดหน้าใหม่ให้คำนวณยอด/ขั้นตอนรับเงินตามวิธีเก็บเงินที่เลือก
+                Response.Redirect(Request.RawUrl, false);
+                Context.ApplicationInstance.CompleteRequest();
+            }
+            catch (Exception ex)
+            {
+                ShowCollectModeMessage("เปลี่ยนวิธีเก็บเงินไม่สำเร็จ: " + ex.Message, false);
+            }
+        }
+
+        private void ShowCollectModeMessage(string msg, bool ok)
+        {
+            try
+            {
+                pnlCollectMode.Visible = true;
+                litCollectModeMsg.Text = "<div style=\"margin-top:10px;padding:10px 13px;border-radius:8px;background:"
+                    + (ok ? "#E8F5E9;color:#2E7D32" : "#FFEBEE;color:#C62828") + ";\">"
+                    + (ok ? "✅ " : "⚠ ") + Server.HtmlEncode(msg ?? "") + "</div>";
+            }
+            catch { }
         }
 
         protected void TextBox5_TextChanged(object sender, EventArgs e)
