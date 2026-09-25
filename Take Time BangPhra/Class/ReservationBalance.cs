@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Globalization;
@@ -170,7 +170,7 @@ namespace Take_Time_BangPhra
                 string otaPay = hasOtaCol && row["OTA_Payment_Type"] != DBNull.Value
                     ? Convert.ToString(row["OTA_Payment_Type"]) : "";
 
-                result[id] = Compute(id,
+                var b = Compute(id,
                     DetectCollectMode(remark, otaPay),
                     Dec(row["TotalPrice"]),
                     Dec(row["Charges"]),
@@ -178,6 +178,19 @@ namespace Take_Time_BangPhra
                     Dec(row["PaidLedger"]),
                     row["LedgerRows"] == DBNull.Value ? 0 : Convert.ToInt32(row["LedgerRows"]),
                     Dec(row["Deposit"]));
+
+                // ใบจองที่ยกเลิกแล้วไม่มียอดค้างเก็บจากลูกค้า และ "รับแล้ว" = เงินที่รับจริง
+                // (ไม่ใช่ Total − 0 = ราคาเต็ม) — ไม่งั้นหน้ารายการจองรวมยอดค้างของใบที่ยกเลิกไปด้วย
+                string status = dt.Columns.Contains("Status") && row["Status"] != DBNull.Value
+                    ? Convert.ToString(row["Status"]) : "";
+                if (status.StartsWith("ยกเลิก", StringComparison.Ordinal))
+                {
+                    decimal paidActual = b.LedgerRows > 0 ? b.PaidLedger : b.Deposit;
+                    b.Due = 0m;
+                    b.Credit = 0m;
+                    b.Received = paidActual;
+                }
+                result[id] = b;
             }
             return result;
         }
@@ -202,7 +215,7 @@ namespace Take_Time_BangPhra
                 : "CAST(0 AS decimal(18,2)) AS PaidLedger, 0 AS LedgerRows";
 
             string sql =
-                "SELECT r.ID, ISNULL(r.TotalPrice, 0) AS TotalPrice, ISNULL(r.Deposit, 0) AS Deposit, r.Remark" +
+                "SELECT r.ID, ISNULL(r.TotalPrice, 0) AS TotalPrice, ISNULL(r.Deposit, 0) AS Deposit, r.Remark, r.Status" +
                 (withOta ? ", r.OTA_Payment_Type" : "") +
                 ", " + chargeCols + ", " + payCols + @"
                   FROM Reservation r";
