@@ -73,6 +73,39 @@ namespace Take_Time_BangPhra.Payments
             }
         }
 
+        // ── ความสามารถ ──────────────────────────────────────────────────────
+
+        /// <summary>กันวงเงินบนบัตรได้ (capture=false, หมดอายุ 7 วัน) — ดู IDepositGateway ด้านล่าง</summary>
+        public bool SupportsPreAuth { get { return true; } }
+
+        /// <summary>POST /charges/{id}/refunds</summary>
+        public bool SupportsRefund { get { return true; } }
+
+        /// <summary>
+        /// Omise ในระบบนี้: บัตร (Omise.js → token) และ QR พร้อมเพย์ (source[type]=promptpay)
+        /// — กรองด้วย Payment_Methods_Enabled ที่ผู้ดูแลเปิดไว้
+        /// </summary>
+        public IList<GatewayChannel> GetAvailableChannels()
+        {
+            var list = new List<GatewayChannel>();
+            if (!IsReady) return list;
+            string raw = "," + (PaymentGatewayConfig.Get("Payment_Methods_Enabled", "") ?? "")
+                .ToUpperInvariant().Replace(" ", "") + ",";
+            if (raw.Contains("," + PaymentGatewayConfig.MethodCard + ","))
+                list.Add(new GatewayChannel
+                {
+                    Code = PaymentGatewayConfig.MethodCard, ProviderCode = "card",
+                    Name = PaymentGatewayConfig.MethodName(PaymentGatewayConfig.MethodCard), Type = "CARD"
+                });
+            if (raw.Contains("," + PaymentGatewayConfig.MethodQr + ","))
+                list.Add(new GatewayChannel
+                {
+                    Code = PaymentGatewayConfig.MethodQr, ProviderCode = "promptpay",
+                    Name = PaymentGatewayConfig.MethodName(PaymentGatewayConfig.MethodQr), Type = "QR"
+                });
+            return list;
+        }
+
         // ── สร้างรายการชำระเงิน ──────────────────────────────────────────────
 
         public PaymentChargeResult CreateCharge(PaymentChargeRequest req)

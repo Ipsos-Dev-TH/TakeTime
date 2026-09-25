@@ -333,6 +333,16 @@ namespace Take_Time_BangPhra
         protected global::System.Web.UI.WebControls.TextBox txtCaptureReason;
 
         /// <summary>
+        /// pnlHoldRefundRef control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlHoldRefundRef;
+
+        /// <summary>
+        /// txtHoldRefundRef control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtHoldRefundRef;
+
+        /// <summary>
         /// btnCaptureHold control.
         /// </summary>
         protected global::System.Web.UI.WebControls.Button btnCaptureHold;

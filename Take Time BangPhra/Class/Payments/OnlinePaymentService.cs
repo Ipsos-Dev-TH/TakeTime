@@ -404,8 +404,8 @@ namespace Take_Time_BangPhra.Payments
         {
             PaymentTransaction txn = _store.GetById((int)txnId);
             if (txn == null) return "ไม่พบรายการ";
-            if (txn.Provider == "MANUAL_QR")
-                return "รายการโอน/แนบสลิปไม่ได้ผ่านเกตเวย์ — คืนเงินด้วยการโอนกลับตามปกติ";
+            if (txn.Provider == "MANUAL_QR" || txn.Provider == "TRANSFER" || txn.Provider == "CASH")
+                return "รายการโอน/เงินสดไม่ได้ผ่านเกตเวย์ — คืนเงินด้วยการโอนกลับ/คืนเงินสดตามปกติ";
             if (txn.Status != PaymentStatus.Paid && txn.Status != PaymentStatus.Refunded)
                 return "คืนได้เฉพาะรายการที่จ่ายสำเร็จแล้ว (สถานะปัจจุบัน: " + PaymentStatus.Thai(txn.Status) + ")";
             if (amount <= 0) return "ยอดคืนต้องมากกว่า 0";
@@ -446,6 +446,7 @@ namespace Take_Time_BangPhra.Payments
             if (txn == null) return "ไม่พบรายการ";
             if (txn.Status == PaymentStatus.Paid) return "ชำระแล้ว";
             if (txn.Provider == "MANUAL_QR") return "รอตรวจสลิป (ไม่ต้องถามเกตเวย์)";
+            if (txn.Provider == "TRANSFER" || txn.Provider == "CASH") return "รายการนอกเกตเวย์ (ไม่ต้องถามเกตเวย์)";
 
             IPaymentGateway gw = Gateway(txn.Provider);
             if (!gw.IsReady) return "เกตเวย์ยังไม่พร้อม";
@@ -601,10 +602,16 @@ namespace Take_Time_BangPhra.Payments
             // ⚠ ต้องเป็นชื่อที่ตรงกับแถวใน Account_Paid_How เป๊ะ ๆ — AccountingSync ค้นด้วย
             // ข้อความนี้ (LookupPaidHowAccountId) เพื่อบังคับ Dr เข้าบัญชีพักเงินเกตเวย์ใน NextAcc
             // ถ้าส่งชื่อสวย ๆ ("บัตรเครดิต / เดบิต") จะหาไม่เจอ แล้วบัญชีจะเดาเป็นเงินสด
-            string methodText = PaymentGatewayConfig.Get("Payment_PaidHow_Name", "Omise (จ่ายออนไลน์)");
-            // แหล่งเงินรายผู้ให้บริการ/วิธีจ่าย (ตั้งที่ Accounting Integration, PHASE19_21) — ไม่ได้ตั้ง = ชื่อเดิม
-            methodText = Take_Time_BangPhra.Integration.AccountingSyncService
-                .ResolveGatewayPaidHowName(_conn, txn.Provider, txn.Method, methodText);
+            // 1) แคตตาล็อกช่องทาง: แยกแหล่งเงินตามเจ้า/วิธี/ยี่ห้อบัตร (เช่น PaySo VISA / AMEX / พร้อมเพย์)
+            //    ให้แต่ละช่องผูกบัญชีพักเงินใน NextAcc แยกกันได้
+            // 2) ไม่เจอ → แหล่งเงินรายผู้ให้บริการที่ตั้งใน Accounting Integration (PHASE19_21) → 3) ค่าตั้งเดิม
+            string methodText = PaymentChannelCatalog.ResolvePaidHowName(txn.Provider, txn.Method, txn.CardBrand);
+            if (string.IsNullOrEmpty(methodText))
+            {
+                methodText = PaymentGatewayConfig.Get("Payment_PaidHow_Name", "Omise (จ่ายออนไลน์)");
+                methodText = Take_Time_BangPhra.Integration.AccountingSyncService
+                    .ResolveGatewayPaidHowName(_conn, txn.Provider, txn.Method, methodText);
+            }
             string notes = "ชำระออนไลน์ผ่าน " + (txn.Provider ?? "-")
                          + " · อ้างอิง " + txn.TxnRef
                          + (string.IsNullOrEmpty(txn.ProviderTxnId) ? "" : " · เลขที่เกตเวย์ " + txn.ProviderTxnId)

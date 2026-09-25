@@ -102,14 +102,27 @@ namespace Take_Time_BangPhra.Payments
         public const string ProviderOmise = "OMISE";
         public const string ProviderPayso = "PAYSO";
 
-        /// <summary>เกตเวย์ที่เลือกใช้อยู่ — OMISE (ค่าเริ่มต้น) หรือ PAYSO</summary>
+        /// <summary>
+        /// เกตเวย์ที่เลือกใช้อยู่ — PAYSO (หลัก / ค่าเริ่มต้นเมื่อยังไม่ได้ตั้ง) หรือ OMISE (สำรอง)
+        /// ⚠ Payso ยังไม่พร้อม (ร้านค้ายังไม่อนุมัติ/ปิดอยู่) = IsGatewayReady เป็น false
+        ///   ⇒ ทุกวิธีที่ต้องใช้เกตเวย์ถูกซ่อนจากลูกค้าเอง เหลือแต่โอน/แนบสลิป
+        /// </summary>
         public static string ActiveProvider
         {
             get
             {
-                string p = (Get("Payment_Provider", ProviderOmise) ?? ProviderOmise).Trim().ToUpperInvariant();
-                return p == ProviderPayso ? ProviderPayso : ProviderOmise;
+                string p = (Get("Payment_Provider", ProviderPayso) ?? ProviderPayso).Trim().ToUpperInvariant();
+                return p == ProviderOmise ? ProviderOmise : ProviderPayso;
             }
+        }
+
+        /// <summary>
+        /// เกตเวย์ที่เลือกใช้อยู่ กันวงเงิน (pre-auth) ได้ไหม — Omise ได้ / Payso ไม่ได้
+        /// ใช้คู่กับ Security_Hold_Mode (SecurityHoldService.Mode)
+        /// </summary>
+        public static bool ActiveProviderSupportsPreAuth
+        {
+            get { return ActiveProvider == ProviderOmise; }
         }
 
         /// <summary>เกตเวย์ที่เลือกอยู่พร้อมใช้งานจริงไหม</summary>
@@ -330,6 +343,8 @@ namespace Take_Time_BangPhra.Payments
         public static void Invalidate()
         {
             lock (_lock) { _cache = null; _loadedAt = DateTime.MinValue; _tableMissing = false; }
+            // แคตตาล็อกช่องทางชำระอ่านสถานะเกตเวย์จากค่าตั้งชุดนี้ — ล้างไปพร้อมกัน
+            try { PaymentChannelCatalog.Invalidate(); } catch { }
         }
 
         /// <summary>ค่าตั้งทั้งหมดพร้อม metadata สำหรับวาดหน้าตั้งค่า (ค่าลับถูกปิดบัง)</summary>

@@ -918,12 +918,13 @@
                     style="margin-top:18px; border-top:1px dashed #C5E1A5; padding-top:14px;">
                     <h4 style="color:#33691E; margin:0 0 4px;">🛡 เงินประกันความเสียหาย</h4>
                     <div style="font-size:0.9em; color:#7CB342; margin-bottom:12px;">
-                        บัตร = กันวงเงินไว้เฉย ๆ เงินไม่ออกจากบัตร เช็คเอาท์ค่อยคืนหรือหักเฉพาะที่เสียหายจริง ·
-                        เงินสด = บันทึกรับไว้ในระบบ ไม่ต้องเบิกเงินมารอคืน
+                        โอน = ลูกค้าโอนเข้าบัญชีโรงแรม บันทึกเลขอ้างอิงไว้ในระบบ (นอกเกตเวย์) ·
+                        เงินสด = บันทึกรับไว้ในระบบ · เช็คเอาท์ค่อยคืนหรือหักเฉพาะที่เสียหายจริง
                     </div>
                     <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
-                        <asp:DropDownList ID="ddlDepositMethod" runat="server" CssClass="rounded-textbox" Width="200px">
-                            <asp:ListItem Value="CARD" Text="กันวงเงินบนบัตร" />
+                        <asp:DropDownList ID="ddlDepositMethod" runat="server" CssClass="rounded-textbox" Width="220px"
+                            onchange="rvDepMode(this)">
+                            <asp:ListItem Value="TRANSFER" Text="รับเงินประกันโดยโอน" />
                             <asp:ListItem Value="CASH" Text="รับเป็นเงินสด" />
                         </asp:DropDownList>
                         <asp:TextBox ID="txtDepositAmount" runat="server" TextMode="Number" Width="150px"
@@ -932,6 +933,26 @@
                         <asp:Button ID="btnMakeDeposit" runat="server" Text="รับเงินประกัน"
                             OnClick="btnMakeDeposit_Click" CausesValidation="false" CssClass="reservation-button" />
                     </div>
+                    <%-- ข้อมูลบัญชีรับโอน (จากแคตตาล็อกช่องทาง) + เลขอ้างอิงการโอน — แสดงเมื่อเลือก "โอน" --%>
+                    <asp:Panel ID="pnlDepositTransfer" runat="server" Visible="false"
+                        style="margin-top:10px; padding:10px 13px; border-radius:8px; background:#fff;">
+                        <asp:Literal ID="litDepositTransferInfo" runat="server" />
+                        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:8px;">
+                            <span style="font-weight:600; font-size:0.9em;">เลขอ้างอิงการโอน</span>
+                            <asp:TextBox ID="txtDepositRef" runat="server" Width="280px" CssClass="rounded-textbox"
+                                MaxLength="100" placeholder="เช่น เลขที่รายการ / เวลาโอน / ธนาคารผู้โอน" />
+                        </div>
+                    </asp:Panel>
+                    <script>
+                        function rvDepMode(sel) {
+                            var p = document.getElementById('<%= pnlDepositTransfer.ClientID %>');
+                            if (p) p.style.display = (sel && sel.value === 'TRANSFER') ? '' : 'none';
+                        }
+                        (function () {
+                            var s = document.getElementById('<%= ddlDepositMethod.ClientID %>');
+                            if (s) rvDepMode(s);
+                        })();
+                    </script>
                     <asp:Literal ID="litDepositMsg" runat="server" />
                     <asp:Panel ID="pnlDepositLink" runat="server" Visible="false" style="margin-top:14px;">
                         <div style="display:flex; gap:20px; flex-wrap:wrap; align-items:flex-start;">

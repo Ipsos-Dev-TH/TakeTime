@@ -658,6 +658,21 @@ namespace Take_Time_BangPhra
         protected global::System.Web.UI.WebControls.Button btnMakeDeposit;
 
         /// <summary>
+        /// pnlDepositTransfer control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlDepositTransfer;
+
+        /// <summary>
+        /// litDepositTransferInfo control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Literal litDepositTransferInfo;
+
+        /// <summary>
+        /// txtDepositRef control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtDepositRef;
+
+        /// <summary>
         /// litDepositMsg control.
         /// </summary>
         protected global::System.Web.UI.WebControls.Literal litDepositMsg;

@@ -19,9 +19,83 @@ namespace Take_Time_BangPhra.Payments
     ///   • Omise กันวงเงินได้เฉพาะบัตร และ **หมดอายุเอง 7 วัน** — เกินนั้นวงเงินคืนลูกค้า
     ///     อัตโนมัติ ระบบจะเตือนก่อนหมดอายุและปิดสถานะให้เอง
     ///   • ฟีเจอร์ปิดอยู่ = คลาสนี้ไม่ถูกเรียกจากหน้าไหนเลย ระบบเดิมทำงานเหมือนเดิม
+    ///
+    /// โหมด (ค่าตั้ง Security_Hold_Mode):
+    ///   • TRANSFER (ค่าเริ่มต้น) — PaySo (เกตเวย์หลัก) กันวงเงินบัตรไม่ได้ ⇒ รับเงินประกันโดยลูกค้า
+    ///     โอนเข้าบัญชีโรงแรม บันทึกเป็นรายการนอกเกตเวย์ (Provider = TRANSFER) เช็คเอาท์ค่อยบันทึก
+    ///     "โอนคืน" หรือ "หักค่าเสียหาย" พร้อมผู้ทำ/เวลา/เลขอ้างอิง — ไม่มีการเรียกเกตเวย์ใด ๆ
+    ///   • CARD_HOLD — กันวงเงินบนบัตร (ต้องใช้เกตเวย์ที่ SupportsPreAuth = Omise)
+    ///   • CASH — รับเงินสดเป็นหลัก
+    ///   ทุกโหมด: เงินประกันไม่ใช่รายได้ ไม่ลง Account_Receipt/Payment_History ⇒ ไม่ส่ง NextAcc
+    ///   (เงินที่ "หักค่าเสียหาย" เท่านั้นที่ออกใบเสร็จค่าเสียหายตามปกติ)
     /// </summary>
     public class SecurityHoldService
     {
+        public const string ModeTransfer = "TRANSFER";
+        public const string ModeCardHold = "CARD_HOLD";
+        public const string ModeCash = "CASH";
+
+        public const string ProviderCash = "CASH";
+        public const string ProviderTransfer = "TRANSFER";
+
+        /// <summary>โหมดรับเงินประกัน — ไม่ได้ตั้ง/ค่าแปลก = TRANSFER</summary>
+        public static string Mode
+        {
+            get
+            {
+                string m = "";
+                try { m = (PaymentGatewayConfig.Get("Security_Hold_Mode", ModeTransfer) ?? "").Trim().ToUpperInvariant(); }
+                catch { }
+                return m == ModeCardHold || m == ModeCash ? m : ModeTransfer;
+            }
+        }
+
+        /// <summary>รายการเงินประกันนี้อยู่นอกเกตเวย์ไหม (เงินสด/โอน — ไม่มีอะไรต้องยิงไปเกตเวย์)</summary>
+        public static bool IsOffGateway(string provider)
+        {
+            return string.Equals(provider, ProviderCash, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(provider, ProviderTransfer, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>บัญชีโรงแรมที่ให้ลูกค้าโอนเงินประกัน (จากแคตตาล็อกช่องทาง) — null = ยังไม่มีช่องทางโอน</summary>
+        public static PaymentChannel TransferChannel()
+        {
+            try { return PaymentChannelCatalog.DepositTransferChannel(); } catch { return null; }
+        }
+
+        /// <summary>
+        /// กล่องข้อมูลบัญชีรับโอนเงินประกัน (ชื่อ/ข้อความแนะนำ/QR) สำหรับหน้าพนักงานโชว์ให้ลูกค้า
+        /// — encode ครบทุกค่า ใส่ Literal ได้ตรง ๆ
+        /// </summary>
+        public static string TransferInfoHtml()
+        {
+            PaymentChannel ch = TransferChannel();
+            if (ch == null)
+                return "<div style=\"color:#8D6E00;font-size:0.9em;\">⚠ ยังไม่มีช่องทางโอนในระบบ — "
+                     + "ตั้งที่ ศูนย์ตั้งค่า → ช่องทางชำระเงิน (บันทึกรับโอนได้ตามปกติ)</div>";
+
+            var sb = new System.Text.StringBuilder();
+            sb.Append("<div style=\"display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start;\">");
+            string qr = (ch.QrImageUrl ?? "").Trim();
+            if (qr.Length > 0)
+            {
+                if (qr.StartsWith("~/"))
+                {
+                    try { qr = System.Web.VirtualPathUtility.ToAbsolute(qr); } catch { }
+                }
+                sb.Append("<img src=\"").Append(System.Web.HttpUtility.HtmlAttributeEncode(qr))
+                  .Append("\" alt=\"QR\" style=\"max-width:150px;border-radius:8px;background:#fff;\" />");
+            }
+            sb.Append("<div style=\"flex:1;min-width:200px;font-size:0.92em;line-height:1.6;\">")
+              .Append("<b>โอนเงินประกันเข้า: ").Append(System.Web.HttpUtility.HtmlEncode(ch.Name ?? "")).Append("</b>");
+            if (!string.IsNullOrWhiteSpace(ch.Instructions))
+                sb.Append("<div>").Append(System.Web.HttpUtility.HtmlEncode(ch.Instructions.Trim())
+                    .Replace("\r\n", "<br/>").Replace("\n", "<br/>")).Append("</div>");
+            sb.Append("<div style=\"color:#7CB342;\">เงินประกันไม่ใช่ค่าห้อง — ไม่ออกใบเสร็จ เช็คเอาท์โอนคืน/หักค่าเสียหาย</div>");
+            sb.Append("</div></div>");
+            return sb.ToString();
+        }
+
         private readonly string _conn;
         private readonly code _code = new code();
 
@@ -55,8 +129,11 @@ namespace Take_Time_BangPhra.Payments
                 try
                 {
                     if (!IsAvailable) return false;
+                    // โหมดโอน/เงินสด (ค่าเริ่มต้น) ไม่เสนอลิงก์กันวงเงินบัตรเด็ดขาด
+                    if (Mode != ModeCardHold) return false;
                     if (!PaymentGatewayConfig.IsEnabled) return false;
-                    return new OnlinePaymentService(_conn).Gateway() is IDepositGateway;
+                    IPaymentGateway gw = new OnlinePaymentService(_conn).Gateway();
+                    return gw != null && gw.SupportsPreAuth && gw.IsReady && gw is IDepositGateway;
                 }
                 catch { return false; }
             }
@@ -118,7 +195,13 @@ namespace Take_Time_BangPhra.Payments
         {
             error = null;
             if (!IsAvailable) { error = "ระบบวงเงินประกันยังไม่เปิดใช้งาน"; return null; }
-            if (!IsCardHoldAvailable) { error = "เกตเวย์ยังไม่พร้อมกันวงเงินบัตร — รับเป็นเงินสดแทนได้"; return null; }
+            if (!IsCardHoldAvailable)
+            {
+                error = Mode != ModeCardHold
+                    ? "ที่พักรับเงินประกันโดยการโอน (โหมด " + Mode + ") — ไม่ใช้ลิงก์กันวงเงินบัตร"
+                    : "เกตเวย์ที่ใช้อยู่กันวงเงินบัตรไม่ได้ — รับเป็นเงินโอน/เงินสดแทนได้";
+                return null;
+            }
             if (amount <= 0) { error = "จำนวนเงินต้องมากกว่า 0"; return null; }
 
             var open = GetOpenHold(reservationId);
@@ -156,6 +239,49 @@ namespace Take_Time_BangPhra.Payments
         /// </summary>
         public string CreateCashHold(int reservationId, decimal amount, int? adminId, out string error)
         {
+            string holdRef = CreateOffGatewayHold(ProviderCash, reservationId, amount, null, null, adminId, out error);
+            if (holdRef == null) return null;
+
+            Notify.Send(Notify.Ev.PaymentHold,
+                "🛡 <b>รับเงินประกันเป็นเงินสด</b> " + amount.ToString("N2") + " บาท\n"
+                + "การจอง #" + reservationId + " · " + holdRef
+                + "\nเช็คเอาท์: คืนเงินสดก้อนนี้ หรือหักค่าเสียหายแล้วคืนส่วนที่เหลือ");
+            return holdRef;
+        }
+
+        /// <summary>
+        /// รับเงินประกันโดย "โอนเข้าบัญชีโรงแรม" — บันทึกนอกเกตเวย์ทันที (HELD, ไม่มีวันหมดอายุ)
+        /// transferRef = เลขอ้างอิง/เวลาโอน/ธนาคารต้นทางของลูกค้า · note = หมายเหตุ (เช่น ชื่อบัญชีผู้โอน)
+        /// ไม่ลงใบเสร็จ/Payment_History/NextAcc — เงินประกันเป็นเงินที่ต้องคืน ไม่ใช่รายได้
+        /// </summary>
+        public string CreateTransferHold(int reservationId, decimal amount, string transferRef, string note,
+            int? adminId, out string error)
+        {
+            PaymentChannel ch = TransferChannel();
+            string channelText = ch == null ? null
+                : ch.Code + " · " + (string.IsNullOrEmpty(ch.PaidHowName) ? ch.Name : ch.PaidHowName);
+            string fullNote = string.IsNullOrWhiteSpace(note) ? "" : note.Trim();
+            if (channelText != null)
+                fullNote = fullNote + (fullNote.Length > 0 ? " | " : "") + "เข้าบัญชี: " + channelText;
+
+            string holdRef = CreateOffGatewayHold(ProviderTransfer, reservationId, amount,
+                transferRef, fullNote, adminId, out error);
+            if (holdRef == null) return null;
+
+            Notify.Send(Notify.Ev.PaymentHold,
+                "🛡 <b>รับเงินประกันโดยการโอน</b> " + amount.ToString("N2") + " บาท\n"
+                + "การจอง #" + reservationId + " · " + holdRef
+                + (string.IsNullOrWhiteSpace(transferRef)
+                    ? "\n⚠ ยังไม่ระบุเลขอ้างอิงการโอน"
+                    : "\nอ้างอิง: " + Notify.E(transferRef.Trim()))
+                + "\nเช็คเอาท์: บันทึกโอนคืน หรือหักค่าเสียหายแล้วโอนคืนส่วนที่เหลือ (นอกเกตเวย์)");
+            return holdRef;
+        }
+
+        /// <summary>บันทึกเงินประกันนอกเกตเวย์ (เงินสด/โอน) — สถานะ HELD ทันที</summary>
+        private string CreateOffGatewayHold(string provider, int reservationId, decimal amount,
+            string transferRef, string transferNote, int? adminId, out string error)
+        {
             error = null;
             if (!IsAvailable) { error = "ระบบวงเงินประกันยังไม่เปิดใช้งาน"; return null; }
             if (amount <= 0) { error = "จำนวนเงินต้องมากกว่า 0"; return null; }
@@ -171,23 +297,42 @@ namespace Take_Time_BangPhra.Payments
             string holdRef = "HOLD-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-"
                            + Guid.NewGuid().ToString("N").Substring(0, 4).ToUpperInvariant();
 
-            _code.DatabaseInsertSafe(_conn, @"
-                INSERT INTO Payment_Security_Holds
-                    (Hold_Ref, Reservation_ID, Provider, Amount, [Status], Held_At, Created_Date, Created_By)
-                VALUES (@r, @res, 'CASH', @amt, @st, GETDATE(), GETDATE(), @by)",
-                new Dictionary<string, object>
-                {
-                    { "@r", holdRef },
-                    { "@res", reservationId },
-                    { "@amt", amount },
-                    { "@st", HoldStatus.Held },
-                    { "@by", (object)adminId ?? DBNull.Value }
-                });
+            bool isTransfer = provider == ProviderTransfer;
+            string tRef = Trunc(transferRef == null ? null : transferRef.Trim(), 100);
+            string tNote = Trunc(transferNote == null ? null : transferNote.Trim(), 400);
 
-            Notify.Send(Notify.Ev.PaymentHold,
-                "🛡 <b>รับเงินประกันเป็นเงินสด</b> " + amount.ToString("N2") + " บาท\n"
-                + "การจอง #" + reservationId + " · " + holdRef
-                + "\nเช็คเอาท์: คืนเงินสดก้อนนี้ หรือหักค่าเสียหายแล้วคืนส่วนที่เหลือ");
+            if (isTransfer && HasTransferColumns())
+            {
+                _code.DatabaseInsertSafe(_conn, @"
+                    INSERT INTO Payment_Security_Holds
+                        (Hold_Ref, Reservation_ID, Provider, Amount, [Status], Held_At, Created_Date, Created_By,
+                         Transfer_Ref, Transfer_Note)
+                    VALUES (@r, @res, @prov, @amt, @st, GETDATE(), GETDATE(), @by, @tref, @tnote)",
+                    new Dictionary<string, object>
+                    {
+                        { "@r", holdRef }, { "@res", reservationId }, { "@prov", provider },
+                        { "@amt", amount }, { "@st", HoldStatus.Held },
+                        { "@by", (object)adminId ?? DBNull.Value },
+                        { "@tref", (object)tRef ?? DBNull.Value },
+                        { "@tnote", (object)tNote ?? DBNull.Value }
+                    });
+            }
+            else
+            {
+                // ยังไม่รัน PHASE19_20 (ไม่มีคอลัมน์โอน) → เก็บอ้างอิงไว้ใน Raw_Response ให้ตรวจย้อนได้
+                string raw = isTransfer ? "TRANSFER ref=" + (tRef ?? "-") + "; note=" + (tNote ?? "-") : null;
+                _code.DatabaseInsertSafe(_conn, @"
+                    INSERT INTO Payment_Security_Holds
+                        (Hold_Ref, Reservation_ID, Provider, Amount, [Status], Held_At, Created_Date, Created_By, Raw_Response)
+                    VALUES (@r, @res, @prov, @amt, @st, GETDATE(), GETDATE(), @by, @raw)",
+                    new Dictionary<string, object>
+                    {
+                        { "@r", holdRef }, { "@res", reservationId }, { "@prov", provider },
+                        { "@amt", amount }, { "@st", HoldStatus.Held },
+                        { "@by", (object)adminId ?? DBNull.Value },
+                        { "@raw", (object)raw ?? DBNull.Value }
+                    });
+            }
             return holdRef;
         }
 
@@ -207,6 +352,10 @@ namespace Take_Time_BangPhra.Payments
             if (hold == null) return "ไม่พบรายการวงเงินประกันนี้";
             if (hold.Status == HoldStatus.Held) { ok = true; return "กันวงเงินไว้เรียบร้อยแล้ว"; }
             if (hold.Status != HoldStatus.PendingCard) return "รายการนี้ปิดไปแล้ว (" + HoldStatus.Thai(hold.Status) + ")";
+
+            // โหมดโอน/เงินสด หรือเกตเวย์หลัก (PaySo) กันวงเงินไม่ได้ → ลิงก์เก่าใช้ไม่ได้แล้ว
+            if (!IsCardHoldAvailable)
+                return "ที่พักรับเงินประกันโดยการโอนเข้าบัญชี (ไม่ใช้การกันวงเงินบัตรแล้ว) — กรุณาติดต่อเจ้าหน้าที่";
 
             IDepositGateway gw = Gateway();
             if (gw == null) return "เกตเวย์ที่ใช้อยู่ไม่รองรับการกันวงเงิน";
@@ -275,6 +424,16 @@ namespace Take_Time_BangPhra.Payments
         /// </summary>
         public string CaptureDamage(long holdId, decimal amount, string reason, int? adminId)
         {
+            return CaptureDamage(holdId, amount, reason, adminId, null, null);
+        }
+
+        /// <summary>
+        /// หักค่าเสียหาย — refundRef/refundNote ใช้กับเงินประกันโอน: บันทึกการโอนคืนส่วนที่เหลือ
+        /// (เลขอ้างอิง/บัญชีที่โอนคืน) · เงินสด/โอน ไม่มีการเรียกเกตเวย์ใด ๆ
+        /// </summary>
+        public string CaptureDamage(long holdId, decimal amount, string reason, int? adminId,
+            string refundRef, string refundNote)
+        {
             var hold = GetById(holdId);
             if (hold == null) return "ไม่พบรายการวงเงินประกัน";
             if (hold.Status != HoldStatus.Held) return "สถานะปัจจุบัน: " + HoldStatus.Thai(hold.Status) + " — ตัดเงินไม่ได้";
@@ -285,11 +444,12 @@ namespace Take_Time_BangPhra.Payments
             if (!TryTransition(hold.ID, HoldStatus.Held, "CAPTURING"))
                 return "รายการนี้กำลังถูกดำเนินการอยู่ กรุณารอสักครู่แล้วรีเฟรช";
 
-            bool isCash = string.Equals(hold.Provider, "CASH", StringComparison.OrdinalIgnoreCase);
+            bool isTransfer = string.Equals(hold.Provider, ProviderTransfer, StringComparison.OrdinalIgnoreCase);
+            bool isCash = isTransfer || string.Equals(hold.Provider, ProviderCash, StringComparison.OrdinalIgnoreCase);
             HoldResult r;
             if (isCash)
             {
-                // เงินสดอยู่ในมือเราแล้ว — ไม่มีอะไรต้องยิง แค่บันทึกการตัดสินใจ
+                // เงินสด/เงินโอนอยู่กับเราแล้ว — ไม่มีอะไรต้องยิง แค่บันทึกการตัดสินใจ
                 r = new HoldResult { Success = true, Status = HoldStatus.Captured };
             }
             else
@@ -309,7 +469,7 @@ namespace Take_Time_BangPhra.Payments
             _code.DatabaseInsertSafe(_conn, @"
                 UPDATE Payment_Security_Holds
                    SET [Status] = @st, Captured_Amount = @amt, Capture_Reason = @rs,
-                       Captured_At = GETDATE(), Captured_By = @by, Raw_Response = @raw,
+                       Captured_At = GETDATE(), Captured_By = @by, Raw_Response = COALESCE(@raw, Raw_Response),
                        Updated_Date = GETDATE()
                  WHERE ID = @id",
                 new Dictionary<string, object>
@@ -319,6 +479,9 @@ namespace Take_Time_BangPhra.Payments
                     { "@by", (object)adminId ?? DBNull.Value },
                     { "@raw", (object)r.RawResponse ?? DBNull.Value }
                 });
+
+            decimal remainder = hold.Amount - amount;
+            if (isTransfer) SaveRefundRecord(hold.ID, remainder, refundRef, refundNote);
 
             // เงินเข้าจริงแล้ว → ลงสมุดรายการชำระเงินกลาง (ตรวจย้อน/ออกใบเสร็จต่อได้)
             try
@@ -338,7 +501,9 @@ namespace Take_Time_BangPhra.Payments
                 var txn = store.Create(req, hold.Provider, 0m);
                 store.MarkPaid(txn.ID, hold.ProviderChargeId, null, hold.CardBrand, hold.CardLast4);
                 store.SetApplied(txn.ID,
-                    isCash
+                    isTransfer
+                        ? "หักจากเงินประกันเงินโอน " + hold.HoldRef + " — ออกใบเสร็จค่าเสียหาย (แหล่งเงิน: " + TransferPaidHowText() + ")"
+                        : isCash
                         ? "หักจากเงินประกันเงินสด " + hold.HoldRef + " — ออกใบเสร็จค่าเสียหาย (แหล่งเงิน: เงินสด)"
                         : "ตัดจากวงเงินประกัน " + hold.HoldRef + " — ออกใบเสร็จค่าเสียหายโดยเลือกแหล่งเงินของเกตเวย์",
                     null);
@@ -348,15 +513,26 @@ namespace Take_Time_BangPhra.Payments
                 _code.Logs(_conn, "SecurityHold", "บันทึก txn หลัง capture ไม่สำเร็จ: " + ex.Message, "System");
             }
 
-            decimal remainder = hold.Amount - amount;
             Notify.Send(Notify.Ev.PaymentHold,
-                "💥 <b>หักค่าเสียหายจากเงินประกัน" + (isCash ? " (เงินสด)" : "") + "</b> "
+                "💥 <b>หักค่าเสียหายจากเงินประกัน" + (isTransfer ? " (เงินโอน)" : isCash ? " (เงินสด)" : "") + "</b> "
                 + amount.ToString("N2") + " / " + hold.Amount.ToString("N2") + " บาท\nการจอง #" + hold.ReservationId
                 + (string.IsNullOrEmpty(reason) ? "" : "\n📝 " + Notify.E(reason))
-                + (isCash
+                + (isTransfer
+                    ? (remainder > 0
+                        ? "\n🏦 ต้องโอนคืนลูกค้า " + remainder.ToString("N2") + " บาท"
+                          + (string.IsNullOrWhiteSpace(refundRef)
+                              ? " (ยังไม่ระบุเลขอ้างอิงการโอนคืน)"
+                              : " · อ้างอิง " + Notify.E(refundRef.Trim()))
+                        : "")
+                    : isCash
                     ? (remainder > 0 ? "\n💵 ต้องคืนเงินสดลูกค้า " + remainder.ToString("N2") + " บาท" : "")
                     : "\nส่วนที่เหลือคืนวงเงินให้ลูกค้าอัตโนมัติ")
                 + " · อย่าลืมออกใบเสร็จค่าเสียหาย");
+
+            if (isTransfer)
+                return "หักค่าเสียหาย " + amount.ToString("N2") + " บาทแล้ว"
+                     + (remainder > 0 ? " — โอนคืนลูกค้า " + remainder.ToString("N2") + " บาท (นอกเกตเวย์)" : "")
+                     + " และออกใบเสร็จค่าเสียหาย (แหล่งเงิน: " + TransferPaidHowText() + ")";
 
             if (isCash)
                 return "หักค่าเสียหาย " + amount.ToString("N2") + " บาทแล้ว"
@@ -373,6 +549,14 @@ namespace Take_Time_BangPhra.Payments
         /// <summary>คืนวงเงินทั้งหมด (ไม่พบความเสียหาย)</summary>
         public string Release(long holdId, int? adminId)
         {
+            return Release(holdId, adminId, null, null);
+        }
+
+        /// <summary>
+        /// คืนเงินประกันทั้งหมด — เงินโอน: บันทึกการ "โอนคืน" พร้อมเลขอ้างอิง/หมายเหตุ (ไม่มีการเรียกเกตเวย์)
+        /// </summary>
+        public string Release(long holdId, int? adminId, string refundRef, string refundNote)
+        {
             var hold = GetById(holdId);
             if (hold == null) return "ไม่พบรายการวงเงินประกัน";
 
@@ -388,7 +572,8 @@ namespace Take_Time_BangPhra.Payments
             if (!TryTransition(hold.ID, HoldStatus.Held, "RELEASING"))
                 return "รายการนี้กำลังถูกดำเนินการอยู่";
 
-            bool isCash = string.Equals(hold.Provider, "CASH", StringComparison.OrdinalIgnoreCase);
+            bool isTransfer = string.Equals(hold.Provider, ProviderTransfer, StringComparison.OrdinalIgnoreCase);
+            bool isCash = isTransfer || string.Equals(hold.Provider, ProviderCash, StringComparison.OrdinalIgnoreCase);
             HoldResult r;
             if (isCash)
             {
@@ -411,7 +596,7 @@ namespace Take_Time_BangPhra.Payments
             _code.DatabaseInsertSafe(_conn, @"
                 UPDATE Payment_Security_Holds
                    SET [Status] = @st, Released_At = GETDATE(), Released_By = @by,
-                       Raw_Response = @raw, Updated_Date = GETDATE()
+                       Raw_Response = COALESCE(@raw, Raw_Response), Updated_Date = GETDATE()
                  WHERE ID = @id",
                 new Dictionary<string, object>
                 {
@@ -419,6 +604,19 @@ namespace Take_Time_BangPhra.Payments
                     { "@by", (object)adminId ?? DBNull.Value },
                     { "@raw", (object)r.RawResponse ?? DBNull.Value }
                 });
+
+            if (isTransfer)
+            {
+                SaveRefundRecord(hold.ID, hold.Amount, refundRef, refundNote);
+                Notify.Send(Notify.Ev.PaymentHold,
+                    "✅ <b>บันทึกโอนคืนเงินประกันแล้ว</b> " + hold.Amount.ToString("N2") + " บาท\n"
+                    + "การจอง #" + hold.ReservationId
+                    + (string.IsNullOrWhiteSpace(refundRef)
+                        ? " · ⚠ ยังไม่ระบุเลขอ้างอิงการโอนคืน"
+                        : " · อ้างอิง " + Notify.E(refundRef.Trim())));
+                return "บันทึกคืนเงินประกันแล้ว — โอนคืนลูกค้า " + hold.Amount.ToString("N2") + " บาท (นอกเกตเวย์)"
+                     + (string.IsNullOrWhiteSpace(refundRef) ? " · ยังไม่ได้ระบุเลขอ้างอิงการโอนคืน" : "");
+            }
 
             Notify.Send(Notify.Ev.PaymentHold,
                 (isCash ? "✅ <b>คืนเงินประกันเงินสดแล้ว</b> " : "✅ <b>คืนวงเงินประกันแล้ว</b> ")
@@ -454,7 +652,8 @@ namespace Take_Time_BangPhra.Payments
                 // 1) ปิดรายการที่เลยวันหมดอายุ (Omise คืนวงเงินให้ลูกค้าไปแล้ว)
                 var expired = _code.DatabaseQuerySafe(_conn, @"
                     SELECT ID, Reservation_ID, Amount FROM Payment_Security_Holds
-                     WHERE [Status] = @held AND Expires_At IS NOT NULL AND Expires_At < GETDATE()",
+                     WHERE [Status] = @held AND Expires_At IS NOT NULL AND Expires_At < GETDATE()
+                       AND Provider NOT IN ('CASH','TRANSFER')",
                     new Dictionary<string, object> { { "@held", HoldStatus.Held } });
 
                 if (expired != null)
@@ -491,7 +690,8 @@ namespace Take_Time_BangPhra.Payments
                     SELECT ID, Reservation_ID, Amount, Expires_At FROM Payment_Security_Holds
                      WHERE [Status] = @held AND Expiry_Warned = 0
                        AND Expires_At IS NOT NULL
-                       AND Expires_At < DATEADD(HOUR, @h, GETDATE())",
+                       AND Expires_At < DATEADD(HOUR, @h, GETDATE())
+                       AND Provider NOT IN ('CASH','TRANSFER')",
                     new Dictionary<string, object> { { "@held", HoldStatus.Held }, { "@h", warnHours } });
 
                 if (warn != null)
@@ -505,6 +705,39 @@ namespace Take_Time_BangPhra.Payments
                             + " บาท\nการจอง #" + r["Reservation_ID"]
                             + "\nหมดอายุ " + Convert.ToDateTime(r["Expires_At"]).ToString("dd/MM/yyyy HH:mm")
                             + " — ตัดค่าเสียหายหรือคืนวงเงินก่อนถึงเวลานั้น");
+                    }
+
+                // 3) เงินประกันนอกเกตเวย์ (โอน/เงินสด) — ไม่มีวันหมดอายุ ไม่ต้องยิงเกตเวย์
+                //    แค่เตือน + ลง log ครั้งเดียว เมื่อเช็คเอาท์เลยมาแล้ว N วันแต่ยังไม่บันทึกคืน/หัก (กันลืมคืนลูกค้า)
+                int overdueDays = Math.Max(1, PaymentGatewayConfig.GetInt("Security_Hold_Overdue_Days", 3));
+                var overdue = _code.DatabaseQuerySafe(_conn, @"
+                    SELECT h.ID, h.Hold_Ref, h.Reservation_ID, h.Amount, h.Provider, r.CheckoutDate
+                      FROM Payment_Security_Holds h
+                      JOIN Reservation r ON r.ID = h.Reservation_ID
+                     WHERE h.[Status] = @held AND h.Expiry_Warned = 0
+                       AND h.Provider IN ('CASH','TRANSFER')
+                       AND r.CheckoutDate IS NOT NULL
+                       AND r.CheckoutDate < DATEADD(DAY, -@d, GETDATE())",
+                    new Dictionary<string, object> { { "@held", HoldStatus.Held }, { "@d", overdueDays } });
+
+                if (overdue != null)
+                    foreach (DataRow r in overdue.Rows)
+                    {
+                        _code.DatabaseInsertSafe(_conn,
+                            "UPDATE Payment_Security_Holds SET Expiry_Warned = 1 WHERE ID = @id",
+                            new Dictionary<string, object> { { "@id", r["ID"] } });
+                        bool tr = string.Equals(Convert.ToString(r["Provider"]), ProviderTransfer,
+                            StringComparison.OrdinalIgnoreCase);
+                        string line = "เงินประกัน" + (tr ? "โอน" : "เงินสด") + " " + Convert.ToString(r["Hold_Ref"])
+                            + " การจอง #" + Convert.ToString(r["Reservation_ID"])
+                            + " ยอด " + Convert.ToDecimal(r["Amount"]).ToString("N2")
+                            + " บาท — เช็คเอาท์ " + Convert.ToDateTime(r["CheckoutDate"]).ToString("dd/MM/yyyy")
+                            + " แล้วแต่ยังไม่บันทึกคืน/หักค่าเสียหาย";
+                        _code.Logs(_conn, "SecurityHold", "ค้างคืน: " + line, "System");
+                        Notify.Send(Notify.Ev.PaymentHold,
+                            "⏰ <b>เงินประกันยังไม่ได้คืน</b>\n" + Notify.E(line)
+                            + "\n→ บันทึก " + (tr ? "\"โอนคืน\"" : "\"คืนเงินสด\"")
+                            + " หรือ \"หักค่าเสียหาย\" ที่หน้าเช็คเอาท์");
                     }
             }
             catch (Exception ex)
@@ -566,6 +799,74 @@ namespace Take_Time_BangPhra.Payments
                 SELECT TOP (" + Math.Max(1, top) + @") ID, Hold_Ref, Reservation_ID, Provider, Amount,
                        Captured_Amount, [Status], Card_Last4, Expires_At, Capture_Reason, Created_Date
                   FROM Payment_Security_Holds ORDER BY ID DESC", null);
+        }
+
+        // ── เงินประกันโอน: คอลัมน์ + บันทึกโอนคืน ─────────────────────────────
+
+        private static bool _hasTransferCols;
+        private static DateTime _transferColsCheckedAt = DateTime.MinValue;
+
+        /// <summary>มีคอลัมน์ของเงินประกันโอน (PHASE19_Migration_20) แล้วหรือยัง — ยังไม่มีก็ทำงานได้ (เก็บใน Raw_Response)</summary>
+        public bool HasTransferColumns()
+        {
+            if (_hasTransferCols) return true;
+            if ((DateTime.UtcNow - _transferColsCheckedAt).TotalMinutes < 5) return false;
+            _transferColsCheckedAt = DateTime.UtcNow;
+            try
+            {
+                DataTable dt = _code.DatabaseQuerySafe(_conn, @"
+                    SELECT COUNT(*) AS N FROM sys.columns
+                     WHERE object_id = OBJECT_ID('dbo.Payment_Security_Holds')
+                       AND name IN ('Transfer_Ref','Transfer_Note','Refund_Amount','Refund_Ref','Refund_Note','Refund_Method')", null);
+                _hasTransferCols = dt != null && dt.Rows.Count > 0 && Convert.ToInt32(dt.Rows[0]["N"]) >= 6;
+            }
+            catch { _hasTransferCols = false; }
+            return _hasTransferCols;
+        }
+
+        /// <summary>บันทึกการโอนคืนเงินประกัน (ใคร/เมื่อไหร่ อยู่ใน Released_By/Captured_By + วันที่ของแถวนั้น)</summary>
+        private void SaveRefundRecord(long holdId, decimal refundAmount, string refundRef, string refundNote)
+        {
+            try
+            {
+                string rRef = Trunc(refundRef == null ? null : refundRef.Trim(), 100);
+                string rNote = Trunc(refundNote == null ? null : refundNote.Trim(), 400);
+                decimal amt = refundAmount < 0 ? 0m : refundAmount;
+                if (HasTransferColumns())
+                    _code.DatabaseInsertSafe(_conn, @"
+                        UPDATE Payment_Security_Holds
+                           SET Refund_Method = 'TRANSFER', Refund_Amount = @amt,
+                               Refund_Ref = @ref, Refund_Note = @note, Updated_Date = GETDATE()
+                         WHERE ID = @id",
+                        new Dictionary<string, object>
+                        {
+                            { "@id", holdId }, { "@amt", amt },
+                            { "@ref", (object)rRef ?? DBNull.Value }, { "@note", (object)rNote ?? DBNull.Value }
+                        });
+                else
+                    _code.DatabaseInsertSafe(_conn, @"
+                        UPDATE Payment_Security_Holds
+                           SET Raw_Response = ISNULL(Raw_Response,'') + @txt, Updated_Date = GETDATE()
+                         WHERE ID = @id",
+                        new Dictionary<string, object>
+                        {
+                            { "@id", holdId },
+                            { "@txt", " | REFUND TRANSFER amt=" + amt.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)
+                                      + " ref=" + (rRef ?? "-") + " note=" + (rNote ?? "-") }
+                        });
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_conn, "SecurityHold", "บันทึกโอนคืนไม่สำเร็จ (hold " + holdId + "): " + ex.Message, "System");
+            }
+        }
+
+        /// <summary>ชื่อแหล่งเงินของบัญชีรับโอน (ใช้บอกพนักงานตอนออกใบเสร็จค่าเสียหาย)</summary>
+        private static string TransferPaidHowText()
+        {
+            PaymentChannel ch = TransferChannel();
+            if (ch == null) return "บัญชีโอนของที่พัก";
+            return string.IsNullOrEmpty(ch.PaidHowName) ? ch.Name : ch.PaidHowName;
         }
 
         // ── ภายใน ───────────────────────────────────────────────────────────
@@ -726,6 +1027,16 @@ namespace Take_Time_BangPhra.Payments
             public int ReservationId;
             public decimal Amount, CapturedAmount;
             public DateTime? HeldAt, ExpiresAt;
+            // เงินประกันโอน (PHASE19_20 — ยังไม่รัน = null)
+            public string TransferRef, TransferNote, RefundRef, RefundNote;
+            public decimal? RefundAmount;
+            public bool IsTransfer { get { return string.Equals(Provider, ProviderTransfer, StringComparison.OrdinalIgnoreCase); } }
+            public bool IsCash { get { return string.Equals(Provider, ProviderCash, StringComparison.OrdinalIgnoreCase); } }
+        }
+
+        private static string OptStr(DataRow r, string col)
+        {
+            return r.Table.Columns.Contains(col) && r[col] != DBNull.Value ? Convert.ToString(r[col]) : null;
         }
 
         private static HoldRow Map(DataRow r)
@@ -745,6 +1056,12 @@ namespace Take_Time_BangPhra.Payments
                 ? Convert.ToString(r["Capture_Reason"]) : null;
             h.HeldAt = r["Held_At"] == DBNull.Value ? (DateTime?)null : Convert.ToDateTime(r["Held_At"]);
             h.ExpiresAt = r["Expires_At"] == DBNull.Value ? (DateTime?)null : Convert.ToDateTime(r["Expires_At"]);
+            h.TransferRef = OptStr(r, "Transfer_Ref");
+            h.TransferNote = OptStr(r, "Transfer_Note");
+            h.RefundRef = OptStr(r, "Refund_Ref");
+            h.RefundNote = OptStr(r, "Refund_Note");
+            h.RefundAmount = r.Table.Columns.Contains("Refund_Amount") && r["Refund_Amount"] != DBNull.Value
+                ? Convert.ToDecimal(r["Refund_Amount"]) : (decimal?)null;
             return h;
         }
     }

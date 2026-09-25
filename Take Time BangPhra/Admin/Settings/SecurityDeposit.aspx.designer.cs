@@ -30,6 +30,16 @@ namespace Take_Time_BangPhra.Admin.Settings
         protected global::System.Web.UI.WebControls.CheckBox chkEnabled;
 
         /// <summary>
+        /// ddlMode control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.DropDownList ddlMode;
+
+        /// <summary>
+        /// litTransferInfo control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Literal litTransferInfo;
+
+        /// <summary>
         /// txtDefault control.
         /// </summary>
         protected global::System.Web.UI.WebControls.TextBox txtDefault;

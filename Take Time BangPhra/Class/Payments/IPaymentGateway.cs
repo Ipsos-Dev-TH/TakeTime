@@ -33,14 +33,47 @@ namespace Take_Time_BangPhra.Payments
 
         /// <summary>ทดสอบการเชื่อมต่อจากหน้าตั้งค่า — คืนข้อความสรุปให้ผู้ใช้อ่าน</summary>
         string TestConnection();
+
+        // ── ความสามารถ (ให้หน้าจอ/แคตตาล็อกช่องทางถามก่อนเสนอทางเลือก) ─────────
+
+        /// <summary>
+        /// กันวงเงิน (pre-authorization) ได้ไหม — true เฉพาะเจ้าที่ implement <see cref="IDepositGateway"/>
+        /// (Omise) · Payso ไม่มีเส้นทางกันวงเงิน ⇒ เงินประกันต้องรับโดยโอน/เงินสดนอกเกตเวย์
+        /// </summary>
+        bool SupportsPreAuth { get; }
+
+        /// <summary>คืนเงินผ่านเกตเวย์ได้ไหม (ตั้งค่าเส้นทางคืนเงินไว้แล้ว)</summary>
+        bool SupportsRefund { get; }
+
+        /// <summary>
+        /// ช่องทางชำระที่เกตเวย์นี้เปิดให้ใช้อยู่ตอนนี้ (รหัสวิธีภายใน CARD / QR / INSTALLMENT
+        /// พร้อมรหัสที่ส่งให้ผู้ให้บริการจริง) — คืนรายการว่างถ้าเกตเวย์ยังไม่พร้อม
+        /// ⚠ ไม่ได้ถาม API ของผู้ให้บริการ (ยังไม่มีเส้นทาง "รายการช่องทาง" ที่ยืนยันได้)
+        ///   อ่านจากค่าตั้ง — ดู <see cref="PaysoGateway.GetAvailableChannels"/>
+        /// </summary>
+        System.Collections.Generic.IList<GatewayChannel> GetAvailableChannels();
+    }
+
+    /// <summary>ช่องทางที่เกตเวย์รองรับ — ใช้ประกอบแคตตาล็อกช่องทางชำระ (PaymentChannelCatalog)</summary>
+    public sealed class GatewayChannel
+    {
+        /// <summary>รหัสวิธีภายในระบบที่ส่งเข้า CreateCharge (CARD / QR / INSTALLMENT)</summary>
+        public string Code;
+        /// <summary>รหัสที่ส่งให้ผู้ให้บริการจริง (Payso: ผ่าน Payso_Method_Map)</summary>
+        public string ProviderCode;
+        /// <summary>ชื่อไทย</summary>
+        public string Name;
+        /// <summary>CARD | QR | GATEWAY_OTHER</summary>
+        public string Type;
     }
 
     /// <summary>
     /// ความสามารถ "กันวงเงิน" (authorization hold) — ใช้กับเงินประกันความเสียหาย
     ///
     /// แยกจาก IPaymentGateway เพราะไม่ใช่ทุกเจ้าทำได้ (Omise ทำได้เฉพาะบัตร,
-    /// PromptPay กันวงเงินไม่ได้, Payso ยังไม่ทราบ) — โค้ดฝั่งหน้าจอตรวจด้วย
-    /// <c>gateway is IDepositGateway</c> ก่อนเสนอทางเลือกนี้เสมอ
+    /// PromptPay กันวงเงินไม่ได้, Payso ไม่รองรับ) — โค้ดฝั่งหน้าจอตรวจด้วย
+    /// <c>gateway is IDepositGateway</c> / <c>SupportsPreAuth</c> ก่อนเสนอทางเลือกนี้เสมอ
+    /// และต้องอยู่ในโหมด Security_Hold_Mode = CARD_HOLD (ค่าเริ่มต้นคือ TRANSFER)
     /// </summary>
     public interface IDepositGateway
     {

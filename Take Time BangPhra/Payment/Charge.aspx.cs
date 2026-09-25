@@ -51,8 +51,27 @@ namespace Take_Time_BangPhra.Payment
             else if (!PaymentGatewayConfig.ChannelEnabled(PaymentSource.Pos))
                 Msg("err", "ช่องทาง \"ขายหน้าร้าน\" ถูกปิดรับชำระออนไลน์อยู่ — เปิดได้ที่หน้าตั้งค่าเกตเวย์");
 
-            pnlHoldSection.Visible = new SecurityHoldService(_conn).IsAvailable
+            var holdSvc = new SecurityHoldService(_conn);
+            pnlHoldSection.Visible = holdSvc.IsAvailable
                 || PaymentGatewayConfig.GetBool("Payment_SecurityHold_Enabled", false);
+
+            // วิธีรับเงินประกันตามโหมด — ลิงก์กันวงเงินบัตรเฉพาะโหมด CARD_HOLD ที่เกตเวย์กันวงเงินได้จริง
+            if (!IsPostBack && pnlHoldSection.Visible)
+            {
+                try
+                {
+                    string mode = SecurityHoldService.Mode;
+                    ddlHoldMethod.Items.Clear();
+                    if (mode == SecurityHoldService.ModeCardHold && holdSvc.IsCardHoldAvailable)
+                        ddlHoldMethod.Items.Add(new System.Web.UI.WebControls.ListItem("💳 กันวงเงินบัตร (ส่งลิงก์)", "CARD"));
+                    if (mode == SecurityHoldService.ModeCash)
+                        ddlHoldMethod.Items.Add(new System.Web.UI.WebControls.ListItem("💵 รับเงินสด (บันทึกทันที)", "CASH"));
+                    ddlHoldMethod.Items.Add(new System.Web.UI.WebControls.ListItem("🏦 รับโอน (บันทึกทันที)", "TRANSFER"));
+                    if (mode != SecurityHoldService.ModeCash)
+                        ddlHoldMethod.Items.Add(new System.Web.UI.WebControls.ListItem("💵 รับเงินสด (บันทึกทันที)", "CASH"));
+                }
+                catch { }
+            }
 
             if (!IsPostBack) BindToday();
         }
@@ -155,6 +174,29 @@ namespace Take_Time_BangPhra.Payment
 
             int? adminId = null;
             try { if (Session["UserID"] != null) adminId = Convert.ToInt32(Session["UserID"]); } catch { }
+
+            // ── โอนเข้าบัญชีโรงแรม: บันทึกนอกเกตเวย์ทันที ──
+            if (ddlHoldMethod.SelectedValue == "TRANSFER")
+            {
+                string trErr;
+                string tref = (txtHoldTransferRef.Text ?? "").Trim();
+                string trRef = holds.CreateTransferHold(resId, amount, tref, null, adminId, out trErr);
+                if (trRef == null)
+                {
+                    Msg("err", Server.HtmlEncode(trErr ?? "บันทึกไม่สำเร็จ"));
+                    BindToday();
+                    return;
+                }
+                PaymentChannel dep = SecurityHoldService.TransferChannel();
+                Msg("ok", "รับเงินประกันโดยโอน " + amount.ToString("N2") + " บาท ของการจอง #" + resId
+                    + " แล้ว (" + Server.HtmlEncode(trRef) + ")"
+                    + (dep == null ? "" : " · เข้าบัญชี " + Server.HtmlEncode(dep.Name))
+                    + (tref.Length == 0 ? "<br/>⚠ ยังไม่ได้ใส่เลขอ้างอิงการโอน" : "")
+                    + "<br/>ตอนเช็คเอาท์: หน้าเช็คเอาท์จะให้บันทึก \"โอนคืน\" หรือ \"หักค่าเสียหาย\" (ไม่ผ่านเกตเวย์ ไม่ออกใบเสร็จ)");
+                txtHoldTransferRef.Text = "";
+                BindToday();
+                return;
+            }
 
             // ── เงินสด: บันทึกรับทันที จบในคลิกเดียว ──
             if (ddlHoldMethod.SelectedValue == "CASH")

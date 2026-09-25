@@ -51,6 +51,62 @@ namespace Take_Time_BangPhra.Payments
         public string DisplayName { get { return "Payso"; } }
         public bool IsReady { get { return PaymentGatewayConfig.IsPaysoReady; } }
 
+        // ── ความสามารถ ──────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Payso ในระบบนี้ไม่มีเส้นทาง "กันวงเงิน" (ไม่ได้ implement IDepositGateway —
+        /// มีแค่ CreateCharge/QueryStatus/Refund) ⇒ เงินประกันต้องรับโดยโอนนอกเกตเวย์
+        /// </summary>
+        public bool SupportsPreAuth { get { return false; } }
+
+        /// <summary>คืนเงินได้เมื่อผู้ดูแลตั้งเส้นทาง Payso_Path_Refund ไว้ (ว่าง = Refund คืน null)</summary>
+        public bool SupportsRefund
+        {
+            get { return !string.IsNullOrWhiteSpace(PaymentGatewayConfig.Get("Payso_Path_Refund", "")); }
+        }
+
+        /// <summary>วิธีภายในที่ Payso รับได้ (ตัวที่ MapMethod แปลงผ่าน Payso_Method_Map)</summary>
+        public static readonly string[] SupportedMethods =
+        {
+            PaymentGatewayConfig.MethodCard, PaymentGatewayConfig.MethodQr, PaymentGatewayConfig.MethodInstallment
+        };
+
+        /// <summary>
+        /// ช่องทางที่เปิดใช้ — อ่านจากค่าตั้ง <c>Payso_Enabled_Channels</c> (เช่น "CARD,QR")
+        /// ⚠ ไม่ได้ถาม API ของ Payso: สัญญา API ทั้งหมดของตัวเชื่อมนี้เป็นค่าตั้ง (ไม่มีเส้นทาง
+        ///   "รายการช่องทางที่ร้านเปิด" ที่ยืนยันได้) — เมื่อบัญชีร้านค้าได้รับอนุมัติ ผู้ดูแลใส่
+        ///   ช่องทางที่ Payso เปิดให้จริงในค่านี้ · ว่าง = ใช้วิธีเกตเวย์ใน Payment_Methods_Enabled
+        /// </summary>
+        public IList<GatewayChannel> GetAvailableChannels()
+        {
+            var list = new List<GatewayChannel>();
+            if (!IsReady) return list;
+
+            string raw = PaymentGatewayConfig.Get("Payso_Enabled_Channels", "");
+            if (string.IsNullOrWhiteSpace(raw))
+                raw = PaymentGatewayConfig.Get("Payment_Methods_Enabled", "") ?? "";
+
+            foreach (string part in raw.Split(','))
+            {
+                string m = part.Trim().ToUpperInvariant();
+                if (m.Length == 0 || Array.IndexOf(SupportedMethods, m) < 0) continue;
+                bool dup = false;
+                foreach (GatewayChannel g in list) if (g.Code == m) { dup = true; break; }
+                if (dup) continue;
+                list.Add(new GatewayChannel
+                {
+                    Code = m,
+                    ProviderCode = MapMethod(m),
+                    Name = PaymentGatewayConfig.MethodName(m),
+                    Type = m == PaymentGatewayConfig.MethodQr ? "QR" : "CARD"
+                });
+            }
+            return list;
+        }
+
+        /// <summary>รหัสที่จะส่งให้ Payso จริงของวิธีภายใน (ตาม Payso_Method_Map) — ใช้แสดงในหน้าตั้งค่า</summary>
+        public static string ProviderMethodCode(string method) { return MapMethod(method); }
+
         // ── สร้างรายการชำระเงิน ──────────────────────────────────────────────
 
         public PaymentChargeResult CreateCharge(PaymentChargeRequest req)

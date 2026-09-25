@@ -92,10 +92,10 @@
         <asp:Panel ID="pnlHoldSection" runat="server" CssClass="qc-card">
             <h3>🛡 รับเงินประกันความเสียหาย (ตอนเช็คอิน)</h3>
             <div class="sub">
-                เลือกได้สองแบบ — <b>กันวงเงินบัตร</b>: ส่งลิงก์ให้ลูกค้ากรอกเอง เงินไม่เข้าไม่ออก
-                (วงเงินอยู่ได้ 7 วัน หมดอายุระบบสร้างลิงก์ใหม่ให้เอง) /
-                <b>เงินสด</b>: บันทึกรับเข้าระบบทันที ·
-                ทั้งสองแบบไปจบที่หน้าเช็คเอาท์: คืนทั้งหมด หรือหักค่าเสียหายแล้วคืนส่วนที่เหลือ
+                <b>โอน</b> (ค่าเริ่มต้น): ลูกค้าโอนเข้าบัญชีโรงแรม บันทึกเลขอ้างอิงไว้ในระบบ (นอกเกตเวย์) /
+                <b>เงินสด</b>: บันทึกรับเข้าระบบทันที /
+                <b>กันวงเงินบัตร</b>: เฉพาะโหมด CARD_HOLD + Omise ·
+                ทุกแบบไปจบที่หน้าเช็คเอาท์: คืนทั้งหมด หรือหักค่าเสียหายแล้วคืนส่วนที่เหลือ
             </div>
             <div class="qc-row">
                 <div class="qc-f" style="max-width:150px">
@@ -111,9 +111,14 @@
                     <label>วิธีรับประกัน</label>
                     <asp:DropDownList ID="ddlHoldMethod" runat="server"
                         style="width:100%;padding:10px 12px;border:1.5px solid #dbe3de;border-radius:9px;font-size:15px;">
-                        <asp:ListItem Value="CARD">💳 กันวงเงินบัตร (ส่งลิงก์)</asp:ListItem>
+                        <asp:ListItem Value="TRANSFER">🏦 รับโอน (บันทึกทันที)</asp:ListItem>
                         <asp:ListItem Value="CASH">💵 รับเงินสด (บันทึกทันที)</asp:ListItem>
                     </asp:DropDownList>
+                </div>
+                <div class="qc-f" style="max-width:240px">
+                    <label>เลขอ้างอิงการโอน (ถ้าโอน)</label>
+                    <asp:TextBox ID="txtHoldTransferRef" runat="server" MaxLength="100"
+                        placeholder="เลขที่รายการ / เวลาโอน" />
                 </div>
                 <asp:Button ID="btnHold" runat="server" CssClass="qc-btn" Text="รับประกัน / สร้างลิงก์"
                     OnClick="btnHold_Click" UseSubmitBehavior="false"

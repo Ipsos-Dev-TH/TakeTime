@@ -92,9 +92,19 @@
             <h2><i class="fas fa-credit-card"></i> รับชำระเงินออนไลน์</h2>
             <p>
                 ให้ลูกค้าเลือกได้ว่าจะ <b>สแกน QR โอนแล้วแนบสลิป (แบบเดิม)</b> หรือ
-                <b>จ่ายด้วยบัตรเครดิตผ่านเกตเวย์</b><br />
-                ปิดสวิตช์เมื่อไหร่ ระบบก็กลับไปทำงานเหมือนเดิมทุกอย่างทันที
+                <b>จ่ายผ่านเกตเวย์ PaySo (หลัก)</b> — Omise เป็นเกตเวย์สำรอง<br />
+                ปิดสวิตช์/PaySo ยังไม่อนุมัติ = ลูกค้าไม่เห็นอะไรเกี่ยวกับเกตเวย์เลย ระบบทำงานเหมือนเดิมทุกอย่าง
             </p>
+        </div>
+
+        <div class="pg-card" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+            <div style="flex:1;min-width:240px;">
+                <b>ช่องทางชำระเงิน (แคตตาล็อก)</b>
+                <div class="sub" style="margin:2px 0 0;">ลูกค้าเห็นช่องทางไหน · ข้อความแนะนำ/เงื่อนไข/QR รายช่องทาง ·
+                    ช่องทาง PaySo (VISA / AMEX / พร้อมเพย์) และสถานะ "รอเปิดใช้ PaySo"</div>
+            </div>
+            <a class="pg-btn ghost" style="text-decoration:none;display:inline-block"
+               href="<%= ResolveUrl("~/Admin/Settings/PaymentChannels") %>">จัดการช่องทางชำระเงิน →</a>
         </div>
 
         <asp:Literal ID="litMsg" runat="server" />
@@ -247,7 +257,7 @@
             var master = $one("input[id$='cfg_Payment_Enabled']");
 
             function apply() {
-                var prov = provider ? (provider.value || 'OMISE').toUpperCase() : 'OMISE';
+                var prov = provider ? (provider.value || 'PAYSO').toUpperCase() : 'PAYSO';
 
                 // การ์ด/ข้อความของเกตเวย์: โชว์เฉพาะเจ้าที่เลือก
                 var tagged = $all('[data-pg-provider]');

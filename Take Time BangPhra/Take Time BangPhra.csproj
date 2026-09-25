@@ -501,6 +501,7 @@
     <Content Include="Admin\ManageAmenities.aspx" />
     <Content Include="Admin\Settings\PaymentGateway.aspx" />
     <Content Include="Admin\Settings\SecurityDeposit.aspx" />
+    <Content Include="Admin\Settings\PaymentChannels.aspx" />
     <Content Include="Guest\Facilities.aspx" />
     <Content Include="Guest\Review.aspx" />
     <Content Include="Guest\Chat.aspx" />
@@ -1222,6 +1223,13 @@
     <Compile Include="Admin\Settings\SecurityDeposit.aspx.designer.cs">
       <DependentUpon>SecurityDeposit.aspx</DependentUpon>
     </Compile>
+    <Compile Include="Admin\Settings\PaymentChannels.aspx.cs">
+      <DependentUpon>PaymentChannels.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Settings\PaymentChannels.aspx.designer.cs">
+      <DependentUpon>PaymentChannels.aspx</DependentUpon>
+    </Compile>
     <Compile Include="Admin\Settings\AISettings.aspx.cs">
       <DependentUpon>AISettings.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>
@@ -1485,6 +1493,7 @@
     <Compile Include="Class\Payments\OmiseGateway.cs" />
     <Compile Include="Class\Payments\BookingPayment.cs" />
     <Compile Include="Class\Payments\SecurityHoldService.cs" />
+    <Compile Include="Class\Payments\PaymentChannelCatalog.cs" />
     <Compile Include="Guest\MyPoints.aspx.cs">
       <DependentUpon>MyPoints.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>

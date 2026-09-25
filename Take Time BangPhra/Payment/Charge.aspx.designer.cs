@@ -80,6 +80,11 @@ namespace Take_Time_BangPhra.Payment
         protected global::System.Web.UI.WebControls.DropDownList ddlHoldMethod;
 
         /// <summary>
+        /// txtHoldTransferRef control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtHoldTransferRef;
+
+        /// <summary>
         /// btnHold control.
         /// </summary>
         protected global::System.Web.UI.WebControls.Button btnHold;

@@ -71,6 +71,8 @@ namespace Take_Time_BangPhra.Admin.Settings
             try
             {
                 chkEnabled.Checked = PaymentGatewayConfig.GetBool("Payment_SecurityHold_Enabled", false);
+                ListItem mode = ddlMode.Items.FindByValue(SecurityHoldService.Mode);
+                if (mode != null) { ddlMode.ClearSelection(); mode.Selected = true; }
                 txtDefault.Text = PaymentGatewayConfig.GetDecimal("Payment_SecurityHold_Default", 1000m)
                     .ToString("0.##", CultureInfo.InvariantCulture);
                 txtWarnHours.Text = PaymentGatewayConfig.GetInt("Payment_SecurityHold_WarnHours", 24)
@@ -87,11 +89,37 @@ namespace Take_Time_BangPhra.Admin.Settings
         /// <summary>บอกให้ชัดว่าอะไรพร้อม/ไม่พร้อม แทนที่จะให้ไปไล่เดาเอาเองทีละหน้า</summary>
         private void ShowReadiness()
         {
+            ShowTransferInfo();
+            string mode = SecurityHoldService.Mode;
+            if (mode != SecurityHoldService.ModeCardHold)
+            {
+                bool on = false;
+                try { on = PaymentGatewayConfig.GetBool("Payment_SecurityHold_Enabled", false); } catch { }
+                PaymentChannel ch = SecurityHoldService.TransferChannel();
+                var sbt = new StringBuilder("<div class=\"sd-steps\">");
+                Step(sbt, on, "เปิดใช้เงินประกันแล้ว", "ยังไม่เปิดใช้เงินประกัน (ติ๊กด้านล่าง)");
+                if (mode == SecurityHoldService.ModeTransfer)
+                    Step(sbt, ch != null, "มีบัญชีรับโอนแล้ว", "ยังไม่มีช่องทางโอน (ตั้งที่หน้า ช่องทางชำระเงิน)");
+                sbt.Append("</div>");
+                sbt.Append("<div class=\"sd-alert info\" style=\"margin:12px 0 0\">โหมด <b>"
+                    + (mode == SecurityHoldService.ModeTransfer ? "รับโอน (นอกเกตเวย์)" : "เงินสด")
+                    + "</b> — ไม่ต้องใช้เกตเวย์ ไม่มีลิงก์กันวงเงินบัตร · เช็คอินบันทึกรับเงินประกัน · "
+                    + "เช็คเอาท์บันทึกคืน/หักค่าเสียหาย (ผู้ทำ/เวลา/เลขอ้างอิง เก็บไว้ในระบบ) · "
+                    + "เงินประกันไม่ถูกลงเป็นรายได้และไม่ส่ง NextAcc</div>");
+                if (_colMissing)
+                    sbt.Append("<div class=\"sd-alert warn\" style=\"margin:12px 0 0\">"
+                            + "ยังไม่มีคอลัมน์ <b>Accommodation.Security_Deposit_Amount</b> — "
+                            + "รัน <b>Database/PHASE19_Migration_11_Security_Deposit_Process.sql</b> "
+                            + "ถึงจะตั้งวงเงินรายห้องได้ (ระหว่างนี้ใช้ค่ากลางกับทุกห้อง)</div>");
+                litReady.Text = sbt.ToString();
+                return;
+            }
+
             bool feature = false, holdOn = false, gwReady = false, cardOn = false;
             try { feature = Feature.On("OnlinePayment") && PaymentGatewayConfig.GetBool("Payment_Enabled", false); }
             catch { }
             try { holdOn = PaymentGatewayConfig.GetBool("Payment_SecurityHold_Enabled", false); } catch { }
-            try { gwReady = PaymentGatewayConfig.IsGatewayReady; } catch { }
+            try { gwReady = PaymentGatewayConfig.IsGatewayReady && PaymentGatewayConfig.ActiveProviderSupportsPreAuth; } catch { }
             try { cardOn = PaymentGatewayConfig.AvailableMethods(0m).Contains(PaymentGatewayConfig.MethodCard); }
             catch { }
 
@@ -99,7 +127,7 @@ namespace Take_Time_BangPhra.Admin.Settings
             sb.Append("<div class=\"sd-steps\">");
             Step(sb, feature, "เปิดรับชำระเงินออนไลน์", "ยังไม่เปิดระบบชำระเงินออนไลน์");
             Step(sb, holdOn, "เปิดใช้เงินประกันแล้ว", "ยังไม่เปิดใช้เงินประกัน (ติ๊กด้านล่าง)");
-            Step(sb, gwReady, "เกตเวย์พร้อม", "เกตเวย์ยังไม่พร้อม (ใส่กุญแจ)");
+            Step(sb, gwReady, "เกตเวย์ (Omise) พร้อมกันวงเงิน", "ต้องใช้ Omise ที่พร้อมใช้งาน (PaySo กันวงเงินไม่ได้)");
             Step(sb, cardOn, "เปิดรับบัตรแล้ว", "ยังไม่เปิดวิธีจ่ายด้วยบัตร");
             sb.Append("</div>");
 
@@ -109,7 +137,7 @@ namespace Take_Time_BangPhra.Admin.Settings
             else
                 sb.Append("<div class=\"sd-alert info\" style=\"margin:12px 0 0\">"
                         + "ข้อที่ยังไม่ครบ ทำให้<b>กันวงเงินบนบัตรไม่ได้</b> — แต่ "
-                        + "<b>รับเงินประกันเป็นเงินสดยังทำได้ตามปกติ</b> "
+                        + "<b>รับเงินประกันเป็นเงินโอน/เงินสดยังทำได้ตามปกติ</b> "
                         + "(บันทึกไว้ในระบบเดียวกัน เช็คเอาท์แล้วคืนหรือหักได้เหมือนกัน)<br/>"
                         + "ข้อที่เกี่ยวกับเกตเวย์/วิธีชำระ ตั้งได้ที่หน้า <b>รับชำระเงินออนไลน์</b></div>");
 
@@ -120,6 +148,22 @@ namespace Take_Time_BangPhra.Admin.Settings
                         + "ถึงจะตั้งวงเงินรายห้องได้ (ระหว่างนี้ใช้ค่ากลางกับทุกห้อง)</div>");
 
             litReady.Text = sb.ToString();
+        }
+
+        /// <summary>บัญชีที่ให้ลูกค้าโอนเงินประกัน (จากแคตตาล็อกช่องทาง)</summary>
+        private void ShowTransferInfo()
+        {
+            try
+            {
+                PaymentChannel ch = SecurityHoldService.TransferChannel();
+                litTransferInfo.Text = "<small style=\"display:block;color:#8b959e;font-size:12.5px;margin-top:6px;line-height:1.6\">"
+                    + (ch == null
+                        ? "ยังไม่มีช่องทางโอนในระบบ — เพิ่ม/จัดชนิดที่หน้า <b>ช่องทางชำระเงิน</b>"
+                        : "บัญชีรับโอนเงินประกัน: <b>" + Server.HtmlEncode(ch.Name) + "</b> (" + Server.HtmlEncode(ch.Code) + ")"
+                          + " — เปลี่ยนได้ด้วยค่าตั้ง Security_Hold_Transfer_Channel")
+                    + " · <a href=\"" + ResolveUrl("~/Admin/Settings/PaymentChannels") + "\">ช่องทางชำระเงิน</a></small>";
+            }
+            catch { litTransferInfo.Text = ""; }
         }
 
         private static void Step(StringBuilder sb, bool done, string okText, string todoText)
@@ -237,6 +281,10 @@ namespace Take_Time_BangPhra.Admin.Settings
                 try
                 {
                     PaymentGatewayConfig.Set("Payment_SecurityHold_Enabled", chkEnabled.Checked ? "1" : "0", adminId);
+                    string m = ddlMode.SelectedValue;
+                    if (m == SecurityHoldService.ModeTransfer || m == SecurityHoldService.ModeCash
+                        || m == SecurityHoldService.ModeCardHold)
+                        PaymentGatewayConfig.Set("Security_Hold_Mode", m, adminId);
                     PaymentGatewayConfig.Set("Payment_SecurityHold_Default",
                         def.ToString("0.##", CultureInfo.InvariantCulture), adminId);
                     PaymentGatewayConfig.Set("Payment_SecurityHold_WarnHours",
@@ -323,8 +371,7 @@ namespace Take_Time_BangPhra.Admin.Settings
             {
                 var c = new code();
                 DataTable dt = c.DatabaseQuerySafe(_conn, @"
-                    SELECT TOP 50 h.Hold_Ref, h.Reservation_ID, h.Amount, h.Provider,
-                           h.Card_Last4, h.Held_At, h.Expires_At, h.[Status]
+                    SELECT TOP 50 h.*
                       FROM Payment_Security_Holds h
                      WHERE h.[Status] IN ('HELD','PENDING_CARD')
                      ORDER BY h.ID DESC", null);
@@ -344,7 +391,10 @@ namespace Take_Time_BangPhra.Admin.Settings
                 {
                     bool cash = string.Equals(Convert.ToString(r["Provider"]), "CASH",
                         StringComparison.OrdinalIgnoreCase);
+                    bool transfer = string.Equals(Convert.ToString(r["Provider"]), SecurityHoldService.ProviderTransfer,
+                        StringComparison.OrdinalIgnoreCase);
                     string last4 = Convert.ToString(r["Card_Last4"]);
+                    string tref = dt.Columns.Contains("Transfer_Ref") ? Convert.ToString(r["Transfer_Ref"]) : "";
                     string exp = r["Expires_At"] == DBNull.Value
                         ? "—"
                         : Convert.ToDateTime(r["Expires_At"]).ToString("dd/MM/yy HH:mm");
@@ -356,10 +406,12 @@ namespace Take_Time_BangPhra.Admin.Settings
                       .Append("</td><td data-th=\"ยอด\">")
                       .Append(Convert.ToDecimal(r["Amount"]).ToString("N2"))
                       .Append("</td><td data-th=\"วิธี\">")
-                      .Append(cash ? "เงินสด" : ("บัตร" + (string.IsNullOrEmpty(last4) ? "" : " ****" + last4)))
+                      .Append(transfer
+                          ? "โอน" + (string.IsNullOrEmpty(tref) ? "" : " · " + Server.HtmlEncode(tref))
+                          : cash ? "เงินสด" : ("บัตร" + (string.IsNullOrEmpty(last4) ? "" : " ****" + Server.HtmlEncode(last4))))
                       .Append("</td><td data-th=\"สถานะ\">")
                       .Append(Server.HtmlEncode(HoldStatus.Thai(Convert.ToString(r["Status"]))))
-                      .Append("</td><td data-th=\"หมดอายุ\">").Append(cash ? "—" : exp)
+                      .Append("</td><td data-th=\"หมดอายุ\">").Append(cash || transfer ? "—" : exp)
                       .Append("</td></tr>");
                 }
                 sb.Append("</tbody></table></div>");

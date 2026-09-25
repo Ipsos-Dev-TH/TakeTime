@@ -202,6 +202,16 @@ namespace Take_Time_BangPhra
                 }
                 catch (Exception pex) { System.Diagnostics.Trace.TraceError($"OnlinePayment timer error: {(pex.InnerException ?? pex).Message}"); }
 
+                // เงินประกันความเสียหาย: ปิดวงเงินบัตรที่หมดอายุ + เตือนเงินประกันโอน/เงินสดที่เช็คเอาท์แล้วยังไม่คืน
+                // — เรียกแยกจาก PollPendingIfDue เพราะตัวนั้นเงียบเมื่อระบบชำระออนไลน์ปิด (โหมดโอนไม่ต้องใช้เกตเวย์)
+                //   SweepIfDue กันรันซ้ำเองทุก 30 นาที · no-op ถ้ายังไม่มีตาราง
+                try
+                {
+                    string holdConn = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                    new Take_Time_BangPhra.Payments.SecurityHoldService(holdConn).SweepIfDue();
+                }
+                catch (Exception hx) { System.Diagnostics.Trace.TraceError($"SecurityHold sweep error: {(hx.InnerException ?? hx).Message}"); }
+
                 _consecutiveTimerErrors = 0;
             }
             catch (AggregateException aex)

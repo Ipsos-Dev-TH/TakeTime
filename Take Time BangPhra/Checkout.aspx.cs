@@ -49,7 +49,20 @@ namespace Take_Time_BangPhra
                 }
 
                 bool cashHold = string.Equals(hold.Provider, "CASH", StringComparison.OrdinalIgnoreCase);
-                if (cashHold)
+                if (hold.IsTransfer)
+                {
+                    // เงินประกันโอน — จัดการนอกเกตเวย์ทั้งหมด: บันทึกโอนคืน/หัก พร้อมเลขอ้างอิง
+                    litHoldInfo.Text = "รับเงินประกันโดย<b>โอน " + hold.Amount.ToString("N2") + " บาท</b>"
+                        + (hold.HeldAt.HasValue ? " (รับเมื่อ " + hold.HeldAt.Value.ToString("dd/MM/yyyy HH:mm") + ")" : "")
+                        + (string.IsNullOrEmpty(hold.TransferRef) ? "" : " · อ้างอิง " + Server.HtmlEncode(hold.TransferRef))
+                        + "<br/>ไม่มีความเสียหาย → <b>โอนคืนลูกค้า</b> แล้วกด \"คืนเงินประกัน (โอนคืน)\" · "
+                        + "มีความเสียหาย → กรอกยอดแล้วกด \"หักค่าเสียหาย\" แล้วโอนคืนส่วนที่เหลือ · "
+                        + "ใส่เลขอ้างอิงการโอนคืนไว้ด้วย (ระบบเก็บผู้ทำ/เวลาให้เอง — ไม่มีการเรียกเกตเวย์)";
+                    btnReleaseHold.Text = "✅ คืนเงินประกัน (โอนคืน " + hold.Amount.ToString("N2") + " บาท)";
+                    btnCaptureHold.Text = "💥 หักค่าเสียหาย";
+                    pnlHoldRefundRef.Visible = true;
+                }
+                else if (cashHold)
                 {
                     litHoldInfo.Text = "รับเงินประกันเป็น<b>เงินสด " + hold.Amount.ToString("N2") + " บาท</b>"
                         + (hold.HeldAt.HasValue ? " (รับเมื่อ " + hold.HeldAt.Value.ToString("dd/MM/yyyy HH:mm") + ")" : "")
@@ -86,8 +99,9 @@ namespace Take_Time_BangPhra
             int? adminId = null;
             try { if (Session["UserID"] != null) adminId = Convert.ToInt32(Session["UserID"]); } catch { }
 
+            string refundRef = (txtHoldRefundRef.Text ?? "").Trim();   // ใช้เฉพาะเงินประกันโอน (อื่น ๆ service ไม่สนใจ)
             string msg = new Take_Time_BangPhra.Payments.SecurityHoldService(connectionString)
-                .CaptureDamage(holdId, amount, txtCaptureReason.Text.Trim(), adminId);
+                .CaptureDamage(holdId, amount, txtCaptureReason.Text.Trim(), adminId, refundRef, null);
             litHoldMsg.Text = "<div class='alert alert-info'>" + Server.HtmlEncode(msg) + "</div>";
             LoadSecurityHold();
         }
@@ -98,8 +112,9 @@ namespace Take_Time_BangPhra
             int? adminId = null;
             try { if (Session["UserID"] != null) adminId = Convert.ToInt32(Session["UserID"]); } catch { }
 
+            string refundRef = (txtHoldRefundRef.Text ?? "").Trim();   // ใช้เฉพาะเงินประกันโอน (อื่น ๆ service ไม่สนใจ)
             string msg = new Take_Time_BangPhra.Payments.SecurityHoldService(connectionString)
-                .Release(holdId, adminId);
+                .Release(holdId, adminId, refundRef, null);
             litHoldMsg.Text = "<div class='alert alert-info'>" + Server.HtmlEncode(msg) + "</div>";
             LoadSecurityHold();
         }

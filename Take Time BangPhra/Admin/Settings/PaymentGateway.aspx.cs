@@ -78,11 +78,14 @@ namespace Take_Time_BangPhra.Admin.Settings
             new UiGroup { Name = "๑) เปิดระบบและเลือกผู้ให้บริการ",
                 Note = "สองค่านี้กำหนดทุกอย่าง — เลือกเกตเวย์เจ้าไหน ด้านล่างจะแสดงเฉพาะการตั้งค่าของเจ้านั้น "
                      + "ปิดสวิตช์เมื่อไหร่ ระบบกลับไปทำงานเหมือนเดิมทุกอย่างทันที" },
-            new UiGroup { Name = "๒) ตั้งค่า Omise", Provider = "OMISE",
-                Note = "คีย์จาก Omise Dashboard → Keys — ขึ้นต้น _test_ = โหมดทดสอบ ไม่ตัดเงินจริง · "
-                     + "อย่าลืมตั้ง Webhook ตาม URL ในการ์ดล่างสุด แล้วกด \"ทดสอบการเชื่อมต่อ\"" },
-            new UiGroup { Name = "๒) Payso — การเชื่อมต่อ", Provider = "PAYSO",
-                Note = "กุญแจและที่อยู่ของผู้ให้บริการ (จากหน้า Merchant ของ Payso)" },
+            new UiGroup { Name = "๒) ตั้งค่า Omise (สำรอง)", Provider = "OMISE",
+                Note = "เกตเวย์สำรอง — คีย์จาก Omise Dashboard → Keys — ขึ้นต้น _test_ = โหมดทดสอบ ไม่ตัดเงินจริง · "
+                     + "อย่าลืมตั้ง Webhook ตาม URL ในการ์ดล่างสุด แล้วกด \"ทดสอบการเชื่อมต่อ\" · "
+                     + "Omise เป็นเจ้าเดียวที่กันวงเงินบัตร (เงินประกันโหมด CARD_HOLD) ได้" },
+            new UiGroup { Name = "๒) PaySo (หลัก) — การเชื่อมต่อ", Provider = "PAYSO",
+                Note = "เกตเวย์หลัก (แนะนำ) — กุญแจและที่อยู่ของผู้ให้บริการ (จากหน้า Merchant ของ PaySo) · "
+                     + "ร้านค้ายังไม่อนุมัติ = ปิด \"เปิดใช้เกตเวย์ Payso\" ไว้ ลูกค้าจะไม่เห็นอะไรเกี่ยวกับเกตเวย์เลย · "
+                     + "\"ช่องทางที่ PaySo เปิดให้\" ใส่เฉพาะช่องทางที่ PaySo อนุมัติจริง (CARD, QR, INSTALLMENT)" },
             new UiGroup { Name = "Payso — รูปแบบคำขอ", Provider = "PAYSO", Collapsed = true,
                 Note = "ขั้นสูง — ต้องตรงกับเอกสาร https://api-docs.payso.co แก้ที่นี่ได้เลย ไม่ต้อง build ใหม่" },
             new UiGroup { Name = "Payso — เส้นทาง API", Provider = "PAYSO", Collapsed = true,
@@ -99,9 +102,12 @@ namespace Take_Time_BangPhra.Admin.Settings
             new UiGroup { Name = "๔) จุดที่เปิดรับจ่ายออนไลน์", TwoCol = true,
                 Note = "ปิดจุดไหน จุดนั้นไม่เสนอทางจ่ายออนไลน์ — ที่เหลือทำงานตามเดิม (มีผลเมื่อสวิตช์ใหญ่เปิดอยู่)" },
             new UiGroup { Name = "วงเงินประกันความเสียหาย", MasterKey = "Payment_SecurityHold_Enabled",
-                Note = "กันวงเงินบนบัตรแทนการรับโอนเงินประกัน — เงินไม่เข้าไม่ออกจนกว่าจะตัดค่าเสียหายจริง "
-                     + "(Omise + บัตรเท่านั้น, วงเงินอยู่ได้ 7 วัน) · "
-                     + "ตั้งวงเงินแยกรายห้องพักได้ที่หน้า \"เงินประกันความเสียหาย\"" },
+                Note = "ค่าเริ่มต้น: รับเงินประกันโดยการโอน (TRANSFER) จัดการนอกเกตเวย์ — PaySo กันวงเงินบัตรไม่ได้ · "
+                     + "CARD_HOLD = กันวงเงินบนบัตร (ต้องใช้ Omise, วงเงินอยู่ได้ 7 วัน) · CASH = รับเงินสดเป็นหลัก · "
+                     + "เงินประกันไม่ถูกลงเป็นรายได้/ไม่ส่ง NextAcc · ตั้งวงเงินแยกรายห้องพักได้ที่หน้า \"เงินประกันความเสียหาย\"" },
+            new UiGroup { Name = "ช่องทางชำระเงินและนโยบายยกเลิก",
+                Note = "นโยบายยกเลิกหลักที่ครอบทุกช่องทาง — รายละเอียด/เงื่อนไขรายช่องทาง (โอน, PaySo VISA, AMEX, พร้อมเพย์ …) "
+                     + "จัดการที่หน้า \"ช่องทางชำระเงิน\"" },
             new UiGroup { Name = "การบันทึกบัญชีและแจ้งเตือน",
                 Note = "พฤติกรรมหลังลูกค้าจ่ายสำเร็จ — การลงระบบอัตโนมัติ แหล่งเงินที่ผูกกับ NextAcc และการแจ้งพนักงาน" },
             new UiGroup { Name = "อื่น ๆ", Note = "" },
@@ -130,8 +136,9 @@ namespace Take_Time_BangPhra.Admin.Settings
             }
             switch (dbCategory)
             {
-                case "Omise": return "๒) ตั้งค่า Omise";
-                case "Payso — การเชื่อมต่อ": return "๒) Payso — การเชื่อมต่อ";
+                case "Omise": return "๒) ตั้งค่า Omise (สำรอง)";
+                case "Payso — การเชื่อมต่อ": return "๒) PaySo (หลัก) — การเชื่อมต่อ";
+                case "ช่องทางชำระเงินและนโยบายยกเลิก": return dbCategory;
                 case "สแกน QR แบบเดิม": return "สแกน QR แบบเดิม (โอนแล้วแนบสลิป)";
                 case "ช่องทางที่เปิดรับเงินออนไลน์": return "๔) จุดที่เปิดรับจ่ายออนไลน์";
                 case "Payso — รูปแบบคำขอ":
@@ -248,7 +255,8 @@ namespace Take_Time_BangPhra.Admin.Settings
             try { featureOn = Feature.On("OnlinePayment"); } catch { }
             bool s1 = featureOn && on("Payment_Enabled");
 
-            bool omise = !string.Equals(v("Payment_Provider"), "PAYSO", StringComparison.OrdinalIgnoreCase);
+            // ไม่ได้ตั้ง = PAYSO (เกตเวย์หลัก) — ตรงกับ PaymentGatewayConfig.ActiveProvider
+            bool omise = string.Equals(v("Payment_Provider"), "OMISE", StringComparison.OrdinalIgnoreCase);
             bool s2;
             if (omise)
                 s2 = on("Omise_Enabled") && v("Omise_SecretKey").Length > 0;
@@ -267,7 +275,7 @@ namespace Take_Time_BangPhra.Admin.Settings
             string[] labels =
             {
                 s1 ? "เปิดระบบแล้ว" : "เปิดสวิตช์ (ฟีเจอร์ + หน้านี้)",
-                s2 ? "เกตเวย์ " + (omise ? "Omise" : "Payso") + " พร้อม" : "ใส่กุญแจ" + (omise ? " Omise" : " Payso"),
+                s2 ? "เกตเวย์ " + (omise ? "Omise (สำรอง)" : "PaySo") + " พร้อม" : "ใส่กุญแจ" + (omise ? " Omise (สำรอง)" : " PaySo"),
                 s3 ? "เปิดวิธีชำระแล้ว" : "เลือกวิธีชำระให้ลูกค้า",
                 s4 ? "เปิดจุดรับเงินแล้ว" : "เปิดจุดรับเงิน",
             };
@@ -344,8 +352,11 @@ namespace Take_Time_BangPhra.Admin.Settings
                 {
                     string v = o.Trim();
                     if (v.Length == 0) continue;
-                    ddl.Items.Add(new ListItem(v, v));
+                    ddl.Items.Add(new ListItem(SelectText(key, v), v));
                 }
+                // ยังไม่ได้ตั้งผู้ให้บริการ = PAYSO (หลัก) — ให้หน้าจอตรงกับที่ระบบใช้จริง
+                if (key == "Payment_Provider" && string.IsNullOrEmpty(value)) value = PaymentGatewayConfig.ProviderPayso;
+                if (key == "Security_Hold_Mode" && string.IsNullOrEmpty(value)) value = SecurityHoldService.ModeTransfer;
                 ListItem sel = ddl.Items.FindByValue(value ?? "");
                 if (sel != null) sel.Selected = true;
                 return ddl;
@@ -360,6 +371,23 @@ namespace Take_Time_BangPhra.Admin.Settings
             // ค่าลับไม่ส่งค่าจริงออกหน้าเว็บ
             tb.Text = secret ? "" : (value ?? "");
             return tb;
+        }
+
+        /// <summary>ข้อความในตัวเลือกแบบ dropdown ที่อ่านง่ายกว่ารหัสดิบ (ค่าที่บันทึกยังเป็นรหัสเดิม)</summary>
+        private static string SelectText(string key, string v)
+        {
+            if (key == "Payment_Provider")
+            {
+                if (v == PaymentGatewayConfig.ProviderPayso) return "PAYSO — เกตเวย์หลัก (แนะนำ)";
+                if (v == PaymentGatewayConfig.ProviderOmise) return "OMISE — สำรอง";
+            }
+            if (key == "Security_Hold_Mode")
+            {
+                if (v == SecurityHoldService.ModeTransfer) return "TRANSFER — รับโอน จัดการนอกเกตเวย์ (ค่าเริ่มต้น)";
+                if (v == SecurityHoldService.ModeCardHold) return "CARD_HOLD — กันวงเงินบัตร (Omise เท่านั้น)";
+                if (v == SecurityHoldService.ModeCash) return "CASH — รับเงินสดเป็นหลัก";
+            }
+            return v;
         }
 
         // ── บันทึก ────────────────────────────────────────────────────────────
@@ -467,6 +495,24 @@ namespace Take_Time_BangPhra.Admin.Settings
 
             if (key == "Payment_Methods_Enabled" && v.Length == 0)
                 return "ต้องเปิดวิธีชำระอย่างน้อยหนึ่งวิธี";
+
+            // ช่องทางที่ PaySo เปิดให้ — รับเฉพาะรหัสที่ตัวเชื่อม Payso ส่งได้จริง
+            if (key == "Payso_Enabled_Channels" && v.Length > 0)
+            {
+                foreach (string part in v.Split(','))
+                {
+                    string m = part.Trim().ToUpperInvariant();
+                    if (m.Length == 0) continue;
+                    if (Array.IndexOf(PaysoGateway.SupportedMethods, m) < 0)
+                        return "ช่องทาง PaySo \"" + m + "\" ไม่รู้จัก — ใช้ได้: "
+                             + string.Join(", ", PaysoGateway.SupportedMethods);
+                }
+            }
+
+            if (key == "Security_Hold_Mode" && v.Length > 0
+                && v != SecurityHoldService.ModeTransfer && v != SecurityHoldService.ModeCardHold
+                && v != SecurityHoldService.ModeCash)
+                return "โหมดเงินประกันต้องเป็น TRANSFER / CARD_HOLD / CASH";
 
             return null;
         }
@@ -635,7 +681,7 @@ namespace Take_Time_BangPhra.Admin.Settings
         {
             string s = Convert.ToString(status) ?? "";
             string p = Convert.ToString(provider) ?? "";
-            return s == PaymentStatus.Paid && p != "MANUAL_QR" && p != "CASH";
+            return s == PaymentStatus.Paid && p != "MANUAL_QR" && p != "CASH" && p != "TRANSFER";
         }
 
         // ── ข้อความสถานะ ──────────────────────────────────────────────────────
@@ -662,10 +708,11 @@ namespace Take_Time_BangPhra.Admin.Settings
                 if (!PaymentGatewayConfig.IsGatewayReady)
                 {
                     Msg("warn", omise
-                        ? "เลือกใช้ <b>Omise</b> แต่ยังตั้งค่าไม่ครบ — ต้องเปิด \"เปิดใช้เกตเวย์ Omise\" "
+                        ? "เลือกใช้ <b>Omise (สำรอง)</b> แต่ยังตั้งค่าไม่ครบ — ต้องเปิด \"เปิดใช้เกตเวย์ Omise\" "
                           + "และใส่ Secret Key (skey_…) ตอนนี้ลูกค้าจะเห็นเฉพาะวิธีเดิม"
-                        : "เลือกใช้ <b>Payso</b> แต่ยังตั้งค่าไม่ครบ (Base URL / กุญแจ) — "
-                          + "ตอนนี้ลูกค้าจะเห็นเฉพาะวิธีเดิม", true);
+                        : "<b>PaySo (เกตเวย์หลัก)</b> ยังไม่พร้อม (ยังไม่อนุมัติร้านค้า / ยังไม่เปิด / ยังไม่ใส่ Base URL + กุญแจ) — "
+                          + "ลูกค้าจะเห็นเฉพาะช่องทางโอน/แนบสลิป ไม่มีตัวเลือกเกตเวย์โผล่ · "
+                          + "ช่องทาง PaySo ในหน้า \"ช่องทางชำระเงิน\" จะขึ้นสถานะ \"รอเปิดใช้ PaySo\"", true);
                     return;
                 }
 

@@ -5699,6 +5699,29 @@ namespace Take_Time_BangPhra
                     try { txtDepositAmount.Text = holds.SuggestedAmount(reservationId).ToString("0.##"); }
                     catch { }
 
+                    // วิธีรับตามโหมด (Security_Hold_Mode): ค่าเริ่มต้นโอน — ลิงก์กันวงเงินบัตรโผล่
+                    // เฉพาะโหมด CARD_HOLD + เกตเวย์กันวงเงินได้จริง (PaySo ทำไม่ได้)
+                    try
+                    {
+                        string mode = Take_Time_BangPhra.Payments.SecurityHoldService.Mode;
+                        ddlDepositMethod.Items.Clear();
+                        if (mode == Take_Time_BangPhra.Payments.SecurityHoldService.ModeCardHold && holds.IsCardHoldAvailable)
+                            ddlDepositMethod.Items.Add(new ListItem("กันวงเงินบนบัตร", "CARD"));
+                        if (mode == Take_Time_BangPhra.Payments.SecurityHoldService.ModeCash)
+                        {
+                            ddlDepositMethod.Items.Add(new ListItem("รับเป็นเงินสด", "CASH"));
+                            ddlDepositMethod.Items.Add(new ListItem("รับเงินประกันโดยโอน", "TRANSFER"));
+                        }
+                        else
+                        {
+                            ddlDepositMethod.Items.Add(new ListItem("รับเงินประกันโดยโอน", "TRANSFER"));
+                            ddlDepositMethod.Items.Add(new ListItem("รับเป็นเงินสด", "CASH"));
+                        }
+                        pnlDepositTransfer.Visible = true;
+                        litDepositTransferInfo.Text = Take_Time_BangPhra.Payments.SecurityHoldService.TransferInfoHtml();
+                    }
+                    catch { }
+
                     // มีวงเงินค้างอยู่แล้ว — บอกไปเลย จะได้ไม่กันซ้ำสองก้อน
                     var open = holds.GetOpenHold(reservationId);
                     if (open != null)
@@ -5707,7 +5730,10 @@ namespace Take_Time_BangPhra
                         litDepositMsg.Text =
                             "<div style=\"margin-top:10px;padding:10px 13px;border-radius:8px;background:"
                             + (held ? "#E8F5E9;color:#2E7D32" : "#FFF8E1;color:#8D6E00") + ";\">"
-                            + (held ? "✅ การจองนี้มีเงินประกันอยู่แล้ว " : "⏳ รอลูกค้ากรอกบัตร ")
+                            + (held
+                                ? "✅ การจองนี้มีเงินประกันอยู่แล้ว"
+                                  + (open.IsTransfer ? " (โอน)" : open.IsCash ? " (เงินสด)" : "") + " "
+                                : "⏳ รอลูกค้ากรอกบัตร ")
                             + open.Amount.ToString("N2") + " บาท ("
                             + Server.HtmlEncode(open.HoldRef) + ")"
                             + (held ? " — จัดการตอนเช็คเอาท์" : "") + "</div>";
@@ -5784,6 +5810,23 @@ namespace Take_Time_BangPhra
 
                 var holds = new Take_Time_BangPhra.Payments.SecurityHoldService(conn);
                 string err;
+
+                // ── โอนเข้าบัญชีโรงแรม (ค่าเริ่มต้น): บันทึกนอกเกตเวย์ทันที ──
+                if (ddlDepositMethod.SelectedValue == "TRANSFER")
+                {
+                    string tref = (txtDepositRef.Text ?? "").Trim();
+                    string holdRef = holds.CreateTransferHold(rid, amt, tref, null, adminId, out err);
+                    if (string.IsNullOrEmpty(holdRef)) { ShowPayError(err ?? "บันทึกไม่สำเร็จ"); return; }
+                    litDepositMsg.Text =
+                        "<div style=\"margin-top:10px;padding:10px 13px;border-radius:8px;"
+                        + "background:#E8F5E9;color:#2E7D32;\">✅ รับเงินประกันโดยโอน "
+                        + amt.ToString("N2") + " บาท บันทึกแล้ว (" + Server.HtmlEncode(holdRef) + ")"
+                        + (tref.Length == 0 ? " · ⚠ ยังไม่ได้ใส่เลขอ้างอิงการโอน" : "")
+                        + " — เช็คเอาท์ค่อยบันทึกโอนคืนหรือหักค่าเสียหาย (ไม่ออกใบเสร็จ/ไม่ลงบัญชีรายได้)</div>";
+                    txtDepositRef.Text = "";
+                    pnlDepositLink.Visible = false;
+                    return;
+                }
 
                 if (ddlDepositMethod.SelectedValue == "CASH")
                 {

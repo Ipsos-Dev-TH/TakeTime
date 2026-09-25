@@ -363,6 +363,14 @@
                         <asp:TextBox ID="txtCaptureReason" runat="server" placeholder="เช่น ผ้าเช็ดตัวหาย 2 ผืน"
                             style="width:100%;padding:9px 11px;border:1.5px solid #dbe3de;border-radius:8px;font-size:14px;" />
                     </div>
+                    <%-- เงินประกันโอน: เลขอ้างอิง/บัญชีที่โอนคืน (บันทึกคู่กับผู้ทำ+เวลา) --%>
+                    <asp:Panel ID="pnlHoldRefundRef" runat="server" Visible="false" style="flex:1;min-width:200px;">
+                        <label style="display:block;font-weight:600;font-size:13px;margin-bottom:4px;">
+                            เลขอ้างอิงการโอนคืน / บัญชีลูกค้า</label>
+                        <asp:TextBox ID="txtHoldRefundRef" runat="server" MaxLength="100"
+                            placeholder="เช่น KBANK 123-4-56789-0 · รายการ 0915"
+                            style="width:100%;padding:9px 11px;border:1.5px solid #dbe3de;border-radius:8px;font-size:14px;" />
+                    </asp:Panel>
                     <asp:Button ID="btnCaptureHold" runat="server" Text="💥 ตัดค่าเสียหาย"
                         OnClick="btnCaptureHold_Click" UseSubmitBehavior="false"
                         OnClientClick="if(!confirm('ตัดค่าเสียหายจากวงเงินประกันตามยอดที่กรอก? ส่วนที่เหลือจะคืนลูกค้าทันที'))return false;this.disabled=true;"
