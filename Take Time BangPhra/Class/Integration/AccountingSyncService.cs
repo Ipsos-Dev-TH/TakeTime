@@ -203,6 +203,10 @@ namespace Take_Time_BangPhra.Integration
             if (!string.IsNullOrEmpty(supplierTaxId))
                 payload["supplierTaxId"] = supplierTaxId;
             // ใบรับรองแทนใบเสร็จรับเงิน — ProcessVoucherJournal แยกไปออกเอกสาร NextAcc type 15 (ไม่ออก PV/Expense ซ้ำ)
+            // ผู้เรียกที่ไม่รู้จักใบรับรอง (ปุ่มซิงค์ใหม่หน้า CheckDocument/CheckPayment ฯลฯ สร้าง payload จากฐานข้อมูล)
+            // → อ่านจาก Account_Payment เอง ไม่งั้นใบรับรองถูกส่งใหม่เป็น PV/Expense = ลงบัญชีซ้ำใน NextAcc
+            if (certificateInLieu == null)
+                certificateInLieu = LoadCertificateInLieuFromDb(documentNumber);
             if (certificateInLieu != null)
                 WriteCertificateInLieuPayload(payload, certificateInLieu);
 
@@ -4951,6 +4955,41 @@ namespace Take_Time_BangPhra.Integration
             payload["cilCertifierPosition"] = cil.CertifierPosition ?? "";
             payload["cilWitnessName"] = cil.WitnessName ?? "";
             payload["cilWitnessPosition"] = cil.WitnessPosition ?? "";
+        }
+
+        /// <summary>ข้อมูลใบรับรองแทนใบเสร็จที่บันทึกไว้กับใบสำคัญจ่าย (PHASE19_19) — null ถ้าไม่ใช่/ยังไม่รัน migration</summary>
+        private CertificateInLieuInfo LoadCertificateInLieuFromDb(string documentNumber)
+        {
+            if (string.IsNullOrEmpty(documentNumber)) return null;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"IF COL_LENGTH('dbo.Account_Payment', 'Is_Certificate_In_Lieu') IS NOT NULL
+                          EXEC sp_executesql N'SELECT TOP 1 Cil_Reason, Cil_Payee_Name, Cil_Payee_Address,
+                                  Cil_Certifier_Name, Cil_Certifier_Position, Cil_Witness_Name, Cil_Witness_Position
+                             FROM Account_Payment WHERE ID = @num AND Is_Certificate_In_Lieu = 1',
+                             N'@num NVARCHAR(100)', @num = @num",
+                    new Dictionary<string, object> { { "@num", documentNumber } });
+                if (dt == null || dt.Rows.Count == 0) return null;
+                DataRow r = dt.Rows[0];
+                string C(string k) => r[k] == DBNull.Value ? "" : r[k].ToString().Trim();
+                return new CertificateInLieuInfo
+                {
+                    Reason = C("Cil_Reason"),
+                    PayeeName = C("Cil_Payee_Name"),
+                    PayeeAddress = C("Cil_Payee_Address"),
+                    CertifierName = C("Cil_Certifier_Name"),
+                    CertifierPosition = C("Cil_Certifier_Position"),
+                    WitnessName = C("Cil_Witness_Name"),
+                    WitnessPosition = C("Cil_Witness_Position")
+                };
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"LoadCertificateInLieuFromDb: doc={documentNumber} {ex.Message}", "SYSTEM");
+                return null;
+            }
         }
 
         /// <summary>คืน null ถ้า payload ไม่ใช่ใบรับรองแทนใบเสร็จ</summary>
@@ -10750,7 +10789,7 @@ namespace Take_Time_BangPhra.Integration
                     $" (Nexaacc_Receipt_Header_Type={_config.ReceiptHeaderType}, buyerDeclined={(d.BuyerDeclinedTaxInvoice ? "Y" : "N")})";
                 if (!string.IsNullOrWhiteSpace(d.TaxInvoiceTitleNotice))
                     msg += " ⚠ " + d.TaxInvoiceTitleNotice +
-                        " → แก้ที่ NextAcc: ข้อมูลบริษัท ติ๊ก \"ได้รับอนุมัติ ภ.พ.06\" + กรอกวันที่อนุมัติ แล้วเปิด PDF ใหม่ (หัวคำนวณตอนพิมพ์)";
+                        " → ปลดที่ NextAcc ทางใดทางหนึ่ง: (1) แอดมินแพลตฟอร์ม site-settings ปิด \"บังคับ ภ.พ.06 ก่อนออกใบกำกับภาษีอย่างย่อ\" (RequirePhoR06ForAbbreviatedTaxInvoice=false — เหมาะกับกิจการที่ไม่ได้ใช้เครื่องบันทึกการเก็บเงิน) หรือ (2) ข้อมูลบริษัท ติ๊ก \"ได้รับอนุมัติ ภ.พ.06\" + วันที่ (ย้อนก่อนเอกสารใบแรก) แล้วเปิด PDF ใหม่ (หัวคำนวณตอนพิมพ์)";
                 _code.Logs(_connectionString, "AccountingSync", msg, "SYSTEM");
             }
             catch (Exception ex)
