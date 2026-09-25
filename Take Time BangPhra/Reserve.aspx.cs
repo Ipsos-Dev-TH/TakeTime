@@ -1675,6 +1675,24 @@ namespace Take_Time_BangPhra
                                         {
                                             DateTime editCheckoutDate = editCheckinDate.Value.AddDays(Convert.ToDouble(DropDownList1.SelectedValue));
 
+                                            // ใบ "เลื่อนเข้าพัก" ที่กำลังลงวันใหม่ (วันเข้าพักเดิมเป็นค่าแทน 1990/ว่าง): ห้องทุกห้องของใบ
+                                            // เป็น "ห้องเดิม" จึงไม่เคยถูกตรวจว่าว่างในวันใหม่ ⇒ ลงวันทับห้องที่คนอื่นจองแล้วได้
+                                            // → ตรวจห้องเดิมด้วย (CheckAvailability ตัดใบนี้ออกเองแล้ว ไม่ชนกับตัวเอง)
+                                            bool rebookFromPostpone = false;
+                                            try
+                                            {
+                                                DataTable dtCurDate = code2.DatabaseQuerySafe(conn,
+                                                    "SELECT CheckinDate FROM [Reservation] WHERE ID = @id",
+                                                    new Dictionary<string, object> { { "@id", Convert.ToInt32(id) } });
+                                                if (dtCurDate != null && dtCurDate.Rows.Count > 0)
+                                                {
+                                                    object curIn = dtCurDate.Rows[0]["CheckinDate"];
+                                                    rebookFromPostpone = curIn == DBNull.Value
+                                                        || RescheduleService.IsPlaceholderDate(Convert.ToDateTime(curIn));
+                                                }
+                                            }
+                                            catch { rebookFromPostpone = false; }
+
                                             // Check each selected room to see if it's NEW (not in old accommodations)
                                             foreach (GridViewRow row in GridView1.Rows)
                                             {
@@ -1695,8 +1713,8 @@ namespace Take_Time_BangPhra
                                                         }
                                                     }
 
-                                                    // Only check availability for NEW rooms
-                                                    if (!isExistingRoom)
+                                                    // Only check availability for NEW rooms (+ ทุกห้องเมื่อลงวันใหม่ให้ใบที่เลื่อนไว้)
+                                                    if (!isExistingRoom || rebookFromPostpone)
                                                     {
                                                         // ✅ Get requested people count
                                                         int requestedPeople = 1; // Default
@@ -6542,24 +6560,16 @@ namespace Take_Time_BangPhra
                 short? adminId = Session["UserID"] != null ? (short?)Convert.ToInt16(Session["UserID"]) : null;
                 string adminName = Session["User"]?.ToString();
 
+                // บันทึกประวัติ POSTPONE แถวเดียวพร้อมวันเดิม (เดิมบันทึก 2 แถว → หน้ารายการเลื่อนขึ้น "ไม่มีประวัติ")
+                bool hadRealDate = oldCheckinDate.HasValue && !RescheduleService.IsPlaceholderDate(oldCheckinDate);
                 rescheduleService.MarkAsPostponed(
                     reservationId,
-                    "เลื่อนเข้าพัก - ยังไม่กำหนดวันใหม่",
+                    hadRealDate ? "เลื่อนเข้าพักจากหน้าแก้ไขการจอง" : "เลื่อนเข้าพัก - ยังไม่กำหนดวันใหม่",
                     adminId,
-                    adminName);
-
-                // Log the date change if there was a real date before
-                if (oldCheckinDate.HasValue && !RescheduleService.IsPlaceholderDate(oldCheckinDate))
-                {
-                    rescheduleService.LogReschedule(
-                        reservationId,
-                        "POSTPONE",
-                        oldCheckinDate, oldCheckoutDate, oldStayDays,
-                        null, null, null,
-                        "มัดจำแล้ว", "มัดจำแล้ว",
-                        "เลื่อนเข้าพักจากหน้าแก้ไขการจอง",
-                        adminId, adminName);
-                }
+                    adminName,
+                    hadRealDate ? oldCheckinDate : null,
+                    hadRealDate ? oldCheckoutDate : null,
+                    hadRealDate ? (int?)oldStayDays : null);
 
                 // Send Telegram notification
                 try

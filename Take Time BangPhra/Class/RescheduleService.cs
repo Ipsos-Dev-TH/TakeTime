@@ -89,33 +89,64 @@ namespace Take_Time_BangPhra
 
         /// <summary>
         /// ตั้งค่า Reservation เป็น Postponed (เลื่อนวันเข้าพัก - ยังไม่กำหนดวันใหม่)
-        /// ใช้ตอนสร้าง reservation ใหม่ที่ยังไม่มีวัน check-in
+        /// ใช้ตอนสร้าง reservation ใหม่ที่ยังไม่มีวัน check-in / กดปุ่มเลื่อนเข้าพัก / บันทึกหน้าแก้ไขโดยไม่ใส่วัน
+        ///
+        /// ทำซ้ำได้ (idempotent): ใบที่เลื่อนอยู่แล้ว (เช่น เปิดหน้าแก้ไขแล้วบันทึกหมายเหตุโดยไม่ใส่วัน)
+        /// จะไม่ถูกรีเซ็ต PostponedDate และไม่บันทึกประวัติ POSTPONE ซ้ำ — เดิมรีเซ็ตทุกครั้ง ทำให้
+        /// "อายุการเลื่อน" (นับวันหมดอายุมัดจำ) เริ่มนับใหม่ทุกครั้งที่มีคนแก้ใบ
+        ///
+        /// ส่งวันเดิม (oldCheckin/oldCheckout/oldStayDays) มาด้วยเมื่อใบมีวันเข้าพักจริงก่อนเลื่อน —
+        /// บันทึกเป็นประวัติแถวเดียว (เดิมปุ่มเลื่อนบันทึก 2 แถว: แถวแรกไม่มีวันเดิม แถวสองมีวันเดิม
+        /// ⇒ หน้ารายการเลื่อนหยิบแถวแรกมาแสดงเป็น "การจองเดิม" จึงขึ้น "ไม่มีประวัติ")
         /// </summary>
-        public void MarkAsPostponed(int reservationId, string reason = null, short? adminId = null, string adminName = null)
+        /// <returns>true = เพิ่งเปลี่ยนเป็นเลื่อน (บันทึกประวัติแล้ว), false = เลื่อนอยู่แล้วก่อนหน้า</returns>
+        public bool MarkAsPostponed(int reservationId, string reason = null, short? adminId = null, string adminName = null,
+            DateTime? oldCheckinDate = null, DateTime? oldCheckoutDate = null, int? oldStayDays = null)
         {
+            bool wasPostponed = false;
+            string oldStatus = null;
             using (SqlConnection conn = new SqlConnection(_connectionString))
             {
                 conn.Open();
+                // SET ทุกนิพจน์อ่านค่า "ก่อน" update ⇒ CASE ใช้ค่าเดิมของ IsPostponed/PostponedDate
                 using (SqlCommand cmd = new SqlCommand(@"
+                    DECLARE @was bit, @st nvarchar(100);
+                    SELECT @was = ISNULL([IsPostponed], 0), @st = [Status] FROM [dbo].[Reservation] WHERE ID = @ID;
                     UPDATE [dbo].[Reservation]
                     SET [IsPostponed] = 1,
-                        [PostponedDate] = GETDATE()
-                    WHERE ID = @ID", conn))
+                        [PostponedDate] = CASE WHEN ISNULL([IsPostponed], 0) = 1 AND [PostponedDate] IS NOT NULL
+                                               THEN [PostponedDate] ELSE GETDATE() END
+                    WHERE ID = @ID;
+                    SELECT ISNULL(@was, 0) AS WasPostponed, @st AS OldStatus;", conn))
                 {
                     cmd.Parameters.AddWithValue("@ID", reservationId);
-                    cmd.ExecuteNonQuery();
+                    using (SqlDataReader reader = cmd.ExecuteReader())
+                    {
+                        if (reader.Read())
+                        {
+                            wasPostponed = reader["WasPostponed"] != DBNull.Value && Convert.ToBoolean(reader["WasPostponed"]);
+                            oldStatus = reader["OldStatus"] != DBNull.Value ? reader["OldStatus"].ToString() : null;
+                        }
+                    }
                 }
             }
 
-            // Log the postpone event
+            if (wasPostponed) return false;
+
+            bool hasOldDates = oldCheckinDate.HasValue && !IsPlaceholderDate(oldCheckinDate);
+
+            // Log the postpone event (แถวเดียว — พร้อมวันเดิมถ้ามี)
             LogReschedule(
                 reservationId,
                 "POSTPONE",
+                hasOldDates ? oldCheckinDate : null,
+                hasOldDates && !IsPlaceholderDate(oldCheckoutDate) ? oldCheckoutDate : null,
+                hasOldDates ? oldStayDays : null,
                 null, null, null,
-                null, null, null,
-                "มัดจำแล้ว", "มัดจำแล้ว",
+                oldStatus ?? "มัดจำแล้ว", oldStatus ?? "มัดจำแล้ว",
                 reason ?? "ลูกค้ายังไม่กำหนดวันเข้าพัก",
                 adminId, adminName);
+            return true;
         }
 
         /// <summary>
@@ -222,19 +253,25 @@ namespace Take_Time_BangPhra
 
         /// <summary>
         /// ยกเลิกการเลื่อนวันเข้าพัก (ลบออกจากรายการเลื่อน)
+        ///
+        /// ยกเลิกได้เฉพาะใบที่ "ยังเลื่อนอยู่จริง" (ยังไม่มีวันเข้าพัก + สถานะ มัดจำแล้ว/รอชำระเงิน) —
+        /// กันหน้ารายการที่เปิดค้างไว้ไปยกเลิกใบที่มีคนลงวันใหม่/เช็คอินไปแล้ว (เดิม UPDATE ตาม ID อย่างเดียว)
+        /// ไม่แตะบัญชี: มัดจำที่รับไว้ยังเป็นเงินรับล่วงหน้า (หนี้สินต่อลูกค้า) จนกว่าจะคืนเงิน/ริบมัดจำแยกต่างหาก
         /// </summary>
-        public void CancelPostpone(
+        /// <returns>true = ยกเลิกแล้ว, false = ใบไม่อยู่ในสถานะเลื่อน (ไม่ได้เปลี่ยนอะไร)</returns>
+        public bool CancelPostpone(
             int reservationId,
             short? adminId = null,
             string adminName = null,
             string reason = null)
         {
+            string oldStatus = null;
+            int affected;
             using (SqlConnection conn = new SqlConnection(_connectionString))
             {
                 conn.Open();
 
                 // Get current info before update
-                string oldStatus = null;
                 using (SqlCommand getCmd = new SqlCommand(
                     "SELECT Status FROM Reservation WHERE ID = @ID", conn))
                 {
@@ -242,29 +279,49 @@ namespace Take_Time_BangPhra
                     oldStatus = getCmd.ExecuteScalar()?.ToString();
                 }
 
-                // Update status
+                // Update status — เฉพาะใบที่ยังเลื่อนอยู่ (วันเข้าพักเป็นค่าแทน 1990/ว่าง)
                 using (SqlCommand cmd = new SqlCommand(@"
                     UPDATE [dbo].[Reservation]
                     SET [Status] = N'ยกเลิกการเลื่อนวันเข้าพัก',
                         [IsPostponed] = 0
-                    WHERE ID = @ID", conn))
+                    WHERE ID = @ID
+                      AND [Status] IN (N'มัดจำแล้ว', N'รอชำระเงิน')
+                      AND ([CheckinDate] IS NULL OR [CheckinDate] < '19910101')", conn))
                 {
                     cmd.Parameters.AddWithValue("@ID", reservationId);
-                    cmd.ExecuteNonQuery();
+                    affected = cmd.ExecuteNonQuery();
                 }
             }
 
-            // Log the cancellation
-            LogReschedule(
-                reservationId,
-                "CANCEL_POSTPONE",
-                null, null, null,
-                null, null, null,
-                oldStatus: "มัดจำแล้ว",
-                newStatus: "ยกเลิกการเลื่อนวันเข้าพัก",
-                reason: reason ?? "ยกเลิกการเลื่อนวันเข้าพัก",
-                adminId: adminId,
-                adminName: adminName);
+            if (affected <= 0) return false;
+
+            string why = string.IsNullOrWhiteSpace(reason) ? "ยกเลิกการเลื่อนวันเข้าพัก" : reason.Trim();
+            if (why.Length > 500) why = why.Substring(0, 500);   // คอลัมน์ Reason NVARCHAR(500)
+
+            // Log the cancellation — สถานะจริงก่อนยกเลิกได้ถูกอัปเดตไปแล้ว อย่าให้ log พังแล้วผู้ใช้เห็นว่า "ยกเลิกไม่สำเร็จ"
+            try
+            {
+                LogReschedule(
+                    reservationId,
+                    "CANCEL_POSTPONE",
+                    null, null, null,
+                    null, null, null,
+                    oldStatus: oldStatus ?? "มัดจำแล้ว",
+                    newStatus: "ยกเลิกการเลื่อนวันเข้าพัก",
+                    reason: why,
+                    adminId: adminId,
+                    adminName: adminName);
+            }
+            catch (Exception ex)
+            {
+                try
+                {
+                    new code().Logs(_connectionString, "PostponeList - Cancel history log error",
+                        "Reservation " + reservationId + ": " + ex.Message, adminName ?? "SYSTEM");
+                }
+                catch { }
+            }
+            return true;
         }
 
         /// <summary>
