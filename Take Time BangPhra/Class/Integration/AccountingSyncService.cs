@@ -420,6 +420,145 @@ namespace Take_Time_BangPhra.Integration
         }
 
         /// <summary>
+        /// Enqueue JE ปรับปรุง "เงินสดของใบ OTA" (หน้า PaymentHistory → ⚠ เงินสดของใบ OTA ที่ควรตรวจ):
+        /// ใบ OTA แบบ Channel Collect ที่เช็คอินรุ่นเก่าออกใบเสร็จรับเงินสดแล้ว sync ไป NextAcc เป็นเงินสดรับ
+        /// → Dr ลูกหนี้ OTA / Cr เงินสด-ธนาคารที่ใบเสร็จใช้ (ไม่ void ใบเสร็จ, ไม่แตะรายได้/VAT).
+        /// เมื่อสำเร็จ processor ตั้ง Payment_History.Status = 'OTA_RECLASS' และ
+        /// Reservation.Ota_Revenue_Ref = 'RECLASS-{receiptId}' (job รายได้ OTA จะไม่โพสต์ซ้ำ).
+        /// กันซ้ำ: คิวค้าง/เคยสำเร็จของ ref เดียวกัน → คืนรายการเดิม (FAILED = ปลุกกลับเป็น PENDING)
+        /// </summary>
+        /// <returns>queue id; -1 = ยังไม่ได้ตั้งค่า NextAcc / ข้อมูลไม่ครบ</returns>
+        public long EnqueueOtaCashReclass(long paymentHistoryId, int reservationId, string receiptId,
+            decimal amount, DateTime entryDate, string otaChannel = null, string otaBookingId = null,
+            DateTime? originalPaymentDate = null, string requestedBy = null)
+        {
+            if (!_config.IsConfigured) return -1;
+            if (paymentHistoryId <= 0 || reservationId <= 0 || amount <= 0 || string.IsNullOrWhiteSpace(receiptId)) return -1;
+
+            receiptId = receiptId.Trim();
+            string refKey = $"OTA-RECLASS-{receiptId}";
+
+            var payload = new Dictionary<string, object>
+            {
+                { "refKey", refKey },
+                { "paymentHistoryId", paymentHistoryId },
+                { "reservationId", reservationId },
+                { "receiptId", receiptId },
+                { "amount", amount },
+                { "entryDate", AcctDate(entryDate) },
+                { "otaChannel", otaChannel ?? "" },
+                { "otaBookingId", otaBookingId ?? "" },
+                { "requestedBy", requestedBy ?? "" }
+            };
+            if (originalPaymentDate.HasValue)
+                payload["originalPaymentDate"] = AcctDate(originalPaymentDate.Value);
+
+            string unsentStatus;
+            long existing = FindUnsentEntry("OTA_RECLASS", "OTA_CASH_RECLASS", "refKey", refKey, out unsentStatus);
+            if (existing > 0)
+            {
+                // FAILED = ผู้ใช้กดซ้ำเพื่อลองใหม่ → ปลุกกลับเป็น PENDING (payload ล่าสุด); PENDING/PROCESSING = รออยู่แล้ว
+                if (string.Equals(unsentStatus, "FAILED", StringComparison.OrdinalIgnoreCase))
+                    TryRefreshQueuePayload(existing, payload, $"OTA_CASH_RECLASS {refKey}");
+                return existing;
+            }
+
+            // เคยสำเร็จแล้ว (ไม่จำกัดเวลา) → ห้ามโพสต์ซ้ำ
+            long done = FindRecentCompletedEntry("OTA_RECLASS", "OTA_CASH_RECLASS", "refKey", refKey, 315360000);
+            if (done > 0) return done;
+
+            return InsertQueue("OTA_RECLASS", reservationId, "OTA_CASH_RECLASS", payload);
+        }
+
+        /// <summary>
+        /// ใบเสร็จนี้ถูกส่งเข้า NextAcc แล้ว (และยังไม่ถูก void) หรือยัง — ใช้ตัดสินว่าต้องกลับรายการเงินสดใน NextAcc ไหม.
+        /// ดูคิวล่าสุดของใบนี้ (CREATE_RECEIPT_DOCUMENT / VOID_RECEIPT): CREATE สำเร็จจริง (ไม่ใช่ SKIPPED_*) = sync แล้ว;
+        /// VOID ใหม่กว่า = ถูกยกเลิกแล้ว. ไม่พบในคิว → ดู Account_Receipt.Nexaacc_Doc_Id (PHASE18_32) ถ้ามีคอลัมน์
+        /// </summary>
+        /// <param name="state">ข้อความสถานะสำหรับแสดงผล</param>
+        public bool IsReceiptSyncedForOtaReclass(string receiptId, out string state)
+        {
+            state = "ไม่ทราบ";
+            if (string.IsNullOrWhiteSpace(receiptId)) { state = "ไม่มีใบเสร็จ"; return false; }
+            receiptId = receiptId.Trim();
+            try
+            {
+                string esc = receiptId.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]");
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 ID, Action_Type, Status, Nexaacc_Response_Id, Nexaacc_Document_Number
+                        FROM Accounting_Sync_Queue
+                       WHERE Entity_Type = 'RECEIPT'
+                         AND Action_Type IN ('CREATE_RECEIPT_DOCUMENT', 'VOID_RECEIPT')
+                         AND Payload LIKE @p
+                       ORDER BY ID DESC",
+                    new Dictionary<string, object> { { "@p", $"%\"receiptNumber\":\"{esc}\"%" } });
+                if (dt != null && dt.Rows.Count > 0)
+                {
+                    var r = dt.Rows[0];
+                    string action = r["Action_Type"]?.ToString() ?? "";
+                    string status = r["Status"]?.ToString() ?? "";
+                    string resp = r["Nexaacc_Response_Id"] == DBNull.Value ? "" : r["Nexaacc_Response_Id"].ToString();
+                    string docNo = r["Nexaacc_Document_Number"] == DBNull.Value ? "" : r["Nexaacc_Document_Number"].ToString();
+                    if (action == "VOID_RECEIPT")
+                    {
+                        state = status == "COMPLETED" ? "ใบเสร็จถูกยกเลิกใน NextAcc แล้ว" : $"กำลังยกเลิกใบเสร็จ ({status})";
+                        return false;
+                    }
+                    if (status == "COMPLETED" && !resp.StartsWith("SKIPPED", StringComparison.OrdinalIgnoreCase))
+                    {
+                        state = "ส่งเข้า NextAcc แล้ว" + (string.IsNullOrEmpty(docNo) ? "" : " (" + docNo + ")");
+                        return true;
+                    }
+                    state = status == "COMPLETED" ? "ไม่ได้ส่งเข้า NextAcc (" + resp + ")" : $"ยังไม่ส่งเข้า NextAcc ({status})";
+                    return false;
+                }
+
+                try
+                {
+                    var link = _code.DatabaseQuerySafe(_connectionString,
+                        "SELECT TOP 1 Nexaacc_Doc_Id, Nexaacc_Doc_Number FROM Account_Receipt WHERE ID = @id",
+                        new Dictionary<string, object> { { "@id", receiptId } });
+                    if (link != null && link.Rows.Count > 0 && link.Rows[0]["Nexaacc_Doc_Id"] != DBNull.Value)
+                    {
+                        state = "ส่งเข้า NextAcc แล้ว (" + link.Rows[0]["Nexaacc_Doc_Number"] + ")";
+                        return true;
+                    }
+                }
+                catch { /* ยังไม่ได้รัน PHASE18_32 */ }
+
+                state = "ไม่พบการส่งเข้า NextAcc";
+                return false;
+            }
+            catch (Exception ex)
+            {
+                state = "ตรวจสถานะไม่ได้: " + ex.Message;
+                return false;
+            }
+        }
+
+        /// <summary>สถานะคิว OTA_CASH_RECLASS ล่าสุดของใบเสร็จนี้ (null = ยังไม่เคยสั่ง) — ใช้แสดงผลในหน้าตรวจ</summary>
+        public string GetOtaCashReclassQueueState(string receiptId, out long queueId)
+        {
+            queueId = 0;
+            if (string.IsNullOrWhiteSpace(receiptId)) return null;
+            try
+            {
+                string refKey = $"OTA-RECLASS-{receiptId.Trim()}";
+                string esc = refKey.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]");
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 ID, Status, Error_Message FROM Accounting_Sync_Queue
+                       WHERE Entity_Type = 'OTA_RECLASS' AND Action_Type = 'OTA_CASH_RECLASS'
+                         AND Payload LIKE @p
+                       ORDER BY ID DESC",
+                    new Dictionary<string, object> { { "@p", $"%\"refKey\":\"{esc}\"%" } });
+                if (dt == null || dt.Rows.Count == 0) return null;
+                queueId = Convert.ToInt64(dt.Rows[0]["ID"]);
+                return dt.Rows[0]["Status"]?.ToString();
+            }
+            catch { return null; }
+        }
+
+        /// <summary>
         /// Enqueue receipt document creation.
         /// Call after ReceiptService generates a receipt.
         /// </summary>
@@ -3142,6 +3281,10 @@ namespace Take_Time_BangPhra.Integration
                 // ── Asset Reclassification (DR สินทรัพย์ / CR ค่าใช้จ่าย) ──
                 case "ASSET_RECLASSIFICATION":
                     return await ProcessAssetReclassification(payload);
+
+                // ── เงินสดของใบ OTA ที่ OTA เก็บจริง (Dr ลูกหนี้ OTA / Cr เงินสด) ──
+                case "OTA_CASH_RECLASS":
+                    return await ProcessOtaCashReclass(payload);
 
                 // ── Deprecated: ไม่ผูกกับเอกสาร — skip ไม่ยิง API ──
                 case "CREATE_DEPOSIT_JOURNAL":
@@ -5883,6 +6026,172 @@ namespace Take_Time_BangPhra.Integration
             _lastDocNumber = result?.data?.DocumentNumber;
             _lastDocType = "JOURNAL";
             return journalId.ToString();
+        }
+
+        /// <summary>
+        /// OTA_CASH_RECLASS — Dr ลูกหนี้ OTA / Cr เงินสด-ธนาคารที่ใบเสร็จใช้ (ดู EnqueueOtaCashReclass).
+        /// กันซ้ำ 3 ชั้น: คิวของ ref เดียวกันที่เคยสำเร็จ / JE ref เดียวกันบน NextAcc (JournalExistsByReferenceAsync) /
+        /// แถว Payment_History ที่เป็น OTA_RECLASS แล้วแต่หา JE ไม่เจอ = หยุดให้คนตรวจ (ไม่เดาแล้วโพสต์ซ้ำ).
+        /// สำเร็จ → Payment_History.Status = 'OTA_RECLASS' + Reservation.Ota_Revenue_Ref = 'RECLASS-{receiptId}'
+        /// </summary>
+        private async Task<string> ProcessOtaCashReclass(Dictionary<string, object> p)
+        {
+            long phId = Convert.ToInt64(p["paymentHistoryId"]);
+            int reservationId = Convert.ToInt32(p["reservationId"]);
+            string receiptId = (p["receiptId"]?.ToString() ?? "").Trim();
+            decimal amount = Convert.ToDecimal(p["amount"]);
+            DateTime entryDate = ParseAcctDate(p["entryDate"]?.ToString());
+            string otaChannel = p.ContainsKey("otaChannel") ? p["otaChannel"]?.ToString() : null;
+            string otaBookingId = p.ContainsKey("otaBookingId") ? p["otaBookingId"]?.ToString() : null;
+            string requestedBy = p.ContainsKey("requestedBy") ? p["requestedBy"]?.ToString() : null;
+            DateTime? originalPaymentDate = null;
+            if (p.ContainsKey("originalPaymentDate") && !string.IsNullOrEmpty(p["originalPaymentDate"]?.ToString()))
+                originalPaymentDate = ParseAcctDate(p["originalPaymentDate"].ToString());
+
+            if (phId <= 0 || reservationId <= 0 || amount <= 0 || string.IsNullOrEmpty(receiptId))
+                throw new ArgumentException("OTA_CASH_RECLASS: payload ไม่ครบ (paymentHistoryId/reservationId/receiptId/amount)");
+
+            string reference = $"OTA-RECLASS-{receiptId}";
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ProcessOtaCashReclass: PH#{phId} การจอง #{reservationId} ใบเสร็จ {receiptId} amount={amount} โดย {requestedBy}", "SYSTEM");
+
+            // 1) ตรวจแถวเงินในระบบอีกครั้ง — สถานะอาจเปลี่ยนระหว่างรอคิว
+            var row = _code.DatabaseQuerySafe(_connectionString,
+                "SELECT TOP 1 Status, Receipt_ID, Reservation_ID, PaymentAmount FROM Payment_History WHERE ID = @id",
+                new Dictionary<string, object> { { "@id", phId } });
+            if (row == null || row.Rows.Count == 0)
+                throw new ArgumentException($"OTA_CASH_RECLASS: ไม่พบ Payment_History #{phId}");
+            string phStatus = row.Rows[0]["Status"]?.ToString() ?? "";
+            string phReceipt = row.Rows[0]["Receipt_ID"] == DBNull.Value ? "" : row.Rows[0]["Receipt_ID"].ToString().Trim();
+            int phRes = row.Rows[0]["Reservation_ID"] == DBNull.Value ? 0 : Convert.ToInt32(row.Rows[0]["Reservation_ID"]);
+            decimal phAmount = row.Rows[0]["PaymentAmount"] == DBNull.Value ? 0m : Convert.ToDecimal(row.Rows[0]["PaymentAmount"]);
+            if (!string.Equals(phReceipt, receiptId, StringComparison.OrdinalIgnoreCase) || phRes != reservationId)
+                throw new ArgumentException($"OTA_CASH_RECLASS: Payment_History #{phId} ไม่ตรงกับใบเสร็จ {receiptId}/การจอง #{reservationId} แล้ว — ไม่ปรับรายการ");
+            if (Math.Abs(phAmount - amount) > 0.005m)
+                throw new ArgumentException($"OTA_CASH_RECLASS: ยอดของ Payment_History #{phId} เปลี่ยนเป็น {phAmount:N2} (สั่งไว้ {amount:N2}) — สั่งใหม่จากหน้าตรวจ");
+            if (phStatus != "COMPLETED" && phStatus != "OTA_RECLASS")
+                throw new ArgumentException($"OTA_CASH_RECLASS: Payment_History #{phId} สถานะเป็น {phStatus} แล้ว — ไม่ปรับรายการ");
+
+            // 2) กันโพสต์ซ้ำ
+            string resultId;
+            long doneBefore = FindRecentCompletedEntry("OTA_RECLASS", "OTA_CASH_RECLASS", "refKey", reference, 315360000);
+            if (doneBefore > 0 || await JournalExistsByReferenceAsync(reference))
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessOtaCashReclass: {reference} โพสต์แล้ว (คิว #{doneBefore}) — ข้ามการโพสต์ ปรับสถานะในระบบอย่างเดียว", "SYSTEM");
+                resultId = "ALREADY_POSTED:" + reference;
+            }
+            else if (phStatus == "OTA_RECLASS")
+            {
+                // ถูกปรับสถานะไปแล้วแต่หา JE ไม่เจอ (ค้นไม่ได้/ปรับมือ) — ไม่เดา ให้คนตรวจใน NextAcc ก่อน
+                throw new ArgumentException($"OTA_CASH_RECLASS: Payment_History #{phId} เป็น OTA_RECLASS แล้วแต่ไม่พบ JE {reference} บน NextAcc " +
+                    "— ตรวจใน NextAcc ก่อน (กันโพสต์ซ้ำ)");
+            }
+            else
+            {
+                // 3) ใบเสร็จต้องอยู่ใน NextAcc จริง (ยังไม่ void) — ไม่งั้น Cr เงินสดจะไม่มีคู่
+                string syncState;
+                if (!IsReceiptSyncedForOtaReclass(receiptId, out syncState))
+                    throw new Exception($"OTA_CASH_RECLASS: ใบเสร็จ {receiptId} — {syncState} → ยังไม่กลับรายการเงินสด (จะลองใหม่เมื่อใบเสร็จเข้า NextAcc)");
+
+                // บัญชีเงินสด/ธนาคาร: ใช้ค่าที่ส่งไปจริงตอนสร้างใบเสร็จ (payload คิว) ก่อน → ข้อมูลหัวใบเสร็จ
+                string paymentMethod = null, paymentAccountId = null;
+                var orig = LookupReceiptPayloadForOtaReclass(receiptId);
+                if (orig != null)
+                {
+                    paymentMethod = orig.ContainsKey("paymentMethod") ? orig["paymentMethod"]?.ToString() : null;
+                    paymentAccountId = orig.ContainsKey("paymentAccountId") ? orig["paymentAccountId"]?.ToString() : null;
+                }
+                if (string.IsNullOrEmpty(paymentMethod) && string.IsNullOrEmpty(paymentAccountId))
+                {
+                    var info = LookupReceiptHeaderInfo(receiptId);
+                    if (info != null)
+                    {
+                        paymentMethod = info.Value.paymentMethod;
+                        paymentAccountId = info.Value.paymentAccountId;
+                    }
+                }
+
+                var journal = _mapper.MapOtaCashReclassToJournal(reservationId, receiptId, amount, entryDate,
+                    paymentMethod, paymentAccountId, otaChannel, otaBookingId, originalPaymentDate);
+                var intJournal = _mapper.ConvertJournalToIntegration(journal);
+                var result = await _apiClient.CreateIntegrationJournalAsync(intJournal);
+                Guid journalId = RequireValidDocId(result?.data?.Id, $"OtaCashReclass receipt={receiptId}");
+
+                _lastDocNumber = result?.data?.DocumentNumber;
+                _lastDocType = "JOURNAL";
+                resultId = journalId.ToString();
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessOtaCashReclass: posted {reference} ({_lastDocNumber}) Dr OTA_RECEIVABLE / Cr cash({paymentMethod}|{paymentAccountId}) {amount:N2}", "SYSTEM");
+            }
+
+            // 4) ปรับสถานะในระบบ — best effort (JE โพสต์แล้ว ห้ามโยน error จนคิว retry แล้วเสี่ยงโพสต์ซ้ำ)
+            MarkOtaCashReclassDone(phId, reservationId, receiptId, requestedBy, _lastDocNumber ?? reference);
+            return resultId;
+        }
+
+        /// <summary>payload ของคิว CREATE_RECEIPT_DOCUMENT ที่สำเร็จล่าสุดของใบเสร็จนี้ (null = ไม่พบ)</summary>
+        private Dictionary<string, object> LookupReceiptPayloadForOtaReclass(string receiptId)
+        {
+            try
+            {
+                string esc = receiptId.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]");
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 Payload FROM Accounting_Sync_Queue
+                       WHERE Entity_Type = 'RECEIPT' AND Action_Type = 'CREATE_RECEIPT_DOCUMENT'
+                         AND Status = 'COMPLETED' AND Payload LIKE @p
+                       ORDER BY ID DESC",
+                    new Dictionary<string, object> { { "@p", $"%\"receiptNumber\":\"{esc}\"%" } });
+                if (dt?.Rows.Count > 0 && dt.Rows[0]["Payload"] != DBNull.Value)
+                    return _serializer.Deserialize<Dictionary<string, object>>(dt.Rows[0]["Payload"].ToString());
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"LookupReceiptPayloadForOtaReclass receipt={receiptId}: {ex.Message}", "SYSTEM");
+            }
+            return null;
+        }
+
+        private void MarkOtaCashReclassDone(long phId, int reservationId, string receiptId, string requestedBy, string journalRef)
+        {
+            try
+            {
+                string tag = $" [OTA-RECLASS {DateTime.Now.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)} by {(string.IsNullOrWhiteSpace(requestedBy) ? "SYSTEM" : requestedBy)}: " +
+                             $"เงิน OTA เก็บ ไม่ใช่เงินสดรับ — JE {journalRef}]";
+                if (tag.Length > 250) tag = tag.Substring(0, 249) + "]";
+                int n = _code.DatabaseInsertSafe(_connectionString,
+                    @"UPDATE Payment_History
+                         SET Status = 'OTA_RECLASS',
+                             Notes = LEFT(ISNULL(Notes, N''), 500 - LEN(@tag)) + @tag,
+                             UpdatedDate = GETDATE()
+                       WHERE ID = @id AND Status = 'COMPLETED'",
+                    new Dictionary<string, object> { { "@id", phId }, { "@tag", tag } });
+                _code.Logs(_connectionString, "OTA-Cash-Reclass",
+                    $"Payment_History #{phId} (ใบเสร็จ {receiptId}, การจอง #{reservationId}) → OTA_RECLASS ({n} แถว) JE {journalRef}",
+                    string.IsNullOrWhiteSpace(requestedBy) ? "SYSTEM" : requestedBy);
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"MarkOtaCashReclassDone: ปรับสถานะ Payment_History #{phId} ไม่สำเร็จ (JE {journalRef} โพสต์แล้ว — ปรับมือ): {ex.Message}", "SYSTEM");
+            }
+
+            try
+            {
+                string revRef = "RECLASS-" + receiptId;
+                int n = _code.DatabaseInsertSafe(_connectionString,
+                    "UPDATE Reservation SET Ota_Revenue_Ref = @ref WHERE ID = @id AND Ota_Revenue_Ref IS NULL",
+                    new Dictionary<string, object> { { "@ref", revRef }, { "@id", reservationId } });
+                if (n == 0)
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"MarkOtaCashReclassDone: การจอง #{reservationId} มี Ota_Revenue_Ref อยู่แล้ว — คงค่าเดิม (ไม่ทับเป็น {revRef})", "SYSTEM");
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"MarkOtaCashReclassDone: ตั้ง Ota_Revenue_Ref การจอง #{reservationId} ไม่สำเร็จ: {ex.Message}", "SYSTEM");
+            }
         }
 
         /// <summary>อ่าน payload เดิมของ action ที่ระบุ จาก Accounting_Sync_Queue (COMPLETED ล่าสุด)</summary>

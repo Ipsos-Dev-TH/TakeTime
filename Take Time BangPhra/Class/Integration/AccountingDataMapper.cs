@@ -3675,5 +3675,68 @@ namespace Take_Time_BangPhra.Integration
                 }
             };
         }
+
+        // ══════════════════════════════════════════════
+        // OTA Cash Reclassification Journal
+        // (Dr ลูกหนี้ OTA / Cr เงินสด-ธนาคาร — เงินค่าห้องที่ OTA เก็บไป แต่ถูกบันทึกเป็นเงินสดรับตอนเช็คอิน)
+        // ══════════════════════════════════════════════
+
+        /// <summary>
+        /// ใบ OTA แบบ Channel Collect ที่หน้าเช็คอินรุ่นเก่าบังคับให้ออกใบเสร็จ "รับเงินสด" แล้ว sync เข้า NextAcc
+        /// (Dr เงินสด / Cr รายได้ / Cr ภาษีขาย) — ความจริงคือ OTA เก็บเงินไป โรงแรมไม่ได้รับเงินสด.
+        /// JE นี้ย้ายขา Dr จากเงินสด/ธนาคารที่ใบเสร็จใช้ ไปเป็นลูกหนี้ OTA (ไม่แตะรายได้/ภาษีขาย):
+        ///   Dr OTA_RECEIVABLE  amount
+        ///   Cr เงินสด/ธนาคาร   amount
+        /// ผลสุทธิ = Dr ลูกหนี้ OTA / Cr รายได้ / Cr ภาษีขาย (ตรงกับที่ job รายได้ OTA ลงให้ใบที่ไม่มีใบเสร็จ)
+        /// บัญชีเงินสดหาแบบเดียวกับการกลับรายการใบเสร็จ: paymentAccountId (GUID) ก่อน → paymentMethod
+        /// Reference = OTA-RECLASS-{receiptId} (ใช้กันซ้ำ)
+        /// </summary>
+        public CreateJournalEntryRequest MapOtaCashReclassToJournal(
+            int reservationId, string receiptId, decimal amount, DateTime entryDate,
+            string paymentMethod, string paymentAccountId,
+            string otaChannel = null, string otaBookingId = null, DateTime? originalPaymentDate = null)
+        {
+            if (amount <= 0)
+                throw new ArgumentException("MapOtaCashReclassToJournal: amount ต้อง > 0");
+            if (string.IsNullOrWhiteSpace(receiptId))
+                throw new ArgumentException("MapOtaCashReclassToJournal: receiptId ว่าง");
+
+            decimal amt = Math.Round(amount, 2, MidpointRounding.AwayFromZero);
+            Guid otaArAccountId = GetAccountId("OTA_RECEIVABLE");
+            Guid cashAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod);
+            if (cashAccountId == otaArAccountId)
+                throw new ArgumentException(
+                    "MapOtaCashReclassToJournal: บัญชีรับเงินของใบเสร็จเป็นบัญชีลูกหนี้ OTA อยู่แล้ว — ไม่ต้องปรับ");
+
+            string channel = string.IsNullOrWhiteSpace(otaChannel) ? "OTA" : otaChannel.Trim();
+            string booking = string.IsNullOrWhiteSpace(otaBookingId) ? "" : " " + otaBookingId.Trim();
+            string origDate = originalPaymentDate.HasValue ? $" (บันทึกเดิม {originalPaymentDate.Value.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)})" : "";
+
+            return new CreateJournalEntryRequest
+            {
+                EntryDate = entryDate,
+                JournalType = NexaaccJournalType.General,
+                Description = $"ปรับปรุง — เงินค่าห้อง {channel}{booking} ที่ OTA เก็บ ไม่ใช่เงินสดรับ " +
+                              $"(ใบเสร็จ {receiptId}, การจอง #{reservationId}){origDate}",
+                Reference = $"OTA-RECLASS-{receiptId.Trim()}",
+                Lines = new List<JournalEntryLineRequest>
+                {
+                    new JournalEntryLineRequest
+                    {
+                        AccountId = otaArAccountId,
+                        DebitAmount = amt,
+                        CreditAmount = 0,
+                        Description = $"ลูกหนี้ {channel} — ค่าห้องที่ OTA เก็บแทน (การจอง #{reservationId})"
+                    },
+                    new JournalEntryLineRequest
+                    {
+                        AccountId = cashAccountId,
+                        DebitAmount = 0,
+                        CreditAmount = amt,
+                        Description = $"กลับเงินสดที่ใบเสร็จ {receiptId} บันทึกเกิน (ไม่ได้รับเงินจริง)"
+                    }
+                }
+            };
+        }
     }
 }
