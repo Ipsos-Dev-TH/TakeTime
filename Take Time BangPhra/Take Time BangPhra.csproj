@@ -1432,6 +1432,7 @@
       <DependentUpon>SystemSettings.aspx</DependentUpon>
     </Compile>
     <Compile Include="Class\AppCfg.cs" />
+    <Compile Include="Class\ReservationBalance.cs" />
     <Compile Include="Admin\LineLinkCallback.aspx.cs">
       <DependentUpon>LineLinkCallback.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>

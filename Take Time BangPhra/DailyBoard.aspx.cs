@@ -81,24 +81,13 @@ namespace Take_Time_BangPhra
                      AND Status NOT IN (N'ยกเลิก', N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน')
                    GROUP BY Customer_MobilePhone", p);
 
-            // ค่าใช้จ่ายในห้อง + ยอดที่ชำระแล้ว (รวมทีเดียว ไม่ query ต่อแถว)
-            DataTable charges = SafeQuery(
-                @"SELECT rpc.Reservation_ID, SUM(rpc.TotalAmount) AS Charges
-                    FROM Reservation_Product_Charges rpc
-                    INNER JOIN Reservation r ON r.ID = rpc.Reservation_ID
-                   WHERE @d >= r.CheckinDate AND @d < r.CheckoutDate AND rpc.Status <> 'CANCELLED'
-                   GROUP BY rpc.Reservation_ID", p);
-
-            DataTable paid = SafeQuery(
-                @"SELECT ph.Reservation_ID, SUM(ph.PaymentAmount) AS Paid
-                    FROM Payment_History ph
-                    INNER JOIN Reservation r ON r.ID = ph.Reservation_ID
-                   WHERE @d >= r.CheckinDate AND @d < r.CheckoutDate AND ph.Status = 'COMPLETED'
-                   GROUP BY ph.Reservation_ID", p);
+            // ยอดเงินต่อการจอง — ใช้สูตรกลาง ReservationBalance (ตรงกับหน้ารายละเอียด/เช็คเอาท์)
+            // เดิมนับเฉพาะ Payment_History ⇒ OTA Channel Collect (OTA เก็บเงินแล้ว ไม่มี Payment_History)
+            // ขึ้นเป็นค้างชำระเต็มยอดจนกว่าจะเช็คอิน และยอดค้างชำระรวมบนหัวตารางสูงเกินจริง
+            Dictionary<int, ReservationBalance> balances = ReservationBalance.LoadMany(_conn,
+                "@d >= r.CheckinDate AND @d < r.CheckoutDate AND r.Status NOT IN (N'ยกเลิก', N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน')", p);
 
             var visitMap = MapByKey(visits, "Customer_MobilePhone", "Visits");
-            var chargeMap = MapById(charges, "Reservation_ID", "Charges");
-            var paidMap = MapById(paid, "Reservation_ID", "Paid");
 
             // สร้างแถว + จัดเรียงตามลำดับห้อง
             var rows = new List<BoardRow>();
@@ -148,14 +137,21 @@ namespace Take_Time_BangPhra
                 if (row.IsArrival) checkIn++;
                 if (row.IsDeparture) checkOut++;
 
-                // เงิน
-                decimal total = r["TotalPrice"] != DBNull.Value ? Convert.ToDecimal(r["TotalPrice"]) : 0m;
-                decimal extra = chargeMap.ContainsKey(resId) ? chargeMap[resId] : 0m;
-                decimal pd = paidMap.ContainsKey(resId) ? paidMap[resId] : 0m;
-                row.Total = total + extra;
-                row.Extra = extra;
-                row.Paid = pd;
-                row.Due = row.Total - pd;
+                // เงิน (สูตรกลาง — ไม่พบใน balances ซึ่งไม่ควรเกิด ก็คิดจากค่าในแถวเองด้วยสูตรเดียวกัน)
+                ReservationBalance bal;
+                if (!balances.TryGetValue(resId, out bal))
+                {
+                    decimal total = r["TotalPrice"] != DBNull.Value ? Convert.ToDecimal(r["TotalPrice"]) : 0m;
+                    decimal dep = r["Deposit"] != DBNull.Value ? Convert.ToDecimal(r["Deposit"]) : 0m;
+                    string rm = r["Remark"] != DBNull.Value ? r["Remark"].ToString() : "";
+                    bal = ReservationBalance.Compute(resId, ReservationBalance.DetectCollectMode(rm, ""),
+                        total, 0m, 0m, 0m, 0, dep);
+                }
+                row.Total = bal.Total;
+                row.Extra = bal.Charges;
+                row.Paid = bal.Received;
+                row.Due = bal.Due;
+                row.IsChannelCollect = bal.IsChannelCollect;
                 if (row.Due > 0) dueTotal += row.Due;
 
                 // จำนวนครั้งที่เคยมา
@@ -223,7 +219,11 @@ namespace Take_Time_BangPhra
                 sb.Append(Td(itemCell, bg));
 
                 sb.Append(Td($"{row.Total:N0}", bg, "right"));
-                sb.Append(Td($"{row.Paid:N0}", bg, "right"));
+                // Channel Collect: ยอดที่ "รับแล้ว" คือเงินที่ OTA เก็บไป — บอกให้ชัด ไม่ให้หน้างานไปทวงลูกค้าซ้ำ
+                string paidCell = $"{row.Paid:N0}";
+                if (row.IsChannelCollect)
+                    paidCell += $"<br/><span style='{ST_SUB}'>OTA เก็บแล้ว</span>";
+                sb.Append(Td(paidCell, bg, "right"));
                 sb.Append(row.Due > 0
                     ? Td($"<span style='font-size:18px;font-weight:bold;color:#a5241a;'>{row.Due:N0}</span>", bg, "right")
                     : Td("<span style='font-weight:bold;color:#1b7a43;'>ครบแล้ว</span>", bg, "right"));
@@ -313,7 +313,7 @@ namespace Take_Time_BangPhra
             public int ResId, Order, Nights, PastVisits;
             public string Rooms, Guest, Phone, Items, Channel, Remark, Status;
             public DateTime CheckIn, CheckOut;
-            public bool IsArrival, IsDeparture;
+            public bool IsArrival, IsDeparture, IsChannelCollect;
             public decimal Total, Paid, Due, Extra;
         }
 
@@ -326,18 +326,6 @@ namespace Take_Time_BangPhra
                 string k = r[keyCol]?.ToString();
                 if (string.IsNullOrEmpty(k)) continue;
                 m[k] = r[valCol] != DBNull.Value ? Convert.ToInt32(r[valCol]) : 0;
-            }
-            return m;
-        }
-
-        private static Dictionary<int, decimal> MapById(DataTable dt, string keyCol, string valCol)
-        {
-            var m = new Dictionary<int, decimal>();
-            if (dt == null) return m;
-            foreach (DataRow r in dt.Rows)
-            {
-                if (r[keyCol] == DBNull.Value) continue;
-                m[Convert.ToInt32(r[keyCol])] = r[valCol] != DBNull.Value ? Convert.ToDecimal(r[valCol]) : 0m;
             }
             return m;
         }

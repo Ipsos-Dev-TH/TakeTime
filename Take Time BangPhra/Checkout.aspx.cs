@@ -179,32 +179,16 @@ namespace Take_Time_BangPhra
                     lblCheckinDate.Text = Convert.ToDateTime(row["CheckinDate"]).ToString("dd/MM/yyyy");
                     lblCheckoutDate.Text = Convert.ToDateTime(row["CheckoutDate"]).ToString("dd/MM/yyyy");
 
-                    // 🔧 Calculate total price including ALL product charges
-                    decimal baseTotalPrice = Convert.ToDecimal(row["TotalPrice"]);
-                    decimal deposit = row["Deposit"] != DBNull.Value ? Convert.ToDecimal(row["Deposit"]) : 0;
-
-                    // Get product charges from Reservation_Product_Charges
-                    decimal productCharges = 0;
-                    try
+                    // 🔧 ยอดเงิน — สูตรกลาง ReservationBalance (ตรงกับตารางรายวัน/หน้ารายการจอง/หน้ารายละเอียด)
+                    // ค่าห้อง + ค่าใช้จ่ายในห้อง (Reservation_Product_Charges) + ยอดรับแล้ว (Payment_History → fallback Deposit)
+                    // Channel Collect: ค่าห้องถือว่า OTA จ่ายแล้ว
+                    ReservationBalance bal = ReservationBalance.Load(connectionString, reservationId);
+                    if (bal == null)
                     {
-                        var chargesParams = new System.Collections.Generic.Dictionary<string, object>
-                        {
-                            { "@reservationId", reservationId }
-                        };
-                        string chargesQuery = @"
-                            SELECT ISNULL(SUM(TotalAmount), 0) as TotalCharges
-                            FROM Reservation_Product_Charges
-                            WHERE Reservation_ID = @reservationId
-                            AND Status <> 'CANCELLED'";
-                        DataTable dtCharges = codeInstance.DatabaseQuerySafe(connectionString, chargesQuery, chargesParams);
-                        if (dtCharges.Rows.Count > 0 && dtCharges.Rows[0]["TotalCharges"] != DBNull.Value)
-                        {
-                            productCharges = Convert.ToDecimal(dtCharges.Rows[0]["TotalCharges"]);
-                        }
-                    }
-                    catch
-                    {
-                        // Ignore if table doesn't exist
+                        decimal baseTotalPrice = row["TotalPrice"] != DBNull.Value ? Convert.ToDecimal(row["TotalPrice"]) : 0m;
+                        decimal deposit = row["Deposit"] != DBNull.Value ? Convert.ToDecimal(row["Deposit"]) : 0m;
+                        bal = ReservationBalance.Compute(reservationId, ReservationBalance.ModeNone,
+                            baseTotalPrice, 0m, 0m, 0m, 0, deposit);
                     }
 
                     // Get Room Service charges (CHARGE_TO_ROOM orders)
@@ -232,56 +216,29 @@ namespace Take_Time_BangPhra
                         // Ignore if table doesn't exist
                     }
 
-                    // Add room service to product charges
-                    productCharges += roomServiceCharges;
+                    // ยอดรวม = ยอดจากสูตรกลาง + Room Service ที่ชาร์จเข้าห้อง (บวกเพิ่มเหมือนสูตรเดิมของหน้านี้)
+                    decimal totalPriceWithCharges = bal.Total + roomServiceCharges;
 
-                    // Calculate total price with ALL product charges
-                    decimal totalPriceWithCharges = baseTotalPrice + productCharges;
+                    // ยอดรับแล้ว = ยอดที่สูตรกลางนับ (Channel Collect = รวมค่าห้องที่ OTA เก็บไป)
+                    decimal totalPaid = bal.Received;
 
-                    // Get accurate total paid from Payment_History
-                    decimal totalPaid = 0;
-                    try
+                    // คงเหลือ
+                    decimal remainingBalance;
+                    if (bal.IsChannelCollect)
                     {
-                        totalPaid = paymentDataAccess.GetTotalPaidAmount(reservationId);
-
-                        // ✅ FIX: Fallback to Deposit if no payment history (same as ReserveTable)
-                        if (totalPaid == 0 && deposit > 0)
-                        {
-                            totalPaid = deposit;
-                        }
+                        // ค่าห้อง OTA เก็บแล้ว → เก็บแค่ค่าใช้จ่ายในห้องที่ค้าง + Room Service ที่ชาร์จเข้าห้อง
+                        remainingBalance = bal.PendingCharges + roomServiceCharges;
                     }
-                    catch
+                    else
                     {
-                        // Fallback to Deposit if Payment_History not available
-                        totalPaid = deposit;
+                        // สุทธิ = คงเหลือ − ยอดจ่ายเกิน + Room Service (เท่ากับ ยอดรวม − ยอดรับแล้ว)
+                        remainingBalance = Math.Round(bal.Due - bal.Credit + roomServiceCharges, 2, MidpointRounding.AwayFromZero);
+                        if (Math.Abs(remainingBalance) <= ReservationBalance.RoundingTolerance) remainingBalance = 0m;
                     }
+                    if (remainingBalance < 0m) remainingBalance = 0m;   // จ่ายเกิน = ครบแล้ว
 
-                    // Calculate remaining balance
-                    decimal remainingBalance = totalPriceWithCharges - totalPaid;
-
-                    // Check for pending product charges (for warning message)
-                    decimal pendingCharges = 0;
-                    try
-                    {
-                        var pendingParams = new System.Collections.Generic.Dictionary<string, object>
-                        {
-                            { "@reservationId", reservationId }
-                        };
-                        string pendingQuery = @"
-                            SELECT ISNULL(SUM(TotalAmount), 0) as PendingCharges
-                            FROM Reservation_Product_Charges
-                            WHERE Reservation_ID = @reservationId
-                            AND Status = 'PENDING'";
-                        DataTable dtPending = codeInstance.DatabaseQuerySafe(connectionString, pendingQuery, pendingParams);
-                        if (dtPending.Rows.Count > 0 && dtPending.Rows[0]["PendingCharges"] != DBNull.Value)
-                        {
-                            pendingCharges = Convert.ToDecimal(dtPending.Rows[0]["PendingCharges"]);
-                        }
-                    }
-                    catch
-                    {
-                        // Ignore if table doesn't exist
-                    }
+                    // สินค้าชาร์จเข้าห้องที่ยังค้าง (ใช้แสดงคำเตือน)
+                    decimal pendingCharges = bal.PendingCharges;
 
                     // Check for pending Room Service orders (not yet delivered)
                     decimal pendingRoomService = 0;

@@ -752,7 +752,7 @@
                             <ItemTemplate>
                                 <div class="price-total"><%# String.Format("{0:N0}", Eval("TotalPrice")) %></div>
                                 <div class="price-deposit">มัดจำ: <%# String.Format("{0:N0}", Eval("Deposit")) %></div>
-                                <div class="price-remain">ค้าง: <%# String.Format("{0:N0}", Convert.ToDecimal(Eval("TotalPrice")) - Convert.ToDecimal(Eval("Deposit") ?? 0)) %></div>
+                                <div class="price-remain">ค้าง: <%# String.Format("{0:N0}", Eval("BalDue")) %></div>
                             </ItemTemplate>
                         </asp:TemplateField>
 

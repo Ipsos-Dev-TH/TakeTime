@@ -414,6 +414,11 @@ namespace Take_Time_BangPhra
                   ORDER BY rpc.ID ASC",
                 new SqlParameter("@SelectedDate", Calendar1.SelectedDate.ToString("yyyy-MM-dd")));
 
+            // ยอดเงินของทุกการจองในวันที่เลือก — query เดียว (เดิม query ต่อแถว 4 ครั้ง)
+            Dictionary<int, ReservationBalance> balances = ReservationBalance.LoadMany(conn,
+                "@SelectedDate >= r.CheckinDate AND @SelectedDate < r.CheckoutDate",
+                new Dictionary<string, object> { { "@SelectedDate", Calendar1.SelectedDate.ToString("yyyy-MM-dd") } });
+
             // Add additional columns if they don't exist
             if (!dtReservation.Columns.Contains("AccomName"))
                 dtReservation.Columns.Add("AccomName");
@@ -478,90 +483,24 @@ namespace Take_Time_BangPhra
 
                 dtReservation.Rows[i]["Items"] = Items.Trim();
 
-                // Calculate remaining amount (Total Price + Product Charges - Total Paid)
+                // ยอดเงิน — สูตรกลาง ReservationBalance (ตรงกับตารางรายวัน/หน้ารายละเอียด/เช็คเอาท์)
+                // Channel Collect: ค่าห้องถือว่า OTA จ่ายแล้ว → คงเหลือเฉพาะค่าใช้จ่ายในห้องที่ยังค้าง
                 int reservationId = Convert.ToInt32(dtReservation.Rows[i]["ID"]);
-
-                // 1. Get base total price from Reservation table (same as Reservation_Confirmed and Checkout)
-                decimal baseTotalPrice = 0;
-                var priceParams = new Dictionary<string, object>
+                ReservationBalance bal;
+                if (!balances.TryGetValue(reservationId, out bal))
                 {
-                    { "@reservationId", reservationId }
-                };
-                DataTable dtReservationPrice = code2.DatabaseQuerySafe(conn,
-                    @"SELECT ISNULL(TotalPrice, 0) as TotalPrice
-                      FROM Reservation
-                      WHERE ID = @reservationId",
-                    priceParams);
-                if (dtReservationPrice.Rows.Count > 0 && dtReservationPrice.Rows[0]["TotalPrice"] != DBNull.Value)
-                {
-                    baseTotalPrice = Convert.ToDecimal(dtReservationPrice.Rows[0]["TotalPrice"]);
+                    decimal baseTotal = dtReservation.Rows[i]["TotalPrice"] != DBNull.Value ? Convert.ToDecimal(dtReservation.Rows[i]["TotalPrice"]) : 0m;
+                    decimal dep = dtReservation.Rows[i]["Deposit"] != DBNull.Value ? Convert.ToDecimal(dtReservation.Rows[i]["Deposit"]) : 0m;
+                    bal = ReservationBalance.Compute(reservationId, ReservationBalance.ModeNone, baseTotal, 0m, 0m, 0m, 0, dep);
                 }
 
-                // 2. Get product charges from Reservation_Product_Charges (same as Checkout page)
-                decimal productCharges = 0;
-                var chargesParams = new Dictionary<string, object>
-                {
-                    { "@reservationId", reservationId }
-                };
-                DataTable dtProductCharges2 = code2.DatabaseQuerySafe(conn,
-                    @"SELECT ISNULL(SUM(TotalAmount), 0) as TotalCharges
-                      FROM Reservation_Product_Charges
-                      WHERE Reservation_ID = @reservationId
-                      AND Status <> 'CANCELLED'",
-                    chargesParams);
-                if (dtProductCharges2.Rows.Count > 0 && dtProductCharges2.Rows[0]["TotalCharges"] != DBNull.Value)
-                {
-                    productCharges = Convert.ToDecimal(dtProductCharges2.Rows[0]["TotalCharges"]);
-                }
+                // 🔧 FIX: TotalPrice แสดงยอดรวมค่าใช้จ่ายในห้องแล้ว
+                dtReservation.Rows[i]["TotalPrice"] = bal.Total;
+                dtReservation.Rows[i]["TotalPriceWithCharges"] = bal.Total.ToString("N0");
 
-                // 3. Calculate total price with charges
-                decimal totalPrice = baseTotalPrice + productCharges;
-
-                // 🔧 FIX: Update TotalPrice column to show calculated value (includes ProductCharges)
-                dtReservation.Rows[i]["TotalPrice"] = totalPrice;
-                dtReservation.Rows[i]["TotalPriceWithCharges"] = totalPrice.ToString("N0");
-
-                // 4. Get total paid from Payment_History (same as Checkout page)
-                decimal totalPaid = 0;
-                var paidParams = new Dictionary<string, object>
-                {
-                    { "@reservationId", reservationId }
-                };
-                DataTable dtPaid = code2.DatabaseQuerySafe(conn,
-                    @"SELECT ISNULL(SUM(PaymentAmount), 0) as TotalPaid
-                      FROM Payment_History
-                      WHERE Reservation_ID = @reservationId
-                      AND Status = 'COMPLETED'",
-                    paidParams);
-                if (dtPaid.Rows.Count > 0 && dtPaid.Rows[0]["TotalPaid"] != DBNull.Value)
-                {
-                    totalPaid = Convert.ToDecimal(dtPaid.Rows[0]["TotalPaid"]);
-                }
-
-                // 6. If no payment history, fallback to Deposit column (same as Checkout page)
-                if (totalPaid == 0)
-                {
-                    var depositParams = new Dictionary<string, object>
-                    {
-                        { "@reservationId", reservationId }
-                    };
-                    DataTable dtDeposit = code2.DatabaseQuerySafe(conn,
-                        @"SELECT ISNULL(Deposit, 0) as Deposit
-                          FROM Reservation
-                          WHERE ID = @reservationId",
-                        depositParams);
-                    if (dtDeposit.Rows.Count > 0 && dtDeposit.Rows[0]["Deposit"] != DBNull.Value)
-                    {
-                        totalPaid = Convert.ToDecimal(dtDeposit.Rows[0]["Deposit"]);
-                    }
-                }
-
-                // 7. Calculate remaining balance
-                decimal remainingBalance = totalPrice - totalPaid;
-
-                // 🔧 FIX: Update Deposit column to show actual total paid from Payment_History
-                dtReservation.Rows[i]["Deposit"] = totalPaid;
-                dtReservation.Rows[i]["Remain"] = remainingBalance.ToString("N0");
+                // 🔧 FIX: Deposit column แสดง "ยอดที่รับแล้ว" (Channel Collect = ยอดที่ OTA เก็บไป)
+                dtReservation.Rows[i]["Deposit"] = bal.Received;
+                dtReservation.Rows[i]["Remain"] = bal.Due.ToString("N0");
 
                 // Get reservation count (include checked-in, checked-out, and completed reservations)
                 string mobilePhone = dtReservation.Rows[i]["Customer_MobilePhone"].ToString();

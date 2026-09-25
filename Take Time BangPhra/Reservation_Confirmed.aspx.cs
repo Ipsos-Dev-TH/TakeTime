@@ -24,6 +24,9 @@ namespace Take_Time_BangPhra
             {
                 string id = Request.QueryString["id"];
                 string check = Request.QueryString["check"];
+                // เบอร์ต่างประเทศ "+852…" ใน query string ที่ไม่ได้ encode → '+' กลายเป็นช่องว่าง
+                // (แบบเดียวกับ Reserve.aspx) คืนเป็น '+' ก่อนใช้ค้นหา ไม่งั้นหาการจองไม่เจอ
+                if (!string.IsNullOrEmpty(check)) check = check.Replace(" ", "+");
 
                 var accomParams = new Dictionary<string, object> { { "@ReservationID", id }, { "@CustomerPhone", check } };
                 DataTable dtReservationAccommodation = code2.DatabaseQuerySafe(conn,
@@ -135,61 +138,23 @@ namespace Take_Time_BangPhra
                 Label9.Text = string.IsNullOrEmpty(Items) ? "ไม่มีรายการ" : Items;
 
                 // Set payment information
-                // 🔧 Calculate total price including product charges
-
-                // 1. Get base total price from Reservation
-                decimal baseTotalPrice = 0;
-                var priceParams = new Dictionary<string, object> { { "@ReservationID", id } };
-                DataTable dtReservationPrice = code2.DatabaseQuerySafe(conn,
-                    "SELECT TotalPrice FROM Reservation WHERE ID = @ReservationID", priceParams);
-                if (dtReservationPrice.Rows.Count > 0 && dtReservationPrice.Rows[0]["TotalPrice"] != DBNull.Value)
+                // 🔧 ยอดเงิน — สูตรกลาง ReservationBalance (ตรงกับตารางรายวัน/หน้ารายการจอง/เช็คเอาท์)
+                // ค่าห้อง + ค่าใช้จ่ายในห้อง, ยอดรับแล้ว = Payment_History (ไม่มีแถว → Deposit),
+                // Channel Collect: ค่าห้องถือว่า OTA จ่ายแล้ว
+                int resIdNum;
+                int.TryParse(id, out resIdNum);
+                ReservationBalance bal = resIdNum > 0 ? ReservationBalance.Load(conn, resIdNum) : null;
+                if (bal == null)
                 {
-                    baseTotalPrice = Convert.ToDecimal(dtReservationPrice.Rows[0]["TotalPrice"]);
+                    DataRow r0 = dtReservationAccommodation.Rows[0];
+                    decimal baseTotal = r0["TotalPrice"] != DBNull.Value ? Convert.ToDecimal(r0["TotalPrice"]) : 0m;
+                    decimal dep = r0["Deposit"] != DBNull.Value ? Convert.ToDecimal(r0["Deposit"]) : 0m;
+                    bal = ReservationBalance.Compute(resIdNum, ReservationBalance.ModeNone, baseTotal, 0m, 0m, 0m, 0, dep);
                 }
 
-                // 2. Get product charges from Reservation_Product_Charges
-                decimal productCharges = 0;
-                var charges2Params = new Dictionary<string, object> { { "@ReservationID", id } };
-                DataTable dtProductCharges2 = code2.DatabaseQuerySafe(conn,
-                    @"SELECT ISNULL(SUM(TotalAmount), 0) as TotalCharges
-                       FROM Reservation_Product_Charges
-                       WHERE Reservation_ID = @ReservationID
-                       AND Status <> 'CANCELLED'", charges2Params);
-                if (dtProductCharges2.Rows.Count > 0 && dtProductCharges2.Rows[0]["TotalCharges"] != DBNull.Value)
-                {
-                    productCharges = Convert.ToDecimal(dtProductCharges2.Rows[0]["TotalCharges"]);
-                }
-
-                // 3. Calculate total price with charges
-                decimal totalPrice = baseTotalPrice + productCharges;
-
-                // 5. Get total paid from Payment_History
-                decimal totalPaid = 0;
-                var paidParams = new Dictionary<string, object> { { "@ReservationID", id } };
-                DataTable dtPaid = code2.DatabaseQuerySafe(conn,
-                    @"SELECT ISNULL(SUM(PaymentAmount), 0) as TotalPaid
-                       FROM Payment_History
-                       WHERE Reservation_ID = @ReservationID
-                       AND Status = 'COMPLETED'", paidParams);
-                if (dtPaid.Rows.Count > 0 && dtPaid.Rows[0]["TotalPaid"] != DBNull.Value)
-                {
-                    totalPaid = Convert.ToDecimal(dtPaid.Rows[0]["TotalPaid"]);
-                }
-
-                // 6. If no payment history, fallback to Deposit column
-                if (totalPaid == 0)
-                {
-                    var depositParams = new Dictionary<string, object> { { "@ReservationID", id } };
-                    DataTable dtDeposit = code2.DatabaseQuerySafe(conn,
-                        "SELECT ISNULL(Deposit, 0) as Deposit FROM Reservation WHERE ID = @ReservationID", depositParams);
-                    if (dtDeposit.Rows.Count > 0 && dtDeposit.Rows[0]["Deposit"] != DBNull.Value)
-                    {
-                        totalPaid = Convert.ToDecimal(dtDeposit.Rows[0]["Deposit"]);
-                    }
-                }
-
-                // 7. Calculate remaining balance
-                decimal remainingBalance = totalPrice - totalPaid;
+                decimal totalPrice = bal.Total;
+                decimal totalPaid = bal.Received;
+                decimal remainingBalance = bal.Due;
 
                 Label11.Text = totalPrice.ToString("n0");
                 Label12.Text = totalPaid.ToString("n0");
