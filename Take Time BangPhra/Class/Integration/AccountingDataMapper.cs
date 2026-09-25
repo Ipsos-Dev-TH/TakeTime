@@ -3365,6 +3365,60 @@ namespace Take_Time_BangPhra.Integration
             };
         }
 
+        /// <summary>
+        /// "ใบรับรองแทนใบเสร็จรับเงิน" (CertificateInLieu, DocumentType=15) ผ่าน company /document.
+        /// NextAcc (DocumentService.AutoPostToJournalAsync, DocumentService.cs:15058-15096):
+        ///   Dr ค่าใช้จ่ายราย line (VAT ถ้ามีรวมเป็นต้นทุน — เคลมไม่ได้ §82/4) / Cr แหล่งเงิน
+        ///   (PaymentAccountId → BankAccountId → 111; :14459-14474) + Cr WHT ค้างจ่ายถ้ามี.
+        /// เป็นเงินสดเสมอ (PaymentType=Cash, :1331-1336) → ไม่เปิดเจ้าหนี้/ไม่ค้างชำระ.
+        /// reuse การสร้างบรรทัด/บัญชี/แหล่งเงินจาก MapVoucherToDocument (mapping เดียวกับใบสำคัญจ่าย)
+        /// ผู้เรียกต้องรวม VAT เข้ายอดบรรทัดแล้ว (ไม่มีภาษีซื้อให้เคลม) — ที่นี่บังคับ VatRate=0 อีกชั้น.
+        /// </summary>
+        public CreateDocumentRequest MapVoucherToCertificateInLieu(
+            int voucherId, string expenseCategory, decimal amount, string paymentMethod,
+            DateTime voucherDate, string description, string payeeName, Guid contactId,
+            CertificateInLieuInfo cil,
+            decimal whtRate = 0, decimal whtAmount = 0,
+            string paymentAccountId = null, string expenseAccountId = null,
+            List<ExpenseLine> expenseLines = null, string documentNumber = null)
+        {
+            var doc = MapVoucherToDocument(voucherId, expenseCategory, amount, paymentMethod,
+                voucherDate, description, payeeName, contactId,
+                false, whtRate, whtAmount, paymentAccountId, expenseAccountId, expenseLines, documentNumber, 0m);
+
+            cil = cil ?? new CertificateInLieuInfo();
+            doc.DocumentType = NexaaccDocumentType.CertificateInLieu;
+            doc.PricesIncludeVat = false;
+            doc.SupplierInvoiceNumber = null;   // ไม่มีเอกสารของผู้รับเงิน — นี่คือเหตุผลที่ต้องออกใบรับรอง
+            foreach (var l in doc.Lines)
+            {
+                l.VatRate = 0;
+                l.IsVatClaimable = false;
+            }
+
+            doc.CertificateReason = cil.Reason;
+            doc.CertifierName = cil.CertifierName;
+            doc.CertifierPosition = string.IsNullOrWhiteSpace(cil.CertifierPosition) ? null : cil.CertifierPosition;
+            doc.WitnessName = string.IsNullOrWhiteSpace(cil.WitnessName) ? null : cil.WitnessName;
+            doc.WitnessPosition = string.IsNullOrWhiteSpace(cil.WitnessPosition) ? null : cil.WitnessPosition;
+            doc.PaymentDate = voucherDate;
+
+            // ผู้รับเงินจริง (เช่น คนขับแท็กซี่) — แบบฟอร์มสรรพากรระบุผู้รับเงินในรายละเอียดรายจ่าย
+            // contact ของเอกสารยังเป็นผู้ขายที่เลือกในหน้า (อาจเป็นผู้ขายกลาง) → ชื่อ/ที่อยู่จริงลงหมายเหตุ
+            string refStr = !string.IsNullOrEmpty(documentNumber) ? documentNumber : $"PV-{voucherId}";
+            var notes = new System.Text.StringBuilder();
+            notes.Append($"ใบรับรองแทนใบเสร็จรับเงิน {refStr} - {description}");
+            string payee = !string.IsNullOrWhiteSpace(cil.PayeeName) ? cil.PayeeName.Trim() : payeeName;
+            if (!string.IsNullOrWhiteSpace(payee))
+            {
+                notes.Append($" | ผู้รับเงิน: {payee}");
+                if (!string.IsNullOrWhiteSpace(cil.PayeeAddress))
+                    notes.Append($" ที่อยู่: {cil.PayeeAddress.Trim()}");
+            }
+            doc.Notes = notes.ToString();
+            return doc;
+        }
+
 
         // ══════════════════════════════════════════════
         // Integration Credit Note (ใบลดหนี้)

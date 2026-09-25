@@ -103,6 +103,9 @@ namespace Take_Time_BangPhra.Account.Report
                 LoadNexaaccPaidHowOptions();
                 LoadNexaaccChargeOptions();
 
+                // ใบรับรองแทนใบเสร็จรับเงิน — ค่าตั้งต้นผู้รับรอง (ผู้ใช้ที่ login) / พยาน (กรรมการ)
+                InitCertInLieuDefaults();
+
                 string command = Request.QueryString["command"];
                 string uid = Request.QueryString["uid"];
                 if (command == "edit")
@@ -177,6 +180,9 @@ namespace Take_Time_BangPhra.Account.Report
                     {
                         chkIsCredit.Checked = Convert.ToBoolean(dtPayment.Rows[0]["IsCredit"]);
                     }
+
+                    // ใบรับรองแทนใบเสร็จรับเงิน (ถ้าใบนี้เคยบันทึกไว้) — ต้องโหลดก่อน LoadNextAccReference (ใช้เลือกลิงก์)
+                    LoadCertInLieu(dtPayment.Rows[0]);
 
                     // Load NextAcc document reference
                     LoadNextAccReference(id);
@@ -561,6 +567,18 @@ namespace Take_Time_BangPhra.Account.Report
             // Store original UID for edit mode - to preserve file attachment names
             string originalUid = uid;
 
+            // ใบรับรองแทนใบเสร็จรับเงิน — ตรวจก่อนขั้น void/ลบใบเดิม (โหมดแก้ไข) กันข้อมูลหายเมื่อกรอกไม่ครบ
+            bool isCertInLieu = chkCertInLieu.Checked;
+            if (isCertInLieu)
+            {
+                string cilErr = ValidateCertInLieu();
+                if (cilErr != null)
+                {
+                    ClientScript.RegisterStartupScript(this.GetType(), "cilvalidate", "alert('" + cilErr + "');", true);
+                    return;
+                }
+            }
+
             if (command == "edit")
             {
                 try
@@ -703,7 +721,8 @@ namespace Take_Time_BangPhra.Account.Report
                 decimal whtAmount = 0;
                 decimal.TryParse(txtWHTAmount.Text, out whtAmount);
 
-                bool isCredit = chkIsCredit.Checked;
+                // ใบรับรองแทนใบเสร็จ = จ่ายเงินแล้วเสมอ (ไม่มีเครดิต)
+                bool isCredit = chkIsCredit.Checked && !isCertInLieu;
 
                 var paymentInsertParams = new Dictionary<string, object>
                 {
@@ -738,6 +757,9 @@ namespace Take_Time_BangPhra.Account.Report
                         "VALUES (@ID,@VendorID,@CreatedDate,@TotalAmount,@VatTypeID,@Vat,@TotalAmountExcludeVat,@PaidHow,@PaidType,N'Normal',@CreatedByID,@WHTRate,@WHTAmount,@IsCredit)",
                         paymentInsertParams);
                 }
+
+                if (isCertInLieu)
+                    SaveCertInLieuColumns(docNum);
 
                 // SECURE: Insert payment details with parameterized queries (including per-line category)
                 for(int i = 0;i<dtDetail.Rows.Count;i++)
@@ -1134,7 +1156,8 @@ namespace Take_Time_BangPhra.Account.Report
                         // ไม่เคลมภาษีซื้อ (§82/5): รวม VAT เข้าค่าใช้จ่าย — กระจาย VAT เข้ายอดแต่ละบรรทัด
                         // แล้วส่ง hasInputVat=false/vatAmount=0 → NextAcc Dr ค่าใช้จ่าย = net+VAT ไม่แยกภาษีซื้อ
                         // (ได้ผลทุก endpoint รวม integration ที่ไม่มี IsVatClaimable per line). WHT คิดบนฐานก่อน VAT คงเดิม
-                        bool noClaimVat = ddlVatClaim.SelectedValue == "0";
+                        // ใบรับรองแทนใบเสร็จ: ไม่มีใบกำกับภาษี → เคลมภาษีซื้อไม่ได้เสมอ (§82/4) รวม VAT เข้าค่าใช้จ่าย
+                        bool noClaimVat = ddlVatClaim.SelectedValue == "0" || isCertInLieu;
                         if (noClaimVat && vatAmt > 0 && expenseLines.Count > 0)
                         {
                             decimal subtotalForVat = 0m;
@@ -1170,7 +1193,8 @@ namespace Take_Time_BangPhra.Account.Report
                             expenseLines: expenseLines,
                             isCredit: isCredit, autoRecordPayment: paidHowIsCashOrBank && !isCredit,
                             supplierExternalId: vendorExternalId, supplierTaxId: vendorTaxId,
-                            vatAmount: vatAmt);
+                            vatAmount: vatAmt,
+                            certificateInLieu: isCertInLieu ? BuildCertInLieuInfo() : null);
                         syncStatus = syncQid > 0 ? "queued" : "err";
 
                         // Asset reclassification: DR Fixed Asset / CR Expense
@@ -1527,7 +1551,8 @@ namespace Take_Time_BangPhra.Account.Report
                         try
                         {
                             var sync = new Integration.AccountingSyncService(conn);
-                            string url = sync.BuildNexaaccDocumentUrl(nexaaccResponseId, "EXPENSE");
+                            string url = sync.BuildNexaaccDocumentUrl(nexaaccResponseId,
+                                chkCertInLieu.Checked ? "CERTIFICATE_IN_LIEU" : "EXPENSE");
                             if (!string.IsNullOrEmpty(url))
                             {
                                 lnkNextAccDoc.NavigateUrl = url;
@@ -1537,11 +1562,193 @@ namespace Take_Time_BangPhra.Account.Report
                         catch { }
                     }
                 }
+
+                // ปุ่มดู PDF ทางการจาก NextAcc (ใบสำคัญจ่าย / ใบรับรองแทนใบเสร็จ) — ใช้ตัวดึง+cache เดียวกับหน้า CheckPayment
+                bool hasNextAccDoc = !string.IsNullOrEmpty(nexaaccResponseId) && !nexaaccResponseId.StartsWith("SKIPPED");
+                lnkNextAccPdf.Visible = pnlNextAccRef.Visible && hasNextAccDoc;
+                if (pnlNextAccRef.Visible && chkCertInLieu.Checked)
+                    lblNextAccSyncStatus.Text = (lblNextAccSyncStatus.Text + " ใบรับรองแทนใบเสร็จรับเงิน").Trim();
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"LoadNextAccReference Error: {ex.Message}");
             }
+        }
+
+        // ──────────────────────────────────────────────
+        // ใบรับรองแทนใบเสร็จรับเงิน (ผู้รับเงินออกใบเสร็จไม่ได้ — แท็กซี่/แผงลอย/ลูกจ้างรายวัน)
+        // เลือกแล้ว: ใบนี้ sync เป็นเอกสาร NextAcc type 15 "แทน" ใบสำคัญจ่าย/ค่าใช้จ่าย (ไม่ลง GL ซ้ำ),
+        // จ่ายเงินสดเสมอ (ไม่มีเครดิต), VAT รวมเข้าค่าใช้จ่าย (ไม่มีใบกำกับภาษี)
+        // ──────────────────────────────────────────────
+
+        protected void chkCertInLieu_CheckedChanged(object sender, EventArgs e)
+        {
+            ApplyCertInLieuMode();
+        }
+
+        private void ApplyCertInLieuMode()
+        {
+            bool on = chkCertInLieu.Checked;
+            pnlCertInLieu.Visible = on;
+            if (on)
+            {
+                chkIsCredit.Checked = false;
+                if (ddlVatClaim.Items.FindByValue("0") != null)
+                    ddlVatClaim.SelectedValue = "0";
+                if (string.IsNullOrWhiteSpace(txtCilCertifierName.Text) || string.IsNullOrWhiteSpace(txtCilCertifierPosition.Text))
+                    InitCertInLieuDefaults();
+            }
+            chkIsCredit.Enabled = !on;
+            ddlVatClaim.Enabled = !on;
+        }
+
+        /// <summary>ผู้รับรอง = ผู้ใช้ที่ login (+ตำแหน่งจาก Employee_Salary / ค่าตั้ง Nexaacc_Cil_Certifier_Position),
+        /// พยาน/ผู้อนุมัติ = กรรมการ (Admin.IsCEO) — เติมเฉพาะช่องที่ยังว่าง</summary>
+        private void InitCertInLieuDefaults()
+        {
+            try
+            {
+                string adminId = Session["UserID"]?.ToString();
+                if (string.IsNullOrWhiteSpace(txtCilCertifierName.Text) && !string.IsNullOrEmpty(adminId))
+                {
+                    DataTable dtMe = code.DatabaseQuerySafe(conn,
+                        "SELECT TOP 1 FirstName, LastName FROM Admin WHERE ID = @id",
+                        new Dictionary<string, object> { { "@id", adminId } });
+                    if (dtMe != null && dtMe.Rows.Count > 0)
+                        txtCilCertifierName.Text = (dtMe.Rows[0]["FirstName"] + " " + dtMe.Rows[0]["LastName"]).Trim();
+                }
+                if (string.IsNullOrWhiteSpace(txtCilCertifierPosition.Text))
+                    txtCilCertifierPosition.Text = new Integration.AccountingSyncService(conn).GetCertificateInLieuDefaultPosition(adminId);
+                if (string.IsNullOrWhiteSpace(txtCilWitnessName.Text))
+                {
+                    DataTable dtCeo = code.DatabaseQuery(conn, "SELECT TOP 1 FirstName, LastName FROM Admin WHERE IsCEO = 'True'");
+                    if (dtCeo != null && dtCeo.Rows.Count > 0)
+                        txtCilWitnessName.Text = (dtCeo.Rows[0]["FirstName"] + " " + dtCeo.Rows[0]["LastName"]).Trim();
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"InitCertInLieuDefaults Error: {ex.Message}");
+            }
+        }
+
+        /// <summary>โหลดข้อมูลใบรับรองที่บันทึกไว้ (โหมดแก้ไข) — ไม่มีคอลัมน์ (ยังไม่รัน PHASE19_19) = ข้าม</summary>
+        private void LoadCertInLieu(DataRow row)
+        {
+            try
+            {
+                if (row == null || !row.Table.Columns.Contains("Is_Certificate_In_Lieu")
+                    || row["Is_Certificate_In_Lieu"] == DBNull.Value
+                    || !Convert.ToBoolean(row["Is_Certificate_In_Lieu"]))
+                    return;
+
+                chkCertInLieu.Checked = true;
+                string C(string col) => row.Table.Columns.Contains(col) && row[col] != DBNull.Value ? row[col].ToString() : "";
+                txtCilReason.Text = C("Cil_Reason");
+                txtCilPayeeName.Text = C("Cil_Payee_Name");
+                txtCilPayeeAddress.Text = C("Cil_Payee_Address");
+                if (C("Cil_Certifier_Name").Length > 0) txtCilCertifierName.Text = C("Cil_Certifier_Name");
+                if (C("Cil_Certifier_Position").Length > 0) txtCilCertifierPosition.Text = C("Cil_Certifier_Position");
+                if (C("Cil_Witness_Name").Length > 0) txtCilWitnessName.Text = C("Cil_Witness_Name");
+                txtCilWitnessPosition.Text = C("Cil_Witness_Position");
+                ApplyCertInLieuMode();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"LoadCertInLieu Error: {ex.Message}");
+            }
+        }
+
+        /// <summary>คืนข้อความ error (ไม่มี ' ) หรือ null ถ้าผ่าน</summary>
+        private string ValidateCertInLieu()
+        {
+            if (string.IsNullOrWhiteSpace(txtCilReason.Text))
+                return "กรุณาระบุเหตุผลที่ไม่ได้รับใบเสร็จ (ใบรับรองแทนใบเสร็จรับเงิน)";
+            if (string.IsNullOrWhiteSpace(txtCilCertifierName.Text))
+                return "กรุณาระบุชื่อผู้รับรอง (ใบรับรองแทนใบเสร็จรับเงิน)";
+            if ((DropDownList3.SelectedItem?.Text ?? "").Contains("เงินเดือน"))
+                return "ใบจ่ายเงินเดือนออกเป็นใบรับรองแทนใบเสร็จไม่ได้ — กรุณาเอาเครื่องหมายออก";
+            try
+            {
+                var cfg = new Integration.AccountingConfig(conn);
+                if (cfg.IsConfigured && cfg.Enabled && cfg.IsVoucherDocumentMode && !cfg.CanUseCompanyEndpoints)
+                    return "ออกใบรับรองแทนใบเสร็จใน NextAcc ต้องเปิด company endpoint (Nexaacc_Company_Endpoints=1 และตั้ง CompanyId) — ติดต่อผู้ดูแลระบบ";
+            }
+            catch { }
+            return null;
+        }
+
+        private Integration.CertificateInLieuInfo BuildCertInLieuInfo()
+        {
+            return new Integration.CertificateInLieuInfo
+            {
+                Reason = txtCilReason.Text.Trim(),
+                PayeeName = txtCilPayeeName.Text.Trim(),
+                PayeeAddress = txtCilPayeeAddress.Text.Trim(),
+                CertifierName = txtCilCertifierName.Text.Trim(),
+                CertifierPosition = txtCilCertifierPosition.Text.Trim(),
+                WitnessName = txtCilWitnessName.Text.Trim(),
+                WitnessPosition = txtCilWitnessPosition.Text.Trim()
+            };
+        }
+
+        /// <summary>เก็บข้อมูลใบรับรองลง Account_Payment (migration PHASE19_19). ยังไม่รัน migration → log แล้วไปต่อ
+        /// (การ sync ใช้ข้อมูลจาก payload คิว ไม่ได้อ่านคอลัมน์เหล่านี้)</summary>
+        private void SaveCertInLieuColumns(string docNum)
+        {
+            try
+            {
+                var info = BuildCertInLieuInfo();
+                code.DatabaseInsertSafe(conn,
+                    @"UPDATE [dbo].[Account_Payment]
+                      SET Is_Certificate_In_Lieu = 1,
+                          Cil_Reason = @Reason, Cil_Payee_Name = @PayeeName, Cil_Payee_Address = @PayeeAddress,
+                          Cil_Certifier_Name = @CertName, Cil_Certifier_Position = @CertPos,
+                          Cil_Witness_Name = @WitName, Cil_Witness_Position = @WitPos
+                      WHERE ID = @ID",
+                    new Dictionary<string, object>
+                    {
+                        { "@Reason", info.Reason },
+                        { "@PayeeName", string.IsNullOrEmpty(info.PayeeName) ? (object)DBNull.Value : info.PayeeName },
+                        { "@PayeeAddress", string.IsNullOrEmpty(info.PayeeAddress) ? (object)DBNull.Value : info.PayeeAddress },
+                        { "@CertName", info.CertifierName },
+                        { "@CertPos", string.IsNullOrEmpty(info.CertifierPosition) ? (object)DBNull.Value : info.CertifierPosition },
+                        { "@WitName", string.IsNullOrEmpty(info.WitnessName) ? (object)DBNull.Value : info.WitnessName },
+                        { "@WitPos", string.IsNullOrEmpty(info.WitnessPosition) ? (object)DBNull.Value : info.WitnessPosition },
+                        { "@ID", docNum }
+                    });
+            }
+            catch (Exception ex)
+            {
+                try { new code().Logs(conn, "Accounting Sync", $"SaveCertInLieuColumns: doc={docNum} {ex.Message} (รัน PHASE19_Migration_19 แล้วหรือยัง?)", "SYSTEM"); } catch { }
+            }
+        }
+
+        protected void lnkNextAccPdf_Click(object sender, EventArgs e)
+        {
+            string docNum = ViewState["PaymentID"]?.ToString();
+            if (string.IsNullOrEmpty(docNum)) return;
+            string msg;
+            try
+            {
+                Server.ScriptTimeout = 300;
+                var res = System.Threading.Tasks.Task.Run(() =>
+                    new Integration.AccountingSyncService(conn).DownloadVoucherDocumentFromNextAccAsync(docNum, false, false)
+                ).GetAwaiter().GetResult();
+                if (res != null && res.Found && !string.IsNullOrEmpty(res.PdfRelativeUrl))
+                {
+                    Response.Redirect(res.PdfRelativeUrl, false);
+                    Context.ApplicationInstance.CompleteRequest();
+                    return;
+                }
+                msg = res?.Message ?? "ยังไม่พบเอกสารบน NextAcc";
+            }
+            catch (Exception ex)
+            {
+                msg = "ดึง PDF จาก NextAcc ไม่สำเร็จ: " + ex.Message;
+            }
+            string safe = (msg ?? "").Replace("\\", "\\\\").Replace("'", "\\'").Replace("\r", " ").Replace("\n", " ");
+            ClientScript.RegisterStartupScript(this.GetType(), "nextaccpdf", "alert('" + safe + "');", true);
         }
 
         #region Asset Management Integration

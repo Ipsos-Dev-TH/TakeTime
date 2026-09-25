@@ -168,7 +168,8 @@ namespace Take_Time_BangPhra.Integration
             List<Dictionary<string, object>> expenseLines = null,
             bool isCredit = false, bool autoRecordPayment = false,
             string supplierExternalId = null, string supplierTaxId = null,
-            decimal vatAmount = 0)
+            decimal vatAmount = 0,
+            CertificateInLieuInfo certificateInLieu = null)
         {
             if (!_config.IsConfigured) return -1;
             if (amount <= 0) return -1;
@@ -201,6 +202,9 @@ namespace Take_Time_BangPhra.Integration
                 payload["supplierExternalId"] = supplierExternalId;
             if (!string.IsNullOrEmpty(supplierTaxId))
                 payload["supplierTaxId"] = supplierTaxId;
+            // ใบรับรองแทนใบเสร็จรับเงิน — ProcessVoucherJournal แยกไปออกเอกสาร NextAcc type 15 (ไม่ออก PV/Expense ซ้ำ)
+            if (certificateInLieu != null)
+                WriteCertificateInLieuPayload(payload, certificateInLieu);
 
             if (!string.IsNullOrEmpty(documentNumber))
             {
@@ -3631,6 +3635,17 @@ namespace Take_Time_BangPhra.Integration
             bool isSalaryVoucher = (expenseCategory ?? "").Contains("เงินเดือน")
                 || (expenseCategory ?? "").Equals("salary", StringComparison.OrdinalIgnoreCase);
 
+            // ── ใบรับรองแทนใบเสร็จรับเงิน (NextAcc type 15) — เส้นแยกเด็ดขาด: ออกเอกสารนี้ "แทน" PV/Expense
+            //    ของรายการเดียวกัน (GL ลงครั้งเดียว). JOURNAL mode ไม่มีเอกสาร → ตกลงเส้น JE ปกติด้านล่าง
+            //    (Dr ค่าใช้จ่าย / Cr แหล่งเงิน — หน้าเว็บรวม VAT เข้ายอดบรรทัดแล้ว ไม่มีภาษีซื้อ)
+            var certificateInLieu = ReadCertificateInLieuPayload(p);
+            if (certificateInLieu != null && _config.IsVoucherDocumentMode)
+            {
+                return await ProcessCertificateInLieu(certificateInLieu, voucherId, expenseCategory, amount,
+                    paymentMethod, voucherDate, description, payeeName, whtRate, whtAmount, docNumber,
+                    paymentAccountId, expenseAccountId, expenseLines, supplierContact, attachments, isSalaryVoucher);
+            }
+
             string nexaaccId = null;
             string nexaaccDocNumber = null;
             string nexaaccDocType = null;
@@ -4912,6 +4927,147 @@ namespace Take_Time_BangPhra.Integration
             _code.Logs(_connectionString, "AccountingSync",
                 $"SettleVoucherDoc: เสร็จ doc={documentNumber} docId={docId} (ใบสำคัญจ่าย company endpoint)", "SYSTEM");
             return docId;
+        }
+
+        // ──────────────────────────────────────────────
+        // ใบรับรองแทนใบเสร็จรับเงิน (CertificateInLieu, NextAcc DocumentType=15) — จ่ายให้ผู้ที่ออกใบเสร็จไม่ได้
+        //   company POST /api/companies/{cid}/document (DocumentController.cs:353) + approve (:641)
+        //   GL (DocumentService.cs:15058-15096): Dr ค่าใช้จ่ายราย line (VAT รวมเป็นต้นทุน) / Cr แหล่งเงิน
+        //   (PaymentAccountId) + Cr WHT — เงินสดเสมอ ไม่เปิดเจ้าหนี้ (:1331-1336, :1596)
+        //   ไม่ใช้ POST /api/integration/certificates-in-lieu เพราะเส้นนั้น Cr เจ้าหนี้ 21220 + BalanceDue เต็ม
+        //   (IntegrationService.cs:3958-3985 → :2379-2456) = หนี้ค้างที่ไม่มีใครตัด และไม่มีช่องลายเซ็นผู้จัดทำ
+        //   (IntegrationDtos.cs:287-301). idempotent + void ใช้ marker/คิวเดียวกับใบสำคัญจ่าย
+        //   (Account_Payment.Nexaacc_Voucher_Doc_Marker, VOID_VOUCHER → /integration/documents/void by DocumentId
+        //   IntegrationService.cs:4288-4323 ซึ่ง void ได้ทุกชนิดเอกสาร)
+        // ──────────────────────────────────────────────
+
+        private static void WriteCertificateInLieuPayload(Dictionary<string, object> payload, CertificateInLieuInfo cil)
+        {
+            payload["certificateInLieu"] = true;
+            payload["cilReason"] = cil.Reason ?? "";
+            payload["cilPayeeName"] = cil.PayeeName ?? "";
+            payload["cilPayeeAddress"] = cil.PayeeAddress ?? "";
+            payload["cilCertifierName"] = cil.CertifierName ?? "";
+            payload["cilCertifierPosition"] = cil.CertifierPosition ?? "";
+            payload["cilWitnessName"] = cil.WitnessName ?? "";
+            payload["cilWitnessPosition"] = cil.WitnessPosition ?? "";
+        }
+
+        /// <summary>คืน null ถ้า payload ไม่ใช่ใบรับรองแทนใบเสร็จ</summary>
+        private static CertificateInLieuInfo ReadCertificateInLieuPayload(Dictionary<string, object> p)
+        {
+            if (p == null || !p.ContainsKey("certificateInLieu") || p["certificateInLieu"] == null) return null;
+            bool on;
+            try { on = Convert.ToBoolean(p["certificateInLieu"]); } catch { on = false; }
+            if (!on) return null;
+            string S(string k) => p.ContainsKey(k) && p[k] != null ? p[k].ToString().Trim() : "";
+            return new CertificateInLieuInfo
+            {
+                Reason = S("cilReason"),
+                PayeeName = S("cilPayeeName"),
+                PayeeAddress = S("cilPayeeAddress"),
+                CertifierName = S("cilCertifierName"),
+                CertifierPosition = S("cilCertifierPosition"),
+                WitnessName = S("cilWitnessName"),
+                WitnessPosition = S("cilWitnessPosition")
+            };
+        }
+
+        private async Task<string> ProcessCertificateInLieu(CertificateInLieuInfo cil,
+            int voucherId, string expenseCategory, decimal amount, string paymentMethod, DateTime voucherDate,
+            string description, string payeeName, decimal whtRate, decimal whtAmount, string docNumber,
+            string paymentAccountId, string expenseAccountId, List<ExpenseLine> expenseLines,
+            ContactInfo supplierContact, List<IntegrationAttachment> attachments, bool isSalaryVoucher)
+        {
+            // ข้อมูลผิด = retry ไม่ช่วย → ArgumentException (คิวไม่เผา retry)
+            if (isSalaryVoucher)
+                throw new ArgumentException($"ใบรับรองแทนใบเสร็จรับเงิน doc={docNumber}: ใช้กับเงินเดือนไม่ได้ — ใบจ่ายเงินเดือนต้องออกเป็นใบสำคัญจ่ายปกติ");
+            if (string.IsNullOrWhiteSpace(cil.Reason) || string.IsNullOrWhiteSpace(cil.CertifierName))
+                throw new ArgumentException($"ใบรับรองแทนใบเสร็จรับเงิน doc={docNumber}: ต้องระบุเหตุผลที่ไม่ได้รับใบเสร็จ และชื่อผู้รับรอง (NextAcc บังคับ)");
+            if (!_config.CanUseCompanyEndpoints)
+                throw new ArgumentException($"ใบรับรองแทนใบเสร็จรับเงิน doc={docNumber}: ต้องเปิดใช้ company endpoint ของ NextAcc " +
+                    "(ตั้ง CompanyId + Nexaacc_Company_Endpoints=1) — เส้น /integration/certificates-in-lieu ลงเป็นเจ้าหนี้ค้าง ไม่ใช่การจ่ายเงิน จึงไม่ใช้");
+            if (supplierContact?.NexaaccContactId == null)
+                throw new InvalidOperationException($"ใบรับรองแทนใบเสร็จรับเงิน doc={docNumber}: ผูกผู้รับเงิน '{payeeName}' เป็นผู้ติดต่อ (ผู้จำหน่าย) ใน NextAcc ไม่สำเร็จ — ตรวจ log EnsureSupplierContactAsync แล้วกด Retry");
+
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ProcessCertificateInLieu: doc={docNumber} amount={amount} payee={payeeName} realPayee='{cil.PayeeName}' certifier='{cil.CertifierName}' witness='{cil.WitnessName}'",
+                "SYSTEM");
+
+            var doc = _mapper.MapVoucherToCertificateInLieu(voucherId, expenseCategory, amount, paymentMethod,
+                voucherDate, description, payeeName, supplierContact.NexaaccContactId.Value, cil,
+                whtRate, whtAmount, paymentAccountId, expenseAccountId, expenseLines, docNumber);
+            ApplyCertificateInLieuPreparer(doc, docNumber);
+
+            Guid docId = await SettleVoucherDocAsync(doc, docNumber);   // create → approve (marker DOC:→APR:→{id})
+
+            // เลขจริงออกตอนอนุมัติ (ร่างใช้ DRAFT-xxxx — DocumentService.cs:1047) → อ่านเลขล่าสุดจาก NextAcc
+            try
+            {
+                var fresh = await _apiClient.GetDocumentAsync(docId);
+                if (!string.IsNullOrEmpty(fresh?.data?.DocumentNumber)) _lastDocNumber = fresh.data.DocumentNumber;
+            }
+            catch { /* ไม่กระทบผลการสร้าง */ }
+            _lastDocType = "CERTIFICATE_IN_LIEU";
+
+            if (whtAmount > 0)
+                await TryAutoGenerateWhtCertAsync(docId, docNumber);
+            // company /document ไม่รับไฟล์แนบใน request → แนบหลังได้ docId (กันซ้ำในตัว)
+            await UploadReceiptSlipsAsync(docId, attachments, docNumber);
+
+            BackfillNextAccRefToPayment(docNumber, docId.ToString(), _lastDocNumber);
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ProcessCertificateInLieu: เสร็จ doc={docNumber} → NextAcc {_lastDocNumber ?? "-"} ({docId})", "SYSTEM");
+            return docId.ToString();
+        }
+
+        /// <summary>ผู้จัดทำ (slot 0 บน PDF) = คนสร้างใบสำคัญจ่ายใน TakeTime + ลายเซ็น — NextAcc CreateDocumentRequest
+        /// รับ PreparerName/PreparerSignatureBase64 (DocumentDtos.cs:142-147, เก็บที่ DocumentService.cs:1228-1229,
+        /// พิมพ์ priority เหนือ CreatedBy — PdfGenerationService.cs:1028-1040)</summary>
+        private void ApplyCertificateInLieuPreparer(CreateDocumentRequest doc, string documentNumber)
+        {
+            if (doc == null || string.IsNullOrEmpty(documentNumber)) return;
+            var info = LookupPreparerInfo(documentNumber);
+            if (info == null) return;
+            if (!string.IsNullOrEmpty(info.Value.name)) doc.PreparerName = info.Value.name;
+            if (!string.IsNullOrEmpty(info.Value.dataUri))
+            {
+                if (info.Value.dataUri.Length <= SignatureMaxBytes)
+                    doc.PreparerSignatureBase64 = info.Value.dataUri;
+                else
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"ApplyCertificateInLieuPreparer: doc={documentNumber} ลายเซ็น {info.Value.dataUri.Length} bytes > {SignatureMaxBytes} — ส่งเฉพาะชื่อ (บีบรูปให้เล็กลง)", "SYSTEM");
+            }
+        }
+
+        /// <summary>ตำแหน่งตั้งต้นของผู้รับรอง (หน้าใบสำคัญจ่าย): ตำแหน่งปัจจุบันของพนักงาน (Employee_Salary.Position)
+        /// → ค่าตั้ง Accounting_Integration_Config "Nexaacc_Cil_Certifier_Position" → "ผู้มีอำนาจอนุมัติ"</summary>
+        public string GetCertificateInLieuDefaultPosition(string adminId)
+        {
+            try
+            {
+                if (!string.IsNullOrEmpty(adminId))
+                {
+                    var dt = _code.DatabaseQuerySafe(_connectionString,
+                        "SELECT TOP 1 Position FROM Employee_Salary WHERE Admin_ID = @id AND IsActive = 1 ORDER BY EffectiveDate DESC",
+                        new Dictionary<string, object> { { "@id", adminId } });
+                    if (dt != null && dt.Rows.Count > 0 && dt.Rows[0][0] != DBNull.Value
+                        && !string.IsNullOrWhiteSpace(dt.Rows[0][0].ToString()))
+                        return dt.Rows[0][0].ToString().Trim();
+                }
+            }
+            catch { }
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 ConfigValue FROM Accounting_Integration_Config WHERE ConfigKey = N'Nexaacc_Cil_Certifier_Position'",
+                    null);
+                if (dt != null && dt.Rows.Count > 0 && dt.Rows[0][0] != DBNull.Value
+                    && !string.IsNullOrWhiteSpace(dt.Rows[0][0].ToString()))
+                    return dt.Rows[0][0].ToString().Trim();
+            }
+            catch { }
+            return "ผู้มีอำนาจอนุมัติ";
         }
 
         private string LookupVoucherDocMarker(string documentNumber)

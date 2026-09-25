@@ -214,6 +214,18 @@ namespace Take_Time_BangPhra.Integration
 
         /// <summary>ผู้ซื้อไม่ประสงค์รับใบกำกับภาษี → ยกเว้น gate §86/4 + หัวคงเป็น "ใบเสร็จรับเงิน"</summary>
         public bool? BuyerDeclinedTaxInvoice { get; set; }
+
+        // ===== ใบรับรองแทนใบเสร็จรับเงิน (DocumentType=15 CertificateInLieu) =====
+        // ตรงกับ NextAcc CreateDocumentRequest (DocumentDtos.cs:50-55) — NextAcc บังคับ
+        // CertificateReason + CertifierName เมื่อ DocumentType=15 (DocumentService.cs:1022-1029)
+        // และพิมพ์ลงกรอบ "ข้อมูลใบรับรอง" บน PDF (PdfGenerationService.DocumentRenderer.cs:997-1031)
+        /// <summary>เหตุผลที่ไม่ได้รับใบเสร็จ (บังคับเมื่อเป็นใบรับรองแทนใบเสร็จ)</summary>
+        public string CertificateReason { get; set; }
+        /// <summary>ชื่อผู้รับรอง (บังคับเมื่อเป็นใบรับรองแทนใบเสร็จ)</summary>
+        public string CertifierName { get; set; }
+        public string CertifierPosition { get; set; }
+        public string WitnessName { get; set; }
+        public string WitnessPosition { get; set; }
     }
 
     public class DocumentLineRequest
@@ -1112,8 +1124,12 @@ namespace Take_Time_BangPhra.Integration
     }
 
     // ──────────────────────────────────────────────
-    // Integration: Certificate in Lieu of Tax Invoice
-    // (ใบรับรองแทนใบกำกับภาษี — POST /api/integration/certificates-in-lieu)
+    // Integration: Certificate in Lieu of Receipt
+    // (ใบรับรองแทนใบเสร็จรับเงิน — POST /api/integration/certificates-in-lieu)
+    // ⚠ ใบสำคัญจ่ายไม่ใช้เส้นนี้: NextAcc ลงบัญชีเส้น integration เป็น Cr เจ้าหนี้ 21220 +
+    //   BalanceDue = ยอดเต็ม (IntegrationService.cs:3958-3985 → BuildIntegrationJournalLinesAsync
+    //   "expense" :2379-2456) = ตั้งหนี้ค้างที่ไม่มีใครตัด ⇒ ใช้ company /document type 15 แทน
+    //   (Cr แหล่งเงินตรง ๆ — DocumentService.cs:15058-15096) ดู CertificateInLieuInfo
     // ──────────────────────────────────────────────
 
     public class InboundCertificateInLieuRequest
@@ -1135,6 +1151,23 @@ namespace Take_Time_BangPhra.Integration
         public string Notes { get; set; }
         public bool IncludeVat { get; set; }
         public List<IntegrationAttachment> Attachments { get; set; }
+    }
+
+    /// <summary>
+    /// ข้อมูล "ใบรับรองแทนใบเสร็จรับเงิน" ที่หน้าใบสำคัญจ่ายเก็บมา (จ่ายให้ผู้ที่ออกใบเสร็จไม่ได้ —
+    /// แท็กซี่/แผงลอย/ลูกจ้างรายวัน → กิจการรับรองรายจ่ายเอง). ส่งผ่านคิว CREATE_VOUCHER_JOURNAL
+    /// (payload key ขึ้นต้น "cil") แล้ว ProcessVoucherJournal แยกไปสร้างเอกสาร NextAcc type 15
+    /// แทน PV/Expense (ไม่ลง GL ซ้ำ).
+    /// </summary>
+    public class CertificateInLieuInfo
+    {
+        public string Reason { get; set; }
+        public string PayeeName { get; set; }
+        public string PayeeAddress { get; set; }
+        public string CertifierName { get; set; }
+        public string CertifierPosition { get; set; }
+        public string WitnessName { get; set; }
+        public string WitnessPosition { get; set; }
     }
 
     /// <summary>

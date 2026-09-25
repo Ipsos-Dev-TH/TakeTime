@@ -400,6 +400,8 @@
                     </span>
                     <asp:HyperLink ID="lnkNextAccDoc" runat="server" Text="เปิดใน NextAcc" Target="_blank"
                         Style="margin-left: 15px; color: #1565c0; text-decoration: underline; font-size: 13px;" Visible="false" />
+                    <asp:LinkButton ID="lnkNextAccPdf" runat="server" Text="ดู PDF (NextAcc)" OnClick="lnkNextAccPdf_Click"
+                        CausesValidation="false" Style="margin-left: 15px; color: #1565c0; text-decoration: underline; font-size: 13px;" Visible="false" />
                     <asp:Label ID="lblNextAccSyncStatus" runat="server" Text=""
                         Style="margin-left: 15px; font-size: 12px; color: #666;" />
                     <asp:Label ID="lblNextAccPaymentStatus" runat="server" Text=""
@@ -501,6 +503,36 @@
                     </div>
                  </td>
 
+            </tr>
+
+            <tr style="background-color:#fff8e1;">
+                 <td class="modal-sm" style="width: 20%; text-align: right; vertical-align: top;">ไม่มีใบเสร็จ:</td>
+                <td>
+                    &nbsp;<asp:CheckBox ID="chkCertInLieu" runat="server" AutoPostBack="True" OnCheckedChanged="chkCertInLieu_CheckedChanged"
+                        Text=" ผู้รับเงินออกใบเสร็จไม่ได้ — ออก &quot;ใบรับรองแทนใบเสร็จรับเงิน&quot;" Font-Bold="true" />
+                    <span style="color:#888; font-size:11px; margin-left:5px;">เช่น ค่าแท็กซี่ / แผงลอย / ลูกจ้างรายวัน — NextAcc ออกเอกสารใบรับรองแทนใบสำคัญจ่าย (จ่ายเงินสด ไม่มีภาษีซื้อ)</span>
+                    <asp:Panel ID="pnlCertInLieu" runat="server" Visible="false" Style="margin-top:6px; padding:8px; border:1px dashed #f0b429;">
+                        <div style="margin-bottom:4px;">
+                            <span style="font-size:12px; color:#b7791f;">เหตุผลที่ไม่ได้รับใบเสร็จ *</span><br />
+                            <asp:TextBox ID="txtCilReason" runat="server" Width="90%" MaxLength="500" placeholder="เช่น ผู้รับเงินเป็นผู้ขายรายย่อย ไม่มีใบเสร็จรับเงิน" />
+                        </div>
+                        <div style="margin-bottom:4px;">
+                            <span style="font-size:12px; color:#b7791f;">ผู้รับเงิน (ถ้าไม่ตรงกับผู้ขายที่เลือก)</span><br />
+                            <asp:TextBox ID="txtCilPayeeName" runat="server" Width="44%" MaxLength="200" placeholder="ชื่อผู้รับเงิน" />
+                            <asp:TextBox ID="txtCilPayeeAddress" runat="server" Width="44%" MaxLength="500" placeholder="ที่อยู่ (ถ้ามี)" />
+                        </div>
+                        <div style="margin-bottom:4px;">
+                            <span style="font-size:12px; color:#b7791f;">ผู้รับรอง *</span><br />
+                            <asp:TextBox ID="txtCilCertifierName" runat="server" Width="44%" MaxLength="200" placeholder="ชื่อผู้รับรอง" />
+                            <asp:TextBox ID="txtCilCertifierPosition" runat="server" Width="44%" MaxLength="200" placeholder="ตำแหน่ง" />
+                        </div>
+                        <div>
+                            <span style="font-size:12px; color:#b7791f;">พยาน / ผู้อนุมัติ</span><br />
+                            <asp:TextBox ID="txtCilWitnessName" runat="server" Width="44%" MaxLength="200" placeholder="ชื่อพยาน/ผู้อนุมัติ" />
+                            <asp:TextBox ID="txtCilWitnessPosition" runat="server" Width="44%" MaxLength="200" placeholder="ตำแหน่ง" />
+                        </div>
+                    </asp:Panel>
+                 </td>
             </tr>
 
            
