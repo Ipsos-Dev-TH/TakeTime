@@ -281,6 +281,15 @@ namespace Take_Time_BangPhra.Integration
         /// <summary>externalRef ของเอกสาร (NextAcc `GET /documents/{id}` คืน field `reference`) —
         /// TakeTime ใช้ = เลขใบเสร็จ (receiptNumber) → ยืนยันตัวตนเอกสารก่อนเปิด PDF กันเปิดผิดใบ</summary>
         public string Reference { get; set; }
+        /// <summary>หัวเรื่องที่ NextAcc จะพิมพ์บนกระดาษจริง (JSON <c>documentTitle</c>) — คำนวณด้วย
+        /// <c>PdfGenerationService.ComputeDocumentTitle</c> ตัวเดียวกับ PDF (verified NextAcc DocumentDtos.cs
+        /// DocumentResponse.DocumentTitle + DocumentService.GetDocumentAsync). null = NextAcc รุ่นเก่า/ไม่ได้คำนวณ</summary>
+        public string DocumentTitle { get; set; }
+        /// <summary>คำเตือน "หัวถูกลดจากใบกำกับภาษีอย่างย่อเป็นใบเสร็จรับเงิน เพราะบริษัทยังไม่มีสิทธิ์ §86/6 (ภ.พ.06)"
+        /// (JSON <c>taxInvoiceTitleNotice</c>, NextAcc PdfGenerationService.AbbreviatedDowngradeNotice). null = ไม่ถูกลด</summary>
+        public string TaxInvoiceTitleNotice { get; set; }
+        /// <summary>ธง "ผู้ซื้อไม่ประสงค์รับใบกำกับภาษี" ที่ NextAcc เก็บไว้บนใบ (JSON <c>buyerDeclinedTaxInvoice</c>)</summary>
+        public bool BuyerDeclinedTaxInvoice { get; set; }
     }
 
     // ──────────────────────────────────────────────

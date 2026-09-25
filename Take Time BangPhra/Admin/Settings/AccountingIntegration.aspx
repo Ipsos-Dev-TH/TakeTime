@@ -380,6 +380,31 @@
                         <br /><strong style="color:#c0392b;">⚠ เปิดหลัง test</strong> — จัดการเคส churn ช่วง dev; booking ใหม่ปกติไม่ติดลบอยู่แล้ว
                     </div>
                 </div>
+                <div class="config-item" style="background:#e3f2fd; border:1px solid #90caf9; border-radius:4px; padding:8px;">
+                    <label>🧾 หัวกระดาษเอกสารขาย (รับชำระ / เช็คเอาท์) ที่ NextAcc พิมพ์</label>
+                    <select id="cfgReceiptHeaderType" onchange="this.setAttribute('data-loaded','1');">
+                        <option value="AUTO">AUTO — ลูกค้ามีเลขภาษี+ที่อยู่ครบ = ใบกำกับเต็มรูป / ไม่ครบ = ใบเสร็จรับเงิน/ใบกำกับภาษีอย่างย่อ (แนะนำ)</option>
+                        <option value="ABBREVIATED">ABBREVIATED — อย่างย่อทุกใบ ยกเว้นลูกค้านิติบุคคลที่ข้อมูลครบ (ยังออกเต็มรูป)</option>
+                    </select>
+                    <div class="help-text" style="border-left:3px solid #1e88e5; padding-left:8px;">
+                        <b>AUTO</b> (ค่าเริ่มต้น = พฤติกรรมเดิม):
+                        ลูกค้ามีเลขผู้เสียภาษี 13 หลัก + ที่อยู่ → <b>"ใบเสร็จรับเงิน/ใบกำกับภาษี"</b> (ใบกำกับเต็มรูป §86/4, ออก e-Tax ได้)
+                        · ลูกค้าไม่มีข้อมูลครบ (walk-in) → <b>"ใบเสร็จรับเงิน/ใบกำกับภาษีอย่างย่อ"</b> (§86/6)
+                        <small>(ข้อสังเกต: ลูกค้าบุคคลธรรมดาที่ไม่มีเลขภาษีแต่มีชื่อ+ที่อยู่ NextAcc ถือว่าครบ §86/4 และอาจพิมพ์เป็นใบเต็มรูปเอง)</small>
+                        <br /><b>ABBREVIATED</b>: ลูกค้าบุคคลธรรมดาได้ <b>"ใบเสร็จรับเงิน/ใบกำกับภาษีอย่างย่อ"</b> เสมอ แม้กรอกเลขภาษี/ที่อยู่ไว้
+                        (ส่ง "ผู้ซื้อไม่ประสงค์รับใบกำกับภาษี" ให้ NextAcc) — ลูกค้านิติบุคคล (เลขภาษีขึ้นต้น 0) ที่ข้อมูลครบยังได้ใบเต็มรูป
+                        <br /><strong style="color:#c0392b;">⚠ เงื่อนไขฝั่ง NextAcc:</strong> คำว่า "อย่างย่อ" จะพิมพ์ได้ต่อเมื่อบริษัทใน NextAcc
+                        <b>ได้รับอนุมัติ ภ.พ.06</b> (หน้าข้อมูลบริษัท: ติ๊ก "ได้รับอนุมัติ ภ.พ.06" + กรอกวันที่อนุมัติ) —
+                        ยังไม่ตั้ง = NextAcc ลดหัวเป็น <b>"ใบเสร็จรับเงิน"</b> เอง (เคส TIV-20260912-0005) ไม่ว่าเลือกโหมดไหน
+                        (TakeTime บังคับหัวแทน NextAcc ไม่ได้ — หัวคำนวณตอนพิมพ์ PDF). ตรวจผลจริงได้จาก log
+                        <code>หัวเอกสาร NextAcc:</code> หลัง sync แต่ละใบ (ต้องเปิด Post-sync verify)
+                        <br /><b>ข้อกฎหมาย:</b> ใบกำกับภาษีอย่างย่อ <b>ผู้ซื้อใช้ขอคืน/เคลมภาษีซื้อไม่ได้</b> (§82/5(2)) ·
+                        ออกได้เฉพาะกิจการค้าปลีกที่ได้รับอนุมัติ ภ.พ.06 · <b>ลูกค้านิติบุคคล/ผู้จด VAT ที่ขอใบกำกับต้องได้ใบเต็มรูปเสมอ</b>
+                        (ลูกค้ารับใบย่อไปแล้วขอเต็มรูปทีหลัง → กด "ออกใบกำกับภาษีเต็มรูปแทน" ที่เอกสารใน NextAcc) ·
+                        ใบอย่างย่อ <b>ออก e-Tax Invoice ไม่ได้</b> · ใบมัดจำไม่ขึ้นกับตั้งค่านี้ (ยังเป็นใบเสร็จรับเงิน REC)
+                        · มีผลกับเอกสารที่ sync หลังบันทึก — ใบเดิมไม่เปลี่ยน
+                    </div>
+                </div>
                 <div class="config-item" style="background:#f1f3f4; border:1px dashed #bbb; border-radius:4px; padding:8px;">
                     <label style="color:#666;"><i class="fas fa-info-circle"></i> การออกใบเดียว "ใบกำกับภาษี/ใบเสร็จรับเงิน" + หักมัดจำ</label>
                     <div class="help-text" style="padding-left:4px;">
@@ -1395,6 +1420,10 @@
                 document.getElementById('cfgAutoReconcileDeposit').checked = !!cfg.autoReconcileDeposit;
                 document.getElementById('cfgCashSaleUseReceipt').checked = !!cfg.cashSaleUseReceipt;
                 document.getElementById('cfgCashSaleCompanyDoc').checked = !!cfg.cashSaleCompanyDoc;
+                // หัวเอกสารขาย: ทำเครื่องหมายว่าโหลดค่าจริงแล้ว — saveSyncSettings ส่งค่านี้เฉพาะเมื่อโหลดสำเร็จ
+                // (กันโหลด AJAX พลาด → dropdown ค้าง AUTO → กดบันทึกเรื่องอื่นแล้วนโยบายหัวเอกสารถูกรีเซ็ตเงียบ ๆ)
+                var rhtSel = document.getElementById('cfgReceiptHeaderType');
+                if (rhtSel && cfg.receiptHeaderType) { rhtSel.value = cfg.receiptHeaderType; rhtSel.setAttribute('data-loaded', '1'); }
                 document.getElementById('cfgStockInUseGRNI').checked = !!cfg.stockInUseGRNI;
                 document.getElementById('cfgStockInSkipJournal').checked = !!cfg.stockInSkipJournal;
                 document.getElementById('cfgEtaxAutoGenerate').value = cfg.etaxAutoGenerate ? 'true' : 'false';
@@ -1536,6 +1565,8 @@
                 etaxEmailLocalOnly: document.getElementById('cfgEtaxEmailLocalOnly').value,
                 etaxEmailFallback: document.getElementById('cfgEtaxEmailFallback').value
             };
+            var rhtEl = document.getElementById('cfgReceiptHeaderType');
+            if (rhtEl && rhtEl.getAttribute('data-loaded') === '1') data.receiptHeaderType = rhtEl.value;
             postAction(data, 'syncTestResult');
         }
 

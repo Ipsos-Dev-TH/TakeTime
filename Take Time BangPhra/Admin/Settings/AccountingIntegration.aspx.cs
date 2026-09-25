@@ -90,6 +90,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "autoReconcileDeposit", config.IsAutoReconcileDeposit },
                     { "cashSaleUseReceipt", config.IsCashSaleUseReceipt },
                     { "cashSaleCompanyDoc", config.IsCashSaleCompanyDoc },
+                    { "receiptHeaderType", config.ReceiptHeaderType },
                     { "etaxAutoGenerate", config.IsEtaxAutoGenerate },
                     { "etaxAutoSign", config.IsEtaxAutoSign },
                     { "etaxAutoSubmit", config.IsEtaxAutoSubmit },
@@ -439,6 +440,21 @@ namespace Take_Time_BangPhra.Admin.Settings
                 // (2 ตัวแรกไม่มีผลต่อโค้ด; การหักมัดจำใช้ drives ผ่านค่าแนะนำ). preset ตั้งค่าให้ = 0
                 if (data.ContainsKey("cashSaleUseReceipt")) config.SetConfig("Nexaacc_CashSale_UseReceipt", BoolToFlag(data["cashSaleUseReceipt"]));
                 if (data.ContainsKey("cashSaleCompanyDoc")) config.SetConfig("Nexaacc_CashSale_CompanyDoc", BoolToFlag(data["cashSaleCompanyDoc"]));
+                // หัวเอกสารขาย = นโยบายเอกสารภาษี → เขียนเฉพาะเมื่อเปลี่ยนจริง + log เก่า→ใหม่ (แนวเดียวกับ VAT มัดจำ)
+                if (data.ContainsKey("receiptHeaderType"))
+                {
+                    string rht = (data["receiptHeaderType"]?.ToString() ?? "AUTO").Trim().ToUpperInvariant();
+                    if (rht != "ABBREVIATED") rht = "AUTO";
+                    string curRht = config.ReceiptHeaderType;
+                    if (!string.Equals(curRht, rht, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _code.Logs(ConnStr, "AccountingConfig",
+                            $"หัวเอกสารขายถูกเปลี่ยน: Nexaacc_Receipt_Header_Type {curRht} → {rht} " +
+                            $"โดย {Session["UserName"] ?? "?"} — มีผลกับเอกสารที่ sync หลังจากนี้ (ใบเดิมไม่เปลี่ยน)",
+                            Session["UserName"]?.ToString() ?? "SYSTEM");
+                        config.SetConfig("Nexaacc_Receipt_Header_Type", rht);
+                    }
+                }
                 if (data.ContainsKey("etaxAutoGenerate")) config.SetConfig("Etax_AutoGenerate", BoolToFlag(data["etaxAutoGenerate"]));
                 if (data.ContainsKey("etaxAutoSign")) config.SetConfig("Etax_AutoSign", BoolToFlag(data["etaxAutoSign"]));
                 if (data.ContainsKey("etaxAutoSubmit")) config.SetConfig("Etax_AutoSubmit", BoolToFlag(data["etaxAutoSubmit"]));
@@ -1662,6 +1678,16 @@ namespace Take_Time_BangPhra.Admin.Settings
                             + "  • Receipt (type 3) → \"ใบเสร็จรับเงิน\" เสมอ\n\n"
                             + "ต้องการใบกำกับภาษี/ใบเสร็จรับเงิน + e-Tax → ตั้ง flag นี้เป็น 0 "
                             + "(ระบบจะออกเป็นใบกำกับขายสดใบเดียว หักมัดจำในใบ) แล้วกด 'ส่งแก้ไขขึ้น NextAcc' ที่ใบนั้น");
+
+                    // หัวเอกสารขาย — TakeTime ตรวจสิทธิ์ ภ.พ.06 ของบริษัทใน NextAcc เองไม่ได้ จึงบอกเงื่อนไขไว้เสมอ
+                    add("info", "หัวเอกสารขาย: " + (cfg.IsReceiptHeaderAbbreviated
+                            ? "ABBREVIATED (อย่างย่อ ยกเว้นนิติบุคคลข้อมูลครบ)"
+                            : "AUTO (เต็มรูปเมื่อลูกค้ามีเลขภาษี+ที่อยู่ / นอกนั้นอย่างย่อ)"),
+                        "หัว \"ใบเสร็จรับเงิน/ใบกำกับภาษีอย่างย่อ\" พิมพ์ได้เมื่อบริษัทใน NextAcc ได้รับอนุมัติ ภ.พ.06 "
+                        + "(ข้อมูลบริษัท: ติ๊ก \"ได้รับอนุมัติ ภ.พ.06\" + วันที่อนุมัติ) — ยังไม่ตั้ง NextAcc จะลดหัวเป็น \"ใบเสร็จรับเงิน\" "
+                        + "(PdfGenerationService.ComputeDocumentTitle / AbbreviatedTaxInvoiceRule). "
+                        + "ดูหัวจริงของแต่ละใบได้จาก log \"หัวเอกสาร NextAcc:\" หลัง sync (ต้องเปิด Post-sync verify)"
+                        + (cfg.IsPostSyncVerifyEnabled ? "" : " ⚠ ตอนนี้ Post-sync verify ปิดอยู่"));
                 }
 
                 // ── 6b) นโยบาย VAT เงินมัดจำ กับ mapping 21913 สอดคล้องกันไหม ─────────────

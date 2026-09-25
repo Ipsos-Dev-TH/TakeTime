@@ -6436,7 +6436,7 @@ namespace Take_Time_BangPhra.Integration
                     $"taxId={(string.IsNullOrWhiteSpace(customerContact?.TaxId) ? "✗" : customerContact.TaxId)} " +
                     $"address={(string.IsNullOrWhiteSpace(customerContact?.Address) ? "✗" : "✓")} " +
                     $"contactId={customerContact?.NexaaccContactId?.ToString() ?? "✗"} " +
-                    $"→ {(HasFullBuyerTaxData(customerContact) ? "ใบกำกับภาษี/ใบเสร็จรับเงิน (เต็มรูป §86/4)" : "ใบเสร็จรับเงิน (ข้อมูลภาษีผู้ซื้อไม่ครบ)")}" +
+                    $"→ {(isDeposit ? "ใบมัดจำ (ไม่ขึ้นกับตั้งค่าหัวเอกสาร)" : ExpectedHeaderLabel(customerContact))}" +
                     $"{(_config.IsCashSaleUseReceipt ? " ⚠ แต่ Nexaacc_CashSale_UseReceipt=1 บังคับออกเป็นใบเสร็จรับเงิน (ไม่ได้ใบกำกับ/e-Tax) — ปิด flag นี้ถ้าต้องการใบกำกับ" : "")}",
                     "SYSTEM");
 
@@ -6657,8 +6657,10 @@ namespace Take_Time_BangPhra.Integration
                     $"ProcessReceiptDocument(payment): receipt={receiptNumber} lines={lines?.Count ?? 0} depositApplied={depositApplied} (from negativeLines={depositFromLines}) multiLine={useMultiLine}",
                     "SYSTEM");
 
+                // WantsFullTaxInvoice = HasFullBuyerTaxData + ตั้งค่าหัวเอกสาร (Nexaacc_Receipt_Header_Type):
+                // ABBREVIATED → เฉพาะนิติบุคคลที่ข้อมูลครบไปเส้นใบเต็มรูปนี้ รายอื่นตกไปเส้น "ไม่ใช่ใบเต็มรูป" ด้านล่าง
                 if (_config.IsReceiptDocumentMode && _config.CanUseCompanyEndpoints && customerContact?.NexaaccContactId != null
-                    && HasFullBuyerTaxData(customerContact)
+                    && WantsFullTaxInvoice(customerContact)
                     && !_config.IsCashSaleUseReceipt)   // toggle: ON → ตกไปเส้น Receipt(3) ด้านล่าง (Dr เงินสด ไม่มีลูกหนี้ ไม่ต้องรอ isCashSale, ไม่ได้ e-Tax)
                 {
                     // โหมด §78/1 เคร่ง (RECEIPT + ไม่ defer + มีการหักมัดจำ): มัดจำออกใบกำกับ+รับรู้ VAT
@@ -6695,7 +6697,10 @@ namespace Take_Time_BangPhra.Integration
                         _code.Logs(_connectionString, "AccountingSync",
                             $"ProcessReceiptDocument(§78/1): receipt={receiptNumber} ใบกำกับยอดคงเหลือ {remaining:N2} + รับรู้รายได้มัดจำ (มัดจำ {depositApplied:N2} ออกใบกำกับ+VAT ตอนรับเงินแล้ว)", "SYSTEM");
                         if (docRId != Guid.Empty)
+                        {
                             await TryAutoGenerateEtaxAsync(docRId, receiptNumber, reservationId, remaining, customerName);
+                            await LogNextAccDocumentHeaderAsync(docRId, receiptNumber);
+                        }
                         return docRId != Guid.Empty ? docRId.ToString() : "DEPREV_ONLY";
                     }
 
@@ -6767,6 +6772,7 @@ namespace Take_Time_BangPhra.Integration
                             $"docId={csDocId} หักมัดจำ={depositApplied:N2} " +
                             $"→ {(csDocCash ? "ใบเดียวจบ (Dr เงินสด ไม่มีลูกหนี้ ไม่มีใบเสร็จรับชำระแยก)" : "⚠ NextAcc ยังเปิดลูกหนี้ → settle ตามเดิม (ได้ใบเสร็จรับชำระเพิ่ม) — ปิด Nexaacc_CashSale_CompanyDoc ได้ถ้าไม่ช่วย")}",
                             "SYSTEM");
+                        await LogNextAccDocumentHeaderAsync(csDocId, receiptNumber);
                         return csDocId.ToString();
                     }
 
@@ -6796,6 +6802,7 @@ namespace Take_Time_BangPhra.Integration
                         $"ProcessReceiptDocument(cash-sale single doc, DEFAULT): receipt={receiptNumber} เลขNextAcc={_lastDocNumber ?? "-"} " +
                         $"→ ใบกำกับภาษี/ใบเสร็จรับเงิน docId={csId} แหล่งเงิน={paymentAccountId ?? "default"} หักมัดจำ={depositApplied:N2} " +
                         $"โหมด JE={(csCashHonored ? "เงินสดในใบ (ไม่มีลูกหนี้)" : "AR+settle (NextAcc ยังไม่รองรับ isCashSale — อัปเกรดแล้วใบใหม่จะเป็นใบเดียวเอง)")}", "SYSTEM");
+                    await LogNextAccDocumentHeaderAsync(csId, receiptNumber);
                     return csId.ToString();
                 }
                 else if (_config.IsReceiptDocumentMode && _config.CanUseCompanyEndpoints
@@ -6814,10 +6821,19 @@ namespace Take_Time_BangPhra.Integration
                     //    VAT-inclusive. หักมัดจำผ่าน SettleReceiptDocAsync (Dr 21510(+21913) / Cr เงินสด —
                     //    GL ถูก; ยอดหักมัดจำแสดงใน Notes) → void ใช้ Receipt-doc branch เดิม
                     //    (MapDepositAppliedReceiptAdjustmentReverse). ไม่ออก e-Tax XML (walk-in ไม่มีเลขภาษี).
+                    //    📝 อัปเดต (ตรวจ NextAcc @HEAD ก.ย. 2026, PdfGenerationService.ComputeDocumentTitle):
+                    //      Receipt(3)+VAT ผู้ซื้อ §86/4 ครบ → "ใบกำกับภาษี/ใบเสร็จรับเงิน"; ไม่ครบ/walk-in/
+                    //      buyerDeclined → "ใบเสร็จรับเงิน/ใบกำกับภาษีอย่างย่อ" เมื่อบริษัทมีสิทธิ์ ภ.พ.06
+                    //      (AbbreviatedTaxInvoiceRule) ไม่งั้น "ใบเสร็จรับเงิน". รุ่นที่ deploy จริงอาจเก่ากว่า HEAD.
                     var doc = _mapper.MapReceiptToDocument(reservationId, useMultiLine ? lines : null, totalAmount, revenueType,
                         paymentMethod, receiptDate, customerName, customerContact.NexaaccContactId.Value,
                         paymentAccountId, hasVat, receiptNumber, isDeposit: false,
                         documentType: NexaaccDocumentType.Receipt);
+                    // ตั้งค่าหัวเอกสาร = ABBREVIATED: ผู้ซื้อที่ไม่ใช่นิติบุคคล-ข้อมูลครบ → ส่งธงไม่ประสงค์รับใบกำกับ
+                    // ให้ NextAcc พิมพ์หัวอย่างย่อ (ไม่ส่งธง = contact จริงที่มีชื่อ+ที่อยู่ NextAcc ถือว่า §86/4 ครบ
+                    // สำหรับบุคคลธรรมดา → พิมพ์ "ใบกำกับภาษี/ใบเสร็จรับเงิน"). AUTO = ไม่แตะ (พฤติกรรมเดิม)
+                    if (_config.IsReceiptHeaderAbbreviated && !WantsFullTaxInvoice(customerContact))
+                        doc.BuyerDeclinedTaxInvoice = true;
                     // NextAcc spec §9: field ระดับเอกสาร → แสดง "หักเงินมัดจำ (REC...) (500.00) / ยอดชำระสุทธิ 2,700"
                     // spec §9.1 "โหมดขับ JE": flag → NextAcc ลง JE self-contained ในใบ (กลับ 217xx/21913 จาก
                     // ใบมัดจำที่ depositAppliedRef ชี้) → เลิกส่ง JV แยกพร้อมกัน (depositForJv=0) กัน double-reverse.
@@ -6991,12 +7007,14 @@ namespace Take_Time_BangPhra.Integration
                     _lastDocType = "RECEIPT";
                     _lastReceiptUsedDrives = doc.DepositAppliedDrivesJournal;   // ให้ post-sync verify รู้ว่า safe จะ reconcile -DEPADJ ค้าง
                     _code.Logs(_connectionString, "AccountingSync",
-                        $"ProcessReceiptDocument(B2C checkout): receipt={receiptNumber} เลขNextAcc={_lastDocNumber ?? "-"} → Receipt(3)+VAT หัวเอกสาร 'ใบเสร็จรับเงิน' (ไม่ใช่ใบกำกับภาษี) docId={docId} depositApplied={depositApplied:N2} drivesJE={(doc.DepositAppliedDrivesJournal ? "yes(no JV)" : "no(JV แยก)")}", "SYSTEM");
+                        $"ProcessReceiptDocument(B2C checkout): receipt={receiptNumber} เลขNextAcc={_lastDocNumber ?? "-"} → Receipt(3)+VAT docId={docId} buyerDeclined={(doc.BuyerDeclinedTaxInvoice == true ? "Y" : "N")} depositApplied={depositApplied:N2} drivesJE={(doc.DepositAppliedDrivesJournal ? "yes(no JV)" : "no(JV แยก)")}", "SYSTEM");
                     // ลูกค้ามีเลขภาษีครบ §86/4 (B2B ที่ route มาที่นี่ผ่าน CashSale_UseReceipt) → Receipt(3) เป็น
                     // "ใบกำกับภาษี/ใบเสร็จรับเงิน" ออก e-Tax T03 ได้ (NextAcc รองรับ Receipt→T03). walk-in ไม่มีเลขภาษี
-                    // → ข้าม (TryAutoGenerate จะ fail-soft เองอยู่แล้ว แต่ gate กันเรียกเปล่า)
-                    if (HasFullBuyerTaxData(customerContact))
+                    // → ข้าม (TryAutoGenerate จะ fail-soft เองอยู่แล้ว แต่ gate กันเรียกเปล่า).
+                    // อย่างย่อ (ABBREVIATED) ออก e-Tax ไม่ได้ (NextAcc EtaxInvoiceService: ไม่ใช่ใบกำกับเต็มรูป) → ข้ามด้วย
+                    if (WantsFullTaxInvoice(customerContact))
                         await TryAutoGenerateEtaxAsync(docId, receiptNumber, reservationId, totalAmount, customerName);
+                    await LogNextAccDocumentHeaderAsync(docId, receiptNumber);
                     return docId.ToString();
                 }
                 else if (_config.IsReceiptDocumentMode)
@@ -7026,7 +7044,9 @@ namespace Take_Time_BangPhra.Integration
                     // ลูกค้ามีข้อมูลภาษีครบ → ใบกำกับเต็มรูปผูก contact จริง
                     // ไม่ครบ (B2C ทั่วไป) → "ไม่ประสงค์รับใบกำกับภาษี": NextAcc ผูก contact กลาง
                     // ลูกค้าเงินสด (IsWalkInCustomer ยกเว้น §86/4) — VAT ขายเข้า ภ.พ.30 ครบ
-                    if (HasFullBuyerTaxData(customerContact))
+                    // (ตั้งค่าหัวเอกสาร ABBREVIATED → เต็มรูปเฉพาะนิติบุคคลข้อมูลครบ — WantsFullTaxInvoice)
+                    bool invFull = WantsFullTaxInvoice(customerContact);
+                    if (invFull)
                         ApplyContactToInvoice(invoice, customerContact);
                     else
                         MarkBuyerDeclinedTaxInvoice(invoice);
@@ -7051,6 +7071,7 @@ namespace Take_Time_BangPhra.Integration
                     _lastDocNumber = result?.data?.DocumentNumber;
                     _lastDocType = "INVOICE";
                     await TryAutoGenerateEtaxAsync(invDocId, receiptNumber, reservationId, totalAmount, customerName);
+                    await LogNextAccDocumentHeaderAsync(invDocId, receiptNumber);
                     return invDocId.ToString();
                 }
                 else
@@ -10524,6 +10545,65 @@ namespace Take_Time_BangPhra.Integration
                 && !string.IsNullOrWhiteSpace(c.Address);
         }
 
+        /// <summary>
+        /// เอกสารขาย (รับชำระ/เช็คเอาท์ — ไม่ใช่ใบมัดจำ) ของผู้ซื้อรายนี้ควรออกเป็น "ใบกำกับภาษีเต็มรูป" ไหม
+        /// ตามการตั้งค่าหัวเอกสาร <c>Nexaacc_Receipt_Header_Type</c>:
+        ///   AUTO        → ข้อมูลภาษีครบ (HasFullBuyerTaxData) = เต็มรูป (พฤติกรรมเดิมทุกตัวอักษร)
+        ///   ABBREVIATED → เต็มรูปเฉพาะผู้ซื้อนิติบุคคล (เลขภาษีขึ้นต้น 0) ที่ข้อมูลครบ — รายอื่นออกแบบ
+        ///                 "ไม่ใช่ใบเต็มรูป" → NextAcc พิมพ์ "ใบเสร็จรับเงิน/ใบกำกับภาษีอย่างย่อ" (ต้องมี ภ.พ.06)
+        /// false = ต้องส่ง buyerDeclinedTaxInvoice (หัวตัดสินโดย NextAcc ComputeDocumentTitle)
+        /// </summary>
+        private bool WantsFullTaxInvoice(ContactInfo c)
+        {
+            if (!HasFullBuyerTaxData(c)) return false;
+            if (!_config.IsReceiptHeaderAbbreviated) return true;
+            return AccountingDataMapper.IsJuristicPerson(c.TaxId);
+        }
+
+        /// <summary>ข้อความอธิบายหัวเอกสารที่คาดว่าจะได้ (ใช้ใน log การตัดสินใจเส้นทาง)</summary>
+        private string ExpectedHeaderLabel(ContactInfo c)
+        {
+            if (WantsFullTaxInvoice(c)) return "ใบกำกับภาษีเต็มรูป §86/4 (\"ใบเสร็จรับเงิน/ใบกำกับภาษี\")";
+            string why = HasFullBuyerTaxData(c)
+                ? "ตั้งค่าหัวเอกสาร=ABBREVIATED (ผู้ซื้อไม่ใช่นิติบุคคล)"
+                : "ข้อมูลภาษีผู้ซื้อไม่ครบ";
+            return $"ไม่ใช่ใบเต็มรูป [{why}] → NextAcc ตัดสินหัว: ปกติ \"ใบเสร็จรับเงิน/ใบกำกับภาษีอย่างย่อ\" ถ้าบริษัทมีสิทธิ์ ภ.พ.06 "
+                + "ไม่งั้น \"ใบเสร็จรับเงิน\""
+                + (_config.IsReceiptHeaderAbbreviated ? "" : " (AUTO: บุคคลธรรมดาที่มีชื่อ+ที่อยู่บน contact NextAcc อาจพิมพ์เป็นเต็มรูปเอง)");
+        }
+
+        /// <summary>
+        /// อ่าน "หัวเอกสารที่ NextAcc จะพิมพ์จริง" กลับมา log ทันทีหลังสร้างเอกสารขาย —
+        /// <c>GET /api/companies/{cid}/document/{id}</c> คืน <c>documentTitle</c> (ComputeDocumentTitle ตัวเดียวกับ PDF)
+        /// + <c>taxInvoiceTitleNotice</c> (หัวถูกลดจากอย่างย่อเป็นใบเสร็จเพราะยังไม่มีสิทธิ์ ภ.พ.06).
+        /// เดิมผู้ใช้รู้ว่าหัวไม่ตรงก็ตอนเปิด PDF (เคส TIV-20260912-0005 พิมพ์ "ใบเสร็จรับเงิน").
+        /// best-effort: ไม่ throw, ข้ามเมื่อปิด Post-sync verify หรือไม่มี company endpoints
+        /// </summary>
+        private async Task LogNextAccDocumentHeaderAsync(Guid docId, string receiptNumber)
+        {
+            if (docId == Guid.Empty || !_config.CanUseCompanyEndpoints || !_config.IsPostSyncVerifyEnabled) return;
+            try
+            {
+                var r = await _apiClient.GetDocumentAsync(docId);
+                var d = r?.data;
+                if (d == null) return;
+                string title = string.IsNullOrWhiteSpace(d.DocumentTitle)
+                    ? "(NextAcc รุ่นนี้ไม่ส่ง documentTitle — เปิด PDF ตรวจเอง)"
+                    : d.DocumentTitle;
+                string msg = $"หัวเอกสาร NextAcc: receipt={receiptNumber} เลข={d.DocumentNumber ?? "-"} → \"{title}\"" +
+                    $" (Nexaacc_Receipt_Header_Type={_config.ReceiptHeaderType}, buyerDeclined={(d.BuyerDeclinedTaxInvoice ? "Y" : "N")})";
+                if (!string.IsNullOrWhiteSpace(d.TaxInvoiceTitleNotice))
+                    msg += " ⚠ " + d.TaxInvoiceTitleNotice +
+                        " → แก้ที่ NextAcc: ข้อมูลบริษัท ติ๊ก \"ได้รับอนุมัติ ภ.พ.06\" + กรอกวันที่อนุมัติ แล้วเปิด PDF ใหม่ (หัวคำนวณตอนพิมพ์)";
+                _code.Logs(_connectionString, "AccountingSync", msg, "SYSTEM");
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"หัวเอกสาร NextAcc: receipt={receiptNumber} อ่านกลับไม่ได้ (ไม่กระทบการ sync): {ex.Message}", "SYSTEM");
+            }
+        }
+
         /// <summary>ตั้งค่า invoice เป็นเคส "ลูกค้าไม่ประสงค์รับใบกำกับภาษี" ตามสัญญา NextAcc:
         /// flag + ล้างข้อมูลลูกค้าทั้ง 3 field (NextAcc ผูก contact กลางให้เอง)</summary>
         private static void MarkBuyerDeclinedTaxInvoice(CreateIntegrationInvoiceRequest invoice)
@@ -12728,6 +12808,11 @@ namespace Take_Time_BangPhra.Integration
                             : $" — Customer_ID = {custIdRaw} แต่ไม่มีแถวนี้ในตาราง Customer"));
 
                 string head = $"ผู้ซื้อที่จะใช้ออกเอกสาร: {contact.Name} ({contact.Phone}) · ที่มา: {src}";
+                if (HasFullBuyerTaxData(contact) && !WantsFullTaxInvoice(contact))
+                    return (false, head + "\nข้อมูลครบ แต่ตั้งค่าหัวเอกสาร (Nexaacc_Receipt_Header_Type) = ABBREVIATED "
+                        + "และผู้ซื้อไม่ใช่นิติบุคคล → ระบบจะออกเป็น \"ใบเสร็จรับเงิน/ใบกำกับภาษีอย่างย่อ\" ไม่ใช่ใบเต็มรูป\n"
+                        + "💡 ต้องการใบเต็มรูปให้ลูกค้ารายนี้: เปลี่ยนตั้งค่าหัวเอกสารเป็น AUTO ชั่วคราว (Admin → ตั้งค่า → NextAcc) "
+                        + "หรือกด \"ออกใบกำกับภาษีเต็มรูปแทน\" ที่เอกสารใบนั้นใน NextAcc");
                 if (HasFullBuyerTaxData(contact))
                     return (true, head + "\nข้อมูลครบ — ออกใบกำกับเต็มรูปได้"
                         + (_config.IsCashSaleUseReceipt
@@ -13237,8 +13322,9 @@ namespace Take_Time_BangPhra.Integration
                     $"BuildCorrectedReceiptInvoice: receipt={receiptNumber} ผู้ซื้อ = {repostContact?.Name ?? "-"} " +
                     $"[{repostBuyerSrc}] taxId={(string.IsNullOrWhiteSpace(repostContact?.TaxId) ? "✗" : repostContact.TaxId)} " +
                     $"address={(string.IsNullOrWhiteSpace(repostContact?.Address) ? "✗" : "✓")} " +
-                    $"→ {(HasFullBuyerTaxData(repostContact) ? "ใบกำกับเต็มรูป" : "ไม่ประสงค์รับใบกำกับ")}", "SYSTEM");
-                if (HasFullBuyerTaxData(repostContact))
+                    $"→ {(isDeposit ? "ใบมัดจำ" : ExpectedHeaderLabel(repostContact))}", "SYSTEM");
+                // ใบมัดจำคงกฎเดิม (HasFullBuyerTaxData) — ตั้งค่าหัวเอกสารมีผลเฉพาะเอกสารขาย (รับชำระ/เช็คเอาท์)
+                if (isDeposit ? HasFullBuyerTaxData(repostContact) : WantsFullTaxInvoice(repostContact))
                 {
                     invoice.CustomerExternalId = repostContact.ExternalId;
                     invoice.CustomerTaxId = repostContact.TaxId;

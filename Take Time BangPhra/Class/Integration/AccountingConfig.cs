@@ -258,6 +258,31 @@ namespace Take_Time_BangPhra.Integration
             || GetConfig("Nexaacc_CashSale_UseReceipt", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
 
         /// <summary>
+        /// หัวกระดาษเอกสารขาย (รับชำระ/เช็คเอาท์ — ไม่รวมใบมัดจำ) ที่ต้องการให้ NextAcc พิมพ์
+        /// (<c>Nexaacc_Receipt_Header_Type</c>, migration PHASE19_18):
+        ///   <b>AUTO</b> (default = พฤติกรรมเดิม) — ผู้ซื้อมีเลขภาษี 13 หลัก + ที่อยู่ → ใบกำกับเต็มรูป
+        ///     "ใบเสร็จรับเงิน/ใบกำกับภาษี"; ไม่ครบ → ส่งแบบไม่ใช่ใบเต็มรูป → NextAcc พิมพ์
+        ///     "ใบเสร็จรับเงิน/ใบกำกับภาษีอย่างย่อ" ถ้าบริษัทมีสิทธิ์ ภ.พ.06 ไม่งั้น "ใบเสร็จรับเงิน".
+        ///   <b>ABBREVIATED</b> — อย่างย่อทุกใบ ยกเว้นผู้ซื้อนิติบุคคล (เลขภาษีขึ้นต้น 0) ที่ข้อมูลครบ
+        ///     (ยังออกเต็มรูป) — ส่ง <c>buyerDeclinedTaxInvoice=true</c> ทุกเส้น.
+        /// ⚠ TakeTime บังคับคำว่า "อย่างย่อ" เองไม่ได้: NextAcc ตัดสินหัวใน
+        /// <c>PdfGenerationService.ComputeDocumentTitle</c> + <c>AbbreviatedTaxInvoiceRule</c> — ต้องตั้ง
+        /// "ได้รับอนุมัติ ภ.พ.06 + วันที่อนุมัติ" ในข้อมูลบริษัทฝั่ง NextAcc ก่อน ไม่งั้นหัวถูกลดเป็น "ใบเสร็จรับเงิน".
+        /// ค่าอื่น/ว่าง = AUTO.
+        /// </summary>
+        public string ReceiptHeaderType
+        {
+            get
+            {
+                string v = (GetConfig("Nexaacc_Receipt_Header_Type", "AUTO") ?? "").Trim().ToUpperInvariant();
+                return v == "ABBREVIATED" ? "ABBREVIATED" : "AUTO";
+            }
+        }
+
+        /// <summary>true = โหมดหัวเอกสาร "อย่างย่อ" (ดู <see cref="ReceiptHeaderType"/>)</summary>
+        public bool IsReceiptHeaderAbbreviated => ReceiptHeaderType == "ABBREVIATED";
+
+        /// <summary>
         /// เงินเดือน: ยุบ "หักลา + หักอื่น ๆ" เข้าไปเป็นการ**ลดยอดรายได้** แทนที่จะส่งเป็นรายการหัก
         ///
         /// ทำไมต้องมีสวิตช์นี้: `PayrollImportLine` ของ NextAcc ไม่มีช่องบัญชีสำหรับ "หักอื่น ๆ"
