@@ -37,7 +37,7 @@ namespace Take_Time_BangPhra.Services
         /// <summary>ล็อกอินด้วยเบอร์ + PIN — ยังไม่เคยตั้ง PIN ให้ใช้เลขท้ายเบอร์ 4 ตัวแล้วบังคับตั้งใหม่</summary>
         public MemberLoginResult Login(string phone, string pin)
         {
-            phone = SanitizePhone(phone);
+            phone = ResolveMemberKey(phone);
             pin = (pin ?? "").Trim();
             if (phone.Length < 9 || pin.Length < 4)
                 return new MemberLoginResult { Error = "กรุณากรอกเบอร์โทรและรหัส PIN ให้ถูกต้อง" };
@@ -88,7 +88,7 @@ namespace Take_Time_BangPhra.Services
             newPin = (newPin ?? "").Trim();
             if (newPin.Length < 4 || newPin.Length > 8 || !long.TryParse(newPin, out _))
                 return (false, "PIN ต้องเป็นตัวเลข 4-8 หลัก");
-            phone = SanitizePhone(phone);
+            phone = ResolveMemberKey(phone);
             if (phone.Length >= 4 && newPin == phone.Substring(phone.Length - 4))
                 return (false, "PIN ใหม่ต้องไม่ใช่เลขท้ายเบอร์โทร");
             int n = _code.DatabaseInsertSafe(_conn,
@@ -102,7 +102,7 @@ namespace Take_Time_BangPhra.Services
         {
             _code.DatabaseInsertSafe(_conn,
                 @"UPDATE Customer_Loyalty SET Member_PIN_Hash = NULL, Pin_Fail_Count = 0, Pin_Locked_Until = NULL
-                   WHERE Customer_MobilePhone = @p", P("@p", SanitizePhone(phone)));
+                   WHERE Customer_MobilePhone = @p", P("@p", ResolveMemberKey(phone)));
         }
 
         // ═══════════════════════ ข้อมูลบัตร/สิทธิ์ ═══════════════════════
@@ -118,7 +118,7 @@ namespace Take_Time_BangPhra.Services
                     FROM Customer_Loyalty cl
                     JOIN Loyalty_Tiers t ON t.ID = cl.CurrentTier_ID
                     LEFT JOIN Customer c ON c.MobilePhone = cl.Customer_MobilePhone
-                   WHERE cl.Customer_MobilePhone = @p", P("@p", SanitizePhone(phone)));
+                   WHERE cl.Customer_MobilePhone = @p", P("@p", ResolveMemberKey(phone)));
             return dt != null && dt.Rows.Count > 0 ? dt.Rows[0] : null;
         }
 
@@ -243,7 +243,7 @@ namespace Take_Time_BangPhra.Services
         /// <summary>แจก voucher ให้สมาชิก 1 คน — คืน (จำนวนที่แจก, ข้อความ)</summary>
         public (int issued, string msg) IssueToMember(int templateId, string phone, string issuedBy)
         {
-            phone = SanitizePhone(phone);
+            phone = ResolveMemberKey(phone);
             var t = _code.DatabaseQuerySafe(_conn,
                 "SELECT * FROM Member_Voucher_Templates WHERE ID = @id AND Is_Active = 1", P("@id", templateId));
             if (t == null || t.Rows.Count == 0) return (0, "ไม่พบ template หรือถูกปิดใช้งาน");
@@ -309,7 +309,7 @@ namespace Take_Time_BangPhra.Services
         /// <summary>voucher ของสมาชิก (พร้อมชื่อ/เงื่อนไข template) — mark หมดอายุให้ระหว่างทาง</summary>
         public DataTable GetMemberVouchers(string phone)
         {
-            phone = SanitizePhone(phone);
+            phone = ResolveMemberKey(phone);
             // หมดอายุ: ทั้งตัว voucher และโค้ดที่กดใช้แล้วแต่ปล่อยเกินหน้าต่างเวลา → กลับเป็น ISSUED ให้กดใหม่ได้
             _code.DatabaseInsertSafe(_conn,
                 @"UPDATE Member_Vouchers SET Status = 'EXPIRED'
@@ -331,7 +331,7 @@ namespace Take_Time_BangPhra.Services
         /// <summary>สมาชิกกด "ใช้คูปอง" → เปิดโค้ดพร้อมหน้าต่างเวลา — คืน (ok, code, หมดเวลาเมื่อ, msg)</summary>
         public (bool ok, string codeText, DateTime windowEnd, string msg) Activate(long voucherId, string phone)
         {
-            phone = SanitizePhone(phone);
+            phone = ResolveMemberKey(phone);
             var dt = _code.DatabaseQuerySafe(_conn,
                 @"SELECT v.Code, v.Status, v.Expiry_Date, v.Activation_Expiry, t.Redeem_Window_Min
                     FROM Member_Vouchers v JOIN Member_Voucher_Templates t ON t.ID = v.Template_ID
@@ -424,7 +424,7 @@ namespace Take_Time_BangPhra.Services
         /// </summary>
         public (bool ok, string msg) Enroll(string phone, int tierId, decimal amount, string paidHow, string staffName)
         {
-            phone = SanitizePhone(phone);
+            phone = ResolveMemberKey(phone);
             if (phone.Length < 9) return (false, "เบอร์โทรไม่ถูกต้อง");
 
             var tier = _code.DatabaseQuerySafe(_conn,
@@ -578,14 +578,14 @@ namespace Take_Time_BangPhra.Services
                 @"SELECT TOP 30 mp.*, t.TierName FROM Membership_Payments mp
                     JOIN Loyalty_Tiers t ON t.ID = mp.Tier_ID
                    WHERE mp.Customer_MobilePhone = @p ORDER BY mp.ID DESC",
-                P("@p", SanitizePhone(phone)));
+                P("@p", ResolveMemberKey(phone)));
         }
 
         public void SetMembershipExpiry(string phone, DateTime? expiry)
         {
             _code.DatabaseInsertSafe(_conn,
                 "UPDATE Customer_Loyalty SET Membership_Expiry = @e WHERE Customer_MobilePhone = @p",
-                P("@e", (object)expiry ?? DBNull.Value, "@p", SanitizePhone(phone)));
+                P("@e", (object)expiry ?? DBNull.Value, "@p", ResolveMemberKey(phone)));
         }
 
         // ═══════════════ ตัดสิทธิ์ voucher รายคน + ยกเลิกใบที่แจกแล้ว ═══════════════
@@ -603,13 +603,13 @@ namespace Take_Time_BangPhra.Services
                     LEFT JOIN Member_Voucher_Exclusions x
                            ON x.Template_ID = t.ID AND x.Customer_MobilePhone = @p
                    ORDER BY t.ID DESC",
-                P("@p", SanitizePhone(phone)));
+                P("@p", ResolveMemberKey(phone)));
         }
 
         /// <summary>ติ๊ก "ไม่ให้สิทธิ์" — excluded=true จะยกเลิกใบที่ยังไม่ใช้ของ template นั้นด้วย</summary>
         public void SetExclusion(string phone, int templateId, bool excluded, string staffName)
         {
-            phone = SanitizePhone(phone);
+            phone = ResolveMemberKey(phone);
             if (excluded)
             {
                 _code.DatabaseInsertSafe(_conn,
@@ -657,7 +657,112 @@ namespace Take_Time_BangPhra.Services
             return prefix + "-" + Guid.NewGuid().ToString("N").Substring(0, 8).ToUpperInvariant();
         }
 
+        // ── เบอร์โทร = key สมาชิก (Customer_Loyalty.Customer_MobilePhone / Customer.MobilePhone) ──
+        //
+        // เบอร์ต่างประเทศถูกเก็บเป็น "+" + ตัวเลขล้วน (GuestPhone, เช่น "+85295456676") ตั้งแต่ commit b9f12a7
+        // แต่รุ่นก่อนตัดทุกอย่างที่ไม่ใช่ตัวเลข → สมาชิกต่างชาติล็อกอิน/ค้นหาไม่เจอ และแต้มแยกเป็นหลายแถว
+        // ที่นี่จึง "หาแถวที่มีอยู่จริง" จากรูปแบบที่เป็นไปได้ทั้งหมดของเบอร์เดียวกัน ตามลำดับ:
+        //   1) ข้อความที่กรอกตรง ๆ (trim) — ค่าจาก Session เป็น key ที่เก็บอยู่แล้ว
+        //   2) รูปมาตรฐาน: ต่างประเทศ (+ / 00) → "+ตัวเลข", +66 → "0…", อื่น ๆ → กฎเบอร์ไทยเดิม (ไม่เปลี่ยน)
+        //   3) ตัวเลขล้วนที่ขึ้นต้นรหัสประเทศแต่ไม่มี + (85295456676) → "+ตัวเลข" (ตามกฎ GuestPhone.Normalize)
+        //   4) รูปแบบเดิมของหน้านี้ (ตัวเลขล้วน) + รูปมาตรฐานที่ตัด "+" — สมาชิกที่สมัครไว้ก่อนแก้ ("85295456676")
+        // เบอร์ไทย (08x / +66) ทุกข้อได้ค่าเดียวกัน ⇒ พฤติกรรมเดิมไม่เปลี่ยน
+        // ⚠ แค่ "จับคู่เบอร์" เท่านั้น — การตรวจ PIN/ล็อกยังทำกับแถวที่เจอเหมือนเดิมทุกประการ
+
+        /// <summary>
+        /// key ของสมาชิกที่ตรงกับเบอร์นี้: แถวใน Customer_Loyalty ก่อน → แถวใน Customer → (ไม่เจอเลย)
+        /// รูปมาตรฐานสำหรับสร้างใหม่ — คืนค่าตามที่เก็บใน DB เพื่อให้ WHERE = @p ถัดไปตรงแน่
+        /// </summary>
+        private string ResolveMemberKey(string raw)
+        {
+            var cands = PhoneCandidates(raw);
+            if (cands.Count == 0) return "";
+
+            string hit = FindStoredKey("SELECT Customer_MobilePhone AS K FROM Customer_Loyalty WHERE Customer_MobilePhone IN ({0})", cands)
+                      ?? FindStoredKey("SELECT MobilePhone AS K FROM Customer WHERE MobilePhone IN ({0})", cands);
+            if (hit != null) return hit;
+
+            // ยังไม่มีในระบบ (เช่น สมัครใหม่) → เบอร์ต่างประเทศที่ไม่มี + ใช้รูป "+…" ให้ตรงกับที่ OTA เก็บ
+            string alt = InternationalFromBareDigits(raw);
+            return alt.Length > 0 ? alt : SanitizePhone(raw);
+        }
+
+        /// <summary>รูปแบบที่เป็นไปได้ของเบอร์เดียวกัน ตามลำดับความสำคัญ (ไม่ซ้ำ ไม่ว่าง)</summary>
+        private static List<string> PhoneCandidates(string raw)
+        {
+            var list = new List<string>();
+            if (string.IsNullOrWhiteSpace(raw)) return list;
+            string std = SanitizePhone(raw);
+            AddCandidate(list, raw.Trim());
+            AddCandidate(list, std);
+            AddCandidate(list, InternationalFromBareDigits(raw));
+            AddCandidate(list, LegacySanitizePhone(raw));
+            // สมาชิกต่างชาติที่สมัครไว้ก่อนแก้ถูกเก็บเป็นตัวเลขล้วน — กรอก "00852…" ก็ต้องเจอ "852…"
+            if (std.StartsWith("+", StringComparison.Ordinal)) AddCandidate(list, std.Substring(1));
+            return list;
+        }
+
+        private static void AddCandidate(List<string> list, string v)
+        {
+            if (string.IsNullOrEmpty(v)) return;
+            foreach (string x in list) if (string.Equals(x, v, StringComparison.Ordinal)) return;
+            list.Add(v);
+        }
+
+        /// <summary>คืนค่า K (ตามที่เก็บใน DB) ของ candidate ตัวแรกที่มีอยู่จริง — null = ไม่เจอ</summary>
+        private string FindStoredKey(string sqlFormat, List<string> cands)
+        {
+            try
+            {
+                var names = new List<string>();
+                var prm = new Dictionary<string, object>();
+                for (int i = 0; i < cands.Count; i++)
+                {
+                    names.Add("@c" + i);
+                    prm["@c" + i] = cands[i];
+                }
+                var dt = _code.DatabaseQuerySafe(_conn, string.Format(sqlFormat, string.Join(",", names)), prm);
+                if (dt == null || dt.Rows.Count == 0) return null;
+
+                // SQL เทียบแบบไม่สนช่องว่างท้าย → เทียบ trim ฝั่งนี้ แล้วเลือกตามลำดับ candidate
+                foreach (string c in cands)
+                    foreach (DataRow r in dt.Rows)
+                    {
+                        if (r["K"] == DBNull.Value) continue;
+                        string k = r["K"].ToString();
+                        if (string.Equals(k.Trim(), c, StringComparison.Ordinal)) return k;
+                    }
+            }
+            catch { }
+            return null;
+        }
+
+        /// <summary>
+        /// รูปมาตรฐานของเบอร์ที่กรอก:
+        ///   • ขึ้นต้น + หรือ 00 → GuestPhone.Normalize ("+ตัวเลข" / +66 → "0…");
+        ///     Normalize ไม่รับ (ไม่ใช่ +66) → "+ตัวเลข" (ใช้ค้นเท่านั้น — ไม่ชนกับ key เบอร์ไทย)
+        ///   • อื่น ๆ (รวม +66 ที่รูปแบบผิด) → กฎเบอร์ไทยเดิมของหน้านี้ทุกประการ
+        /// </summary>
         private static string SanitizePhone(string p)
+        {
+            if (string.IsNullOrWhiteSpace(p)) return "";
+            string t = p.Trim();
+            string digits = AsciiDigits(t);
+            bool intlPrefixed = t.StartsWith("+", StringComparison.Ordinal)
+                                || digits.StartsWith("00", StringComparison.Ordinal);
+            if (intlPrefixed)
+            {
+                string reason;
+                string n = GuestPhone.Normalize(t, null, out reason);
+                if (n.Length > 0) return n;
+                string d = digits.StartsWith("00", StringComparison.Ordinal) ? digits.Substring(2) : digits;
+                if (d.Length > 0 && !d.StartsWith("66", StringComparison.Ordinal)) return "+" + d;
+            }
+            return LegacySanitizePhone(p);
+        }
+
+        /// <summary>กฎเดิมของหน้านี้ (ก่อนรองรับเบอร์ต่างประเทศ): ตัวเลขล้วน + แปลง 66… เป็น 0…</summary>
+        private static string LegacySanitizePhone(string p)
         {
             if (string.IsNullOrWhiteSpace(p)) return "";
             var sb = new StringBuilder();
@@ -665,6 +770,28 @@ namespace Take_Time_BangPhra.Services
             string s = sb.ToString();
             if (s.StartsWith("66") && s.Length > 9) s = "0" + s.Substring(2);
             return s;
+        }
+
+        /// <summary>
+        /// ตัวเลขล้วนที่ไม่มี + / 00 แต่ขึ้นต้นรหัสประเทศที่รู้จัก (85295456676) → "+85295456676"
+        /// ตามกฎ GuestPhone.Normalize — เบอร์ไทยหรือรูปแบบอื่นคืน ""
+        /// </summary>
+        private static string InternationalFromBareDigits(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return "";
+            string t = raw.Trim();
+            if (t.StartsWith("+", StringComparison.Ordinal)) return "";
+            if (AsciiDigits(t).StartsWith("00", StringComparison.Ordinal)) return "";
+            string reason;
+            string n = GuestPhone.Normalize(t, null, out reason);
+            return GuestPhone.IsInternational(n) ? n : "";
+        }
+
+        private static string AsciiDigits(string s)
+        {
+            var sb = new StringBuilder();
+            foreach (char c in s ?? "") if (c >= '0' && c <= '9') sb.Append(c);
+            return sb.ToString();
         }
 
         private static Dictionary<string, object> P(params object[] kv)

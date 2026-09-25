@@ -36,7 +36,7 @@
                 <asp:Panel ID="pnlLogin" runat="server" DefaultButton="btnLogin">
                     <div class="ml-field">
                         <label>เบอร์โทรศัพท์</label>
-                        <asp:TextBox ID="txtPhone" runat="server" TextMode="Phone" MaxLength="15"
+                        <asp:TextBox ID="txtPhone" runat="server" TextMode="Phone" MaxLength="20"
                             placeholder="08xxxxxxxx" autocomplete="tel" />
                     </div>
                     <div class="ml-field">
@@ -47,6 +47,7 @@
                     <asp:Button ID="btnLogin" runat="server" Text="เข้าสู่ระบบ" CssClass="ml-btn" OnClick="btnLogin_Click" />
                     <div class="ml-hint">
                         เข้าครั้งแรก? ใช้ <b>เลขท้ายเบอร์โทร 4 ตัว</b> เป็นรหัส PIN<br />
+                        เบอร์ต่างประเทศ ใส่ +รหัสประเทศ เช่น +852…<br />
                         ลืมรหัส PIN ติดต่อเคาน์เตอร์เพื่อรีเซ็ตได้เลยค่ะ
                     </div>
                 </asp:Panel>
