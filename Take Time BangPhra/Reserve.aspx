@@ -806,7 +806,7 @@
                         <asp:FileUpload ID="FileUpload1" runat="server" OnDataBinding="FileUpload1_DataBinding" Width="350px" CssClass="rounded-textbox"/>
                         <asp:Button ID="Button3" runat="server" Text="Upload Picture" Width="150px" OnClick="Button3_Click" CssClass="reservation-button" style="margin-left: 10px;"/>
                     </div>
-                    <div style="margin-top: 5px; font-size: 0.9em; color: #8D6E63;">
+                    <div id="divSlipHint" runat="server" style="margin-top: 5px; font-size: 0.9em; color: #8D6E63;">
                         *สามารถโอนยอดมัดจำจองขั้นต่ำ หรือ โอนชำระเต็มจำนวนได้เลยค่ะ
                     </div>
                     <div style="margin-top: 10px;">
@@ -1055,7 +1055,7 @@
             </script>
         </asp:Panel>
 
-        <div class="rules-section">
+        <div class="rules-section" id="divRules" runat="server">
             <img src="./Images/กฏระเบียบ.png" width="90%" style="max-width: 800px;"/>
         </div>
         

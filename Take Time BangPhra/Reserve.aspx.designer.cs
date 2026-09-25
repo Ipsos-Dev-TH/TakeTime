@@ -667,6 +667,16 @@ namespace Take_Time_BangPhra
         protected global::System.Web.UI.HtmlControls.HtmlGenericControl rowSlip;
 
         /// <summary>
+        /// divSlipHint control (ข้อความแนะนำการโอน — ซ่อนเมื่อแอดมินลงจอง).
+        /// </summary>
+        protected global::System.Web.UI.HtmlControls.HtmlGenericControl divSlipHint;
+
+        /// <summary>
+        /// divRules control (รูปกฎระเบียบ — ซ่อนเมื่อแอดมินลงจอง).
+        /// </summary>
+        protected global::System.Web.UI.HtmlControls.HtmlGenericControl divRules;
+
+        /// <summary>
         /// pnlOnlinePay control.
         /// </summary>
         protected global::System.Web.UI.WebControls.Panel pnlOnlinePay;

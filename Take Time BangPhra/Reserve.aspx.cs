@@ -77,8 +77,16 @@ namespace Take_Time_BangPhra
             if (!IsPostBack)
             {
                 DataTable dtPaidHow = code.DatabaseQuery(SqlDataSource1.ConnectionString, SqlDataSource1.SelectCommand);
+                bool hasStaffVisible = dtPaidHow.Columns.Contains("Staff_Visible");
+                bool hasGwProvider = dtPaidHow.Columns.Contains("Gateway_Provider");
                 for (int p = 0; p < dtPaidHow.Rows.Count; p++)
                 {
+                    // ช่องทางเกตเวย์ (PaySo/Omise) บันทึกอัตโนมัติเมื่อเกตเวย์ยืนยันเงินเข้า — ไม่ให้เลือกเองในรายการ
+                    // (เลือกเองได้ = บันทึกรับเงินบัตรที่ไม่มีธุรกรรมจริง) + ช่องที่ปิด "พนักงานเห็น" ในแคตตาล็อก
+                    if (hasGwProvider && dtPaidHow.Rows[p]["Gateway_Provider"] != DBNull.Value
+                        && dtPaidHow.Rows[p]["Gateway_Provider"].ToString().Trim().Length > 0) continue;
+                    if (hasStaffVisible && dtPaidHow.Rows[p]["Staff_Visible"] != DBNull.Value
+                        && !Convert.ToBoolean(dtPaidHow.Rows[p]["Staff_Visible"])) continue;
                     DropDownList2.Items.Add(new ListItem(dtPaidHow.Rows[p]["Paid_How"].ToString(), dtPaidHow.Rows[p]["ID"].ToString()));
                 }
                 DropDownList2.DataBind();
@@ -282,6 +290,17 @@ namespace Take_Time_BangPhra
                 // ช่องทางชำระเงินฝั่งลูกค้า (ซ่อนเงินสด/ทดรองกรรมการ, โชว์ช่องทางเกตเวย์เมื่อเปิด)
                 // + นโยบายการจอง/ติ๊กยอมรับ — ส่วนเสริม ล้มแล้วหน้าจองทำงานแบบเดิม
                 SetupBookingChannelsAndPolicies();
+
+                // แอดมินลงจองแทนลูกค้า: ไม่ต้องมีนโยบาย/กติกา/ติ๊กยอมรับ/รูปบัญชีโอน — หน้าเหลือเฉพาะที่ต้องกรอก
+                if (IsStaffUser)
+                {
+                    CheckBox1.Visible = false;
+                    Button1.Enabled = true;
+                    if (divRules != null) divRules.Visible = false;
+                    if (divSlipHint != null) divSlipHint.Visible = false;
+                    // รูปบัญชีธนาคารตั้งต้น (สำหรับลูกค้าโอน) — ซ่อน; แนบสลิปแล้ว Button3_Click แสดงรูปสลิปเอง
+                    if (!IsPostBack) Image1.Visible = false;
+                }
             }
 
             // 🔧 IMPORTANT: Rebind product charges on page load, BUT NOT during postback from delete button
@@ -6282,7 +6301,8 @@ namespace Take_Time_BangPhra
                   .Append(BookingPolicy.Version).Append("</div>");
                 litPolicyModal.Text = sb.ToString();
 
-                pnlPolicySection.Visible = true;
+                // แอดมินลงจองแทนลูกค้า → ไม่แสดงกล่องนโยบาย/ติ๊กยอมรับ (ลูกค้าเห็นและยอมรับตอนจองเองเท่านั้น)
+                pnlPolicySection.Visible = !IsStaffUser;
                 if (pnlPolicyAccept != null) pnlPolicyAccept.Visible = !IsStaffUser;
             }
             catch (Exception polEx)
