@@ -89,7 +89,7 @@ namespace Take_Time_BangPhra
         /// <summary>คำนวณยอด — ไม่แตะฐานข้อมูล (ยกเว้นอ่านค่า tolerance ผ่าน AppCfg ที่ cache ไว้)</summary>
         public static ReservationBalance Compute(int reservationId, string collectMode, decimal roomTotal, decimal charges,
             decimal pendingCharges, decimal paidLedger, int ledgerRows, decimal deposit, decimal otaAmount = -1m,
-            bool unknownDepositIsReal = false)
+            bool unknownDepositIsReal = false, int nights = 0)
         {
             var b = new ReservationBalance();
             b.ReservationId = reservationId;
@@ -100,6 +100,15 @@ namespace Take_Time_BangPhra
             b.PaidLedger = paidLedger;
             b.LedgerRows = ledgerRows;
             b.Deposit = deposit;
+            // Hotel Collect: ราคาต่อคืนเก็บเป็นบาทเต็ม (ปัดลง) → ราคาห้องในระบบต่ำกว่ายอดตามอีเมล OTA ≤ 1 บาท/คืน
+            // (3 × 539 = 1,617 vs 1,619.01) หน้าเช็คอินเพิ่มบรรทัดปรับเศษให้ลูกค้าจ่ายตามยอด OTA — ยอดที่ต้องจ่ายต้องเป็น
+            // ยอด OTA ด้วย ไม่งั้นหลังจ่ายแล้วขึ้น "จ่ายเกิน 2.01" (เงื่อนไขเดียวกับหน้าเช็คอิน: 0 < ส่วนต่าง ≤ จำนวนคืน)
+            if (NormalizeMode(collectMode) == ModeHotel && otaAmount > roomTotal && nights > 0
+                && otaAmount - roomTotal <= nights)
+            {
+                roomTotal = otaAmount;
+                b.RoomTotal = roomTotal;
+            }
             b.Total = roomTotal + charges;
             // ค่าเริ่มต้นสำหรับผู้เรียก Compute ตรง ๆ — LoadMany ตั้งค่าจริงทับให้อีกที
             b.IsOta = b.CollectMode != ModeNone;
@@ -264,7 +273,8 @@ namespace Take_Time_BangPhra
                     row["LedgerRows"] == DBNull.Value ? 0 : Convert.ToInt32(row["LedgerRows"]),
                     Dec(row["Deposit"]),
                     hasOtaAmt && row["OtaAmount"] != DBNull.Value ? Dec(row["OtaAmount"]) : -1m,
-                    source != SourceGuess);
+                    source != SourceGuess,
+                    dt.Columns.Contains("StayDays") && row["StayDays"] != DBNull.Value ? Convert.ToInt32(row["StayDays"]) : 0);
                 b.CollectSource = source;
                 b.IsOta = isOta;
 
@@ -601,7 +611,7 @@ namespace Take_Time_BangPhra
                 : "CAST(0 AS decimal(18,2)) AS PaidLedger, 0 AS LedgerRows";
 
             string sql =
-                "SELECT r.ID, ISNULL(r.TotalPrice, 0) AS TotalPrice, ISNULL(r.Deposit, 0) AS Deposit, r.Remark, r.Status" +
+                "SELECT r.ID, ISNULL(r.TotalPrice, 0) AS TotalPrice, ISNULL(r.Deposit, 0) AS Deposit, r.Remark, r.Status, ISNULL(r.StayDays, 0) AS StayDays" +
                 (withOta ? ", r.OTA_Payment_Type, " + OtaAmountSql + " AS OtaAmount" : "") +
                 (withCh ? ", r.OTA_Channel" : "") +
                 (withBk ? ", r.OTA_Booking_ID" : "") +
