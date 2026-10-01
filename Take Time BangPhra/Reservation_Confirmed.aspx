@@ -511,6 +511,13 @@
             </div>
         </div>
 
+        <!-- 🐾 สัตว์เลี้ยงเข้าพัก (แสดงเฉพาะใบจองที่มีสัตว์เลี้ยง — ตั้งค่าที่ Admin/Settings/PetStay) -->
+        <asp:Panel ID="pnlPetInfo" runat="server" Visible="false" CssClass="detail-card"
+            style="margin-top: 8px;">
+            <h3>🐾 สัตว์เลี้ยงเข้าพัก</h3>
+            <asp:Literal ID="litPetInfo" runat="server" />
+        </asp:Panel>
+
         <!-- Booking Policies (ตั้งค่าที่ Admin/Settings/BookingPolicies) -->
         <asp:Panel ID="pnlPolicies" runat="server" Visible="false" CssClass="detail-card"
             style="margin-top: 8px;">

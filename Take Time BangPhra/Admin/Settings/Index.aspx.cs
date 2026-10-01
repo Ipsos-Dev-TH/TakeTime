@@ -232,6 +232,10 @@ namespace Take_Time_BangPhra.Admin.Settings
                 "ข้อความที่ลูกค้าต้องติ๊กยอมรับก่อนจอง + แสดงบนหน้ายืนยันการจอง · นโยบายยกเลิกแสดงคู่ทุกช่องทางชำระเงิน (Owner / Admin)",
                 "~/Admin/Settings/BookingPolicies",
                 "นโยบาย เงื่อนไข ข้อกำหนด terms conditions privacy ความเป็นส่วนตัว pdpa คืนเงิน refund ยกเลิก cancellation การจอง ยอมรับ"));
+            web.Items.Add(new Item("สัตว์เลี้ยงเข้าพัก (ห้องที่รับ / จำนวนสูงสุด / ค่าบริการ / นโยบาย)",
+                "เปิด-ปิดช่อง 🐾 บนหน้าจอง, ตั้งห้องที่รับสัตว์เลี้ยง จำนวนสูงสุดต่อห้อง ค่าบริการต่อตัว (ต่อคืน/ต่อการเข้าพัก) และนโยบายสัตว์เลี้ยงที่ลูกค้าต้องยอมรับ (Owner / Admin)",
+                "~/Admin/Settings/PetStay",
+                "สัตว์เลี้ยง หมา แมว สุนัข pet dog cat pet-friendly นโยบาย ค่าบริการ ห้องพัก จอง"));
             web.Items.Add(new Item("เกี่ยวกับเรา",
                 "ข้อความหน้า About Us",
                 "~/Admin/ManageAboutUs",

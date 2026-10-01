@@ -165,6 +165,9 @@ namespace Take_Time_BangPhra
 
                 // นโยบายการจอง + ฉบับที่ลูกค้ายอมรับ (ส่วนเสริม — ล้มก็ไม่กระทบหน้ายืนยัน)
                 LoadPolicies(dtReservationAccommodation.Rows[0]);
+
+                // 🐾 สัตว์เลี้ยงเข้าพัก: จำนวนต่อห้อง ค่าบริการ การยอมรับนโยบาย (ส่วนเสริม — ล้มก็ไม่กระทบ)
+                LoadPetInfo(dtReservationAccommodation);
             }
             catch (Exception ex)
             {
@@ -311,6 +314,86 @@ namespace Take_Time_BangPhra
                 pnlReceiptLinks.Visible = false;
 
                 code2.Logs(conn, "LoadReceipts Error", ex.Message + " - " + ex.StackTrace, "SYSTEM");
+            }
+        }
+
+        /// <summary>
+        /// 🐾 สัตว์เลี้ยงเข้าพัก (PHASE19 migration 23): จำนวนต่อห้อง, ค่าบริการ (อยู่ในยอดรวมด้านบนแล้ว —
+        /// เป็นรายการค่าใช้จ่ายในห้อง), เวลา/ฉบับที่ลูกค้ายอมรับนโยบาย + ข้อความนโยบายสัตว์เลี้ยง
+        /// แสดงเฉพาะใบที่มีสัตว์เลี้ยง (ยังไม่รัน migration / ไม่มีสัตว์เลี้ยง = ซ่อน)
+        /// </summary>
+        private void LoadPetInfo(DataTable rows)
+        {
+            try
+            {
+                if (rows == null || rows.Rows.Count == 0 || !rows.Columns.Contains("Pet_Count")) return;
+                DataRow res = rows.Rows[0];
+                int total = res["Pet_Count"] == DBNull.Value ? 0 : Convert.ToInt32(res["Pet_Count"]);
+                if (total <= 0) return;
+
+                var sb = new System.Text.StringBuilder();
+                sb.Append("<div style=\"font-size:0.75em; line-height:1.6;\">");
+
+                // จำนวนต่อห้อง (แถวละห้องจากการ join Reservation_Accommodation)
+                if (rows.Columns.Contains("Room_Pet_Count"))
+                {
+                    foreach (DataRow r in rows.Rows)
+                    {
+                        int n = r["Room_Pet_Count"] == DBNull.Value ? 0 : Convert.ToInt32(r["Room_Pet_Count"]);
+                        if (n <= 0) continue;
+                        sb.Append("<div>• ").Append(Server.HtmlEncode(Convert.ToString(r["AccomName"])))
+                          .Append(": <b>").Append(n).Append(" ตัว</b></div>");
+                    }
+                }
+                sb.Append("<div style=\"margin-top:4px;\">รวม <b>").Append(total).Append(" ตัว</b>");
+                if (rows.Columns.Contains("Pet_Fee_Total") && res["Pet_Fee_Total"] != DBNull.Value)
+                {
+                    decimal fee = Convert.ToDecimal(res["Pet_Fee_Total"]);
+                    if (fee > 0m)
+                        sb.Append(" · ค่าบริการสัตว์เลี้ยง <b>").Append(fee.ToString("N2")).Append(" บาท</b>")
+                          .Append(" <span style=\"color:#999;\">(รวมอยู่ในราคารวมแล้ว)</span>");
+                }
+                sb.Append("</div>");
+
+                if (rows.Columns.Contains("Pet_Notes") && res["Pet_Notes"] != DBNull.Value
+                    && !string.IsNullOrWhiteSpace(res["Pet_Notes"].ToString()))
+                {
+                    sb.Append("<div style=\"color:#666;\">รายละเอียด: ").Append(Server.HtmlEncode(res["Pet_Notes"].ToString())).Append("</div>");
+                }
+
+                if (rows.Columns.Contains("Pet_Policy_Accepted_At") && res["Pet_Policy_Accepted_At"] != DBNull.Value)
+                {
+                    DateTime acceptedAt = Convert.ToDateTime(res["Pet_Policy_Accepted_At"]);
+                    string ver = rows.Columns.Contains("Pet_Policy_Version") && res["Pet_Policy_Version"] != DBNull.Value
+                        ? res["Pet_Policy_Version"].ToString() : "-";
+                    sb.Append("<div style=\"background:#e8f5e9; color:#2e7d32; border-radius:4px; padding:5px 8px; margin:6px 0;\">")
+                      .Append("✅ ผู้จองยอมรับนโยบายการนำสัตว์เลี้ยงเข้าพักแล้ว เมื่อ ")
+                      .Append(Server.HtmlEncode(acceptedAt.ToString("dd/MM/yyyy HH:mm")))
+                      .Append(" น. (ฉบับที่ ").Append(Server.HtmlEncode(ver)).Append(")</div>");
+                }
+
+                string policy = BookingPolicy.Get(BookingPolicy.KeyPet);
+                if (!string.IsNullOrWhiteSpace(policy))
+                {
+                    sb.Append("<details open style=\"margin:4px 0; background:#fafafa; border:1px solid #eee; border-radius:4px; padding:5px 8px;\">")
+                      .Append("<summary style=\"cursor:pointer; font-weight:bold; color:#5d4037;\">")
+                      .Append(Server.HtmlEncode(BookingPolicy.Title(BookingPolicy.KeyPet)))
+                      .Append(" <span style=\"font-weight:normal; color:#999;\">(")
+                      .Append(Server.HtmlEncode(BookingPolicy.TitleEn(BookingPolicy.KeyPet)))
+                      .Append(" · ฉบับปัจจุบัน ").Append(BookingPolicy.PetVersion)
+                      .Append(")</span></summary><div style=\"margin-top:4px; color:#555;\">")
+                      .Append(BookingPolicy.ToHtml(policy))
+                      .Append("</div></details>");
+                }
+                sb.Append("</div>");
+
+                litPetInfo.Text = sb.ToString();
+                pnlPetInfo.Visible = true;
+            }
+            catch (Exception ex)
+            {
+                pnlPetInfo.Visible = false;
+                try { code2.Logs(conn, "Reservation_Confirmed Pet Info Error", ex.Message, "SYSTEM"); } catch { }
             }
         }
 

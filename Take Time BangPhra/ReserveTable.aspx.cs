@@ -449,6 +449,13 @@ namespace Take_Time_BangPhra
                         {
                             AccomName += $": ({dtReservation_Accom.Rows[j]["Amount"]}คน)";
                         }
+                        // 🐾 สัตว์เลี้ยงในห้องนี้ (คอลัมน์จาก PHASE19 migration 23 — ไม่มีคอลัมน์ = ข้าม)
+                        if (dtReservation_Accom.Columns.Contains("Room_Pet_Count")
+                            && dtReservation_Accom.Rows[j]["Room_Pet_Count"] != DBNull.Value
+                            && Convert.ToInt32(dtReservation_Accom.Rows[j]["Room_Pet_Count"]) > 0)
+                        {
+                            AccomName += $" 🐾{dtReservation_Accom.Rows[j]["Room_Pet_Count"]}";
+                        }
                         AccomName += "\r\n";
 
                         if (Convert.ToInt32(dtReservation_Accom.Rows[j]["OrderID"]) < orderID)

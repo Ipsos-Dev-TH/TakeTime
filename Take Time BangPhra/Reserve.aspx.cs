@@ -1042,6 +1042,9 @@ namespace Take_Time_BangPhra
                         }
                     }
 
+                    // 🐾 จำนวนสัตว์เลี้ยงต่อห้องที่บันทึกไว้ (Reservation_Accommodation.Room_Pet_Count) + รายละเอียด
+                    LoadPetSelections(id);
+
                     // Load customer details for form fields (address, email, etc.)
                     try //Address
                     {
@@ -1249,6 +1252,9 @@ namespace Take_Time_BangPhra
                 TextBox4.Text = Session["totalPrice"]?.ToString() ?? "0";
             }
 
+            // 🐾 สัตว์เลี้ยงเข้าพัก — ต้องอยู่ท้ายสุด: TextBox4/Label2 เพิ่งได้ยอดจริงด้านบน
+            //   (จองใหม่: บวกค่าสัตว์เลี้ยงเข้ายอดรวม/มัดจำขั้นต่ำ · แก้ไข: ปรับส่วนต่างเมื่อจำนวนเปลี่ยน · เช็คอิน: แสดงอย่างเดียว)
+            ApplyPetStay(command, id);
         }
 
         protected void Calendar1_SelectionChanged(object sender, EventArgs e)
@@ -1503,6 +1509,12 @@ namespace Take_Time_BangPhra
                 // 📜 ลูกค้าจองเอง: ต้องติ๊กยอมรับนโยบาย + ช่องทางออนไลน์ที่เลือกต้องยังเปิดอยู่
                 // (ตรวจฝั่ง server เสมอ ไม่เชื่อสถานะปุ่มบนหน้าเว็บ)
                 if (command == "reserve" && !ValidateCustomerBookingGate())
+                {
+                    return;
+                }
+
+                // 🐾 สัตว์เลี้ยง: จำนวนไม่เกินที่ห้องรับได้ / ห้องที่ไม่รับใส่ไม่ได้ / ลูกค้าต้องยอมรับนโยบายสัตว์เลี้ยง (ตรวจฝั่ง server)
+                if ((command == "reserve" || command == "edit") && !ValidatePetStay(command))
                 {
                     return;
                 }
@@ -2215,6 +2227,13 @@ namespace Take_Time_BangPhra
 
                                         // ⚠️ uploadSlip moved AFTER createReceipt to ensure Session["PaymentHistoryId"] exists
                                         // uploadSlip(id);  // MOVED DOWN
+
+                                        // 🐾 แก้ไขจำนวนสัตว์เลี้ยง/คืน → ปรับแถวค่าบริการสัตว์เลี้ยง (เฉพาะที่ยังไม่ชำระ) ก่อนออกใบเสร็จใด ๆ
+                                        //    ไม่เปลี่ยน = ไม่แตะ (ราคาที่ตกลงตอนจองคงเดิม)
+                                        if (command == "edit")
+                                        {
+                                            SavePetStay(Convert.ToInt32(id), false);
+                                        }
 
                                         if (command == "edit")
                                         {
@@ -3839,6 +3858,22 @@ namespace Take_Time_BangPhra
                                             i++;
                                         }
                                         checkCreateCustomer();
+
+                                        // 🐾 สัตว์เลี้ยง: ต้องหลังบันทึกห้องพัก (จำนวนต่อห้องเก็บบนแถว Reservation_Accommodation)
+                                        //    ค่าบริการลงเป็นแถวค่าใช้จ่ายในห้อง (PENDING) — ไม่บวกเข้า Reservation.TotalPrice
+                                        decimal rvPetFeeBooked = SavePetStay(Reservation_ID, true);
+                                        bool rvPetPaidInFull = false;
+                                        if (rvPetFeeBooked > 0m)
+                                        {
+                                            // ยอดรวมในหน้า (TextBox4) รวมค่าสัตว์เลี้ยงแล้ว → โอนเต็มจำนวน = จ่ายค่าสัตว์เลี้ยงครบด้วย
+                                            try { rvPetPaidInFull = Convert.ToDouble(TextBox5.Text) == Convert.ToDouble(TextBox4.Text); }
+                                            catch { rvPetPaidInFull = false; }
+                                        }
+                                        if (!string.IsNullOrEmpty(_petSavedSummary))
+                                        {
+                                            msg += "\r\n" + _petSavedSummary;
+                                        }
+
                                         try
                                         {
                                             if (Reservation_ID > 0)
@@ -3864,7 +3899,19 @@ namespace Take_Time_BangPhra
                                         {
                                             if (CheckBox4.Checked == false)
                                             {
+                                                // 🐾 ชำระเต็มจำนวน → ใบเสร็จต้องมีบรรทัด "ค่าบริการสัตว์เลี้ยง" (ยอดบรรทัดรวม = ยอดที่รับ)
+                                                //    มัดจำ → ใบรับมัดจำบรรทัดเดียวตามเดิม ค่าสัตว์เลี้ยงค้าง PENDING ไปออกในใบเช็คอิน
+                                                if (rvPetPaidInFull)
+                                                {
+                                                    AddProductChargesToReceipt(Reservation_ID, dtReserve);
+                                                }
+
                                                 string receiptId = createReceipt(ID, Convert.ToDouble(TextBox5.Text), dtReserve, IsDeposit, docCreatedDate, CheckBox5.Checked);
+
+                                                if (rvPetPaidInFull && !string.IsNullOrEmpty(receiptId))
+                                                {
+                                                    MarkProductChargesAsPaid(Reservation_ID, receiptId);
+                                                }
 
                                                 // ✅ Enqueue to accounting sync (async, non-blocking)
                                                 EnqueueAccountingSync(ID, Convert.ToDouble(TextBox5.Text), IsDeposit, TextBox3.Text);
@@ -3884,6 +3931,12 @@ namespace Take_Time_BangPhra
                                         }
                                         else if (TextBox1.Text != "02" && CheckBox4.Checked == true)
                                         {
+                                            // 🐾 รับเงินเต็มจำนวนแบบไม่ออกใบเสร็จ → ค่าสัตว์เลี้ยงถือว่าชำระแล้ว (ไม่ค้างเป็นยอดต้องเก็บตอนเช็คอิน)
+                                            if (rvPetPaidInFull)
+                                            {
+                                                MarkProductChargesAsPaid(Reservation_ID, "MANUAL_PAYMENT");
+                                            }
+
                                             // Manual payment - no receipt but slip uploaded
                                             try
                                             {
@@ -4616,6 +4669,18 @@ namespace Take_Time_BangPhra
                     if (dtRes?.Rows.Count > 0)
                     {
                         double totalPrice = Convert.ToDouble(dtRes.Rows[0]["TotalPrice"]);
+                        // ยอดเต็มจริง = ค่าห้อง (TotalPrice) + ค่าใช้จ่ายในห้องที่ยังไม่ยกเลิก (เช่น ค่าบริการสัตว์เลี้ยง)
+                        // — สูตรเดียวกับ ReservationBalance.Total. เดิมเทียบแค่ TotalPrice: มัดจำ = ค่าห้องพอดีแต่ยังไม่รวม
+                        // ค่าสัตว์เลี้ยง ถูกพลิกเป็น "ชำระเต็ม" ทั้งที่ไม่มีบรรทัดรายการ (dtReserve ว่าง)
+                        try
+                        {
+                            var dtCharges = code.DatabaseQuerySafe(conn,
+                                "SELECT ISNULL(SUM(TotalAmount), 0) AS Charges FROM Reservation_Product_Charges WHERE Reservation_ID = @id AND Status <> 'CANCELLED'",
+                                new Dictionary<string, object> { { "@id", Reservation_ID } });
+                            if (dtCharges?.Rows.Count > 0 && dtCharges.Rows[0]["Charges"] != DBNull.Value)
+                                totalPrice += Convert.ToDouble(dtCharges.Rows[0]["Charges"]);
+                        }
+                        catch { }
                         double totalPaid = Total_Amount;
                         try
                         {
@@ -5992,8 +6057,9 @@ namespace Take_Time_BangPhra
             {
                 try
                 {
-                    return pnlPolicyAccept == null || !pnlPolicyAccept.Visible
-                        || (chkAcceptPolicy != null && chkAcceptPolicy.Checked);
+                    return (pnlPolicyAccept == null || !pnlPolicyAccept.Visible
+                        || (chkAcceptPolicy != null && chkAcceptPolicy.Checked))
+                        && PetPolicySatisfied;   // 🐾 มีสัตว์เลี้ยง (ลูกค้า) = ต้องยอมรับนโยบายสัตว์เลี้ยงด้วย
                 }
                 catch { return true; }
             }
@@ -6322,6 +6388,14 @@ namespace Take_Time_BangPhra
             try
             {
                 if (IsStaffUser) return true;
+
+                // 🐾 แจ้งให้ตรงเรื่อง — ยังไม่ยอมรับนโยบายสัตว์เลี้ยง (PolicyAcceptSatisfied รวมเงื่อนไขนี้ด้วย)
+                if (!PetPolicySatisfied)
+                {
+                    ClientScript.RegisterStartupScript(this.GetType(), "petPolicyNotAccepted",
+                        "alert('กรุณาอ่านและติ๊กยอมรับ นโยบายการนำสัตว์เลี้ยงเข้าพัก ก่อนยืนยันการจอง');", true);
+                    return false;
+                }
 
                 if (!PolicyAcceptSatisfied)
                 {
@@ -9254,8 +9328,12 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
                         Convert.ToInt32(Session["UserID"]) : (int?)null;
 
                     // Cancel the charge (returns stock and updates reservation total)
-                    _roomChargeService.CancelRoomCharge(chargeId, adminId,
-                        "ลบโดยผู้ใช้จากหน้า Reserve");
+                    // 🐾 ค่าบริการสัตว์เลี้ยงไม่ใช่สินค้า (ไม่มีสต๊อกให้คืน) → ยกเลิกตรง = ยกเว้นค่าบริการ
+                    if (!TryCancelPetCharge(chargeId, adminId))
+                    {
+                        _roomChargeService.CancelRoomCharge(chargeId, adminId,
+                            "ลบโดยผู้ใช้จากหน้า Reserve");
+                    }
 
                     // Reload the charges display
                     LoadProductCharges();
@@ -9326,15 +9404,23 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
                 {
                     foreach (DataRow charge in dtCharges.Rows)
                     {
+                        // ค่าบริการ/กิจกรรมที่ไม่ใช่สินค้าในสต๊อก (สัตว์เลี้ยง, กิจกรรม) มี Product_ID = NULL —
+                        // createReceipt แปลง Product_ID ด้วย Convert.ToInt32 → DBNull ทำใบเสร็จล้มกลางทาง ⇒ ใช้ 0
+                        object chargeProductId = charge["Product_ID"] == DBNull.Value ? (object)"0" : charge["Product_ID"];
+                        string chargeNotes = dtCharges.Columns.Contains("Notes") ? Convert.ToString(charge["Notes"]) : "";
+                        string chargeUnit = "ชิ้น";
+                        if (!string.IsNullOrEmpty(chargeNotes) && chargeNotes.StartsWith(PetStay.ChargeNotePrefix, StringComparison.Ordinal))
+                            chargeUnit = chargeNotes.EndsWith(PetStay.UnitStay, StringComparison.Ordinal) ? "ตัว" : "ตัว/คืน";
+
                         // Add product charge to receipt with ProductType_ID = 3
                         dtReserve.Rows.Add(
                             dtReserve.Rows.Count + 1,  // Number
                             "",  // Receipt_ID (will be set later)
                             "3",  // ProductType_ID = 3 for product charges
-                            charge["Product_ID"],
+                            chargeProductId,
                             charge["Product_Name"].ToString(),  // Product_Data
                             charge["Quantity"],  // Product_Amount
-                            "ชิ้น",  // Product_Unit
+                            chargeUnit,  // Product_Unit
                             charge["UnitPrice"],  // Price_PerPeice
                             charge["TotalAmount"]  // Price_Amount
                         );
@@ -9383,6 +9469,803 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
             // Page_Load will automatically recalculate prices when postback occurs
             // This event handler exists to trigger the postback
             // No additional code needed here - prices are calculated in Page_Load (lines 286-547)
+        }
+
+        // ══════════════════════════════════════════════════════════════════════
+        // 🐾 สัตว์เลี้ยงเข้าพัก (PHASE19 migration 23 · ตั้งค่าที่ Admin/Settings/PetStay)
+        //  · รายห้อง: คอลัมน์สุดท้ายของ GridView1 (txtPetCount/lblPetInfo) — ห้องที่ไม่รับ = "ห้องนี้ไม่รับสัตว์เลี้ยง"
+        //    จำนวนต่อห้องเก็บที่ Reservation_Accommodation.Room_Pet_Count (ใบจองหลายห้อง = แยกตามห้อง)
+        //  · ค่าบริการ = แถว Reservation_Product_Charges ต่อห้อง (Product_ID NULL, Notes "PET_FEE:<หน่วย>",
+        //    Pet_Accommodation_ID) — ไม่บวกเข้า Reservation.TotalPrice / ราคาต่อคืน (Price เป็น int)
+        //    ⇒ หน้าแก้ไข/เช็คอินนับผ่าน ProductCharges เดิม, ReservationBalance (Total = ค่าห้อง + Charges),
+        //      ใบเสร็จ (AddProductChargesToReceipt) และ NextAcc ตามเส้นทางค่าใช้จ่ายในห้อง — ไม่มีการบวกซ้ำ
+        //  · จองใหม่: ยอดรวม (TextBox4) = ค่าห้อง+ของเช่า + ค่าสัตว์เลี้ยง, มัดจำขั้นต่ำ + ค่าสัตว์เลี้ยง
+        //  · ลูกค้าจองเอง: ติ๊กมีสัตว์เลี้ยง → ต้องยอมรับนโยบายสัตว์เลี้ยง (บันทึกเวลา + ฉบับ) · พนักงาน: ไม่ต้อง
+        // ══════════════════════════════════════════════════════════════════════
+
+        private const int PetColumnIndex = 6;
+
+        private sealed class PetLine
+        {
+            public int AccomId;
+            public string AccomName;
+            public int Pets;
+            public decimal FeePerPet;
+            public decimal Quantity;
+            public decimal Total;
+        }
+
+        private sealed class PetCalc
+        {
+            public readonly List<PetLine> Lines = new List<PetLine>();
+            public int TotalPets;
+            public decimal TotalFee;
+            public bool AnyPetRoomSelected;
+            public string Unit = PetStay.UnitNight;
+            public int Nights = 1;
+        }
+
+        /// <summary>สัตว์เลี้ยงที่บันทึกไว้แล้วของใบจอง (โหมดแก้ไข/เช็คอิน)</summary>
+        private sealed class PetState
+        {
+            public readonly Dictionary<int, int> Counts = new Dictionary<int, int>();
+            public readonly Dictionary<int, decimal> ActiveQty = new Dictionary<int, decimal>();
+            public readonly Dictionary<int, decimal> UnitPrice = new Dictionary<int, decimal>();
+            public decimal ActiveTotal;
+            public bool HasPaid;
+            public string Notes;
+
+            public int TotalPets
+            {
+                get { int s = 0; foreach (int n in Counts.Values) s += n; return s; }
+            }
+        }
+
+        private sealed class PetRowRef
+        {
+            public TextBox Box;
+            public int AccomId;
+            public string AccomName;
+            public PetStay.RoomRule Rule;
+        }
+
+        private bool _petClamped;            // คำขอนี้ปรับจำนวนลงให้ไม่เกินที่ห้องรับได้
+        private PetState _petStateCache;
+        private bool _petStateLoaded;
+        private string _petSavedSummary;     // ข้อความสรุปสำหรับแจ้งเตือนการจองใหม่
+
+        /// <summary>ลูกค้ายอมรับนโยบายสัตว์เลี้ยงแล้ว (หรือไม่ต้อง — ไม่มีสัตว์เลี้ยง/พนักงาน/ปิดฟีเจอร์)</summary>
+        private bool PetPolicySatisfied
+        {
+            get
+            {
+                try
+                {
+                    return pnlPetPolicy == null || !pnlPetPolicy.Visible
+                        || (chkAcceptPetPolicy != null && chkAcceptPetPolicy.Checked);
+                }
+                catch { return true; }
+            }
+        }
+
+        protected void chkHasPet_CheckedChanged(object sender, EventArgs e)
+        {
+            // ติ๊ก/เอาติ๊กออก → ลูกค้าต้องยอมรับนโยบายสัตว์เลี้ยงก่อนปุ่มยืนยันจะกดได้ (ยอดคำนวณใน Page_Load แล้ว)
+            RefreshCustomerSubmitButton();
+        }
+
+        protected void chkAcceptPetPolicy_CheckedChanged(object sender, EventArgs e)
+        {
+            RefreshCustomerSubmitButton();
+        }
+
+        protected void txtPetCount_TextChanged(object sender, EventArgs e)
+        {
+            // มีไว้ให้ postback — Page_Load (ApplyPetStay) คำนวณค่าบริการ/ตรวจจำนวนสูงสุดให้แล้ว
+        }
+
+        /// <summary>ลูกค้าจองเอง: ปุ่มยืนยันกดได้เมื่อติ๊กกติกา + นโยบายหลัก + นโยบายสัตว์เลี้ยง (ถ้ามี) ครบ</summary>
+        private void RefreshCustomerSubmitButton()
+        {
+            try
+            {
+                if (IsStaffUser || Request.QueryString["command"] != "reserve") return;
+                if (CheckBox1 != null && CheckBox1.Visible) CheckBox1_CheckedChanged(null, null);
+            }
+            catch { }
+        }
+
+        private void SetPetColumnVisible(bool visible)
+        {
+            try
+            {
+                if (GridView1.Columns.Count > PetColumnIndex) GridView1.Columns[PetColumnIndex].Visible = visible;
+            }
+            catch { }
+        }
+
+        private void HidePetUi()
+        {
+            try
+            {
+                if (pnlPetStay != null) pnlPetStay.Visible = false;
+                SetPetColumnVisible(false);
+            }
+            catch { }
+        }
+
+        /// <summary>โหลดสถานะสัตว์เลี้ยงที่บันทึกไว้ของใบจอง (cache ต่อคำขอ) — null = ไม่มีคอลัมน์/อ่านไม่ได้</summary>
+        private PetState LoadPetState(int reservationId)
+        {
+            if (_petStateLoaded) return _petStateCache;
+            _petStateLoaded = true;
+            _petStateCache = null;
+            if (reservationId <= 0 || !PetStay.SchemaReady) return null;
+            try
+            {
+                var st = new PetState();
+                var p = new Dictionary<string, object> { { "@rid", reservationId } };
+
+                DataTable dtCounts = code2.DatabaseQuerySafe(conn,
+                    "SELECT Accommodation_ID, ISNULL(Room_Pet_Count, 0) AS Pets FROM Reservation_Accommodation WHERE Reservation_ID = @rid", p);
+                foreach (DataRow r in dtCounts.Rows)
+                {
+                    if (r["Accommodation_ID"] == DBNull.Value) continue;
+                    int aid = Convert.ToInt32(r["Accommodation_ID"]);
+                    int n = Convert.ToInt32(r["Pets"]);
+                    int prev;
+                    st.Counts.TryGetValue(aid, out prev);
+                    st.Counts[aid] = prev + n;
+                }
+
+                DataTable dtPetCharges = code2.DatabaseQuerySafe(conn,
+                    @"SELECT Pet_Accommodation_ID, Quantity, UnitPrice, TotalAmount, Status
+                        FROM Reservation_Product_Charges
+                       WHERE Reservation_ID = @rid AND Pet_Accommodation_ID IS NOT NULL AND Status <> 'CANCELLED'", p);
+                foreach (DataRow r in dtPetCharges.Rows)
+                {
+                    int aid = Convert.ToInt32(r["Pet_Accommodation_ID"]);
+                    decimal qty = r["Quantity"] == DBNull.Value ? 0m : Convert.ToDecimal(r["Quantity"]);
+                    decimal prevQty;
+                    st.ActiveQty.TryGetValue(aid, out prevQty);
+                    st.ActiveQty[aid] = prevQty + qty;
+                    if (r["UnitPrice"] != DBNull.Value) st.UnitPrice[aid] = Convert.ToDecimal(r["UnitPrice"]);
+                    if (r["TotalAmount"] != DBNull.Value) st.ActiveTotal += Convert.ToDecimal(r["TotalAmount"]);
+                    if (string.Equals(Convert.ToString(r["Status"]), "PAID", StringComparison.OrdinalIgnoreCase)) st.HasPaid = true;
+                }
+
+                DataTable dtNotes = code2.DatabaseQuerySafe(conn, "SELECT Pet_Notes FROM Reservation WHERE ID = @rid", p);
+                if (dtNotes.Rows.Count > 0 && dtNotes.Rows[0]["Pet_Notes"] != DBNull.Value)
+                    st.Notes = dtNotes.Rows[0]["Pet_Notes"].ToString();
+
+                _petStateCache = st;
+            }
+            catch (Exception ex)
+            {
+                try { code2.Logs(conn, "Reserve - Pet Stay Load", "Reservation " + reservationId + ": " + ex.Message, "SYSTEM"); } catch { }
+            }
+            return _petStateCache;
+        }
+
+        /// <summary>โหมดแก้ไข/เช็คอิน (โหลดครั้งแรก): เติมจำนวนสัตว์เลี้ยงต่อห้อง + รายละเอียดจากที่บันทึกไว้</summary>
+        private void LoadPetSelections(string id)
+        {
+            try
+            {
+                int rid;
+                if (!int.TryParse(id, out rid) || rid <= 0) return;
+                PetState st = LoadPetState(rid);
+                DataTable dtA = Session["dtAccommodation"] as DataTable;
+                if (st == null || dtA == null) return;
+
+                int total = 0;
+                foreach (GridViewRow row in GridView1.Rows)
+                {
+                    if (row.RowIndex >= dtA.Rows.Count) continue;
+                    int aid = Convert.ToInt32(dtA.Rows[row.RowIndex]["ID"]);
+                    int n;
+                    if (!st.Counts.TryGetValue(aid, out n)) n = 0;
+                    TextBox txt = row.FindControl("txtPetCount") as TextBox;
+                    if (txt != null) txt.Text = n.ToString();
+                    total += n;
+                }
+                if (chkHasPet != null) chkHasPet.Checked = total > 0;
+                if (txtPetNotes != null) txtPetNotes.Text = st.Notes ?? "";
+            }
+            catch (Exception ex)
+            {
+                try { code2.Logs(conn, "Reserve - Pet Stay Load Selections", ex.Message, "SYSTEM"); } catch { }
+            }
+        }
+
+        /// <summary>
+        /// คำนวณค่าบริการสัตว์เลี้ยงจากตารางห้อง. priceRef (โหมดแก้ไข) = ใช้ราคาต่อหน่วยที่ตกลงไว้ตอนจองของห้องนั้น
+        /// และยังนับห้องที่เคยมีสัตว์เลี้ยงแม้ภายหลังห้องถูกตั้งเป็น "ไม่รับ". applyUi = จัดหน้าตาช่องกรอก/ปรับจำนวนเกิน
+        /// </summary>
+        private PetCalc ComputePetStay(PetState priceRef, bool applyUi)
+        {
+            var calc = new PetCalc();
+            try { calc.Unit = PetStay.FeeUnit; } catch { calc.Unit = PetStay.UnitNight; }
+            int nights;
+            if (!int.TryParse(DropDownList1.SelectedValue, out nights) || nights < 1) nights = 1;
+            calc.Nights = nights;
+
+            DataTable dtA = Session["dtAccommodation"] as DataTable;
+            bool hasPet = chkHasPet != null && chkHasPet.Checked;
+            bool editable = GridView1.Enabled;
+            var candidates = new List<PetRowRef>();
+
+            foreach (GridViewRow row in GridView1.Rows)
+            {
+                TextBox txt = row.FindControl("txtPetCount") as TextBox;
+                if (txt == null) continue;
+                Label lbl = row.FindControl("lblPetInfo") as Label;
+                CheckBox chk = row.FindControl("chkSelect") as CheckBox;
+                DataRow ar = (dtA != null && row.RowIndex < dtA.Rows.Count) ? dtA.Rows[row.RowIndex] : null;
+                if (ar == null) continue;
+
+                int aid = Convert.ToInt32(ar["ID"]);
+                PetStay.RoomRule rule = PetStay.ReadRoom(ar);
+                int stored = 0;
+                if (priceRef != null) priceRef.Counts.TryGetValue(aid, out stored);
+                if (stored > 0)
+                {
+                    rule.Allowed = true;                               // ใบเดิมมีสัตว์เลี้ยงห้องนี้อยู่แล้ว
+                    if (rule.MaxPets < stored) rule.MaxPets = stored;
+                }
+                decimal agreed;
+                if (priceRef != null && priceRef.UnitPrice.TryGetValue(aid, out agreed)) rule.FeePerPet = agreed;
+
+                bool selected = chk != null && chk.Checked;
+                if (!rule.Allowed)
+                {
+                    if (applyUi)
+                    {
+                        txt.Text = "0";
+                        txt.Visible = false;
+                        if (lbl != null) lbl.Text = "ห้องนี้ไม่รับสัตว์เลี้ยง";
+                    }
+                    continue;
+                }
+
+                if (applyUi)
+                {
+                    txt.Visible = true;
+                    txt.Attributes["max"] = rule.MaxPets.ToString();
+                    if (lbl != null)
+                        lbl.Text = "สูงสุด " + rule.MaxPets + " ตัว · ฿" + PetStay.Money(rule.FeePerPet) + " " + PetStay.UnitLabel(calc.Unit);
+                }
+
+                if (!selected || !hasPet)
+                {
+                    if (selected) calc.AnyPetRoomSelected = true;
+                    if (applyUi) { txt.Text = "0"; txt.Enabled = false; }
+                    continue;
+                }
+
+                calc.AnyPetRoomSelected = true;
+                candidates.Add(new PetRowRef
+                {
+                    Box = txt,
+                    AccomId = aid,
+                    AccomName = Convert.ToString(ar["AccomName"]),
+                    Rule = rule
+                });
+            }
+
+            // จำนวนต่อห้อง: ติดลบ = 0, เกินสูงสุด = ปรับเป็นสูงสุด (ห้องเดียวกันที่ไม่รับถูกตัดไปแล้วด้านบน)
+            var counts = new int[candidates.Count];
+            int sum = 0;
+            for (int k = 0; k < candidates.Count; k++)
+            {
+                int n;
+                if (!int.TryParse((candidates[k].Box.Text ?? "").Trim(), out n) || n < 0) n = 0;
+                if (n > candidates[k].Rule.MaxPets)
+                {
+                    n = candidates[k].Rule.MaxPets;
+                    if (applyUi) _petClamped = true;
+                }
+                counts[k] = n;
+                sum += n;
+            }
+
+            // เพิ่งติ๊ก "มีสัตว์เลี้ยง" (ทุกห้องยังเป็น 0) → ตั้งต้นห้องละ 1 ตัวให้แก้ต่อ
+            if (applyUi && editable && hasPet && sum == 0)
+            {
+                for (int k = 0; k < candidates.Count; k++) { counts[k] = 1; sum++; }
+            }
+
+            for (int k = 0; k < candidates.Count; k++)
+            {
+                PetRowRef c = candidates[k];
+                if (applyUi)
+                {
+                    c.Box.Text = counts[k].ToString();
+                    c.Box.Enabled = editable;
+                }
+                if (counts[k] <= 0) continue;
+                var line = new PetLine
+                {
+                    AccomId = c.AccomId,
+                    AccomName = c.AccomName,
+                    Pets = counts[k],
+                    FeePerPet = c.Rule.FeePerPet,
+                    Quantity = PetStay.BillableQuantity(counts[k], nights, calc.Unit),
+                    Total = PetStay.LineTotal(counts[k], nights, calc.Unit, c.Rule.FeePerPet)
+                };
+                calc.Lines.Add(line);
+                calc.TotalPets += line.Pets;
+                calc.TotalFee += line.Total;
+            }
+            return calc;
+        }
+
+        /// <summary>จำนวนสัตว์เลี้ยง (หรือจำนวนคืนที่คิดเงิน) ต่างจากที่บันทึกไว้หรือไม่</summary>
+        private static bool PetSelectionChanged(PetCalc calc, PetState st)
+        {
+            var desired = new Dictionary<int, int>();
+            var desiredQty = new Dictionary<int, decimal>();
+            foreach (PetLine l in calc.Lines)
+            {
+                int prev;
+                desired.TryGetValue(l.AccomId, out prev);
+                desired[l.AccomId] = prev + l.Pets;
+                decimal prevQty;
+                desiredQty.TryGetValue(l.AccomId, out prevQty);
+                desiredQty[l.AccomId] = prevQty + l.Quantity;
+            }
+
+            var keys = new HashSet<int>(desired.Keys);
+            foreach (int k in st.Counts.Keys) keys.Add(k);
+            foreach (int k in keys)
+            {
+                int d, o;
+                desired.TryGetValue(k, out d);
+                st.Counts.TryGetValue(k, out o);
+                if (d != o) return true;
+            }
+
+            // จำนวนตัวเท่าเดิมแต่จำนวนคืนเปลี่ยน (คิดรายคืน) — เทียบกับแถวค่าบริการที่ยังมีผล
+            // (ไม่มีแถว = พนักงานยกเว้นค่าบริการไว้แล้ว → ไม่สร้างใหม่เอง)
+            foreach (KeyValuePair<int, decimal> kv in desiredQty)
+            {
+                decimal activeQty;
+                if (st.ActiveQty.TryGetValue(kv.Key, out activeQty) && activeQty > 0m && activeQty != kv.Value) return true;
+            }
+            return false;
+        }
+
+        /// <summary>ท้าย Page_Load: แสดง/ซ่อนส่วนสัตว์เลี้ยง คำนวณค่าบริการ และบวกเข้ายอดในหน้า</summary>
+        private void ApplyPetStay(string command, string id)
+        {
+            try
+            {
+                if (pnlPetStay == null) return;
+                bool modeOk = command == "reserve" || command == "edit" || command == "checkin";
+                if (!modeOk || !PetStay.Enabled)
+                {
+                    HidePetUi();
+                    return;
+                }
+
+                int resId = 0;
+                if (command != "reserve") int.TryParse(id, out resId);
+                PetState st = resId > 0 ? LoadPetState(resId) : null;
+
+                if (command == "checkin")
+                {
+                    ShowStoredPetInfo(st);
+                    return;
+                }
+
+                PetCalc calc = ComputePetStay(st, true);
+                bool show = calc.AnyPetRoomSelected || (st != null && st.TotalPets > 0);
+                pnlPetStay.Visible = show;
+                if (!show)
+                {
+                    chkHasPet.Checked = false;
+                    chkAcceptPetPolicy.Checked = false;
+                    SetPetColumnVisible(false);
+                    SyncCustomerSubmitForPets(command);
+                    return;
+                }
+
+                bool has = chkHasPet.Checked;
+                SetPetColumnVisible(has);
+                pnlPetDetail.Visible = has;
+                bool customerReserve = command == "reserve" && !IsStaffUser;
+                pnlPetPolicy.Visible = has && customerReserve;
+                if (!has) chkAcceptPetPolicy.Checked = false;
+                if (pnlPetPolicy.Visible)
+                {
+                    litPetPolicy.Text = "<b>📋 " + Server.HtmlEncode(BookingPolicy.Title(BookingPolicy.KeyPet))
+                        + "</b> <span style=\"color:#A1887F; font-size:0.85em;\">(" + Server.HtmlEncode(BookingPolicy.TitleEn(BookingPolicy.KeyPet))
+                        + " · ฉบับที่ " + BookingPolicy.PetVersion + ")</span><br/>"
+                        + BookingPolicy.ToHtml(BookingPolicy.Get(BookingPolicy.KeyPet));
+                }
+
+                string extra = "";
+                decimal fee = has ? calc.TotalFee : 0m;
+                if (command == "reserve")
+                {
+                    if (fee > 0m)
+                    {
+                        decimal baseTotal = 0m;
+                        try { baseTotal = Convert.ToDecimal(Session["totalPrice"]?.ToString() ?? "0"); } catch { }
+                        TextBox4.Text = (baseTotal + fee).ToString();
+
+                        // มัดจำขั้นต่ำเก็บค่าสัตว์เลี้ยงล่วงหน้าเต็มจำนวน (Label2 อ่านด้วย Convert.ToInt32 → ปัดขึ้นเป็นบาท)
+                        int minDep;
+                        if (int.TryParse((Label2.Text ?? "").Trim(), out minDep))
+                            Label2.Text = (minDep + (int)Math.Ceiling(fee)).ToString();
+                    }
+                }
+                else if (command == "edit" && st != null)
+                {
+                    PetCalc desiredCalc = has ? calc : new PetCalc();
+                    if (PetSelectionChanged(desiredCalc, st))
+                    {
+                        if (st.HasPaid)
+                        {
+                            extra = "<div style=\"color:#C62828; margin-top:4px;\">⚠ ค่าบริการสัตว์เลี้ยงของใบนี้ชำระแล้ว — "
+                                  + "การเปลี่ยนจำนวน/คืนจะไม่ถูกบันทึก (ถ้าต้องเก็บเพิ่ม ให้ชาร์จเข้าห้องเป็นรายการแยก)</div>";
+                        }
+                        else
+                        {
+                            decimal delta = fee - st.ActiveTotal;
+                            decimal cur;
+                            if (delta != 0m && decimal.TryParse(TextBox4.Text, out cur))
+                            {
+                                TextBox4.Text = (cur + delta).ToString();
+                                Session["OldPrice"] = TextBox4.Text;
+                            }
+                            extra = "<div style=\"color:#E65100; margin-top:4px;\">ยอดรวมปรับตามสัตว์เลี้ยงใหม่ ("
+                                  + (delta >= 0 ? "+" : "−") + "฿" + PetStay.Money(Math.Abs(delta))
+                                  + ") — บันทึกเมื่อกด \"ยืนยันการแก้ไข\"</div>";
+                        }
+                    }
+                }
+
+                litPetSummary.Text = BuildPetSummaryHtml(calc, has, extra);
+                SyncCustomerSubmitForPets(command);
+            }
+            catch (Exception ex)
+            {
+                HidePetUi();
+                try { code2.Logs(conn, "Reserve - Pet Stay UI", ex.Message, "SYSTEM"); } catch { }
+            }
+        }
+
+        /// <summary>
+        /// ลูกค้าจองเอง (เปิดฟีเจอร์สัตว์เลี้ยง): ส่วนสัตว์เลี้ยงโผล่/หายตามห้องที่เลือก → คำนวณสถานะปุ่มยืนยันใหม่
+        /// ทุกคำขอด้วยกติกาเดียวกับ CheckBox1_CheckedChanged (กันปุ่มค้าง "กดไม่ได้" หลังเอาห้องที่มีสัตว์เลี้ยงออก)
+        /// </summary>
+        private void SyncCustomerSubmitForPets(string command)
+        {
+            try
+            {
+                if (command != "reserve" || IsStaffUser) return;
+                if (CheckBox1 == null || !CheckBox1.Visible) return;
+                Button1.Enabled = CheckBox1.Checked && PolicyAcceptSatisfied;
+            }
+            catch { }
+        }
+
+        private string BuildPetSummaryHtml(PetCalc calc, bool has, string extraHtml)
+        {
+            var sb = new StringBuilder();
+            sb.Append("<div style=\"margin-top:6px; font-size:0.92em; color:#6D4C41; line-height:1.65;\">");
+            if (!has)
+            {
+                sb.Append("ห้องที่เลือกรับสัตว์เลี้ยงได้ — ติ๊กด้านบนถ้ามีสัตว์เลี้ยงมาด้วย แล้วระบุจำนวนในคอลัมน์ 🐾 ของตารางห้องพัก");
+            }
+            else if (calc.TotalPets <= 0)
+            {
+                sb.Append("ระบุจำนวนสัตว์เลี้ยงของแต่ละห้องในคอลัมน์ 🐾 ของตารางห้องพัก");
+            }
+            else
+            {
+                foreach (PetLine l in calc.Lines)
+                {
+                    sb.Append("• ").Append(Server.HtmlEncode(l.AccomName ?? "")).Append(": ")
+                      .Append(l.Pets).Append(" ตัว × ฿").Append(PetStay.Money(l.FeePerPet));
+                    if (calc.Unit != PetStay.UnitStay) sb.Append(" × ").Append(calc.Nights).Append(" คืน");
+                    sb.Append(" = <b>฿").Append(PetStay.Money(l.Total)).Append("</b><br/>");
+                }
+                sb.Append("รวมค่าบริการสัตว์เลี้ยง <b>฿").Append(PetStay.Money(calc.TotalFee))
+                  .Append("</b> — บวกเข้าราคารวมแล้ว (ใบเสร็จแสดงเป็นรายการ \"ค่าบริการสัตว์เลี้ยง\" แยกจากค่าห้อง)");
+            }
+            sb.Append(extraHtml ?? "").Append("</div>");
+            return sb.ToString();
+        }
+
+        /// <summary>โหมดเช็คอิน: แสดงสัตว์เลี้ยงที่แจ้งไว้อย่างเดียว (ค่าบริการอยู่ในรายการค่าใช้จ่ายในห้องแล้ว)</summary>
+        private void ShowStoredPetInfo(PetState st)
+        {
+            int total = st == null ? 0 : st.TotalPets;
+            if (total <= 0)
+            {
+                HidePetUi();
+                return;
+            }
+            pnlPetStay.Visible = true;
+            chkHasPet.Checked = true;
+            chkHasPet.Enabled = false;
+            SetPetColumnVisible(true);
+            pnlPetDetail.Visible = true;
+            txtPetNotes.ReadOnly = true;
+            pnlPetPolicy.Visible = false;
+            litPetSummary.Text = "<div style=\"margin-top:6px; font-size:0.92em; color:#6D4C41; line-height:1.65;\">"
+                + "สัตว์เลี้ยงที่แจ้งไว้ <b>" + total + " ตัว</b> · ค่าบริการ <b>฿" + PetStay.Money(st.ActiveTotal) + "</b>"
+                + (st.HasPaid ? " (ชำระแล้ว)" : " (อยู่ในรายการค่าใช้จ่ายในห้อง — รวมในยอดที่ต้องชำระแล้ว)")
+                + "</div>";
+        }
+
+        /// <summary>ด่านฝั่ง server ก่อนบันทึก (จองใหม่/แก้ไข) — คืน false = หยุด (แจ้งเตือนแล้ว)</summary>
+        private bool ValidatePetStay(string command)
+        {
+            try
+            {
+                if (!PetStay.Enabled) return true;
+                if (chkHasPet == null || !chkHasPet.Checked || pnlPetStay == null || !pnlPetStay.Visible) return true;
+
+                if (_petClamped)
+                {
+                    ClientScript.RegisterStartupScript(this.GetType(), "petClamped",
+                        "alert('จำนวนสัตว์เลี้ยงเกินที่ห้องรับได้ — ระบบปรับเป็นจำนวนสูงสุดของห้องให้แล้ว\\nกรุณาตรวจสอบยอดอีกครั้งแล้วกดยืนยัน');", true);
+                    return false;
+                }
+
+                int rid = 0;
+                if (command == "edit") int.TryParse(Request.QueryString["id"], out rid);
+                PetCalc calc = ComputePetStay(rid > 0 ? LoadPetState(rid) : null, false);
+                if (calc.TotalPets <= 0)
+                {
+                    ClientScript.RegisterStartupScript(this.GetType(), "petNoCount",
+                        "alert('กรุณาระบุจำนวนสัตว์เลี้ยงในห้องที่รับสัตว์เลี้ยง (คอลัมน์ 🐾) หรือเอาเครื่องหมาย มีสัตว์เลี้ยงเข้าพัก ออก');", true);
+                    return false;
+                }
+
+                if (command == "reserve" && !IsStaffUser && (chkAcceptPetPolicy == null || !chkAcceptPetPolicy.Checked))
+                {
+                    ClientScript.RegisterStartupScript(this.GetType(), "petPolicyGate",
+                        "alert('กรุณาอ่านและติ๊กยอมรับ นโยบายการนำสัตว์เลี้ยงเข้าพัก ก่อนยืนยันการจอง');", true);
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                try { code2.Logs(conn, "Reserve - Pet Stay Validate", ex.Message, "SYSTEM"); } catch { }
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// บันทึกสัตว์เลี้ยงของใบจอง: จำนวนต่อห้อง, แถวค่าบริการ (ค่าใช้จ่ายในห้อง), สรุปบนใบจอง, การยอมรับนโยบาย
+        /// จองใหม่ = สร้างเมื่อมีสัตว์เลี้ยง · แก้ไข = เปลี่ยนเฉพาะเมื่อจำนวน/คืนต่างจากเดิม และค่าบริการยังไม่ชำระ
+        /// คืนยอดค่าบริการที่ลงใหม่ (0 = ไม่ได้ลง). ล้ม = log + แจ้งพนักงาน ไม่ทำให้การจองล้ม
+        /// </summary>
+        private decimal SavePetStay(int reservationId, bool isNewBooking)
+        {
+            _petSavedSummary = null;
+            if (reservationId <= 0) return 0m;
+            try
+            {
+                if (!PetStay.Enabled) return 0m;
+
+                bool has = chkHasPet != null && chkHasPet.Checked && pnlPetStay != null && pnlPetStay.Visible;
+                _petStateLoaded = false;   // อ่านสถานะล่าสุดจากฐานข้อมูล (ไม่ใช้ค่าที่ cache ตอน Page_Load)
+                PetState old = isNewBooking ? null : LoadPetState(reservationId);
+                if (!isNewBooking && old == null) return 0m;
+
+                PetCalc calc = has ? ComputePetStay(old, false) : new PetCalc();
+                string notes = has ? (txtPetNotes.Text ?? "").Trim() : "";
+                if (notes.Length > 500) notes = notes.Substring(0, 500);
+
+                bool changed = isNewBooking ? calc.TotalPets > 0 : PetSelectionChanged(calc, old);
+                bool notesChanged = !isNewBooking && !string.Equals(notes, (old.Notes ?? "").Trim(), StringComparison.Ordinal);
+                if (!changed && !notesChanged && !(isNewBooking && calc.TotalPets > 0)) return 0m;
+
+                if (changed && !isNewBooking && old.HasPaid)
+                {
+                    code2.Logs(conn, "Reserve - Pet Stay",
+                        "Reservation " + reservationId + ": ค่าบริการสัตว์เลี้ยงชำระแล้ว — ไม่ปรับจำนวน/ค่าบริการตามที่แก้ไข",
+                        Session["User"]?.ToString() ?? "SYSTEM");
+                    ClientScript.RegisterStartupScript(this.GetType(), "petPaidLocked",
+                        "alert('ค่าบริการสัตว์เลี้ยงของการจองนี้ชำระแล้ว จึงไม่ได้ปรับจำนวนสัตว์เลี้ยง/ค่าบริการตามที่แก้ไข');", true);
+                    changed = false;
+                }
+
+                object adminParam = DBNull.Value;
+                short adminShort;
+                if (IsStaffUser && Session["UserID"] != null && short.TryParse(Session["UserID"].ToString(), out adminShort))
+                    adminParam = adminShort;
+
+                decimal booked = 0m;
+                using (var con = new SqlConnection(conn))
+                {
+                    con.Open();
+                    using (SqlTransaction tx = con.BeginTransaction())
+                    {
+                        if (changed)
+                        {
+                            if (!isNewBooking)
+                            {
+                                using (var cmd = new SqlCommand(@"
+                                    UPDATE Reservation_Product_Charges
+                                       SET Status = 'CANCELLED', CancelledDate = GETDATE(),
+                                           CancelledBy_AdminID = @admin, CancelReason = N'ปรับจำนวนสัตว์เลี้ยง/จำนวนคืน (แก้ไขการจอง)'
+                                     WHERE Reservation_ID = @rid AND Pet_Accommodation_ID IS NOT NULL AND Status = 'PENDING'", con, tx))
+                                {
+                                    cmd.Parameters.AddWithValue("@admin", adminParam);
+                                    cmd.Parameters.AddWithValue("@rid", reservationId);
+                                    cmd.ExecuteNonQuery();
+                                }
+                            }
+
+                            using (var cmd = new SqlCommand(
+                                "UPDATE Reservation_Accommodation SET Room_Pet_Count = NULL WHERE Reservation_ID = @rid", con, tx))
+                            {
+                                cmd.Parameters.AddWithValue("@rid", reservationId);
+                                cmd.ExecuteNonQuery();
+                            }
+
+                            foreach (PetLine l in calc.Lines)
+                            {
+                                using (var cmd = new SqlCommand(@"
+                                    UPDATE TOP (1) Reservation_Accommodation SET Room_Pet_Count = @n
+                                     WHERE Reservation_ID = @rid AND Accommodation_ID = @aid", con, tx))
+                                {
+                                    cmd.Parameters.AddWithValue("@n", l.Pets);
+                                    cmd.Parameters.AddWithValue("@rid", reservationId);
+                                    cmd.Parameters.AddWithValue("@aid", l.AccomId);
+                                    cmd.ExecuteNonQuery();
+                                }
+
+                                if (l.Total <= 0m || l.Quantity <= 0m) continue;   // ไม่คิดค่าบริการ = ไม่มีแถวค่าใช้จ่าย
+
+                                string name = "ค่าบริการสัตว์เลี้ยง - " + (l.AccomName ?? "") + " (" + l.Pets + " ตัว"
+                                    + (calc.Unit == PetStay.UnitStay ? "" : " × " + calc.Nights + " คืน") + ")";
+                                if (name.Length > 255) name = name.Substring(0, 255);
+
+                                using (var cmd = new SqlCommand(@"
+                                    INSERT INTO Reservation_Product_Charges
+                                        (Reservation_ID, Product_ID, Product_Name, Quantity, UnitPrice, TotalAmount,
+                                         ChargeType, ChargedBy_AdminID, Notes, Status, IsPaid, StockDeducted, Pet_Accommodation_ID)
+                                    VALUES
+                                        (@rid, NULL, @name, @qty, @unit, @total,
+                                         'PRE_BOOKING', @admin, @notes, 'PENDING', 0, 0, @aid)", con, tx))
+                                {
+                                    cmd.Parameters.AddWithValue("@rid", reservationId);
+                                    cmd.Parameters.AddWithValue("@name", name);
+                                    cmd.Parameters.AddWithValue("@qty", l.Quantity);
+                                    cmd.Parameters.AddWithValue("@unit", l.FeePerPet);
+                                    cmd.Parameters.AddWithValue("@total", l.Total);
+                                    cmd.Parameters.AddWithValue("@admin", adminParam);
+                                    cmd.Parameters.AddWithValue("@notes", PetStay.ChargeNotePrefix + ":" + calc.Unit);
+                                    cmd.Parameters.AddWithValue("@aid", l.AccomId);
+                                    cmd.ExecuteNonQuery();
+                                }
+                                booked += l.Total;
+                            }
+                        }
+
+                        using (var cmd = new SqlCommand(@"
+                            UPDATE Reservation
+                               SET Pet_Count = (SELECT ISNULL(SUM(ISNULL(Room_Pet_Count, 0)), 0)
+                                                  FROM Reservation_Accommodation WHERE Reservation_ID = @rid),
+                                   Pet_Fee_Total = (SELECT ISNULL(SUM(TotalAmount), 0) FROM Reservation_Product_Charges
+                                                     WHERE Reservation_ID = @rid AND Pet_Accommodation_ID IS NOT NULL
+                                                       AND Status <> 'CANCELLED'),
+                                   Pet_Notes = @notes
+                             WHERE ID = @rid", con, tx))
+                        {
+                            cmd.Parameters.AddWithValue("@rid", reservationId);
+                            cmd.Parameters.AddWithValue("@notes", notes.Length == 0 ? (object)DBNull.Value : notes);
+                            cmd.ExecuteNonQuery();
+                        }
+
+                        // ลูกค้าจองเอง: บันทึกเวลา + ฉบับนโยบายสัตว์เลี้ยงที่ยอมรับ (พนักงานลงจอง = ไม่มี)
+                        if (isNewBooking && !IsStaffUser && calc.TotalPets > 0
+                            && chkAcceptPetPolicy != null && chkAcceptPetPolicy.Checked)
+                        {
+                            using (var cmd = new SqlCommand(@"
+                                UPDATE Reservation SET Pet_Policy_Accepted_At = GETDATE(), Pet_Policy_Version = @ver
+                                 WHERE ID = @rid", con, tx))
+                            {
+                                cmd.Parameters.AddWithValue("@ver", BookingPolicy.PetVersion);
+                                cmd.Parameters.AddWithValue("@rid", reservationId);
+                                cmd.ExecuteNonQuery();
+                            }
+                        }
+
+                        tx.Commit();
+                    }
+                }
+
+                if (changed || isNewBooking)
+                {
+                    var parts = new List<string>();
+                    foreach (PetLine l in calc.Lines) parts.Add((l.AccomName ?? "") + " " + l.Pets + " ตัว");
+                    _petSavedSummary = calc.TotalPets > 0
+                        ? "🐾 สัตว์เลี้ยง " + calc.TotalPets + " ตัว (" + string.Join(", ", parts.ToArray()) + ")"
+                          + " ค่าบริการ ฿" + PetStay.Money(calc.TotalFee)
+                          + (notes.Length > 0 ? " — " + notes : "")
+                        : null;
+                    code2.Logs(conn, "Reserve - Pet Stay",
+                        "Reservation " + reservationId + (isNewBooking ? " (จองใหม่)" : " (แก้ไข)") + ": สัตว์เลี้ยง "
+                        + calc.TotalPets + " ตัว, ค่าบริการ " + PetStay.Money(calc.TotalFee) + " (" + calc.Unit + ")"
+                        + (changed ? "" : " — ไม่เปลี่ยนจำนวน/ค่าบริการ"),
+                        Session["User"]?.ToString() ?? "Customer");
+                }
+                return booked;
+            }
+            catch (Exception ex)
+            {
+                try
+                {
+                    code2.Logs(conn, "Reserve - Pet Stay Save Error",
+                        "Reservation " + reservationId + ": " + ex.Message, Session["User"]?.ToString() ?? "SYSTEM");
+                }
+                catch { }
+                if (IsStaffUser)
+                {
+                    ClientScript.RegisterStartupScript(this.GetType(), "petSaveError",
+                        "alert('บันทึกข้อมูลสัตว์เลี้ยงไม่สำเร็จ — กรุณาตรวจสอบ/แก้ไขการจองอีกครั้ง');", true);
+                }
+                return 0m;
+            }
+        }
+
+        /// <summary>
+        /// ลบแถวค่าบริการสัตว์เลี้ยงจากตารางค่าใช้จ่ายในห้อง (= ยกเว้นค่าบริการ) — ไม่ใช่แถวสัตว์เลี้ยง คืน false
+        /// ให้ใช้ตัวยกเลิกสินค้าเดิม (คืนสต๊อก)
+        /// </summary>
+        private bool TryCancelPetCharge(long chargeId, int? adminId)
+        {
+            DataTable dt;
+            try
+            {
+                dt = code2.DatabaseQuerySafe(conn,
+                    "SELECT Reservation_ID, Status, Notes FROM Reservation_Product_Charges WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", chargeId } });
+            }
+            catch { return false; }
+            if (dt == null || dt.Rows.Count == 0) return false;
+            string notesVal = Convert.ToString(dt.Rows[0]["Notes"]);
+            if (string.IsNullOrEmpty(notesVal) || !notesVal.StartsWith(PetStay.ChargeNotePrefix, StringComparison.Ordinal))
+                return false;
+
+            if (!string.Equals(Convert.ToString(dt.Rows[0]["Status"]), "PENDING", StringComparison.OrdinalIgnoreCase))
+                throw new Exception("สามารถยกเลิกได้เฉพาะรายการที่ยังไม่ชำระเท่านั้น");
+
+            object adminParam = DBNull.Value;
+            if (adminId.HasValue && adminId.Value > 0 && adminId.Value <= short.MaxValue) adminParam = (short)adminId.Value;
+            int resIdForCharge = Convert.ToInt32(dt.Rows[0]["Reservation_ID"]);
+
+            code2.DatabaseInsertSafe(conn, @"
+                UPDATE Reservation_Product_Charges
+                   SET Status = 'CANCELLED', CancelledDate = GETDATE(), CancelledBy_AdminID = @admin,
+                       CancelReason = N'ยกเว้นค่าบริการสัตว์เลี้ยง (ลบจากหน้า Reserve)'
+                 WHERE ID = @id AND Status = 'PENDING'",
+                new Dictionary<string, object> { { "@admin", adminParam }, { "@id", chargeId } });
+
+            try
+            {
+                code2.DatabaseInsertSafe(conn, @"
+                    UPDATE Reservation
+                       SET Pet_Fee_Total = (SELECT ISNULL(SUM(TotalAmount), 0) FROM Reservation_Product_Charges
+                                             WHERE Reservation_ID = @rid AND Pet_Accommodation_ID IS NOT NULL
+                                               AND Status <> 'CANCELLED')
+                     WHERE ID = @rid",
+                    new Dictionary<string, object> { { "@rid", resIdForCharge } });
+            }
+            catch { }
+
+            code2.Logs(conn, "Reserve - Pet Fee Waived",
+                "Charge " + chargeId + " (Reservation " + resIdForCharge + "): ยกเว้นค่าบริการสัตว์เลี้ยง",
+                adminId.HasValue ? adminId.Value.ToString() : "SYSTEM");
+            return true;
         }
     }
 }

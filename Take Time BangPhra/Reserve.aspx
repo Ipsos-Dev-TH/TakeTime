@@ -316,6 +316,11 @@
         var isSubmitting = false;
 
         function preventDoubleSubmit() {
+            // 🐾 มีสัตว์เลี้ยงแต่ยังไม่ยอมรับนโยบายสัตว์เลี้ยง → ไม่ส่งฟอร์ม (rvPetGate มีเฉพาะเมื่อส่วนสัตว์เลี้ยงแสดงอยู่)
+            if (typeof rvPetGate === 'function' && !rvPetGate()) {
+                return false;
+            }
+
             // Check if already submitting
             if (isSubmitting) {
                 alert('⚠️ กำลังดำเนินการบันทึก กรุณารอสักครู่...');
@@ -387,6 +392,8 @@
             <div class="form-row">
                 <div class="form-label">ประเภทที่พัก:<br />Accommodation Type:</div>
                 <div class="form-controls">
+                    <%-- คอลัมน์สุดท้ายของ GridView1 (index 6) = 🐾 สัตว์เลี้ยงต่อห้อง — ต่อท้ายเพื่อไม่ให้ index เดิม Cells[2..5]/Columns[5] เลื่อน
+                         แสดงเฉพาะเมื่อเปิดฟีเจอร์และติ๊ก "มีสัตว์เลี้ยงเข้าพัก" — ApplyPetStay() คุม --%>
                     <asp:GridView ID="GridView1" runat="server" Width="100%" AutoGenerateColumns="False" CssClass="mydatagrid ExampleFont" PagerStyle-CssClass="pager" HeaderStyle-CssClass="header" RowStyle-CssClass="rows" OnRowCancelingEdit="GridView1_RowCancelingEdit" OnRowEditing="GridView1_RowEditing" OnRowUpdating="GridView1_RowUpdating">
                         <Columns>
                             <asp:TemplateField HeaderText="เลือก" HeaderStyle-Width="5%" HeaderStyle-CssClass="ExampleFont" ItemStyle-CssClass="ExampleFont">
@@ -420,6 +427,12 @@
                                 <HeaderStyle CssClass="header-center ExampleFont"></HeaderStyle>
                                 <ItemStyle CssClass="header-center ExampleFont"></ItemStyle>
                             </asp:CommandField>
+                            <asp:TemplateField HeaderText="🐾 สัตว์เลี้ยง (ตัว)" Visible="false" HeaderStyle-CssClass="header-center ExampleFont" ItemStyle-CssClass="header-center ExampleFont">
+                                <ItemTemplate>
+                                    <asp:TextBox ID="txtPetCount" runat="server" Width="80px" Text='0' TextMode="Number" min="0" AutoPostBack="true" OnTextChanged="txtPetCount_TextChanged" CssClass="rounded-textbox ExampleFont"/>
+                                    <asp:Label ID="lblPetInfo" runat="server" Text="" style="display:block; font-size:0.85em; color:#8D6E63; margin-top:3px;"></asp:Label>
+                                </ItemTemplate>
+                            </asp:TemplateField>
                         </Columns>
                         <HeaderStyle CssClass="header ExampleFont"></HeaderStyle>
                         <PagerStyle CssClass="pager ExampleFont"></PagerStyle>
@@ -427,8 +440,47 @@
                     </asp:GridView>
                 </div>
             </div>
+
+            <%-- ══ 🐾 สัตว์เลี้ยงเข้าพัก (ตั้งค่าที่ ศูนย์ตั้งค่า → สัตว์เลี้ยงเข้าพัก) ══
+                 แสดงเฉพาะเมื่อเปิดฟีเจอร์ และห้องที่เลือกอย่างน้อย 1 ห้องรับสัตว์เลี้ยง — ปิดฟีเจอร์ = ไม่มีอะไรโผล่
+                 ค่าบริการลงเป็นรายการ "ค่าบริการสัตว์เลี้ยง" แยกจากค่าห้อง (บวกเข้ายอดรวมด้านล่างแล้ว) --%>
+            <asp:Panel ID="pnlPetStay" runat="server" Visible="false" CssClass="form-row"
+                style="display:block; background:#FFF3E0; border:1px solid #FFCC80; border-radius:10px; padding:12px 14px; margin:10px 0;">
+                <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:bold; color:#E65100; font-size:1.05em;">
+                    <asp:CheckBox ID="chkHasPet" runat="server" AutoPostBack="true" OnCheckedChanged="chkHasPet_CheckedChanged" CssClass="mycheckbox" />
+                    🐾 มีสัตว์เลี้ยงเข้าพัก (Bringing pets)
+                </label>
+                <asp:Literal ID="litPetSummary" runat="server" />
+                <asp:Panel ID="pnlPetDetail" runat="server" Visible="false" style="margin-top:8px;">
+                    <span style="font-weight:600;">รายละเอียดสัตว์เลี้ยง (ชนิด / สายพันธุ์ / น้ำหนัก):</span>
+                    <asp:TextBox ID="txtPetNotes" runat="server" Width="100%" MaxLength="500" CssClass="rounded-textbox"
+                        placeholder="เช่น สุนัขพันธุ์ชิสุ 1 ตัว 6 กก. / แมว 1 ตัว" />
+                </asp:Panel>
+                <%-- ลูกค้าจองเองเท่านั้น: แสดงนโยบาย + ต้องติ๊กยอมรับ (พนักงานลงจองไม่ต้อง — แบบเดียวกับนโยบายหลัก) --%>
+                <asp:Panel ID="pnlPetPolicy" runat="server" Visible="false" style="margin-top:10px;">
+                    <div style="background:#fff; border-left:4px solid #FB8C00; border-radius:6px; padding:10px 14px; max-height:220px; overflow:auto; line-height:1.7; color:#4E342E; font-size:0.95em;">
+                        <asp:Literal ID="litPetPolicy" runat="server" />
+                    </div>
+                    <label style="display:flex; align-items:flex-start; gap:8px; margin-top:8px; cursor:pointer;">
+                        <asp:CheckBox ID="chkAcceptPetPolicy" runat="server" AutoPostBack="true" OnCheckedChanged="chkAcceptPetPolicy_CheckedChanged" CssClass="mycheckbox" />
+                        <span style="color:#BF360C; font-weight:600;">***ข้าพเจ้ายอมรับนโยบายการนำสัตว์เลี้ยงเข้าพัก (I accept the Pet Policy)<span class="required-field">*</span></span>
+                    </label>
+                </asp:Panel>
+                <script>
+                    // ด่านฝั่งเบราว์เซอร์ (server ตรวจซ้ำเสมอ): ติ๊กมีสัตว์เลี้ยงแล้วต้องติ๊กยอมรับนโยบายสัตว์เลี้ยง
+                    function rvPetGate() {
+                        var has = document.getElementById('<%= chkHasPet.ClientID %>');
+                        var acc = document.getElementById('<%= chkAcceptPetPolicy.ClientID %>');
+                        if (has && has.checked && acc && !acc.checked) {
+                            alert('กรุณาอ่านและติ๊กยอมรับ "นโยบายการนำสัตว์เลี้ยงเข้าพัก" ก่อนยืนยันการจอง');
+                            return false;
+                        }
+                        return true;
+                    }
+                </script>
+            </asp:Panel>
         </div>
-        
+
         <div class="form-panel">
             <h3 class="section-header">Guest Information</h3>
             <div class="form-row" style="background-color: #EFEBE9; padding: 8px 0;">

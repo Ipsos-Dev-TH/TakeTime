@@ -81,6 +81,14 @@
         </div>
 
         <div class="bp-card">
+            <h3>🐾 นโยบายการนำสัตว์เลี้ยงเข้าพัก (Pet Policy)</h3>
+            <div class="sub" style="margin-bottom:0;">
+                เก็บในตารางเดียวกันแต่มีเลขฉบับของตัวเอง — แก้ข้อความ พร้อมตั้งห้องที่รับสัตว์เลี้ยง/จำนวนสูงสุด/ค่าบริการ ได้ที่หน้า
+                <a href="<%= ResolveUrl("~/Admin/Settings/PetStay") %>">สัตว์เลี้ยงเข้าพัก</a>
+            </div>
+        </div>
+
+        <div class="bp-card">
             <div class="bp-actions">
                 <asp:Button ID="btnSave" runat="server" CssClass="bp-btn" Text="💾 บันทึกนโยบาย" OnClick="btnSave_Click" />
                 <a class="bp-btn ghost" href="<%= ResolveUrl("~/Admin/Settings/Index") %>">กลับศูนย์ตั้งค่า</a>

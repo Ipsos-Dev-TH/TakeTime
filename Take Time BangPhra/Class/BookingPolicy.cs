@@ -26,6 +26,14 @@ namespace Take_Time_BangPhra
         public const string KeyCancellation = "Policy_Cancellation";
         public const string KeyVersion = "Policy_Version";
 
+        /// <summary>
+        /// นโยบายการนำสัตว์เลี้ยงเข้าพัก (PHASE19 migration 23) — มีเลขฉบับของตัวเอง (Policy_Pet_Version)
+        /// แยกจากนโยบายหลัก 4 ข้อ: แก้นโยบายสัตว์เลี้ยงไม่ทำให้ฉบับนโยบายหลักขึ้นใหม่ และกลับกัน
+        /// ไม่อยู่ใน <see cref="TextKeys"/> — แสดง/ติ๊กยอมรับเฉพาะเมื่อลูกค้าระบุว่ามีสัตว์เลี้ยง
+        /// </summary>
+        public const string KeyPet = "Policy_Pet";
+        public const string KeyPetVersion = "Policy_Pet_Version";
+
         /// <summary>คีย์ข้อความทั้ง 4 ตามลำดับที่แสดง</summary>
         public static readonly string[] TextKeys = { KeyTerms, KeyPrivacy, KeyRefund, KeyCancellation };
 
@@ -78,6 +86,39 @@ namespace Take_Time_BangPhra
             }
         }
 
+        /// <summary>ฉบับปัจจุบันของนโยบายสัตว์เลี้ยง (ขึ้นเองเมื่อบันทึกแล้วข้อความเปลี่ยน)</summary>
+        public static int PetVersion
+        {
+            get
+            {
+                try
+                {
+                    var map = GetCache();
+                    string v;
+                    int n;
+                    if (map != null && map.TryGetValue(KeyPetVersion, out v) && int.TryParse(v, out n) && n > 0)
+                        return n;
+                }
+                catch { }
+                return 1;
+            }
+        }
+
+        /// <summary>
+        /// ค่าตั้งแบบดิบในตารางเดียวกัน (เช่น Pet_Enabled / Pet_Fee_Unit) — ไม่มี = null (ไม่มีข้อความสำรอง)
+        /// </summary>
+        public static string GetSetting(string key)
+        {
+            try
+            {
+                var map = GetCache();
+                string v;
+                if (map != null && map.TryGetValue(key, out v)) return v;
+            }
+            catch { }
+            return null;
+        }
+
         /// <summary>วันที่แก้ไขล่าสุด (null = ยังไม่มีในฐานข้อมูล)</summary>
         public static DateTime? UpdatedAt
         {
@@ -96,6 +137,7 @@ namespace Take_Time_BangPhra
                 case KeyPrivacy: return "นโยบายความเป็นส่วนตัว";
                 case KeyRefund: return "นโยบายการคืนเงิน";
                 case KeyCancellation: return "นโยบายการยกเลิกการจอง";
+                case KeyPet: return "นโยบายการนำสัตว์เลี้ยงเข้าพัก";
                 default: return key;
             }
         }
@@ -108,6 +150,7 @@ namespace Take_Time_BangPhra
                 case KeyPrivacy: return "Privacy Policy";
                 case KeyRefund: return "Refund Policy";
                 case KeyCancellation: return "Cancellation Policy";
+                case KeyPet: return "Pet Policy";
                 default: return key;
             }
         }
@@ -121,6 +164,7 @@ namespace Take_Time_BangPhra
                 case KeyPrivacy: return "privacy";
                 case KeyRefund: return "refund";
                 case KeyCancellation: return "cancel";
+                case KeyPet: return "pet";
                 default: return "policy";
             }
         }
@@ -248,6 +292,68 @@ namespace Take_Time_BangPhra
             }
         }
 
+        /// <summary>
+        /// บันทึกนโยบายสัตว์เลี้ยง — ข้อความเปลี่ยน = Policy_Pet_Version +1 และเก็บสำเนาใน
+        /// Booking_Pet_Policy_History (ต้องรัน PHASE19_Migration_23) คืนเลขฉบับหลังบันทึก (ไม่เปลี่ยน = เลขเดิม)
+        /// </summary>
+        public static int SavePetPolicy(string text, string modifiedBy)
+        {
+            string cs = ConnStr;
+            if (string.IsNullOrEmpty(cs)) throw new InvalidOperationException("ไม่พบ connection string");
+
+            var current = LoadFromDb(cs);
+            string ov;
+            current.TryGetValue(KeyPet, out ov);
+            int ver = 1;
+            string verStr;
+            if (current.TryGetValue(KeyPetVersion, out verStr)) int.TryParse(verStr, out ver);
+            if (ver < 1) ver = 1;
+            if (string.Equals(Normalize(text), Normalize(ov), StringComparison.Ordinal)) return ver;
+
+            // ยังไม่เคยมีข้อความใน DB (ใช้ข้อความสำรองอยู่) = ฉบับแรก ไม่ต้องขึ้นเลข
+            int newVer = ov == null ? ver : ver + 1;
+            using (var con = new SqlConnection(cs))
+            {
+                con.Open();
+                using (var tx = con.BeginTransaction())
+                {
+                    Upsert(con, tx, KeyPet, Normalize(text), modifiedBy);
+                    Upsert(con, tx, KeyPetVersion, newVer.ToString(), modifiedBy);
+                    using (var cmd = new SqlCommand(@"
+                        INSERT INTO Booking_Pet_Policy_History ([Version], Policy_Pet, Created_Date, Created_By)
+                        VALUES (@ver, @txt, GETDATE(), @by)", con, tx))
+                    {
+                        cmd.Parameters.AddWithValue("@ver", newVer);
+                        cmd.Parameters.AddWithValue("@txt", Normalize(text));
+                        cmd.Parameters.AddWithValue("@by", (object)modifiedBy ?? DBNull.Value);
+                        cmd.ExecuteNonQuery();
+                    }
+                    tx.Commit();
+                }
+            }
+            Invalidate();
+            return newVer;
+        }
+
+        /// <summary>บันทึกค่าตั้งแบบดิบหลายค่า (ไม่มีเลขฉบับ/ประวัติ) เช่น Pet_Enabled, Pet_Fee_Unit</summary>
+        public static void SaveSettings(IDictionary<string, string> values, string modifiedBy)
+        {
+            if (values == null || values.Count == 0) return;
+            string cs = ConnStr;
+            if (string.IsNullOrEmpty(cs)) throw new InvalidOperationException("ไม่พบ connection string");
+            using (var con = new SqlConnection(cs))
+            {
+                con.Open();
+                using (var tx = con.BeginTransaction())
+                {
+                    foreach (KeyValuePair<string, string> kv in values)
+                        Upsert(con, tx, kv.Key, kv.Value, modifiedBy);
+                    tx.Commit();
+                }
+            }
+            Invalidate();
+        }
+
         public static void Invalidate()
         {
             lock (_lock) { _cache = null; _loadedAt = DateTime.MinValue; }
@@ -364,6 +470,10 @@ namespace Take_Time_BangPhra
                 case KeyCancellation:
                     return "กรุณาติดต่อที่พักเพื่อยกเลิกหรือเลื่อนวันเข้าพัก พร้อมหมายเลขการจอง "
                          + "เงื่อนไขการคืนมัดจำเป็นไปตามที่ที่พักกำหนด";
+                case KeyPet:
+                    return "ต้องแจ้งจำนวนสัตว์เลี้ยงตอนจองและไม่เกินจำนวนสูงสุดของห้อง "
+                         + "สัตว์เลี้ยงต้องได้รับวัคซีนครบ ห้ามขึ้นเตียง/โซฟา ต้องจูงสายจูงในพื้นที่ส่วนกลาง\n"
+                         + "ความเสียหายหรือการทำความสะอาดพิเศษคิดค่าใช้จ่ายตามจริง";
                 default:
                     return "";
             }

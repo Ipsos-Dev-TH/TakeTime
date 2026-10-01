@@ -41,6 +41,9 @@ namespace Take_Time_BangPhra
             string otaCols = "";
             if (HasColumn("Reservation", "OTA_Channel")) otaCols += ", r.OTA_Channel";
             if (HasColumn("Reservation", "OTA_Booking_ID")) otaCols += ", r.OTA_Booking_ID";
+            // 🐾 สัตว์เลี้ยงเข้าพัก (PHASE19 migration 23)
+            bool hasPetCol = HasColumn("Reservation", "Pet_Count");
+            if (hasPetCol) otaCols += ", r.Pet_Count";
 
             // การจองที่ "มีผู้พักอยู่" ในวันนี้
             DataTable dt = _code.DatabaseQuerySafe(_conn,
@@ -114,6 +117,8 @@ namespace Take_Time_BangPhra
                     if (ord < row.Order) row.Order = ord;
                 }
                 row.Rooms = names.Count > 0 ? string.Join(" · ", names) : "-";
+                if (hasPetCol && r["Pet_Count"] != DBNull.Value && Convert.ToInt32(r["Pet_Count"]) > 0)
+                    row.Rooms += " · 🐾" + Convert.ToInt32(r["Pet_Count"]);
 
                 // ของเช่า
                 var it = new List<string>();
