@@ -3906,7 +3906,17 @@ namespace Take_Time_BangPhra
                                                     AddProductChargesToReceipt(Reservation_ID, dtReserve);
                                                 }
 
-                                                string receiptId = createReceipt(ID, Convert.ToDouble(TextBox5.Text), dtReserve, IsDeposit, docCreatedDate, CheckBox5.Checked);
+                                                // createReceipt ปิดทุกแถว PENDING เป็น PAID เสมอ — มัดจำต้องไม่ปิดค่าสัตว์เลี้ยงที่ยังไม่ได้รับเงิน
+                                                _keepChargesPendingOnReceipt = rvPetFeeBooked > 0m && !rvPetPaidInFull;
+                                                string receiptId;
+                                                try
+                                                {
+                                                    receiptId = createReceipt(ID, Convert.ToDouble(TextBox5.Text), dtReserve, IsDeposit, docCreatedDate, CheckBox5.Checked);
+                                                }
+                                                finally
+                                                {
+                                                    _keepChargesPendingOnReceipt = false;
+                                                }
 
                                                 if (rvPetPaidInFull && !string.IsNullOrEmpty(receiptId))
                                                 {
@@ -5094,7 +5104,8 @@ namespace Take_Time_BangPhra
                 }
 
                 // 🏨 Mark product charges as paid
-                if (_roomChargeService != null)
+                // 🐾 ใบรับมัดจำตอนจองใหม่ที่มีค่าสัตว์เลี้ยง: ค่าบริการยังไม่ได้ชำระ → ต้องค้าง PENDING ไปออกในใบเช็คอิน
+                if (_roomChargeService != null && !_keepChargesPendingOnReceipt)
                 {
                     MarkProductChargesAsPaid(Convert.ToInt32(Reservation_ID), ReceiptID);
                 }
@@ -9533,6 +9544,7 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
         private PetState _petStateCache;
         private bool _petStateLoaded;
         private string _petSavedSummary;     // ข้อความสรุปสำหรับแจ้งเตือนการจองใหม่
+        private bool _keepChargesPendingOnReceipt;   // createReceipt ไม่ปิดค่าใช้จ่ายในห้อง (ใบมัดจำตอนจองใหม่ที่มีค่าสัตว์เลี้ยง)
 
         /// <summary>ลูกค้ายอมรับนโยบายสัตว์เลี้ยงแล้ว (หรือไม่ต้อง — ไม่มีสัตว์เลี้ยง/พนักงาน/ปิดฟีเจอร์)</summary>
         private bool PetPolicySatisfied
