@@ -45,7 +45,9 @@ namespace Take_Time_BangPhra
             bool hasPetCol = HasColumn("Reservation", "Pet_Count");
             if (hasPetCol) otaCols += ", r.Pet_Count";
 
-            // การจองที่ "มีผู้พักอยู่" ในวันนี้
+            // การจองที่ "มีผู้พักอยู่" ในวันนี้ — เกณฑ์กลาง RescheduleService.SqlActiveStay
+            // (ตัดทุกสถานะ ยกเลิก*/ลบ*, no-show, ใบเลื่อน — เดิมตัดแค่ 3 สถานะยกเลิก ใบ "ลบจากการเลื่อนวันเข้าพัก" หลุดมา)
+            string activeStay = RescheduleService.SqlActiveStay("r");
             DataTable dt = _code.DatabaseQuerySafe(_conn,
                 $@"SELECT r.ID, r.Customer_MobilePhone, r.CheckinDate, r.CheckoutDate, r.StayDays,
                           r.TotalPrice, r.Deposit, r.Remark, r.Reserve_By, r.Status{otaCols},
@@ -53,7 +55,7 @@ namespace Take_Time_BangPhra
                      FROM Reservation r
                      INNER JOIN Customer c ON c.MobilePhone = r.Customer_MobilePhone
                     WHERE @d >= r.CheckinDate AND @d < r.CheckoutDate
-                      AND r.Status NOT IN (N'ยกเลิก', N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน')", p);
+                      AND " + activeStay, p);
 
             if (dt == null || dt.Rows.Count == 0)
                 return BuildHeader(day, 0, 0, 0, 0, 0) +
@@ -81,14 +83,32 @@ namespace Take_Time_BangPhra
                 @"SELECT Customer_MobilePhone, COUNT(*) AS Visits
                     FROM Reservation
                    WHERE CheckoutDate <= @d
-                     AND Status NOT IN (N'ยกเลิก', N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน')
+                     AND " + RescheduleService.SqlNotCancelled("") + @"
+                     AND Status <> N'ไม่มาเช็คอิน'
                    GROUP BY Customer_MobilePhone", p);
+
+            // 🐾 ค่าบริการสัตว์เลี้ยงต่อการจอง (แถว Reservation_Product_Charges ที่ Notes ขึ้นต้น PET_FEE — อยู่ในค่าใช้จ่ายในห้องแล้ว
+            // แสดงแยกให้หน้างานเห็นว่าค่าใช้จ่ายส่วนไหนเป็นค่าสัตว์เลี้ยง) ตารางยังไม่มี/คอลัมน์ไม่ครบ → null = ข้าม
+            DataTable petFees = hasPetCol ? SafeQuery(
+                @"SELECT rpc.Reservation_ID, SUM(rpc.TotalAmount) AS PetFee
+                    FROM Reservation r
+                    INNER JOIN Reservation_Product_Charges rpc ON rpc.Reservation_ID = r.ID
+                   WHERE @d >= r.CheckinDate AND @d < r.CheckoutDate
+                     AND rpc.Status <> 'CANCELLED'
+                     AND rpc.Notes LIKE 'PET_FEE%'
+                   GROUP BY rpc.Reservation_ID", p) : null;
+            var petFeeMap = new Dictionary<int, decimal>();
+            foreach (DataRow pf in Rows(petFees))
+            {
+                if (pf["Reservation_ID"] == DBNull.Value || pf["PetFee"] == DBNull.Value) continue;
+                petFeeMap[Convert.ToInt32(pf["Reservation_ID"])] = Convert.ToDecimal(pf["PetFee"]);
+            }
 
             // ยอดเงินต่อการจอง — ใช้สูตรกลาง ReservationBalance (ตรงกับหน้ารายละเอียด/เช็คเอาท์)
             // เดิมนับเฉพาะ Payment_History ⇒ OTA Channel Collect (OTA เก็บเงินแล้ว ไม่มี Payment_History)
             // ขึ้นเป็นค้างชำระเต็มยอดจนกว่าจะเช็คอิน และยอดค้างชำระรวมบนหัวตารางสูงเกินจริง
             Dictionary<int, ReservationBalance> balances = ReservationBalance.LoadMany(_conn,
-                "@d >= r.CheckinDate AND @d < r.CheckoutDate AND r.Status NOT IN (N'ยกเลิก', N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน')", p);
+                "@d >= r.CheckinDate AND @d < r.CheckoutDate AND " + activeStay, p);
 
             var visitMap = MapByKey(visits, "Customer_MobilePhone", "Visits");
 
@@ -117,8 +137,12 @@ namespace Take_Time_BangPhra
                     if (ord < row.Order) row.Order = ord;
                 }
                 row.Rooms = names.Count > 0 ? string.Join(" · ", names) : "-";
-                if (hasPetCol && r["Pet_Count"] != DBNull.Value && Convert.ToInt32(r["Pet_Count"]) > 0)
-                    row.Rooms += " · 🐾" + Convert.ToInt32(r["Pet_Count"]);
+                // สัตว์เลี้ยง: ใช้ข้อความ ไม่ใช้ emoji 🐾 — หน้านี้ถูกวาดเป็นรูปด้วย HtmlRenderer ซึ่งวาด emoji สีไม่ได้
+                // (ขึ้นเป็นกล่องว่างในรูป LINE) จึงแสดงเป็นป้าย "สัตว์เลี้ยง N ตัว" ในคอลัมน์ห้องพักแทน
+                if (hasPetCol && r["Pet_Count"] != DBNull.Value)
+                    row.Pets = Convert.ToInt32(r["Pet_Count"]);
+                decimal petFee;
+                if (petFeeMap.TryGetValue(resId, out petFee)) row.PetFee = petFee;
 
                 // ของเช่า
                 var it = new List<string>();
@@ -209,7 +233,10 @@ namespace Take_Time_BangPhra
                 alt = !alt;
                 sb.Append("<tr bgcolor='" + bg + "'>");
 
-                sb.Append(Td($"<span style='{ST_ROOM}'>{E(row.Rooms)}</span>", bg));
+                string roomCell = $"<span style='{ST_ROOM}'>{E(row.Rooms)}</span>";
+                if (row.Pets > 0)
+                    roomCell += "<br/>" + Badge("&#9679;", "สัตว์เลี้ยง " + row.Pets + " ตัว", "#5e35b1");
+                sb.Append(Td(roomCell, bg));
                 sb.Append(Td($"<span style='{ST_STRONG}'>{E(row.Guest)}</span><br/><span style='{ST_SUB}'>{E(row.Phone)}</span>", bg));
 
                 // ป้ายสถานะวันนี้ — สิ่งที่ทีมหน้างานต้องเห็นก่อนเพื่อน
@@ -227,7 +254,9 @@ namespace Take_Time_BangPhra
                 sb.Append(Td(visitCell, bg));
 
                 string itemCell = E(row.Items);
-                if (row.Extra > 0) itemCell += $"<br/><span style='{ST_SUB}'>ค่าใช้จ่ายในห้อง {row.Extra:N0}</span>";
+                if (row.Extra > 0)
+                    itemCell += $"<br/><span style='{ST_SUB}'>ค่าใช้จ่ายในห้อง {row.Extra:N0}" +
+                                (row.PetFee > 0 ? $" (ค่าสัตว์เลี้ยง {row.PetFee:N0})" : "") + "</span>";
                 sb.Append(Td(itemCell, bg));
 
                 sb.Append(Td($"{row.Total:N0}", bg, "right"));
@@ -369,11 +398,11 @@ namespace Take_Time_BangPhra
         // ── helpers ───────────────────────────────────────────────────────────────
         private class BoardRow
         {
-            public int ResId, Order, Nights, PastVisits;
+            public int ResId, Order, Nights, PastVisits, Pets;
             public string Rooms, Guest, Phone, Items, Channel, Remark, Status;
             public DateTime CheckIn, CheckOut;
             public bool IsArrival, IsDeparture, IsChannelCollect, IsHotelCollect, IsCollectUnknown, OtaEstimated;
-            public decimal Total, Paid, Due, Extra, OtaCovered;
+            public decimal Total, Paid, Due, Extra, OtaCovered, PetFee;
         }
 
         private static Dictionary<string, int> MapByKey(DataTable dt, string keyCol, string valCol)

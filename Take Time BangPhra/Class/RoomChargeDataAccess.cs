@@ -187,9 +187,48 @@ namespace Take_Time_BangPhra
         /// </summary>
         public DataTable GetActiveGuestReservations()
         {
-            return _code.DatabaseQuerySafe(_connectionString,
+            return ApplyBalances(_code.DatabaseQuerySafe(_connectionString,
                 "SELECT * FROM vw_ActiveGuestReservations ORDER BY CheckInDate DESC",
-                null);
+                null));
+        }
+
+        /// <summary>
+        /// แทนยอด TotalPrice / TotalPaid / RemainingBalance ด้วยสูตรกลาง ReservationBalance
+        /// (เดิม SQL คิด TotalPrice − Deposit ⇒ ไม่รวมค่าใช้จ่ายในห้อง/ค่าสัตว์เลี้ยง ไม่ดู Payment_History และ
+        /// ใบ OTA Channel Collect ขึ้นค้างผิด) — ต้องมีคอลัมน์ ReservationID; คำนวณไม่ได้ = คงค่าจาก SQL เดิม
+        /// </summary>
+        private DataTable ApplyBalances(DataTable dt)
+        {
+            if (dt == null || dt.Rows.Count == 0 || !dt.Columns.Contains("ReservationID")) return dt;
+            try
+            {
+                var ids = new List<string>();
+                foreach (DataRow r in dt.Rows)
+                {
+                    if (r["ReservationID"] == DBNull.Value) continue;
+                    ids.Add(Convert.ToInt32(r["ReservationID"]).ToString(System.Globalization.CultureInfo.InvariantCulture));
+                }
+                if (ids.Count == 0) return dt;
+
+                Dictionary<int, ReservationBalance> map = ReservationBalance.LoadMany(_connectionString,
+                    "r.ID IN (" + string.Join(",", ids) + ")", null);
+
+                foreach (DataRow r in dt.Rows)
+                {
+                    if (r["ReservationID"] == DBNull.Value) continue;
+                    ReservationBalance b;
+                    if (!map.TryGetValue(Convert.ToInt32(r["ReservationID"]), out b) || b == null) continue;
+                    try
+                    {
+                        if (dt.Columns.Contains("TotalPrice")) r["TotalPrice"] = b.Total;
+                        if (dt.Columns.Contains("TotalPaid")) r["TotalPaid"] = b.Received;
+                        if (dt.Columns.Contains("RemainingBalance")) r["RemainingBalance"] = b.Due;
+                    }
+                    catch { /* ชนิดคอลัมน์จาก view ไม่รับ decimal → คงค่าเดิมของแถวนี้ */ }
+                }
+            }
+            catch { /* ส่วนเสริม — คงค่าเดิม */ }
+            return dt;
         }
 
         /// <summary>
@@ -204,7 +243,7 @@ namespace Take_Time_BangPhra
             };
 
             // Query similar to vw_ActiveGuestReservations but with parameterized date
-            return _code.DatabaseQuerySafe(_connectionString,
+            return ApplyBalances(_code.DatabaseQuerySafe(_connectionString,
                 @"SELECT
                     R.ID AS ReservationID,
                     C.Name AS CustomerName,
@@ -232,9 +271,10 @@ namespace Take_Time_BangPhra
                 WHERE
                     CAST(@searchDate AS DATE) >= CAST(R.CheckinDate AS DATE)
                     AND CAST(@searchDate AS DATE) <= CAST(R.CheckoutDate AS DATE)
-                    AND R.Status NOT IN (N'ยกเลิก', N'เช็คเอาท์แล้ว', N'เสร็จสิ้น', N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน')
+                    AND " + RescheduleService.SqlActiveStay("R") + @"
+                    AND R.Status NOT IN (N'เช็คเอาท์แล้ว', N'เช็คเอ้าท์แล้ว', N'เสร็จสิ้น')
                 ORDER BY R.CheckinDate DESC",
-                parameters);
+                parameters));
         }
 
         /// <summary>
@@ -247,9 +287,9 @@ namespace Take_Time_BangPhra
                 { "@reservationId", reservationId }
             };
 
-            return _code.DatabaseQuerySafe(_connectionString,
+            return ApplyBalances(_code.DatabaseQuerySafe(_connectionString,
                 "SELECT * FROM vw_ActiveGuestReservations WHERE ReservationID = @reservationId",
-                parameters);
+                parameters));
         }
 
         /// <summary>
@@ -264,7 +304,7 @@ namespace Take_Time_BangPhra
             };
 
             // Same query as GetActiveGuestReservations(DateTime) but filtered by ID
-            return _code.DatabaseQuerySafe(_connectionString,
+            return ApplyBalances(_code.DatabaseQuerySafe(_connectionString,
                 @"SELECT
                     R.ID AS ReservationID,
                     C.Name AS CustomerName,
@@ -293,8 +333,9 @@ namespace Take_Time_BangPhra
                     R.ID = @reservationId
                     AND CAST(@searchDate AS DATE) >= CAST(R.CheckinDate AS DATE)
                     AND CAST(@searchDate AS DATE) <= CAST(R.CheckoutDate AS DATE)
-                    AND R.Status NOT IN (N'ยกเลิก', N'เช็คเอาท์แล้ว', N'เสร็จสิ้น', N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน')",
-                parameters);
+                    AND " + RescheduleService.SqlActiveStay("R") + @"
+                    AND R.Status NOT IN (N'เช็คเอาท์แล้ว', N'เช็คเอ้าท์แล้ว', N'เสร็จสิ้น')",
+                parameters));
         }
 
         #endregion

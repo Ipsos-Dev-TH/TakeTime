@@ -123,6 +123,15 @@ namespace Take_Time_BangPhra
         protected global::System.Web.UI.WebControls.Label lblCheckoutDate;
 
         /// <summary>
+        /// litStayExtras control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Literal litStayExtras;
+
+        /// <summary>
         /// pnlPaymentComplete control.
         /// </summary>
         /// <remarks>

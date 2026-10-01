@@ -147,6 +147,16 @@ namespace Take_Time_BangPhra
         protected global::System.Web.UI.WebControls.PlaceHolder phTotalsHint;
 
         /// <summary>
+        /// phPostponedHeld control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.PlaceHolder phPostponedHeld;
+
+        /// <summary>
+        /// lblTotalPostponedHeld control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Label lblTotalPostponedHeld;
+
+        /// <summary>
         /// lblTotalAmount control.
         /// </summary>
         protected global::System.Web.UI.WebControls.Label lblTotalAmount;

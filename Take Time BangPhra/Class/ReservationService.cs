@@ -22,7 +22,7 @@ namespace Take_Time_BangPhra.Services
 
         public DataTable GetReservationsForDate(DateTime date)
         {
-            string query = "Select * From Reservation inner join Customer on Customer.MobilePhone = Reservation.Customer_MobilePhone Where @Date >= CheckinDate AND @Date < CheckoutDate AND (Reservation.Status != N'ยกเลิกคืนเงิน' AND Reservation.Status != N'ยกเลิกไม่คืนเงิน')";
+            string query = "Select * From Reservation inner join Customer on Customer.MobilePhone = Reservation.Customer_MobilePhone Where @Date >= CheckinDate AND @Date < CheckoutDate AND " + global::Take_Time_BangPhra.RescheduleService.SqlNotCancelled("Reservation");
             var parameters = new Dictionary<string, object>
             {
                 { "@Date", date.ToString("yyyy-MM-dd") }
@@ -74,7 +74,8 @@ namespace Take_Time_BangPhra.Services
                 INNER JOIN Reservation r ON r.ID = ra.Reservation_ID
                 WHERE @Date >= r.CheckinDate
                 AND @Date < r.CheckoutDate
-                AND r.Status NOT IN (N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน', N'เช็คเอ้าท์แล้ว')
+                AND " + global::Take_Time_BangPhra.RescheduleService.SqlHoldsRoom("r") + @"
+                AND r.Status NOT IN (N'เช็คเอ้าท์แล้ว', N'เช็คเอาท์แล้ว')
                 AND a.LimitWithPeople = 'False'
             )
             ORDER BY a.OrderID ASC";
@@ -107,7 +108,8 @@ namespace Take_Time_BangPhra.Services
                        WHERE ri.Items_ID = i.ID
                        AND @Date >= r.CheckinDate
                        AND @Date < r.CheckoutDate
-                       AND r.Status NOT IN (N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน', N'เช็คเอ้าท์แล้ว')
+                       AND " + global::Take_Time_BangPhra.RescheduleService.SqlHoldsRoom("r") + @"
+                       AND r.Status NOT IN (N'เช็คเอ้าท์แล้ว', N'เช็คเอาท์แล้ว')
                    ), 0)) as AvailableAmount
             FROM Items i
             WHERE i.Status = 1
@@ -153,7 +155,7 @@ namespace Take_Time_BangPhra.Services
                     INNER JOIN Reservation r ON r.ID = ra.Reservation_ID
                     WHERE @Date >= r.CheckinDate
                     AND @Date < r.CheckoutDate
-                    AND r.Status NOT IN ('ยกเลิกแล้ว', 'Cancelled')
+                    AND " + global::Take_Time_BangPhra.RescheduleService.SqlHoldsRoom("r") + @"
                     AND r.ID != @ExcludeReservationId
                 )
             )

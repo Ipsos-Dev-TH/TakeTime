@@ -254,7 +254,7 @@ namespace Take_Time_BangPhra.Admin
             {
                 List<AlertItem> alerts = new List<AlertItem>();
 
-                // 1. Check for outstanding payments
+                // 1. Check for outstanding payments (ไม่นับใบเลื่อน — ลูกค้ายังไม่กำหนดวัน ไม่ใช่ยอดที่ต้องตามเก็บตอนนี้)
                 int outstandingCount = GetOutstandingPaymentsCount();
                 if (outstandingCount > 0)
                 {
@@ -263,8 +263,24 @@ namespace Take_Time_BangPhra.Admin
                         Type = "warning",
                         Icon = "⚠️",
                         Title = "ยอดค้างชำระ",
-                        Description = $"มีลูกค้า {outstandingCount} ราย ที่มียอดค้างชำระ",
+                        Description = $"มีลูกค้า {outstandingCount} ราย ที่มียอดค้างชำระ (ไม่รวมใบเลื่อนวันเข้าพัก)",
                         ActionUrl = "/ReserveTable"
+                    });
+                }
+
+                // 1b. มัดจำของใบเลื่อน — เงินที่ถือไว้แทนลูกค้า (หนี้สิน) แสดงแยก ไม่ปนกับยอดค้างชำระ
+                int postponedCount;
+                decimal postponedHeld;
+                GetPostponedDeposits(out postponedCount, out postponedHeld);
+                if (postponedCount > 0)
+                {
+                    alerts.Add(new AlertItem
+                    {
+                        Type = "info",
+                        Icon = "⏸️",
+                        Title = "มัดจำของใบเลื่อน",
+                        Description = $"ใบเลื่อนวันเข้าพัก {postponedCount} ใบ ถือมัดจำไว้ ฿{postponedHeld:N0} (ไม่นับในยอดค้างชำระ)",
+                        ActionUrl = "/PostponeList"
                     });
                 }
 
@@ -413,7 +429,7 @@ namespace Take_Time_BangPhra.Admin
                     FROM Reservation
                     WHERE CAST(Created_Date AS DATE) >= CAST(@StartDate AS DATE)
                       AND CAST(Created_Date AS DATE) <= CAST(@EndDate AS DATE)
-                      AND Status NOT IN (N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน')";
+                      AND " + RescheduleService.SqlNotCancelled("") + @"";
 
                 var parameters = new Dictionary<string, object>
                 {
@@ -497,17 +513,30 @@ namespace Take_Time_BangPhra.Admin
         {
             try
             {
-                // Total accommodations (assuming fixed number - can be queried from DB)
-                int totalRooms = 20; // Update this based on actual data
+                // จำนวนห้องจากข้อมูลจริง (ที่พักที่เปิดขาย) — เดิม hardcode 20; อ่านไม่ได้/ไม่มีข้อมูล → 20 แบบเดิม
+                int totalRooms = 20;
+                try
+                {
+                    DataTable dtRooms = codeInstance.DatabaseQuerySafe(conn,
+                        "SELECT COUNT(*) AS Rooms FROM Accommodation WHERE Status = 1", null);
+                    if (dtRooms != null && dtRooms.Rows.Count > 0 && dtRooms.Rows[0]["Rooms"] != DBNull.Value)
+                    {
+                        int n = Convert.ToInt32(dtRooms.Rows[0]["Rooms"]);
+                        if (n > 0) totalRooms = n;
+                    }
+                }
+                catch { /* ใช้ค่าเดิม */ }
 
-                // Get occupied rooms for the date
+                // ห้องที่ถูกจองในวันนี้ — เกณฑ์กลาง SqlActiveStay (ไม่ยกเลิก/ลบ, ไม่ใช่ no-show, ไม่ใช่ใบเลื่อน)
+                // เดิมนับเฉพาะ เช็คอินแล้ว/เช็คเอาท์แล้ว/เสร็จสิ้น ⇒ ใบมัดจำแล้วที่เข้าวันนี้ (ยังไม่เช็คอิน) ไม่ถูกนับ
+                // ทั้งที่ป้ายเขียนว่า "ห้องถูกจอง"
                 string query = @"
                     SELECT COUNT(DISTINCT ra.Accommodation_ID) as OccupiedRooms
                     FROM Reservation r
                     INNER JOIN Reservation_Accommodation ra ON r.ID = ra.Reservation_ID
                     WHERE CAST(@Date AS DATE) >= CAST(r.CheckinDate AS DATE)
                       AND CAST(@Date AS DATE) < CAST(r.CheckoutDate AS DATE)
-                      AND r.Status IN (N'เช็คอินแล้ว', N'เช็คเอาท์แล้ว', N'เสร็จสิ้น')";
+                      AND " + RescheduleService.SqlActiveStay("r");
 
                 var parameters = new Dictionary<string, object> { { "@Date", date } };
 
@@ -518,6 +547,7 @@ namespace Take_Time_BangPhra.Admin
                 {
                     occupiedRooms = Convert.ToInt32(dt.Rows[0]["OccupiedRooms"]);
                 }
+                if (occupiedRooms > totalRooms) occupiedRooms = totalRooms;   // ห้องรวม/ข้อมูลเก่า — กัน % เกิน 100
 
                 decimal occupancyRate = totalRooms > 0 ? (decimal)occupiedRooms / totalRooms * 100 : 0;
 
@@ -579,7 +609,7 @@ namespace Take_Time_BangPhra.Admin
                     LEFT JOIN Reservation r ON ra.Reservation_ID = r.ID
                         AND CAST(r.Created_Date AS DATE) >= CAST(@StartDate AS DATE)
                         AND CAST(r.Created_Date AS DATE) <= CAST(@EndDate AS DATE)
-                        AND r.Status NOT IN (N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน')
+                        AND " + RescheduleService.SqlNotCancelled("r") + @"
                     WHERE a.Status = 'True'
                     GROUP BY a.ID, a.Accommodation_Name
                     ORDER BY BookingCount DESC";
@@ -633,7 +663,7 @@ namespace Take_Time_BangPhra.Admin
                     LEFT JOIN Reservation r ON ra.Reservation_ID = r.ID
                         AND CAST(r.Created_Date AS DATE) >= CAST(@StartDate AS DATE)
                         AND CAST(r.Created_Date AS DATE) <= CAST(@EndDate AS DATE)
-                        AND r.Status NOT IN (N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน')
+                        AND " + RescheduleService.SqlNotCancelled("r") + @"
                     WHERE a.Status = 'True'
                     GROUP BY a.ID, a.Accommodation_Name
                     ORDER BY BookingCount DESC";
@@ -677,8 +707,10 @@ namespace Take_Time_BangPhra.Admin
             {
                 // สูตรกลาง ReservationBalance — เดิมนับ TotalPrice − Deposit > 0 ซึ่งไม่รวมค่าใช้จ่ายในห้อง
                 // และไม่ดู Payment_History; Channel Collect (OTA เก็บแล้ว) ไม่ถือเป็นค้างชำระ
+                // ใบเลื่อน (ยังไม่มีวันเข้าพัก) ไม่นับ — มัดจำของใบเลื่อนแสดงแยกใน GetPostponedDeposits
                 Dictionary<int, ReservationBalance> balances = ReservationBalance.LoadMany(conn,
-                    "r.Status IN (N'มัดจำแล้ว', N'เช็คอินแล้ว')", null);
+                    "r.Status IN (N'มัดจำแล้ว', N'เช็คอินแล้ว') AND NOT "
+                    + RescheduleService.SqlIsPostponed("r", RescheduleService.HasIsPostponedColumn(conn)), null);
 
                 int count = 0;
                 foreach (ReservationBalance b in balances.Values)
@@ -691,6 +723,23 @@ namespace Take_Time_BangPhra.Admin
             {
                 System.Diagnostics.Debug.WriteLine($"❌ GetOutstandingPaymentsCount Error: {ex.Message}");
                 return 0;
+            }
+        }
+
+        /// <summary>ใบเลื่อนวันเข้าพักที่ยังมีผล + มัดจำที่ถือไว้ (เงินที่ลูกค้าจ่ายจริง ไม่รวมเงินที่ OTA ถือ)</summary>
+        private void GetPostponedDeposits(out int count, out decimal held)
+        {
+            count = 0;
+            held = 0m;
+            try
+            {
+                RescheduleService.GetPostponedHeld(conn, null, null, out count, out held);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"❌ GetPostponedDeposits Error: {ex.Message}");
+                count = 0;
+                held = 0m;
             }
         }
 

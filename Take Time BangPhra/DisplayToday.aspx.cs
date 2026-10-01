@@ -24,9 +24,12 @@ namespace Take_Time_BangPhra
                 { "@CurrentDate", DateTime.Now.ToString("yyyy-MM-dd") }
             };
 
+            // เดิมไม่กรองสถานะเลย ⇒ ใบที่ยกเลิก/ลบจากการเลื่อนวันขึ้นจอว่า "พักอยู่" — ใช้เกณฑ์กลาง SqlActiveStay
+            // (ตัด ยกเลิก*/ลบ*, no-show, ใบเลื่อน) ชุดเดียวกับตารางรายวัน/อัตราเข้าพัก
+            string activeStay = RescheduleService.SqlActiveStay("Reservation");
             DataTable dtReservation = code.DatabaseQuerySafe(conn,
                 "SELECT * FROM Reservation INNER JOIN Customer ON Customer.MobilePhone = Reservation.Customer_MobilePhone " +
-                "WHERE @CurrentDate >= CheckinDate AND @CurrentDate < CheckoutDate",
+                "WHERE @CurrentDate >= CheckinDate AND @CurrentDate < CheckoutDate AND " + activeStay,
                 dateParams);
 
             DataTable dtReservation_Accom = code.DatabaseQuerySafe(conn,
@@ -43,7 +46,7 @@ namespace Take_Time_BangPhra
 
             // ยอดเงินของทุกการจองที่แสดง — query เดียว (เดิม query ต่อแถว 2 ครั้ง)
             Dictionary<int, ReservationBalance> balances = ReservationBalance.LoadMany(conn,
-                "@CurrentDate >= r.CheckinDate AND @CurrentDate < r.CheckoutDate", dateParams);
+                "@CurrentDate >= r.CheckinDate AND @CurrentDate < r.CheckoutDate AND " + RescheduleService.SqlActiveStay("r"), dateParams);
 
             try
             {
@@ -88,6 +91,13 @@ namespace Take_Time_BangPhra
                         {
                             AccomName += ": (" + dtReservation_Accom.Rows[j]["Amount"].ToString() + "คน) ";
                         }
+                        // 🐾 สัตว์เลี้ยงในห้องนี้ (PHASE19 migration 23 — ไม่มีคอลัมน์ = ข้าม)
+                        if (dtReservation_Accom.Columns.Contains("Room_Pet_Count")
+                            && dtReservation_Accom.Rows[j]["Room_Pet_Count"] != DBNull.Value
+                            && Convert.ToInt32(dtReservation_Accom.Rows[j]["Room_Pet_Count"]) > 0)
+                        {
+                            AccomName += "🐾" + dtReservation_Accom.Rows[j]["Room_Pet_Count"].ToString() + " ";
+                        }
                         if (Convert.ToInt32(dtReservation_Accom.Rows[j]["OrderID"].ToString()) < orderID)
                         {
                             orderID = Convert.ToInt32(dtReservation_Accom.Rows[j]["OrderID"].ToString());
@@ -119,7 +129,8 @@ namespace Take_Time_BangPhra
                 }
 
                 dtReservation.Rows[i]["GrandTotal"] = bal.Total.ToString("N0");
-                dtReservation.Rows[i]["Received"] = bal.Received.ToString("N0") + (bal.IsChannelCollect ? " (OTA เก็บแล้ว)" : "");
+                dtReservation.Rows[i]["Received"] = bal.Received.ToString("N0")
+                    + (bal.IsChannelCollect ? " (OTA เก็บแล้ว)" : bal.IsCollectUnknown ? " (ยังไม่ชัดใครเก็บ — ตรวจก่อนเก็บเงิน)" : "");
                 dtReservation.Rows[i]["Remain"] = bal.Due.ToString("N0");
             }
 

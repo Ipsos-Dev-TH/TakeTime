@@ -257,6 +257,45 @@
             color: #f39c12;
             font-size: 20px;
         }
+
+        /* ป้ายสั้นในข้อมูลการจอง (สัตว์เลี้ยง / วิธีเก็บเงิน OTA) — สีชุดเดียวกับตารางรายวัน */
+        .stay-badge {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 11px;
+            font-size: 13px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .sb-ok    { background: #e8f5e9; color: #1b7a43; }
+        .sb-warn  { background: #fff3e0; color: #c25e00; }
+        .sb-muted { background: #f1f1f1; color: #6b6b6b; }
+
+        /* มือถือ: ข้อมูลการจองเรียงคอลัมน์เดียว, ลดขอบ */
+        @media (max-width: 600px) {
+            .checkout-container {
+                margin: 10px auto;
+                padding: 10px;
+            }
+
+            .checkout-card {
+                padding: 15px;
+            }
+
+            .info-section {
+                grid-template-columns: 1fr;
+            }
+
+            .summary-row {
+                flex-wrap: wrap;
+                gap: 4px;
+            }
+
+            .star {
+                font-size: 32px;
+            }
+        }
     </style>
 
     <div class="checkout-container">
@@ -313,6 +352,9 @@
                     <span class="info-label">วันเช็คเอาท์</span>
                     <span class="info-value"><asp:Label ID="lblCheckoutDate" runat="server"></asp:Label></span>
                 </div>
+
+                <%-- 🐾 สัตว์เลี้ยง / วิธีเก็บเงินของใบ OTA (แสดงเฉพาะเมื่อมีข้อมูล) --%>
+                <asp:Literal ID="litStayExtras" runat="server"></asp:Literal>
             </div>
         </div>
 

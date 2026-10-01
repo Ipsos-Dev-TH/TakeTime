@@ -239,10 +239,13 @@ namespace Take_Time_BangPhra
 
                     // คงเหลือ
                     decimal remainingBalance;
-                    if (bal.IsChannelCollect)
+                    if (bal.IsChannelCollect || bal.IsCollectUnknown)
                     {
-                        // ค่าห้อง OTA เก็บแล้ว → เก็บแค่ค่าใช้จ่ายในห้องที่ค้าง + Room Service ที่ชาร์จเข้าห้อง
-                        remainingBalance = bal.PendingCharges + roomServiceCharges;
+                        // ค่าห้อง OTA เก็บแล้ว → ใช้ยอดค้างจากสูตรกลาง (bal.Due ≥ ค่าใช้จ่ายในห้องที่ยัง PENDING เสมอ
+                        // และรวมส่วนที่ราคาห้องเกินยอด OTA เช่น เพิ่มคืน/อัปเกรดหลังจอง) + Room Service ที่ชาร์จเข้าห้อง
+                        // เดิมใช้ PendingCharges อย่างเดียว ⇒ ส่วนต่างอัปเกรดหลุด เช็คเอาท์ได้ทั้งที่ยังเก็บเงินไม่ครบ
+                        // (CHANNEL/UNKNOWN ไม่รายงานจ่ายเกิน → ไม่หัก Credit)
+                        remainingBalance = bal.Due + roomServiceCharges;
                     }
                     else
                     {
@@ -279,6 +282,9 @@ namespace Take_Time_BangPhra
                         }
                     }
                     catch { }
+
+                    // 🐾 สัตว์เลี้ยง + ใครเก็บเงินค่าห้อง (ใบ OTA) — ให้หน้างานเห็นก่อนตรวจห้อง/เก็บเงิน
+                    litStayExtras.Text = BuildStayExtrasHtml(reservationId, bal);
 
                     lblTotalPrice.Text = totalPriceWithCharges.ToString("N2");
                     lblPaidAmount.Text = totalPaid.ToString("N2");
@@ -337,6 +343,71 @@ namespace Take_Time_BangPhra
                 ShowError("เกิดข้อผิดพลาดในการโหลดข้อมูล: " + ex.Message);
                 btnCheckout.Enabled = false;
             }
+        }
+
+        /// <summary>
+        /// ช่องข้อมูลเสริมในการ์ด "ข้อมูลการจอง": จำนวนสัตว์เลี้ยง + ค่าบริการสัตว์เลี้ยง (ถ้ามี) และวิธีเก็บเงินของใบ OTA
+        /// (Reservation.Pet_Count จาก PHASE19 migration 23 — ไม่มีคอลัมน์/ไม่มีสัตว์เลี้ยง = ไม่แสดง) ส่วนเสริม: พังคืน ""
+        /// </summary>
+        private string BuildStayExtrasHtml(int reservationId, ReservationBalance bal)
+        {
+            var sb = new System.Text.StringBuilder();
+            try
+            {
+                var p = new System.Collections.Generic.Dictionary<string, object> { { "@rid", reservationId } };
+                DataTable dt = codeInstance.DatabaseQuerySafe(connectionString,
+                    @"SELECT CASE WHEN COL_LENGTH('Reservation', 'Pet_Count') IS NULL THEN 0 ELSE 1 END AS HasPet", null);
+                bool hasPet = dt != null && dt.Rows.Count > 0 && Convert.ToInt32(dt.Rows[0]["HasPet"]) == 1;
+                if (hasPet)
+                {
+                    DataTable pet = codeInstance.DatabaseQuerySafe(connectionString,
+                        @"SELECT ISNULL(r.Pet_Count, 0) AS Pets,
+                                 ISNULL((SELECT SUM(rpc.TotalAmount) FROM Reservation_Product_Charges rpc
+                                          WHERE rpc.Reservation_ID = r.ID AND rpc.Status <> 'CANCELLED'
+                                            AND rpc.Notes LIKE 'PET_FEE%'), 0) AS PetFee,
+                                 ISNULL((SELECT SUM(rpc.TotalAmount) FROM Reservation_Product_Charges rpc
+                                          WHERE rpc.Reservation_ID = r.ID AND rpc.Status = 'PENDING'
+                                            AND rpc.Notes LIKE 'PET_FEE%'), 0) AS PetFeePending
+                            FROM Reservation r WHERE r.ID = @rid", p);
+                    if (pet != null && pet.Rows.Count > 0)
+                    {
+                        int pets = Convert.ToInt32(pet.Rows[0]["Pets"]);
+                        decimal fee = Convert.ToDecimal(pet.Rows[0]["PetFee"]);
+                        decimal feePending = Convert.ToDecimal(pet.Rows[0]["PetFeePending"]);
+                        if (pets > 0 || fee > 0m)
+                        {
+                            sb.Append("<div class='info-item'><span class='info-label'>🐾 สัตว์เลี้ยง</span><span class='info-value'>")
+                              .Append(pets > 0 ? pets + " ตัว" : "-");
+                            if (fee > 0m)
+                            {
+                                sb.Append(" · ค่าบริการ ฿").Append(fee.ToString("N2"));
+                                sb.Append(feePending > 0m
+                                    ? " <span class='stay-badge sb-warn'>ยังไม่ชำระ ฿" + feePending.ToString("N2") + "</span>"
+                                    : " <span class='stay-badge sb-ok'>ชำระแล้ว</span>");
+                            }
+                            sb.Append("<div class='checklist-description'>ตรวจความสะอาด/ความเสียหายจากสัตว์เลี้ยงก่อนคืนห้อง</div>");
+                            sb.Append("</span></div>");
+                        }
+                    }
+                }
+            }
+            catch { /* ส่วนเสริม — ไม่กระทบเช็คเอาท์ */ }
+
+            try
+            {
+                if (bal != null && bal.IsOta)
+                {
+                    string badge = bal.IsChannelCollect ? "<span class='stay-badge sb-ok'>● OTA เก็บเงินค่าห้องแล้ว</span>"
+                        : bal.CollectMode == ReservationBalance.ModeHotel ? "<span class='stay-badge sb-warn'>● โรงแรมเก็บหน้างาน</span>"
+                        : bal.IsCollectUnknown ? "<span class='stay-badge sb-muted'>○ ยังไม่ชัดใครเก็บเงิน — ตรวจก่อนเก็บเงิน</span>"
+                        : "";
+                    if (badge.Length > 0)
+                        sb.Append("<div class='info-item'><span class='info-label'>การเก็บเงินค่าห้อง (OTA)</span><span class='info-value'>")
+                          .Append(badge).Append("</span></div>");
+                }
+            }
+            catch { }
+            return sb.ToString();
         }
 
         private bool CheckCanCheckout(int reservationId)

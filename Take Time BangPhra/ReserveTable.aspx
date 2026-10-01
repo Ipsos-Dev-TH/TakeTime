@@ -539,6 +539,7 @@
                                     HeaderStyle-CssClass="header-center" ItemStyle-CssClass="header-center">
                                     <ItemTemplate>
                                         <%# Eval("Status") %>
+                                        <%# CollectBadge(Eval("ID")) == "" ? "" : "<div style='margin-top:4px;'>" + CollectBadge(Eval("ID")) + "</div>" %>
                                         <%# EtaxBadge(Eval("ID")) == "" ? "" : "<div style='margin-top:4px;'>" + EtaxBadge(Eval("ID")) + "</div>" %>
                                     </ItemTemplate>
                                 </asp:TemplateField>

@@ -205,7 +205,7 @@ namespace Take_Time_BangPhra
                   LEFT JOIN [Customer] C ON C.MobilePhone = R.Customer_MobilePhone
                   WHERE RA.Accommodation_ID = @accommodationId
                     AND R.ID != @excludeReservationId
-                    AND R.Status NOT IN (N'ยกเลิก', N'เสร็จสิ้น', N'ไม่มาเช็คอิน')
+                    AND " + RescheduleService.SqlHoldsRoom("R") + @"
                     AND (
                         -- Check for date range overlap
                         (@checkinDate < R.CheckoutDate AND @checkoutDate > R.CheckinDate)
@@ -358,7 +358,7 @@ namespace Take_Time_BangPhra
                           INNER JOIN [dbo].[Accommodation] a ON a.ID = @accommodationId
                          WHERE ra.Accommodation_ID = @accommodationId
                            AND r.ID <> @reservationId
-                           AND r.Status NOT IN (N'ยกเลิก', N'เสร็จสิ้น', N'ไม่มาเช็คอิน')
+                           AND " + RescheduleService.SqlHoldsRoom("r") + @"
                            AND me.CheckinDate < r.CheckoutDate
                            AND me.CheckoutDate > r.CheckinDate
                            AND ISNULL(a.LimitWithPeople, 0) = 0

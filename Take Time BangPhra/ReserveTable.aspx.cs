@@ -229,6 +229,32 @@ namespace Take_Time_BangPhra
                 : "<span title='ออก e-Tax แล้ว รอผลตอบกลับจากกรมสรรพากร' style='display:inline-block;background:#fff3e0;color:#e65100;padding:2px 8px;border-radius:11px;font-size:10.5px;font-weight:700;'>🧾 e-Tax รอสรรพากรยืนยัน</span>";
         }
 
+        /// <summary>ยอดของการจองในวันที่เลือก (ตั้งใน Calendar1_SelectionChanged) — ใช้ทำป้ายวิธีเก็บเงิน</summary>
+        private Dictionary<int, ReservationBalance> _balances;
+
+        /// <summary>
+        /// ป้ายใครเก็บเงินค่าห้อง (เฉพาะใบ OTA) — ข้อความ/สีชุดเดียวกับตารางรายวัน (DailyBoard) และหน้ารายการจอง
+        /// ว่าง = ไม่ใช่ใบ OTA / ไม่มีข้อมูล
+        /// </summary>
+        protected string CollectBadge(object resIdObj)
+        {
+            try
+            {
+                if (_balances == null || resIdObj == null || resIdObj == DBNull.Value) return "";
+                ReservationBalance b;
+                if (!_balances.TryGetValue(Convert.ToInt32(resIdObj), out b) || b == null || !b.IsOta) return "";
+                const string st = "display:inline-block;padding:2px 8px;border-radius:11px;font-size:10.5px;font-weight:700;";
+                if (b.IsChannelCollect)
+                    return "<span title='OTA เก็บเงินค่าห้องแล้ว (Channel Collect)' style='" + st + "background:#e8f5e9;color:#1b7a43;'>● OTA เก็บแล้ว</span>";
+                if (b.CollectMode == ReservationBalance.ModeHotel)
+                    return "<span title='โรงแรมเก็บเงินเอง (Hotel Collect)' style='" + st + "background:#fff3e0;color:#c25e00;'>● เก็บหน้างาน</span>";
+                if (b.IsCollectUnknown)
+                    return "<span title='ยังไม่ชัดว่าใครเก็บเงิน — ตรวจก่อนเก็บเงิน' style='" + st + "background:#f1f1f1;color:#6b6b6b;'>○ ยังไม่ชัดใครเก็บ</span>";
+                return "";
+            }
+            catch { return ""; }
+        }
+
         /// <summary>คืน conversation id ล่าสุดของการจอง (0 = ไม่มีแชท → ซ่อนปุ่ม)</summary>
         protected long GuestChatConvId(object resIdObj)
         {
@@ -377,11 +403,13 @@ namespace Take_Time_BangPhra
         {
             Label1.Text = Calendar1.SelectedDate.ToString("dd MMMM yyyy");
 
+            // สถานะ: เกณฑ์กลาง SqlNotCancelled — เดิมตัดแค่ 2 สถานะยกเลิก ใบ "ยกเลิก" (ระบบยกเลิกอัตโนมัติ) /
+            // "ลบจากการเลื่อนวันเข้าพัก" ยังขึ้นในตาราง. no-show ยังแสดง (ให้เจ้าหน้าที่จัดการต่อได้)
             DataTable dtReservation = DatabaseQuery(conn,
                 @"SELECT * FROM Reservation
                   INNER JOIN Customer ON Customer.MobilePhone = Reservation.Customer_MobilePhone
                   WHERE @SelectedDate >= CheckInDate AND @SelectedDate < CheckOutDate
-                  AND (Reservation.Status != N'ยกเลิกคืนเงิน' AND Reservation.Status != N'ยกเลิกไม่คืนเงิน')",
+                  AND " + RescheduleService.SqlNotCancelled("Reservation"),
                 new SqlParameter("@SelectedDate", Calendar1.SelectedDate.ToString("yyyy-MM-dd")));
 
             DataTable dtReservation_Accom = DatabaseQuery(conn,
@@ -401,14 +429,17 @@ namespace Take_Time_BangPhra
                 new SqlParameter("@SelectedDate", Calendar1.SelectedDate.ToString("yyyy-MM-dd")));
 
             // Query สินค้าที่ชาร์จเข้าห้อง (Room Charges) - แสดงเฉพาะที่ไม่ถูกยกเลิก
+            // LEFT JOIN Product: ค่าบริการสัตว์เลี้ยงไม่ใช่สินค้า (Product_ID = NULL) — เดิม INNER JOIN ทำให้หายจากตาราง
             DataTable dtProductCharges = DatabaseQuery(conn,
                 @"SELECT r.ID as Reservation_ID,
-                         p.Product_Name,
+                         ISNULL(p.Product_Name, rpc.Product_Name) AS Product_Name,
                          rpc.Quantity,
+                         rpc.TotalAmount,
+                         CASE WHEN rpc.Notes LIKE 'PET_FEE%' THEN 1 ELSE 0 END AS IsPetFee,
                          rpc.Status
                   FROM Reservation r
                   INNER JOIN Reservation_Product_Charges rpc ON r.ID = rpc.Reservation_ID
-                  INNER JOIN Product p ON rpc.Product_ID = p.ID
+                  LEFT JOIN Product p ON rpc.Product_ID = p.ID
                   WHERE @SelectedDate >= r.CheckInDate AND @SelectedDate < r.CheckOutDate
                     AND rpc.Status <> 'CANCELLED'
                   ORDER BY rpc.ID ASC",
@@ -416,8 +447,9 @@ namespace Take_Time_BangPhra
 
             // ยอดเงินของทุกการจองในวันที่เลือก — query เดียว (เดิม query ต่อแถว 4 ครั้ง)
             Dictionary<int, ReservationBalance> balances = ReservationBalance.LoadMany(conn,
-                "@SelectedDate >= r.CheckinDate AND @SelectedDate < r.CheckoutDate",
+                "@SelectedDate >= r.CheckinDate AND @SelectedDate < r.CheckoutDate AND " + RescheduleService.SqlNotCancelled("r"),
                 new Dictionary<string, object> { { "@SelectedDate", Calendar1.SelectedDate.ToString("yyyy-MM-dd") } });
+            _balances = balances;   // ป้ายวิธีเก็บเงินในคอลัมน์สถานะ (CollectBadge)
 
             // Add additional columns if they don't exist
             if (!dtReservation.Columns.Contains("AccomName"))
@@ -478,14 +510,28 @@ namespace Take_Time_BangPhra
                     }
                 }
 
-                // สินค้าที่ชาร์จเข้าห้อง (Product Charges)
+                // สินค้าที่ชาร์จเข้าห้อง (Product Charges) + ค่าบริการสัตว์เลี้ยง (รวมเป็นยอดเดียวต่อการจอง)
+                decimal petFee = 0m;
                 for (int j = 0; j < dtProductCharges.Rows.Count; j++)
                 {
                     if (dtReservation.Rows[i]["ID"].ToString() == dtProductCharges.Rows[j]["Reservation_ID"].ToString())
                     {
-                        int quantity = Convert.ToInt32(dtProductCharges.Rows[j]["Quantity"]);
+                        if (dtProductCharges.Columns.Contains("IsPetFee")
+                            && dtProductCharges.Rows[j]["IsPetFee"] != DBNull.Value
+                            && Convert.ToInt32(dtProductCharges.Rows[j]["IsPetFee"]) == 1)
+                        {
+                            petFee += dtProductCharges.Rows[j]["TotalAmount"] != DBNull.Value
+                                ? Convert.ToDecimal(dtProductCharges.Rows[j]["TotalAmount"]) : 0m;
+                            continue;
+                        }
+                        int quantity = dtProductCharges.Rows[j]["Quantity"] != DBNull.Value
+                            ? Convert.ToInt32(dtProductCharges.Rows[j]["Quantity"]) : 0;
                         Items += $"[{dtProductCharges.Rows[j]["Product_Name"]} : ({quantity}ชิ้น)] ";
                     }
+                }
+                if (petFee > 0m)
+                {
+                    Items += $"[🐾 ค่าบริการสัตว์เลี้ยง ฿{petFee:N0}] ";
                 }
 
                 dtReservation.Rows[i]["Items"] = Items.Trim();
@@ -674,10 +720,13 @@ namespace Take_Time_BangPhra
 
         protected void Calendar1_DayRender(object sender, DayRenderEventArgs e)
         {
+            // ห้องเต็ม/ว่างบนปฏิทิน — นับเฉพาะใบที่มีผู้พัก (SqlActiveStay) เดิมไม่กรองสถานะเลย ⇒ ใบที่ยกเลิก
+            // (ที่ยังมีแถวห้องค้าง) ทำให้วันนั้นขึ้นแดงว่าห้องเต็ม
             DataTable dtReservation = DatabaseQuery(conn,
-                @"SELECT * FROM Reservation 
-                  RIGHT JOIN Reservation_Accommodation ON Reservation.ID = Reservation_Accommodation.Reservation_ID 
-                  WHERE @SelectedDate >= CheckinDate AND @SelectedDate < CheckoutDate",
+                @"SELECT * FROM Reservation
+                  RIGHT JOIN Reservation_Accommodation ON Reservation.ID = Reservation_Accommodation.Reservation_ID
+                  WHERE @SelectedDate >= CheckinDate AND @SelectedDate < CheckoutDate
+                  AND " + RescheduleService.SqlActiveStay("Reservation"),
                 new SqlParameter("@SelectedDate", e.Day.Date.ToString("yyyy-MM-dd")));
 
             DataTable dtAccommodation = DatabaseQuery(conn, "SELECT * FROM Accommodation WHERE Status = 1");
@@ -797,6 +846,10 @@ namespace Take_Time_BangPhra
         {
             string status = refund ? "ยกเลิกคืนเงิน" : "ยกเลิกไม่คืนเงิน";
 
+            // ข้อความแจ้งยกเลิก — ต้องสร้าง "ก่อน" แก้ข้อมูล: ด้านล่างยกเลิก Payment_History และตั้ง TotalPrice = 0
+            // (เดิมสร้างหลังจากนั้น ⇒ Telegram ขึ้น "ราคารวม 0 / มัดจำที่คืน 0" ทุกครั้ง)
+            string cancelMessage = BuildCancelTelegram(reservationId, refund);
+
             // 🔧 FIX: Cancel Payment_History records first
             try
             {
@@ -827,8 +880,8 @@ namespace Take_Time_BangPhra
                 new SqlParameter("@Status", status),
                 new SqlParameter("@ReservationId", reservationId));
 
-            // Send Telegram notification
-            await SendTelegramNotification(reservationId, refund);
+            // Send Telegram notification (ข้อความสร้างไว้แล้วก่อนแก้ข้อมูล)
+            await SendTelegramNotification(cancelMessage);
 
             // ── ยกเลิกชาร์จเข้าห้องที่ค้าง (PENDING) ก่อนลบการจอง ──
             // charge PENDING ตัดสต๊อก + ลง COGS บน NextAcc ไปแล้วตอนชาร์จ — ถ้าปล่อยทิ้งตอนยกเลิกการจอง
@@ -928,7 +981,25 @@ namespace Take_Time_BangPhra
             }
         }
 
-        private async Task SendTelegramNotification(string reservationId, bool refund)
+        /// <summary>ส่งข้อความแจ้งยกเลิกที่สร้างไว้ (ว่าง = ไม่ส่ง)</summary>
+        private Task SendTelegramNotification(string message)
+        {
+            try
+            {
+                // ประตูกลาง — เปิด/ปิดได้ที่ ศูนย์ตั้งค่า → การแจ้งเตือน
+                if (!string.IsNullOrEmpty(message)) Notify.Send(Notify.Ev.BookingCancel, message);
+            }
+            catch { /* แจ้งเตือนไม่ได้ไม่ใช่เหตุให้การยกเลิกล้ม */ }
+            return Task.FromResult(0);
+        }
+
+        /// <summary>
+        /// ข้อความแจ้งยกเลิก — เรียก "ก่อน" ยกเลิก Payment_History / ตั้ง TotalPrice = 0 / ลบแถวห้อง
+        /// ยอดใช้สูตรกลาง ReservationBalance: ราคารวม = ค่าห้อง + ค่าใช้จ่ายในห้อง (รวมค่าสัตว์เลี้ยง),
+        /// มัดจำ = เงินที่ลูกค้าจ่ายโรงแรมจริง (Payment_History ก่อน, ไม่มี → Deposit; ใบ OTA Channel ไม่นับเงินที่ OTA ถือ)
+        /// ไม่พบข้อมูล/ผิดพลาด → คืน null
+        /// </summary>
+        private string BuildCancelTelegram(string reservationId, bool refund)
         {
             try
             {
@@ -955,6 +1026,22 @@ namespace Take_Time_BangPhra
                     int stayDays = Convert.ToInt32(dt.Rows[0]["StayDays"]);
                     decimal totalPrice = Convert.ToDecimal(dt.Rows[0]["TotalPrice"]);
                     decimal deposit = Convert.ToDecimal(dt.Rows[0]["TotalPaid"]);
+
+                    int resIdInt;
+                    if (int.TryParse(reservationId, out resIdInt))
+                    {
+                        try
+                        {
+                            ReservationBalance b = ReservationBalance.Load(conn, resIdInt);
+                            if (b != null)
+                            {
+                                totalPrice = b.Total;
+                                deposit = b.LedgerRows > 0 ? b.PaidLedger
+                                        : (b.IsChannelCollect || b.IsCollectUnknown ? 0m : b.Deposit);
+                            }
+                        }
+                        catch { /* ใช้ค่าจาก query ด้านบน */ }
+                    }
 
                     StringBuilder roomDetails = new StringBuilder();
                     foreach (DataRow row in dt.Rows)
@@ -996,14 +1083,14 @@ namespace Take_Time_BangPhra
 
 ⚠️ *หมายเหตุ:* ยกเลิกไม่คืนเงิน";
 
-                    // ประตูกลาง — เปิด/ปิดได้ที่ ศูนย์ตั้งค่า → การแจ้งเตือน
-                    Notify.Send(Notify.Ev.BookingCancel, message);
+                    return message;
                 }
             }
-            catch (Exception ex)
+            catch (Exception)
             {
                 // Log error if needed
             }
+            return null;
         }
 
         private void ProcessRefund(string reservationId)
