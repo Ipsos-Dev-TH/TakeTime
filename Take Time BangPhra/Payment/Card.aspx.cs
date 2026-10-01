@@ -51,11 +51,11 @@ namespace Take_Time_BangPhra.Payment
             if (OmiseGateway.IsTestKey && !string.IsNullOrEmpty(OmiseGateway.PublicKey))
                 litTestBand.Text = "<div class=\"test-band\">โหมดทดสอบ — ยังไม่มีการตัดเงินจริง</div>";
 
-            if (string.IsNullOrEmpty(OmiseGateway.PublicKey))
-            { Fail("ระบบยังไม่พร้อมรับบัตร (ยังไม่ได้ตั้ง Public Key) กรุณาติดต่อเจ้าหน้าที่"); return; }
-
             if (IsHoldMode)
             {
+                if (string.IsNullOrEmpty(OmiseGateway.PublicKey))
+                { Fail("ระบบยังไม่พร้อมรับบัตร (ยังไม่ได้ตั้ง Public Key) กรุณาติดต่อเจ้าหน้าที่"); return; }
+
                 var holds = new SecurityHoldService(_conn);
                 if (!holds.IsAvailable) { Fail("ระบบวงเงินประกันยังไม่เปิดใช้งาน"); return; }
 
@@ -140,6 +140,30 @@ namespace Take_Time_BangPhra.Payment
                           + "↻ เริ่มรายการชำระเงินใหม่</a>"), true);
                 return;
             }
+
+            // หน้านี้กรอกบัตรผ่าน Omise.js เท่านั้น — รายการของเกตเวย์อื่น (PaySo) ใช้หน้าชำระเงินของเกตเวย์นั้น
+            // (เดิมลิงก์ Card?ref= ของรายการ PaySo ขึ้น "ยังไม่ได้ตั้ง Public Key" หรือฟอร์ม Omise ที่ตัดเงินไม่ได้)
+            if (!string.Equals(txn.Provider, OmiseGateway.Provider, StringComparison.OrdinalIgnoreCase))
+            {
+                if (!string.IsNullOrEmpty(txn.PaymentUrl))
+                {
+                    Response.Redirect(txn.PaymentUrl, false);
+                    Context.ApplicationInstance.CompleteRequest();
+                    return;
+                }
+                string again2 = RetryUrl(txn);
+                Fail("รายการนี้ชำระผ่านหน้าชำระเงินของผู้ให้บริการ ไม่ใช่หน้ากรอกบัตรนี้"
+                    + (string.IsNullOrEmpty(again2)
+                        ? " กรุณาติดต่อเจ้าหน้าที่"
+                        : "<br/><a href=\"" + Server.HtmlEncode(again2)
+                          + "\" style=\"display:inline-block;margin-top:10px;padding:11px 18px;border-radius:10px;"
+                          + "background:#1b7a4b;color:#fff;text-decoration:none;font-weight:600;\">"
+                          + "ไปหน้าชำระเงิน</a>"), true);
+                return;
+            }
+
+            if (string.IsNullOrEmpty(OmiseGateway.PublicKey))
+            { Fail("ระบบยังไม่พร้อมรับบัตร (ยังไม่ได้ตั้ง Public Key) กรุณาติดต่อเจ้าหน้าที่"); return; }
 
             litTitle.Text = "ชำระเงินด้วยบัตร";
             litDesc.Text = Server.HtmlEncode(txn.Description ?? "");

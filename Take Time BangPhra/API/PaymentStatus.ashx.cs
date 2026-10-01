@@ -38,12 +38,15 @@ namespace Take_Time_BangPhra.API
                 if (txnRef.Length == 0) { Write(context, 400, "BAD_REQUEST", "ไม่ระบุเลขอ้างอิง"); return; }
 
                 var svc = new OnlinePaymentService(conn);
+                // ระบบปิด/ยังไม่รัน migration (เช่น PaySo ยังไม่อนุมัติแล้วปิดไว้) → ตอบเงียบ ๆ ไม่ยิงเกตเวย์ ไม่พ่น error
+                if (!svc.Store.TablesReady()) { Write(context, 503, "DISABLED", "ระบบชำระเงินออนไลน์ยังไม่เปิดใช้งาน"); return; }
                 var txn = svc.Store.GetByRef(txnRef);
                 if (txn == null) { Write(context, 404, "NOT_FOUND", "ไม่พบรายการ"); return; }
 
-                // ยังค้างอยู่ → ถามเกตเวย์จริงหนึ่งครั้ง (กันกรณี webhook หาย)
-                if (txn.Status == Payments.PaymentStatus.Pending
-                    || txn.Status == Payments.PaymentStatus.Initiated)
+                // ยังค้างอยู่ → ถามเกตเวย์จริงหนึ่งครั้ง (กันกรณี webhook หาย) — เฉพาะเมื่อระบบเปิดอยู่
+                if (svc.IsAvailable
+                    && (txn.Status == Payments.PaymentStatus.Pending
+                        || txn.Status == Payments.PaymentStatus.Initiated))
                 {
                     try { svc.RefreshStatus(txn); } catch { }
                     txn = svc.Store.GetByRef(txnRef) ?? txn;

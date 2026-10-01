@@ -114,11 +114,11 @@ namespace Take_Time_BangPhra.Payments
                     INSERT INTO Payment_Transaction
                         (Txn_Ref, Provider, Method, Source_Type, Source_ID, Amount, Surcharge_Amount,
                          Currency, [Description], Customer_Name, Customer_Phone, Customer_Email,
-                         [Status], Expires_At, Created_Date, Created_By)
+                         [Status], Expires_At, Created_Date, Created_By, Card_Brand)
                     VALUES
                         (@ref, @prov, @method, @stype, @sid, @amt, @sur,
                          @cur, @desc, @cname, @cphone, @cmail,
-                         @status, @exp, GETDATE(), @by);
+                         @status, @exp, GETDATE(), @by, @brand);
                     SELECT CAST(SCOPE_IDENTITY() AS INT);", con))
                 {
                     cmd.Parameters.AddWithValue("@ref", req.TxnRef);
@@ -137,6 +137,8 @@ namespace Take_Time_BangPhra.Payments
                     cmd.Parameters.AddWithValue("@exp",
                         (object)DateTime.Now.AddMinutes(PaymentGatewayConfig.ExpiryMinutes));
                     cmd.Parameters.AddWithValue("@by", (object)req.CreatedByAdminId ?? DBNull.Value);
+                    // ยี่ห้อบัตรตามช่องทางที่ลูกค้าเลือก (ค่าจริงจากเกตเวย์เขียนทับตอน MarkPaid)
+                    cmd.Parameters.AddWithValue("@brand", (object)Trim(req.CardBrandHint, 30) ?? DBNull.Value);
 
                     object id = cmd.ExecuteScalar();
                     return GetById(Convert.ToInt32(id));

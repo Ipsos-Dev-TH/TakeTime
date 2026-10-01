@@ -1151,6 +1151,8 @@ namespace Take_Time_BangPhra
                         if (!string.IsNullOrEmpty(id))
                             ddlRefundAccountModal.Items.Add(new System.Web.UI.WebControls.ListItem($"คืนออก: {name}", id));
                     }
+                    // ไม่ให้เลือกแถวเกตเวย์ (PaySo/Omise) และช่องที่ปิด "พนักงานเห็น" — เงินที่รับผ่านเกตเวย์ใช้ "อัตโนมัติ (บัญชีเดิม)"
+                    Take_Time_BangPhra.Payments.PaymentChannelCatalog.RemoveNonStaffItems(ddlRefundAccountModal.Items, true, false);
                 }
             }
             catch (Exception ex)

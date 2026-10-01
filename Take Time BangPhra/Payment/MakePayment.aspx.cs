@@ -38,6 +38,9 @@ namespace Take_Time_BangPhra.Payment
                 ddlPaymentMethod.DataValueField = "ID";
                 ddlPaymentMethod.DataBind();
 
+                // ไม่ให้เลือกช่องทางเกตเวย์ (PaySo/Omise — ลงบันทึกอัตโนมัติเมื่อเกตเวย์ยืนยัน) และช่องที่ปิด "พนักงานเห็น"
+                Payments.PaymentChannelCatalog.RemoveNonStaffItems(ddlPaymentMethod.Items, true, false);
+
                 // Add default item at the beginning
                 ddlPaymentMethod.Items.Insert(0, new ListItem("-- เลือกวิธีการชำระ --", ""));
             }

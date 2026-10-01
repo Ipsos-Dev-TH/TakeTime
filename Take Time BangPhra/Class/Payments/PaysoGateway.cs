@@ -322,15 +322,17 @@ namespace Take_Time_BangPhra.Payments
             string expected = ComputeSignature(body, secret, algo, enc);
             if (string.IsNullOrEmpty(expected)) return false;
 
-            return FixedTimeEquals(expected, got.Trim());
+            // HEX ไม่สนตัวพิมพ์ (บางเจ้าส่งตัวใหญ่) — BASE64 ตัวพิมพ์มีความหมาย ต้องตรงเป๊ะ
+            bool base64 = !string.IsNullOrEmpty(enc) && enc.Equals("BASE64", StringComparison.OrdinalIgnoreCase);
+            return FixedTimeEquals(expected, got.Trim(), !base64);
         }
 
         /// <summary>เทียบสตริงแบบไม่ให้เวลาเปรียบเทียบบอกใบ้ (กัน timing attack)</summary>
-        private static bool FixedTimeEquals(string a, string b)
+        private static bool FixedTimeEquals(string a, string b, bool ignoreCase)
         {
             if (a == null || b == null) return false;
-            byte[] x = Encoding.UTF8.GetBytes(a.ToLowerInvariant());
-            byte[] y = Encoding.UTF8.GetBytes(b.ToLowerInvariant());
+            byte[] x = Encoding.UTF8.GetBytes(ignoreCase ? a.ToLowerInvariant() : a);
+            byte[] y = Encoding.UTF8.GetBytes(ignoreCase ? b.ToLowerInvariant() : b);
             int diff = x.Length ^ y.Length;
             for (int i = 0; i < x.Length && i < y.Length; i++) diff |= x[i] ^ y[i];
             return diff == 0;
@@ -429,6 +431,10 @@ namespace Take_Time_BangPhra.Payments
             vals["customerName"] = req.CustomerName ?? "";
             vals["customerEmail"] = req.CustomerEmail ?? "";
             vals["customerPhone"] = req.CustomerPhone ?? "";
+            // ช่องทางที่ลูกค้าเลือกในหน้าจอง (เช่น PAYSO_AMEX) + ยี่ห้อบัตรที่ช่องนั้นหมายถึง — ใส่ในแม่แบบได้
+            // เมื่อเอกสาร Payso ระบุฟิลด์ล็อกชนิดบัตร (ว่าง = ลูกค้าเลือกบัตรเองที่หน้า Payso)
+            vals["channelCode"] = req.ChannelCode ?? "";
+            vals["cardBrand"] = req.CardBrandHint ?? "";
             vals["returnUrl"] = req.ReturnUrl ?? "";
             vals["cancelUrl"] = req.CancelUrl ?? "";
             vals["webhookUrl"] = req.WebhookUrl ?? "";

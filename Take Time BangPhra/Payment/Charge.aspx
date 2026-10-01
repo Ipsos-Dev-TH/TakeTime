@@ -41,7 +41,7 @@
     <div class="qc-wrap">
         <div class="qc-head">
             <h2>💳 จุดรับเงินออนไลน์ (หน้าร้าน)</h2>
-            <p>สร้าง QR/ลิงก์ให้ลูกค้าจ่ายตรงนี้ — เงินเข้าแล้วค่อยไปบันทึกการขาย/ออกใบเสร็จ โดยเลือกแหล่งเงิน "<asp:Literal ID="litPaidHowName" runat="server" />"</p>
+            <p>สร้าง QR/ลิงก์ให้ลูกค้าจ่ายตรงนี้ — เงินเข้าแล้วค่อยไปบันทึกการขายหน้าร้าน/ออกใบเสร็จ โดยเลือกแหล่งเงิน "<asp:Literal ID="litPaidHowName" runat="server" />"</p>
         </div>
 
         <asp:Literal ID="litMsg" runat="server" />

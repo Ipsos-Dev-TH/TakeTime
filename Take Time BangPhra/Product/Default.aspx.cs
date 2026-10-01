@@ -520,6 +520,20 @@ namespace Take_Time_BangPhra.Product
             catch { }
         }
 
+        /// <summary>
+        /// แหล่งเงิน POS: ตัดแถวที่ปิด "พนักงานเห็น" และแถวเกตเวย์ที่ไม่ใช่เจ้าที่ใช้อยู่
+        /// (ยังเหลือแหล่งเงินของเกตเวย์ที่ใช้อยู่ — จุดรับเงินออนไลน์ Payment/Charge ให้พนักงานบันทึกขายด้วยแถวนั้นเอง)
+        /// </summary>
+        protected void DropDownList1_DataBound(object sender, EventArgs e)
+        {
+            try
+            {
+                Take_Time_BangPhra.Payments.PaymentChannelCatalog.RemoveNonStaffItems(
+                    DropDownList1.Items, true, true);
+            }
+            catch { }
+        }
+
         protected void DropDownList1_SelectedIndexChanged(object sender, EventArgs e)
         {
             if(DropDownList1.SelectedValue == "1")

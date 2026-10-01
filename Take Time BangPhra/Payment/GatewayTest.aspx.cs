@@ -247,17 +247,29 @@ namespace Take_Time_BangPhra.Payment
                 var code = new code();
                 // รายการชำระเงินทดสอบวันนี้ (SourceId ขึ้นต้น GWTEST)
                 var t = code.DatabaseQuerySafe(_conn, @"
-                    SELECT TOP 30 ID, Created_Date, Txn_Ref, Amount, Surcharge_Amount, [Status]
+                    SELECT TOP 30 ID, Created_Date, Txn_Ref, Amount, Surcharge_Amount, [Status], Provider
                       FROM Payment_Transaction
                      WHERE Source_ID LIKE @p AND Created_Date >= CAST(GETDATE() AS DATE)
                      ORDER BY ID DESC",
                     new Dictionary<string, object> { { "@p", TestSourceId + "%" } });
+                // ปุ่มคืนเงินเฉพาะเกตเวย์ที่มีเส้นทางคืนเงินจริง (PaySo ยังไม่ตั้ง Payso_Path_Refund = ซ่อน)
+                var svc = new OnlinePaymentService(_conn);
+                var refundable = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
                 if (t != null)
                     foreach (DataRow r in t.Rows)
+                    {
+                        string prov = Convert.ToString(r["Provider"]) ?? "";
+                        bool canRefund;
+                        if (!refundable.TryGetValue(prov, out canRefund))
+                        {
+                            canRefund = GatewaySupportsRefund(svc, prov);
+                            refundable[prov] = canRefund;
+                        }
                         rows.Rows.Add("T:" + r["ID"], r["Created_Date"], "ชำระเงิน", r["Txn_Ref"],
                             Convert.ToDecimal(r["Amount"]) + Convert.ToDecimal(r["Surcharge_Amount"]),
                             Payments.PaymentStatus.Thai(Convert.ToString(r["Status"])),
-                            Convert.ToString(r["Status"]) == Payments.PaymentStatus.Paid, false);
+                            Convert.ToString(r["Status"]) == Payments.PaymentStatus.Paid && canRefund, false);
+                    }
 
                 // วงเงินทดสอบ (Reservation_ID = 0)
                 var h = code.DatabaseQuerySafe(_conn, @"
@@ -276,6 +288,15 @@ namespace Take_Time_BangPhra.Payment
 
             gvTest.DataSource = rows;
             gvTest.DataBind();
+        }
+
+        /// <summary>เกตเวย์ของรายการนี้คืนเงินผ่านระบบได้ไหม (รายการนอกเกตเวย์/อ่านไม่ได้ = ไม่ได้)</summary>
+        private static bool GatewaySupportsRefund(OnlinePaymentService svc, string provider)
+        {
+            string p = (provider ?? "").Trim().ToUpperInvariant();
+            if (p != PaymentGatewayConfig.ProviderPayso && p != PaymentGatewayConfig.ProviderOmise) return false;
+            try { return svc.Gateway(p).SupportsRefund; }
+            catch { return false; }
         }
 
         // ── raw viewer ───────────────────────────────────────────────────────

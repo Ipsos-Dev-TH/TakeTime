@@ -80,6 +80,16 @@ namespace Take_Time_BangPhra.Payments
         public string WebhookUrl { get; set; }
         public int? CreatedByAdminId { get; set; }
 
+        /// <summary>รหัสช่องทางจากแคตตาล็อกที่ลูกค้าเลือก (เช่น PAYSO_AMEX) — ว่างได้</summary>
+        public string ChannelCode { get; set; }
+
+        /// <summary>
+        /// ยี่ห้อบัตรที่ช่องทางนั้นหมายถึง (VISA / MASTER / AMEX / JCB / UNIONPAY) — ว่างได้
+        /// เก็บลง Card_Brand ตั้งแต่สร้างรายการ เพื่อให้การลงบันทึกเลือกแหล่งเงินรายยี่ห้อได้
+        /// แม้เกตเวย์ไม่แจ้งยี่ห้อกลับมา (ถ้าแจ้งมา ค่าจริงจากเกตเวย์จะเขียนทับ)
+        /// </summary>
+        public string CardBrandHint { get; set; }
+
         /// <summary>
         /// รายการจากหน้าทดสอบ sandbox — ข้ามการตรวจ "วิธีนี้เปิดให้ลูกค้าแล้วหรือยัง"
         /// เพื่อให้ทดลองก่อนเปิดใช้จริงได้ (ยังต้องมีเกตเวย์ที่ตั้งค่าครบเสมอ)

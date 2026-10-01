@@ -75,6 +75,11 @@ namespace Take_Time_BangPhra.Payment
         protected global::System.Web.UI.WebControls.Panel pnlMethods;
 
         /// <summary>
+        /// litChannelNote control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Literal litChannelNote;
+
+        /// <summary>
         /// rblMethod control.
         /// </summary>
         protected global::System.Web.UI.WebControls.RadioButtonList rblMethod;
@@ -83,6 +88,11 @@ namespace Take_Time_BangPhra.Payment
         /// btnContinue control.
         /// </summary>
         protected global::System.Web.UI.WebControls.Button btnContinue;
+
+        /// <summary>
+        /// btnAllMethods control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Button btnAllMethods;
 
         /// <summary>
         /// pnlManual control.

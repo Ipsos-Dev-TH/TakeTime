@@ -93,8 +93,11 @@
             <!-- ── เลือกวิธีชำระ ── -->
             <asp:Panel ID="pnlMethods" runat="server" CssClass="card">
                 <h2>เลือกวิธีชำระเงิน</h2>
+                <asp:Literal ID="litChannelNote" runat="server" />
                 <asp:RadioButtonList ID="rblMethod" runat="server" CssClass="paylist" RepeatLayout="Flow" />
                 <asp:Button ID="btnContinue" runat="server" CssClass="btn" Text="ดำเนินการต่อ" OnClick="btnContinue_Click" />
+                <asp:Button ID="btnAllMethods" runat="server" CssClass="btn ghost" Visible="false"
+                    Text="เลือกวิธีชำระอื่น" OnClick="btnAllMethods_Click" CausesValidation="false" />
             </asp:Panel>
 
             <!-- ── สแกน QR แล้วแนบสลิป (วิธีเดิม) ── -->

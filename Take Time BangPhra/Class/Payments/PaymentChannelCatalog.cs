@@ -37,6 +37,11 @@ namespace Take_Time_BangPhra.Payments
         public bool GatewayLive = true;
         /// <summary>เหตุผลที่ช่องทางเกตเวย์ยังใช้ไม่ได้ (ว่าง = ใช้ได้) — ใช้แสดงในหน้าตั้งค่า</summary>
         public string Unavailable;
+        /// <summary>
+        /// ผู้ดูแลจัดชนิดแถวนี้เองแล้ว (รัน PHASE19_20 + Channel_Type มีค่า) — false = ระบบเดาจากชื่อ
+        /// ค่าการมองเห็นของแถวที่เดา ไม่นับเป็น "ผู้ดูแลติ๊กเอง"
+        /// </summary>
+        public bool Classified;
 
         internal PaymentChannel Clone() { return (PaymentChannel)MemberwiseClone(); }
     }
@@ -98,6 +103,12 @@ namespace Take_Time_BangPhra.Payments
         /// ช่องทางสำหรับหน้าลูกค้า (หน้าจอง/หน้ายืนยัน/หน้าจ่าย) เรียงตาม Sort_Order
         /// sourceType = จุดรับเงิน เช่น "RESERVATION" (รับ "BOOKING" เป็นชื่อเล่นของ RESERVATION)
         /// ไม่คืน CASH / DIRECTOR_LOAN / OTA เด็ดขาด · ช่องทางเกตเวย์ต้องพร้อมจริงเท่านั้น
+        ///
+        /// 🔒 กฎ Omise (เกตเวย์สำรอง): แถวที่เป็นของ Omise — Gateway_Provider = OMISE หรือชื่อ/รหัสมีคำว่า OMISE —
+        ///   คืนให้ลูกค้า "เฉพาะเมื่อครบทุกข้อ": (1) Omise คือเกตเวย์ที่เลือกใช้อยู่ (Payment_Provider = OMISE)
+        ///   (2) Omise พร้อมจริง (เปิด + มี Secret Key) (3) ผู้ดูแลจัดชนิดแถวเองและติ๊ก Customer_Visible เอง
+        ///   (แถวที่ระบบเดาจากชื่อไม่นับ) และ (4) แถวตั้ง Gateway_Provider = OMISE จริง — แถวชื่อ Omise ที่ถูกจัดเป็น
+        ///   โอน/อื่น ๆ (ไม่ผ่านเกตเวย์) ไม่โชว์ให้ลูกค้าเด็ดขาด ⇒ ลูกค้าไม่มีทางเห็นช่อง Omise ระหว่างใช้ PaySo
         /// </summary>
         public static IList<PaymentChannel> ForCustomer(string sourceType)
         {
@@ -110,6 +121,7 @@ namespace Take_Time_BangPhra.Payments
                 {
                     if (!raw.Active || !raw.CustomerVisible) continue;
                     if (IsNeverCustomer(raw.Type)) continue;
+                    if (IsOmiseRow(raw) && !OmiseCustomerAllowed(raw, ctx)) continue;
                     if (raw.IsGateway)
                     {
                         if (!raw.GatewayLive) continue;
@@ -257,6 +269,182 @@ namespace Take_Time_BangPhra.Payments
             if (brand.Contains("JCB")) return hay.Contains("JCB");
             if (brand.Contains("UNION")) return hay.Contains("UNION");
             return false;
+        }
+
+        /// <summary>
+        /// ยี่ห้อบัตรที่ช่องทางหมายถึง (จากรหัส/ชื่อ เช่น PAYSO_AMEX → AMEX) — ไม่ใช่ช่องบัตร/บอกไม่ได้ = null
+        /// ใช้เป็น PaymentChargeRequest.CardBrandHint เพื่อให้การลงบันทึกเลือกแหล่งเงินรายยี่ห้อได้
+        /// </summary>
+        public static string BrandHint(PaymentChannel c)
+        {
+            if (c == null) return null;
+            if (!string.Equals(c.GatewayChannelCode ?? "", PaymentGatewayConfig.MethodCard, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(c.GatewayChannelCode ?? "", PaymentGatewayConfig.MethodInstallment, StringComparison.OrdinalIgnoreCase))
+                return null;
+            string hay = ((c.Code ?? "") + " " + (c.Name ?? "")).ToUpperInvariant();
+            if (hay.Contains("AMEX") || hay.Contains("AMERICAN")) return "AMEX";
+            if (hay.Contains("VISA")) return "VISA";
+            if (hay.Contains("MASTER")) return "MASTERCARD";
+            if (hay.Contains("JCB")) return "JCB";
+            if (hay.Contains("UNION")) return "UNIONPAY";
+            return null;
+        }
+
+        /// <summary>
+        /// ชื่อแหล่งเงิน (Account_Paid_How.Paid_How) ที่ "ใช้ลงบันทึก" เงินที่รับผ่านเกตเวย์ — จุดเดียวของระบบ
+        /// (OnlinePaymentService ลงบันทึกด้วยชื่อนี้ / หน้า Payment/Charge บอกพนักงานให้เลือกชื่อนี้ตอนบันทึกขาย POS)
+        ///   1) แคตตาล็อกช่องทาง (เจ้า + วิธี + ยี่ห้อบัตร) — แต่ละช่องผูกบัญชีพักเงินใน NextAcc แยกกันได้
+        ///   2) ไม่เจอ หรือแถวแคตตาล็อกยังไม่ผูกบัญชี NextAcc → แหล่งเงินรายเกตเวย์ที่ตั้งใน Accounting Integration
+        ///   3) ไม่ได้ตั้ง → ค่าตั้งเดิม Payment_PaidHow_Name (ค่าเริ่มต้น "Omise (จ่ายออนไลน์)" ตามระบบเดิม)
+        /// </summary>
+        public static string ResolveRecordingPaidHowName(string conn, string provider, string method, string cardBrand)
+        {
+            string methodText = ResolvePaidHowName(provider, method, cardBrand);
+            string gatewayPaidHow = null;
+            try
+            {
+                gatewayPaidHow = Take_Time_BangPhra.Integration.AccountingSyncService
+                    .ResolveGatewayPaidHowName(string.IsNullOrEmpty(conn) ? ConnStr : conn, provider, method, null);
+            }
+            catch { gatewayPaidHow = null; }
+
+            if (string.IsNullOrEmpty(methodText))
+                return gatewayPaidHow ?? LegacyPaidHowName;
+
+            if (!string.IsNullOrEmpty(gatewayPaidHow)
+                && !string.Equals(gatewayPaidHow, methodText, StringComparison.Ordinal)
+                && !PaidHowHasNextAccAccount(conn, methodText))
+            {
+                // แถวของแคตตาล็อก (เช่น PaySo VISA ที่ migration เพิ่มให้) ยังไม่ผูกบัญชี NextAcc
+                // แต่ผู้ดูแลตั้งแหล่งเงินรายเกตเวย์ไว้แล้ว → ใช้ค่านั้น ไม่งั้น NextAcc เดาบัญชีเอง (มักเป็นเงินสด)
+                return gatewayPaidHow;
+            }
+            return methodText;
+        }
+
+        /// <summary>ชื่อแหล่งเงินเกตเวย์แบบเดิม (ค่าตั้ง Payment_PaidHow_Name)</summary>
+        public static string LegacyPaidHowName
+        {
+            get
+            {
+                try { return PaymentGatewayConfig.Get("Payment_PaidHow_Name", "Omise (จ่ายออนไลน์)"); }
+                catch { return "Omise (จ่ายออนไลน์)"; }
+            }
+        }
+
+        /// <summary>แถว Account_Paid_How ชื่อนี้ผูกบัญชี NextAcc แล้วหรือยัง (อ่านไม่ได้ = ถือว่าผูกแล้ว ไม่เปลี่ยนพฤติกรรม)</summary>
+        private static bool PaidHowHasNextAccAccount(string conn, string paidHowName)
+        {
+            try
+            {
+                using (var con = new SqlConnection(string.IsNullOrEmpty(conn) ? ConnStr : conn))
+                using (var cmd = new SqlCommand(
+                    "SELECT TOP 1 CASE WHEN Nexaacc_AccountId IS NULL THEN 0 ELSE 1 END FROM Account_Paid_How WHERE Paid_How = @n AND Status = 'True'", con))
+                {
+                    cmd.Parameters.AddWithValue("@n", paidHowName ?? "");
+                    con.Open();
+                    object o = cmd.ExecuteScalar();
+                    if (o == null || o == DBNull.Value) return false;
+                    return Convert.ToInt32(o) == 1;
+                }
+            }
+            catch { return true; }
+        }
+
+        // ── รายการแหล่งเงินในหน้าพนักงาน ──────────────────────────────────────
+
+        /// <summary>
+        /// พนักงานเลือกแหล่งเงินแถวนี้เองได้ไหม (dropdown รับเงินในหน้าพนักงาน)
+        ///   • แถวที่ปิด "พนักงานเห็น" (Staff_Visible = 0) → ไม่ได้
+        ///   • แถวเกตเวย์ (Gateway_Provider มีค่า / ชื่อ Omise·PaySo ก่อนรัน migration) → ไม่ได้ เพราะเงินผ่านเกตเวย์
+        ///     ถูกลงบันทึกอัตโนมัติเมื่อเกตเวย์ยืนยัน (เลือกเองได้ = บันทึกรับบัตรที่ไม่มีธุรกรรมจริง)
+        ///     ยกเว้น allowGatewaySettlement (หน้าขาย POS): จุดรับเงินหน้าร้าน (Payment/Charge) ตั้งใจไม่ auto-apply
+        ///     พนักงานต้องบันทึกขายเองด้วยแหล่งเงินของเกตเวย์ที่ใช้อยู่ → อนุญาตเฉพาะแถวของเกตเวย์ที่เลือกใช้อยู่
+        ///     (หรือชื่อที่หน้า Charge บอกให้เลือก) ขณะระบบรับชำระออนไลน์เปิด
+        ///   • หาไม่เจอในแคตตาล็อก / แคตตาล็อกพัง → ได้ (ไม่ซ่อนสิ่งที่ไม่รู้จัก)
+        /// </summary>
+        public static bool StaffMaySelect(PaymentChannel c, bool allowGatewaySettlement, ICollection<string> settlementNames)
+        {
+            if (c == null) return true;
+            bool gateway = c.IsGateway;
+            if (!gateway) return c.StaffVisible;
+            if (!allowGatewaySettlement) return false;
+            if (settlementNames != null && !string.IsNullOrEmpty(c.PaidHowName) && settlementNames.Contains(c.PaidHowName))
+                return true;
+            bool onlineOn;
+            try { onlineOn = PaymentGatewayConfig.IsEnabled; } catch { onlineOn = false; }
+            return onlineOn && string.Equals(c.Provider, PaymentGatewayConfig.ActiveProvider, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// ตัดรายการที่พนักงานไม่ควรเลือกเองออกจาก dropdown แหล่งเงิน (ดู <see cref="StaffMaySelect"/>)
+        /// valueIsId = true: Value ของรายการคือ Account_Paid_How.ID / false: ใช้ข้อความ (Paid_How) จับคู่
+        /// ไม่แตะรายการที่ไม่ใช่แถวแหล่งเงิน (เช่น "--- โปรดเลือก ---", ค่าว่าง)
+        /// ⚠ อย่าใช้กับหน้าที่ตั้ง SelectedValue จากข้อมูลเก่า (แถวที่ถูกซ่อนจะทำให้ตั้งค่าไม่ได้)
+        /// </summary>
+        public static void RemoveNonStaffItems(System.Web.UI.WebControls.ListItemCollection items, bool valueIsId,
+            bool allowGatewaySettlement)
+        {
+            if (items == null || items.Count == 0) return;
+            try
+            {
+                List<PaymentChannel> rows = GetRows();
+                if (rows == null || rows.Count == 0) return;
+
+                var names = new HashSet<string>(StringComparer.Ordinal);
+                if (allowGatewaySettlement)
+                {
+                    string active = PaymentGatewayConfig.ActiveProvider;
+                    foreach (string m in new[] { PaymentGatewayConfig.MethodQr, PaymentGatewayConfig.MethodCard })
+                    {
+                        string n = ResolveRecordingPaidHowName(null, active, m, null);
+                        if (!string.IsNullOrEmpty(n)) names.Add(n);
+                    }
+                }
+
+                for (int i = items.Count - 1; i >= 0; i--)
+                {
+                    var it = items[i];
+                    PaymentChannel c = null;
+                    if (valueIsId)
+                    {
+                        int id;
+                        if (!int.TryParse(it.Value, out id) || id <= 0) continue;
+                        foreach (PaymentChannel r in rows) if (r.PaidHowId == id) { c = r; break; }
+                    }
+                    else
+                    {
+                        string t = (it.Value ?? it.Text ?? "").Trim();
+                        if (t.Length == 0) continue;
+                        foreach (PaymentChannel r in rows)
+                            if (string.Equals(r.PaidHowName, t, StringComparison.Ordinal)) { c = r; break; }
+                    }
+                    if (c == null) continue;
+                    if (!StaffMaySelect(c, allowGatewaySettlement, names)) items.RemoveAt(i);
+                }
+            }
+            catch { /* กรองไม่ได้ = แสดงตามเดิม */ }
+        }
+
+        // ── กฎ Omise ฝั่งลูกค้า ───────────────────────────────────────────────
+
+        /// <summary>แถวนี้เป็นของ Omise ไหม (ตั้ง provider ไว้ หรือชื่อ/รหัสมีคำว่า OMISE)</summary>
+        private static bool IsOmiseRow(PaymentChannel c)
+        {
+            if (c == null) return false;
+            if (string.Equals(c.Provider, PaymentGatewayConfig.ProviderOmise, StringComparison.OrdinalIgnoreCase)) return true;
+            string hay = ((c.Code ?? "") + " " + (c.Name ?? "") + " " + (c.PaidHowName ?? "")).ToUpperInvariant();
+            return hay.Contains("OMISE");
+        }
+
+        /// <summary>ดูคำอธิบาย "กฎ Omise" ที่ <see cref="ForCustomer"/></summary>
+        private static bool OmiseCustomerAllowed(PaymentChannel c, GatewayContext ctx)
+        {
+            if (c == null || ctx == null) return false;
+            if (!c.Classified || !c.CustomerVisible) return false;
+            if (!string.Equals(c.Provider, PaymentGatewayConfig.ProviderOmise, StringComparison.OrdinalIgnoreCase)) return false;
+            if (!string.Equals(ctx.Active, PaymentGatewayConfig.ProviderOmise, StringComparison.OrdinalIgnoreCase)) return false;
+            return ctx.Ready;
         }
 
         // ── บันทึกจากหน้าตั้งค่า ─────────────────────────────────────────────
@@ -558,6 +746,7 @@ namespace Take_Time_BangPhra.Payments
             c.Code = cols ? Str(r["Channel_Code"]).ToUpperInvariant() : "";
             if (c.Code.Length == 0) c.Code = DefaultCode(c.Type, c.PaidHowId);
 
+            c.Classified = cols && classified;
             if (cols && classified)
             {
                 c.CustomerVisible = Bool(r["Customer_Visible"]);

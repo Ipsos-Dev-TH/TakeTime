@@ -155,6 +155,8 @@ namespace Take_Time_BangPhra.Admin.CRM
             if (ph != null)
                 foreach (DataRow r in ph.Rows)
                     ddlPaidHow.Items.Add(r["Paid_How"].ToString());
+            // ไม่ให้เลือกช่องทางเกตเวย์ (PaySo/Omise — ลงบันทึกอัตโนมัติเมื่อเกตเวย์ยืนยัน) และช่องที่ปิด "พนักงานเห็น"
+            Take_Time_BangPhra.Payments.PaymentChannelCatalog.RemoveNonStaffItems(ddlPaidHow.Items, false, false);
             if (ddlPaidHow.Items.Count == 0) ddlPaidHow.Items.Add("เงินสด");
         }
 

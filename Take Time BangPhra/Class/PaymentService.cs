@@ -292,6 +292,352 @@ namespace Take_Time_BangPhra
             }
         }
 
+        /// <summary>
+        /// รับชำระของการจองจากหน้า Payment/Pay และเกตเวย์ออนไลน์ (OnlinePaymentService.ApplyToReservation)
+        ///
+        /// ต่างจาก <see cref="ProcessAdditionalPayment"/> ตรงที่ใช้ "ยอดกลาง" <see cref="ReservationBalance"/>
+        /// (ค่าห้อง + ค่าใช้จ่ายในห้อง เช่น ค่าบริการสัตว์เลี้ยง PRE_BOOKING) แทนยอดค่าห้องล้วน:
+        ///   • ยอดเกินยอดค้างกลาง → ไม่รับ (เกตเวย์: เงินค้างไว้ให้พนักงานตรวจ/คืน ตามเดิม)
+        ///   • ครบยอดค้าง (เผื่อเศษ Balance_Rounding_Tolerance) = ชำระเต็ม → ปิดค่าใช้จ่ายในห้องที่ค้างทั้งหมด
+        ///   • ไม่ครบ → เงินตัดค่าห้องก่อน ส่วนที่เกินค่าห้องค่อยปิดค่าใช้จ่ายในห้อง "เก่าสุดก่อน" เฉพาะแถวที่ยอดพอ
+        ///     (มัดจำไม่ทำให้ค่าสัตว์เลี้ยงกลายเป็นชำระแล้ว — เก็บตอนเช็คอินเหมือนใบมัดจำของหน้าจอง)
+        ///   • ไม่ครบ + ไม่ได้ปิดค่าใช้จ่ายใด + ยังไม่เช็คอิน = ใบรับมัดจำ (IsDeposit) บรรทัดเดียวแบบ CreateDepositReceipt
+        ///   • อื่น ๆ = ใบเสร็จมีบรรทัดค่าห้อง + บรรทัดค่าใช้จ่ายที่ปิด (แบบ AddProductChargesToReceipt) ยอดรวม = ยอดรับ
+        /// การปิดค่าใช้จ่ายเขียนแบบ WHERE Status = 'PENDING' ต่อแถว ⇒ เรียกซ้ำไม่ปิดซ้ำ
+        /// (กันซ้ำระดับรายการเกตเวย์อยู่ที่ Payment_Transaction.Applied_At อยู่แล้ว)
+        /// อ่านยอดกลางไม่ได้ → ถอยไปใช้ ProcessAdditionalPayment แบบเดิม
+        /// </summary>
+        public PaymentResult ProcessReservationPayment(
+            int reservationId,
+            decimal amount,
+            string paymentMethod,
+            HttpPostedFile slipFile = null,
+            int? adminId = null,
+            string customerPhone = null,
+            string notes = null)
+        {
+            try
+            {
+                var reservation = _reservationDA.GetReservationByIdAndPhone(reservationId, customerPhone ?? "");
+                if (reservation == null || reservation.Rows.Count == 0)
+                    return new PaymentResult { Success = false, Message = "ไม่พบการจองนี้" };
+                if (amount <= 0)
+                    return new PaymentResult { Success = false, Message = "จำนวนเงินต้องมากกว่า 0" };
+
+                string status = reservation.Columns.Contains("Status") && reservation.Rows[0]["Status"] != DBNull.Value
+                    ? Convert.ToString(reservation.Rows[0]["Status"]).Trim() : "";
+                if (status.StartsWith("ยกเลิก", StringComparison.Ordinal) || status.StartsWith("ลบ", StringComparison.Ordinal)
+                    || status == "Cancel" || status == "CANCELLED")
+                {
+                    // ไม่ลงรับเงินเข้าใบจองที่ยกเลิกแล้ว (เช่น ระบบยกเลิกใบที่ค้างชำระระหว่างลูกค้ากำลังจ่าย)
+                    // เงินเกตเวย์จะค้างเป็น "จ่ายแล้วแต่ยังไม่บันทึก" ให้เจ้าหน้าที่ตรวจ/คืนเงิน
+                    return new PaymentResult
+                    {
+                        Success = false,
+                        Message = "การจองนี้ถูกยกเลิกแล้ว (" + status + ") — ต้องตรวจสอบ/คืนเงินลูกค้า"
+                    };
+                }
+
+                ReservationBalance bal = null;
+                try { bal = ReservationBalance.Load(_connectionString, reservationId); } catch { bal = null; }
+                if (bal == null)
+                    return ProcessAdditionalPayment(reservationId, amount, paymentMethod, slipFile, adminId, customerPhone, notes);
+
+                decimal tol = Math.Max(0.01m, ReservationBalance.RoundingTolerance);
+                decimal due = bal.Due;
+                if (amount > due + tol)
+                {
+                    return new PaymentResult
+                    {
+                        Success = false,
+                        Message = $"จำนวนเงินเกินยอดค้างชำระ (ค้าง: {due:N2} บาท)"
+                    };
+                }
+
+                // ── ค่าใช้จ่ายในห้องที่ยอดนี้ปิดได้ (เก่าสุดก่อน) ──
+                DataTable pending = LoadPendingChargesOldestFirst(reservationId);
+                decimal pendingTotal = 0m;
+                foreach (DataRow pr in pending.Rows) pendingTotal += ToDec(pr["TotalAmount"]);
+
+                bool coversAll = amount >= due - tol;
+                decimal nonChargeDue = due - pendingTotal;
+                if (nonChargeDue < 0m) nonChargeDue = 0m;
+                decimal budget = amount - nonChargeDue;
+
+                var covered = new List<DataRow>();
+                decimal coveredTotal = 0m;
+                foreach (DataRow pr in pending.Rows)
+                {
+                    decimal a = ToDec(pr["TotalAmount"]);
+                    if (coversAll)
+                    {
+                        covered.Add(pr);
+                        coveredTotal += a;
+                        continue;
+                    }
+                    if (a <= budget + 0.01m)
+                    {
+                        covered.Add(pr);
+                        coveredTotal += a;
+                        budget -= a;
+                    }
+                    else break;   // ต้องปิดตามลำดับ — แถวเก่ายังไม่พอ ห้ามข้ามไปปิดแถวใหม่
+                }
+
+                bool arrived = status == "เช็คอินแล้ว" || status == "เสร็จสิ้น"
+                               || status.StartsWith("เช็คเอาท์", StringComparison.Ordinal)
+                               || status.StartsWith("เช็คเอ้าท์", StringComparison.Ordinal);
+                bool isDeposit = !coversAll && covered.Count == 0 && !arrived;
+
+                // ── สลิป / ใบเสร็จ ──
+                long? slipId = null;
+                if (slipFile != null && slipFile.ContentLength > 0)
+                    slipId = UploadPaymentSlip(reservationId, slipFile, customerPhone, adminId);
+
+                string receiptId = GenerateReceiptId();
+                decimal vat = ComputeVatFromGross(amount);
+                _code.DatabaseInsertSafe(_connectionString,
+                    @"INSERT INTO Account_Receipt (
+                        ID, UID, Reservation_ID, Created_Date, Total_Amount, Vat,
+                        Total_Amount_Exclude_Vat, IsDeposit, UseDeposit, Paid_Type,
+                        Status, Etax, Created_By_ID
+                      )
+                      VALUES (
+                        @receiptId, @uid, @reservationId, @createdDate, @totalAmount, @vat,
+                        @totalExcludeVat, @isDeposit, @useDeposit, @paidType,
+                        'Normal', @etax, @createdBy
+                      )",
+                    new Dictionary<string, object>
+                    {
+                        { "@receiptId", receiptId },
+                        { "@uid", Guid.NewGuid().ToString("N") },
+                        { "@reservationId", reservationId },
+                        { "@createdDate", DateTime.Now },
+                        { "@totalAmount", amount },
+                        { "@vat", vat },
+                        { "@totalExcludeVat", amount - vat },
+                        { "@isDeposit", isDeposit },
+                        { "@useDeposit", false },
+                        { "@etax", false },
+                        { "@paidType", paymentMethod },
+                        { "@createdBy", adminId.HasValue ? (object)adminId.Value.ToString() : DBNull.Value }
+                    });
+
+                // บรรทัดใบเสร็จเป็นส่วนเสริม — ล้มแล้วไม่ทิ้งการรับเงินกลางทาง (หัวใบเสร็จออกไปแล้ว ถ้าล้มทั้งก้อน
+                // เกตเวย์จะลองใหม่แล้วได้ใบเสร็จซ้ำ) ⇒ log ไว้ให้ตรวจ
+                try
+                {
+                    InsertReservationPaymentLines(receiptId, reservationId, amount, isDeposit, covered, coveredTotal);
+                }
+                catch (Exception lineEx)
+                {
+                    _code.Logs(_connectionString, "Payment Receipt Lines",
+                        $"ใบเสร็จ {receiptId} การจอง {reservationId}: บันทึกบรรทัดไม่สำเร็จ — {lineEx.Message}", "SYSTEM");
+                }
+
+                // ── Payment_History ──
+                decimal remainingAfter = due - amount;
+                if (remainingAfter < 0m) remainingAfter = 0m;
+                string paymentType = isDeposit ? "DEPOSIT" : (coversAll ? "FULL" : "ADDITIONAL");
+                long paymentId = _code.DatabaseInsertReturnSafe(_connectionString,
+                    @"INSERT INTO Payment_History (
+                        Reservation_ID, PaymentDate, PaymentAmount, PaymentType, PaymentMethod,
+                        Receipt_ID, PaymentSlip_ID, RemainingBalance, PaidBy_CustomerPhone,
+                        ProcessedBy_AdminID, Notes, Status
+                      )
+                      VALUES (
+                        @reservationId, GETDATE(), @amount, @paymentType, @paymentMethod,
+                        @receiptId, @paymentSlipId, @remaining, @paidBy,
+                        @processedBy, @notes, 'COMPLETED'
+                      );
+                      SELECT SCOPE_IDENTITY();",
+                    new Dictionary<string, object>
+                    {
+                        { "@reservationId", reservationId },
+                        { "@amount", amount },
+                        { "@paymentType", paymentType },
+                        { "@paymentMethod", paymentMethod },
+                        { "@receiptId", receiptId },
+                        { "@paymentSlipId", slipId },
+                        { "@remaining", remainingAfter },
+                        { "@paidBy", customerPhone },
+                        { "@processedBy", adminId },
+                        { "@notes", notes }
+                    });
+
+                // ── ปิดค่าใช้จ่ายในห้องที่เงินก้อนนี้ครอบคลุม (ทีละแถว เฉพาะที่ยัง PENDING) ──
+                int closed = 0;
+                foreach (DataRow pr in covered)
+                {
+                    try
+                    {
+                        closed += _code.DatabaseInsertSafe(_connectionString,
+                            @"UPDATE Reservation_Product_Charges
+                                 SET Status = 'PAID', IsPaid = 1, Receipt_ID = @receiptId, PaymentDate = GETDATE()
+                               WHERE ID = @id AND Status = 'PENDING'",
+                            new Dictionary<string, object>
+                            {
+                                { "@receiptId", receiptId },
+                                { "@id", Convert.ToInt64(pr["ID"]) }
+                            });
+                    }
+                    catch (Exception chEx)
+                    {
+                        _code.Logs(_connectionString, "Payment Charges",
+                            $"ปิดค่าใช้จ่าย #{pr["ID"]} ของการจอง {reservationId} ไม่สำเร็จ: {chEx.Message}", "SYSTEM");
+                    }
+                }
+
+                UpdateReservationDeposit(reservationId, _paymentDA.GetTotalPaidAmount(reservationId));
+
+                try { SendPaymentConfirmationEmail(reservationId, receiptId, amount); }
+                catch (Exception emailEx) { _code.Logs(_connectionString, "Email Error", emailEx.Message, "SYSTEM"); }
+
+                try
+                {
+                    var config = new AccountingConfig(_connectionString);
+                    if (config.IsConfigured && config.Enabled)
+                    {
+                        var sync = new AccountingSyncService(_connectionString);
+                        sync.EnqueueReceipt(reservationId, receiptId, amount, vat, DateTime.Now, GetCustomerName(reservationId),
+                            isDeposit: isDeposit, paymentMethod: paymentMethod,
+                            revenueType: "ROOM_REVENUE", paymentAccountId: sync.LookupPaidHowAccountId(paymentMethod));
+                    }
+                }
+                catch (Exception accEx)
+                {
+                    _code.Logs(_connectionString, "Accounting Sync", "Receipt auto-sync error: " + accEx.Message, "SYSTEM");
+                }
+
+                _code.Logs(_connectionString, "Payment",
+                    $"การจอง {reservationId}: รับ {amount:N2} ({paymentType}) ใบเสร็จ {receiptId} · ยอดค้างก่อนรับ {due:N2}"
+                    + (covered.Count > 0 ? $" · ปิดค่าใช้จ่ายในห้อง {closed}/{covered.Count} แถว ({coveredTotal:N2})" : ""),
+                    adminId.HasValue ? adminId.Value.ToString() : "SYSTEM");
+
+                return new PaymentResult
+                {
+                    Success = true,
+                    Message = isDeposit ? "ชำระเงินมัดจำสำเร็จ" : (coversAll ? "ชำระเงินครบแล้ว" : "ชำระเงินสำเร็จ"),
+                    PaymentId = paymentId,
+                    ReceiptId = receiptId,
+                    RemainingBalance = remainingAfter
+                };
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "Payment Error", ex.Message + " - " + ex.StackTrace, "SYSTEM");
+                return new PaymentResult { Success = false, Message = "เกิดข้อผิดพลาด: " + ex.Message };
+            }
+        }
+
+        /// <summary>ค่าใช้จ่ายในห้องที่ยัง PENDING เรียงเก่าสุดก่อน (ตารางไม่มี = ว่าง)</summary>
+        private DataTable LoadPendingChargesOldestFirst(int reservationId)
+        {
+            try
+            {
+                DataTable dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT ID, Product_ID, Product_Name, Quantity, UnitPrice, TotalAmount, Notes
+                        FROM Reservation_Product_Charges
+                       WHERE Reservation_ID = @id AND Status = 'PENDING'
+                       ORDER BY ChargedDate ASC, ID ASC",
+                    new Dictionary<string, object> { { "@id", reservationId } });
+                if (dt != null) return dt;
+            }
+            catch { }
+            return new DataTable();
+        }
+
+        /// <summary>
+        /// บรรทัดของใบเสร็จรับชำระการจอง — มัดจำ: บรรทัดเดียวแบบ ReceiptService.CreateDepositReceipt;
+        /// อื่น ๆ: บรรทัดค่าห้อง (ยอด − ค่าใช้จ่ายที่ปิด) + บรรทัดค่าใช้จ่ายแบบ Reserve.AddProductChargesToReceipt
+        /// ยอดบรรทัดรวม = ยอดรับเสมอ (ค่าห้องติดลบไม่ได้ → รวมเป็นบรรทัดเดียว)
+        /// </summary>
+        private void InsertReservationPaymentLines(string receiptId, int reservationId, decimal amount,
+            bool isDeposit, List<DataRow> covered, decimal coveredTotal)
+        {
+            const string sql = @"INSERT INTO Account_Receipt_Detail
+                  (Number, Receipt_ID, ProductType_ID, Product_ID, Product_Data, Product_Amount, Product_Unit,
+                   Price_PerPeice, Price_Amount)
+                  VALUES (@number, @receiptId, @type, @productId, @data, @qty, @unit, @per, @amt)";
+
+            if (isDeposit)
+            {
+                _code.DatabaseInsertSafe(_connectionString, sql, new Dictionary<string, object>
+                {
+                    { "@number", 1 }, { "@receiptId", receiptId }, { "@type", 1 }, { "@productId", 7 },
+                    { "@data", "ค่ามัดจำที่พักของหมายเลขการจอง " + reservationId + " [" + receiptId + "]" },
+                    { "@qty", 1 }, { "@unit", "ครั้ง" }, { "@per", amount }, { "@amt", amount }
+                });
+                return;
+            }
+
+            decimal roomPortion = amount - coveredTotal;
+            bool collapse = roomPortion < -0.005m;   // ยอดเคยรับไว้เกินค่าห้อง — แยกบรรทัดแล้วยอดไม่ลงตัว
+
+            int accomId = 0;
+            string roomText = "ค่าที่พัก การจอง #" + reservationId;
+            try
+            {
+                DataTable rd = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT r.CheckinDate, r.CheckoutDate,
+                             (SELECT TOP 1 ra.Accommodation_ID FROM Reservation_Accommodation ra
+                               WHERE ra.Reservation_ID = r.ID ORDER BY ra.Accommodation_ID) AS AccomId,
+                             (SELECT TOP 1 a.AccomName FROM Reservation_Accommodation ra
+                                JOIN Accommodation a ON a.ID = ra.Accommodation_ID
+                               WHERE ra.Reservation_ID = r.ID ORDER BY ra.Accommodation_ID) AS AccomName
+                        FROM Reservation r WHERE r.ID = @id",
+                    new Dictionary<string, object> { { "@id", reservationId } });
+                if (rd != null && rd.Rows.Count > 0)
+                {
+                    DataRow r0 = rd.Rows[0];
+                    if (r0["AccomId"] != DBNull.Value) accomId = Convert.ToInt32(r0["AccomId"]);
+                    var th = new System.Globalization.CultureInfo("th-TH");
+                    if (r0["AccomName"] != DBNull.Value) roomText += " " + Convert.ToString(r0["AccomName"]);
+                    if (r0["CheckinDate"] != DBNull.Value && r0["CheckoutDate"] != DBNull.Value)
+                        roomText += " เช็คอิน " + Convert.ToDateTime(r0["CheckinDate"]).ToString("dd MMMM yyyy", th)
+                                  + " เช็คเอ้าท์ " + Convert.ToDateTime(r0["CheckoutDate"]).ToString("dd MMMM yyyy", th);
+                }
+            }
+            catch { /* ข้อความสำรองพอ */ }
+
+            int number = 1;
+            if (collapse || roomPortion > 0.005m)
+            {
+                decimal lineAmt = collapse ? amount : roomPortion;
+                string text = collapse ? roomText + " และค่าบริการในห้อง (ส่วนที่ค้างชำระ)" : roomText;
+                _code.DatabaseInsertSafe(_connectionString, sql, new Dictionary<string, object>
+                {
+                    { "@number", number++ }, { "@receiptId", receiptId }, { "@type", 1 }, { "@productId", accomId },
+                    { "@data", text }, { "@qty", 1 }, { "@unit", "ครั้ง" }, { "@per", lineAmt }, { "@amt", lineAmt }
+                });
+            }
+            if (collapse) return;
+
+            foreach (DataRow c in covered)
+            {
+                string notes = c.Table.Columns.Contains("Notes") && c["Notes"] != DBNull.Value ? Convert.ToString(c["Notes"]) : "";
+                string unit = "ชิ้น";
+                if (notes.StartsWith(PetStay.ChargeNotePrefix, StringComparison.Ordinal))
+                    unit = notes.EndsWith(PetStay.UnitStay, StringComparison.Ordinal) ? "ตัว" : "ตัว/คืน";
+                _code.DatabaseInsertSafe(_connectionString, sql, new Dictionary<string, object>
+                {
+                    { "@number", number++ }, { "@receiptId", receiptId }, { "@type", 3 },
+                    { "@productId", c["Product_ID"] == DBNull.Value ? 0 : Convert.ToInt32(c["Product_ID"]) },
+                    { "@data", Convert.ToString(c["Product_Name"]) },
+                    { "@qty", c["Quantity"] == DBNull.Value ? 1m : Convert.ToDecimal(c["Quantity"]) },
+                    { "@unit", unit },
+                    { "@per", c["UnitPrice"] == DBNull.Value ? ToDec(c["TotalAmount"]) : Convert.ToDecimal(c["UnitPrice"]) },
+                    { "@amt", ToDec(c["TotalAmount"]) }
+                });
+            }
+        }
+
+        private static decimal ToDec(object o)
+        {
+            if (o == null || o == DBNull.Value) return 0m;
+            try { return Convert.ToDecimal(o); } catch { return 0m; }
+        }
+
         #endregion
 
         #region Payment Slip Management

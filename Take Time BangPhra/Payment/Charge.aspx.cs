@@ -11,7 +11,9 @@ namespace Take_Time_BangPhra.Payment
     /// ทำไมไม่ผูกเข้า flow บันทึกขายตรง ๆ: หน้า POS บันทึกขาย = ออกเลขเอกสาร + ตัดสต๊อก +
     /// ส่งบัญชีทันที ไม่มีสถานะ "รอจ่าย" — เสียบการรอเงินเข้าไปกลางทางเสี่ยงพังทั้ง flow
     /// จุดนี้จึงทำงานแบบ "เก็บเงินก่อน แล้วพนักงานบันทึกขายตามปกติ" โดยเลือกแหล่งเงิน
-    /// ของเกตเวย์ (Omise) ⇒ Product_Out / ใบเสร็จ / rollup / NextAcc เดินเส้นเดิมทั้งหมด
+    /// ของเกตเวย์ที่ใช้อยู่ (PaySo/Omise — ชื่อจาก PaymentChannelCatalog.ResolveRecordingPaidHowName)
+    /// ⇒ Product_Out / ใบเสร็จ / rollup / NextAcc เดินเส้นเดิมทั้งหมด
+    /// (หน้าขาย POS จึงยังแสดงแหล่งเงินของเกตเวย์ที่ใช้อยู่ — หน้าพนักงานอื่นซ่อนแถวเกตเวย์)
     /// รายการ POS จึงตั้งใจ "ไม่ auto-apply" — เงินรอจับคู่กับการบันทึกขายเสมอ
     /// </summary>
     public partial class Charge : System.Web.UI.Page
@@ -42,8 +44,10 @@ namespace Take_Time_BangPhra.Payment
                 return;
             }
 
-            litPaidHowName.Text = Server.HtmlEncode(
-                PaymentGatewayConfig.Get("Payment_PaidHow_Name", "Omise (จ่ายออนไลน์)"));
+            // ชื่อแหล่งเงินที่ต้องเลือกตอนบันทึกขาย = ชื่อเดียวกับที่ระบบใช้ลงบันทึกเงินเกตเวย์
+            // (แคตตาล็อกช่องทางของเกตเวย์ที่ใช้อยู่ → แหล่งเงินรายเกตเวย์ใน Accounting Integration → ค่าตั้งเดิม)
+            // เดิมโชว์ค่าตั้ง Payment_PaidHow_Name ตายตัว ("Omise (จ่ายออนไลน์)") แม้ใช้ PaySo อยู่
+            litPaidHowName.Text = Server.HtmlEncode(PaidHowSummary());
 
             var svc = new OnlinePaymentService(_conn);
             if (!svc.IsAvailable)
@@ -147,8 +151,32 @@ namespace Take_Time_BangPhra.Payment
             txtPayLink.Text = cardLink;
 
             Msg("info", "สร้างรายการ " + Server.HtmlEncode(r.TxnRef ?? "") + " แล้ว — เงินเข้าเมื่อไหร่หน้าจอนี้จะขึ้น ✅ เอง "
-                + "จากนั้นไปบันทึกการขายตามปกติ เลือกแหล่งเงิน \"" + litPaidHowName.Text + "\"");
+                + "จากนั้นไปบันทึกการขาย (หน้าขายหน้าร้าน) ตามปกติ เลือกแหล่งเงิน \""
+                + Server.HtmlEncode(RecordingName(req.Method)) + "\""
+                + (req.Method == PaymentGatewayConfig.MethodQr
+                    ? " (ถ้าลูกค้าจ่ายด้วยบัตรผ่านลิงก์ เลือก \"" + Server.HtmlEncode(RecordingName(PaymentGatewayConfig.MethodCard)) + "\")"
+                    : ""));
             BindToday();
+        }
+
+        /// <summary>ชื่อแหล่งเงินที่ใช้บันทึกเงินที่รับผ่านเกตเวย์ที่ใช้อยู่ ด้วยวิธีนี้</summary>
+        private string RecordingName(string method)
+        {
+            try
+            {
+                return PaymentChannelCatalog.ResolveRecordingPaidHowName(_conn, PaymentGatewayConfig.ActiveProvider, method, null)
+                       ?? PaymentChannelCatalog.LegacyPaidHowName;
+            }
+            catch { return PaymentChannelCatalog.LegacyPaidHowName; }
+        }
+
+        /// <summary>สรุปชื่อแหล่งเงินสำหรับหัวหน้าจอ — QR กับบัตรคนละแถวได้ (เช่น PaySo พร้อมเพย์ / PaySo VISA)</summary>
+        private string PaidHowSummary()
+        {
+            string qr = RecordingName(PaymentGatewayConfig.MethodQr);
+            string card = RecordingName(PaymentGatewayConfig.MethodCard);
+            if (string.Equals(qr, card, StringComparison.Ordinal)) return qr;
+            return "QR: " + qr + " / บัตร: " + card;
         }
 
         // ── วางวงเงินประกัน ──────────────────────────────────────────────────

@@ -70,6 +70,25 @@ namespace Take_Time_BangPhra.Payment
             set { ViewState["txn"] = value; }
         }
 
+        // ── ช่องทางที่ลูกค้าเลือกไว้ตอนจอง (&ch=<รหัสแคตตาล็อก> เช่น PAYSO_AMEX) ──
+        private string ChannelCode
+        {
+            get { return (string)ViewState["ch"]; }
+            set { ViewState["ch"] = value; }
+        }
+        /// <summary>วิธีเกตเวย์ (CARD/QR/INSTALLMENT) ของช่องทางที่เลือกไว้ — ว่าง = ไม่มี/ใช้ไม่ได้</summary>
+        private string ChannelMethod
+        {
+            get { return (string)ViewState["chm"]; }
+            set { ViewState["chm"] = value; }
+        }
+        /// <summary>ยี่ห้อบัตรที่ช่องทางนั้นหมายถึง (เช่น AMEX) — ส่งเป็น CardBrandHint ให้ลงบันทึกถูกแหล่งเงิน</summary>
+        private string ChannelBrand
+        {
+            get { return (string)ViewState["chb"]; }
+            set { ViewState["chb"] = value; }
+        }
+
         protected void Page_Load(object sender, EventArgs e)
         {
             _svc = new OnlinePaymentService(_conn);
@@ -84,9 +103,11 @@ namespace Take_Time_BangPhra.Payment
 
                 if (!LoadSource()) return;
 
+                ChannelCode = SafeChannelCode(Request.QueryString["ch"]);
+
                 pnlMain.Visible = true;
                 RenderSummary();
-                BuildMethods();
+                BuildMethods(false);
             }
         }
 
@@ -147,20 +168,36 @@ namespace Take_Time_BangPhra.Payment
                 }
             }
 
-            string status = row["Status"] == DBNull.Value ? "" : row["Status"].ToString();
-            if (status == "Cancel" || status == "CANCELLED")
+            string status = row["Status"] == DBNull.Value ? "" : row["Status"].ToString().Trim();
+            // ระบบเขียนสถานะยกเลิกเป็นภาษาไทย ("ยกเลิก", "ยกเลิกคืนเงิน", ...) และ "ลบจากการเลื่อนวันเข้าพัก"
+            if (status == "Cancel" || status == "CANCELLED"
+                || status.StartsWith("ยกเลิก", StringComparison.Ordinal)
+                || status.StartsWith("ลบ", StringComparison.Ordinal))
             { Fail("การจองนี้ถูกยกเลิกแล้ว"); return false; }
 
+            // ยอดค้างจากสูตรกลาง (ค่าห้อง + ค่าใช้จ่ายในห้อง เช่น ค่าบริการสัตว์เลี้ยง) — เดิมใช้ค่าห้องล้วน
+            // ⇒ ลูกค้าเลือกจ่ายเต็มจำนวนตอนจอง (รวมค่าสัตว์เลี้ยง) แต่ถูกตัดยอดเหลือแค่ค่าห้อง
             decimal remaining;
-            try
+            decimal pendingCharges = 0m;
+            ReservationBalance bal = null;
+            try { bal = ReservationBalance.Load(_conn, rid); } catch { bal = null; }
+            if (bal != null)
             {
-                var da = new PaymentDataAccess(_conn);
-                remaining = da.GetRemainingBalance(rid);
+                remaining = bal.Due;
+                pendingCharges = bal.PendingCharges;
             }
-            catch
+            else
             {
-                decimal total = row["TotalPrice"] == DBNull.Value ? 0m : Convert.ToDecimal(row["TotalPrice"]);
-                remaining = total;
+                try
+                {
+                    var da = new PaymentDataAccess(_conn);
+                    remaining = da.GetRemainingBalance(rid);
+                }
+                catch
+                {
+                    decimal total = row["TotalPrice"] == DBNull.Value ? 0m : Convert.ToDecimal(row["TotalPrice"]);
+                    remaining = total;
+                }
             }
 
             // ยอดที่ระบุมาในลิงก์ต้องไม่เกินยอดค้างจริง (ป้องกันการแก้ตัวเลขใน URL)
@@ -169,7 +206,7 @@ namespace Take_Time_BangPhra.Payment
 
             if (Amount <= 0) { Fail("การจองนี้ชำระเงินครบแล้ว"); return false; }
 
-            ItemText = "ค่าที่พัก การจอง #" + rid;
+            ItemText = (pendingCharges > 0m ? "ค่าที่พักและค่าบริการ การจอง #" : "ค่าที่พัก การจอง #") + rid;
             CustomerName = row["CustomerName"] == DBNull.Value ? "" : row["CustomerName"].ToString();
             CustomerPhone = phone;
             CustomerEmail = row["CustomerEmail"] == DBNull.Value ? "" : row["CustomerEmail"].ToString();
@@ -283,9 +320,12 @@ namespace Take_Time_BangPhra.Payment
             litAmount.Text = "฿" + Amount.ToString("N2");
         }
 
-        private void BuildMethods()
+        /// <param name="showAll">true = ลูกค้ากด "เลือกวิธีอื่น" — ไม่ล็อกตามช่องทางที่เลือกไว้ตอนจองแล้ว</param>
+        private void BuildMethods(bool showAll)
         {
             rblMethod.Items.Clear();
+            litChannelNote.Text = "";
+            btnAllMethods.Visible = false;
             List<string> methods = _svc.AvailableMethods(Amount, SourceType);
 
             if (methods.Count == 0)
@@ -293,6 +333,40 @@ namespace Take_Time_BangPhra.Payment
                 Fail("ขณะนี้ยังไม่มีวิธีชำระเงินที่ใช้ได้กับยอดนี้ กรุณาติดต่อเจ้าหน้าที่");
                 return;
             }
+
+            // ── ลูกค้าเลือกช่องทางเกตเวย์มาจากหน้าจองแล้ว → ล็อกวิธีตามช่องนั้น (ยังกด "เลือกวิธีอื่น" ได้) ──
+            // ไม่สร้างรายการที่เกตเวย์ทันทีที่เปิดหน้า — ลูกค้าต้องกดดำเนินการต่อเอง
+            string chNote = null;
+            PaymentChannel ch = showAll ? null : RequestedChannel(methods, out chNote);
+            if (ch != null)
+            {
+                string cm = ch.GatewayChannelCode.Trim().ToUpperInvariant();
+                ChannelMethod = cm;
+                ChannelBrand = PaymentChannelCatalog.BrandHint(ch);
+
+                string name = string.IsNullOrWhiteSpace(ch.Name) ? PaymentGatewayConfig.MethodName(cm) : ch.Name.Trim();
+                string chLabel = Server.HtmlEncode(name);
+                decimal chSur = PaymentGatewayConfig.SurchargeFor(cm, Amount);
+                if (chSur > 0) chLabel += " (+ค่าธรรมเนียม ฿" + chSur.ToString("N2") + ")";
+                rblMethod.Items.Add(new ListItem(chLabel, cm));
+                rblMethod.SelectedIndex = 0;
+
+                var sb = new System.Text.StringBuilder();
+                sb.Append("<div class=\"note\">ช่องทางที่ท่านเลือกไว้ตอนจอง: <b>").Append(Server.HtmlEncode(name)).Append("</b>");
+                if (!string.IsNullOrWhiteSpace(ch.Conditions))
+                    sb.Append("<br/>").Append(Server.HtmlEncode(ch.Conditions.Trim()).Replace("\n", "<br/>"));
+                if (!string.IsNullOrWhiteSpace(ch.Instructions))
+                    sb.Append("<br/>").Append(Server.HtmlEncode(ch.Instructions.Trim()).Replace("\n", "<br/>"));
+                sb.Append("</div>");
+                litChannelNote.Text = sb.ToString();
+                btnAllMethods.Visible = methods.Count > 1;
+                return;
+            }
+
+            ChannelMethod = null;
+            ChannelBrand = null;
+            if (chNote != null)
+                litChannelNote.Text = "<div class=\"alert err\">" + Server.HtmlEncode(chNote) + "</div>";
 
             foreach (string m in methods)
             {
@@ -308,8 +382,52 @@ namespace Take_Time_BangPhra.Payment
 
             // มีทางเดียวและเป็นวิธีเดิม (ไม่ยิงออกนอกระบบ) = ข้ามขั้นตอนเลือกไปเลย
             // ⚠ ไม่ข้ามให้กับวิธีที่ต้องยิงเกตเวย์ เพราะแค่เปิดหน้าจะกลายเป็นการสร้างรายการจริง
-            if (methods.Count == 1 && methods[0] == PaymentGatewayConfig.MethodManualQr)
+            // (มีข้อความแจ้งว่าช่องทางที่เลือกไว้ใช้ไม่ได้ → ไม่ข้าม ให้ลูกค้าเห็นข้อความก่อน)
+            if (methods.Count == 1 && methods[0] == PaymentGatewayConfig.MethodManualQr && chNote == null)
                 ProceedWith(methods[0]);
+        }
+
+        /// <summary>
+        /// ช่องทางจากพารามิเตอร์ &amp;ch= ที่ยังใช้ได้จริงตอนนี้ — ต้องเป็นช่องเกตเวย์ที่เปิด/พร้อม (GatewayLive),
+        /// วิธีของช่องนั้นอยู่ในวิธีที่ใช้ได้กับยอดนี้ และ (ลูกค้า) อยู่ในรายการที่ลูกค้าเห็นได้
+        /// ใช้ไม่ได้ → null + ข้อความบอกลูกค้า แล้วล้างค่าทิ้ง (แสดงทุกวิธีตามปกติ)
+        /// </summary>
+        private PaymentChannel RequestedChannel(List<string> methods, out string unavailableNote)
+        {
+            unavailableNote = null;
+            string code = ChannelCode;
+            if (string.IsNullOrEmpty(code)) return null;
+
+            PaymentChannel ch = null;
+            try { ch = PaymentChannelCatalog.Get(code); } catch { ch = null; }
+
+            bool ok = ch != null && ch.Active && ch.IsGateway && ch.GatewayLive
+                      && !string.IsNullOrWhiteSpace(ch.GatewayChannelCode)
+                      && methods.Contains(ch.GatewayChannelCode.Trim().ToUpperInvariant());
+            if (ok && !IsStaff())
+            {
+                bool listed = false;
+                foreach (PaymentChannel c in PaymentChannelCatalog.ForCustomer(SourceType))
+                    if (string.Equals(c.Code, ch.Code, StringComparison.OrdinalIgnoreCase)) { listed = true; break; }
+                ok = listed;
+            }
+            if (ok) return ch;
+
+            unavailableNote = "ช่องทางที่เลือกไว้"
+                + (ch != null && !string.IsNullOrWhiteSpace(ch.Name) ? " (" + ch.Name.Trim() + ")" : "")
+                + " ใช้ไม่ได้ในขณะนี้ — กรุณาเลือกวิธีชำระเงินด้านล่าง";
+            ChannelCode = null;
+            return null;
+        }
+
+        /// <summary>รหัสช่องทางจาก URL — รับเฉพาะ A-Z 0-9 _ - ยาวไม่เกิน 50 (นอกนั้น = ไม่มี)</summary>
+        private static string SafeChannelCode(string raw)
+        {
+            string s = (raw ?? "").Trim();
+            if (s.Length == 0 || s.Length > 50) return null;
+            foreach (char c in s)
+                if (!(char.IsLetterOrDigit(c) || c == '_' || c == '-')) return null;
+            return s.ToUpperInvariant();
         }
 
         // ── ปุ่ม ──────────────────────────────────────────────────────────────
@@ -320,6 +438,18 @@ namespace Take_Time_BangPhra.Payment
             if (string.IsNullOrEmpty(m)) { ShowInfo(pnlMethods, "กรุณาเลือกวิธีชำระเงิน", true); return; }
             pnlMain.Visible = true;
             ProceedWith(m);
+        }
+
+        /// <summary>ลูกค้าไม่ใช้ช่องทางที่เลือกไว้ตอนจอง → แสดงทุกวิธีที่ใช้ได้</summary>
+        protected void btnAllMethods_Click(object sender, EventArgs e)
+        {
+            pnlMain.Visible = true;
+            pnlManual.Visible = false;
+            pnlGateway.Visible = false;
+            pnlMethods.Visible = true;
+            ChannelCode = null;
+            RenderSummary();
+            BuildMethods(true);
         }
 
         protected void btnBack_Click(object sender, EventArgs e)
@@ -405,9 +535,10 @@ namespace Take_Time_BangPhra.Payment
 
                 if (SourceType == PaymentSource.Reservation)
                 {
-                    // ใช้เส้นทางเดิมทุกประการ — ได้ Payment_History / ใบเสร็จ เหมือนพนักงานคีย์เอง
+                    // ได้ Payment_History / ใบเสร็จ / ส่งบัญชี เหมือนพนักงานคีย์เอง — ยอดกลาง (ค่าห้อง + ค่าใช้จ่ายในห้อง)
+                    // ครบยอด = ปิดค่าใช้จ่ายในห้อง + มีบรรทัดในใบเสร็จ / ไม่ครบก่อนเช็คอิน = ใบรับมัดจำ
                     var ps = new PaymentService(_conn);
-                    PaymentResult pr = ps.ProcessAdditionalPayment(
+                    PaymentResult pr = ps.ProcessReservationPayment(
                         int.Parse(SourceId), Amount, "โอนเงิน",
                         fuSlip.HasFile ? fuSlip.PostedFile : null,
                         null, CustomerPhone,
@@ -418,6 +549,9 @@ namespace Take_Time_BangPhra.Payment
                         ShowInfo(pnlManual, pr == null ? "บันทึกไม่สำเร็จ" : pr.Message, true);
                         return;
                     }
+                    // ใบจองที่ลูกค้าจองแล้วรอชำระ (เลือกจ่ายออนไลน์แต่มาโอนแทน) → ได้เงินแล้ว เลื่อนเป็น "มัดจำแล้ว"
+                    // เหมือนเส้นทางเกตเวย์ (เงื่อนไขสถานะเดิมใน UPDATE — ไม่ทับสถานะอื่น)
+                    BookingPayment.PromoteIfPending(_conn, int.Parse(SourceId));
                     Done("บันทึกการชำระเงินเรียบร้อยแล้ว"
                         + (string.IsNullOrEmpty(pr.ReceiptId) ? "" : " เลขที่ใบเสร็จ " + pr.ReceiptId));
                     return;
@@ -427,7 +561,10 @@ namespace Take_Time_BangPhra.Payment
             }
             catch (Exception ex)
             {
-                ShowInfo(pnlManual, "เกิดข้อผิดพลาด: " + ex.Message, true);
+                LogPay("บันทึกการโอน/แนบสลิปไม่สำเร็จ " + SourceType + " " + SourceId + ": " + ex.Message);
+                ShowInfo(pnlManual, IsStaff()
+                    ? "เกิดข้อผิดพลาด: " + ex.Message
+                    : "บันทึกการชำระเงินไม่สำเร็จ กรุณาลองใหม่อีกครั้ง หรือติดต่อเจ้าหน้าที่", true);
             }
         }
 
@@ -473,6 +610,15 @@ namespace Take_Time_BangPhra.Payment
                 CustomerEmail = CustomerEmail
             };
 
+            // ช่องทางที่ลูกค้าเลือกไว้ตอนจอง (เช่น PaySo AMEX) → ส่งรหัส + ยี่ห้อบัตรไปด้วย
+            // ⇒ ลงบันทึกเข้าแหล่งเงินของช่องนั้นได้แม้เกตเวย์ไม่แจ้งยี่ห้อบัตรกลับมา
+            if (!string.IsNullOrEmpty(ChannelMethod)
+                && string.Equals(method, ChannelMethod, StringComparison.OrdinalIgnoreCase))
+            {
+                req.ChannelCode = ChannelCode;
+                req.CardBrandHint = ChannelBrand;
+            }
+
             PaymentChargeResult r = _svc.Start(req);
             TxnRef = r.TxnRef;
 
@@ -487,8 +633,14 @@ namespace Take_Time_BangPhra.Payment
 
             if (!r.Success)
             {
+                // ลูกค้าไม่ต้องเห็นเหตุผลทางเทคนิค (ค่าตั้งเกตเวย์/คำตอบดิบ) — เก็บลง log ให้เจ้าหน้าที่
+                LogPay("เริ่มรายการไม่สำเร็จ " + SourceType + " " + SourceId + " วิธี " + method
+                    + " ref " + (r.TxnRef ?? "-") + ": " + (r.Message ?? "-"));
                 litGwInfo.Text = "<div class=\"alert err\">เริ่มรายการชำระเงินไม่สำเร็จ<br/>"
-                    + Server.HtmlEncode(r.Message ?? "") + "</div>";
+                    + Server.HtmlEncode(IsStaff()
+                        ? (r.Message ?? "")
+                        : "ระบบชำระเงินออนไลน์ขัดข้องชั่วคราว กรุณาลองใหม่อีกครั้ง หรือกด \"เลือกวิธีอื่น\"")
+                    + "</div>";
                 btnCheck.Visible = false;
                 return;
             }
@@ -597,6 +749,12 @@ namespace Take_Time_BangPhra.Payment
             lit.Text = "<div class=\"alert " + (isError ? "err" : "ok") + "\">"
                      + Server.HtmlEncode(message ?? "") + "</div>";
             target.Controls.AddAt(0, lit);
+        }
+
+        private void LogPay(string detail)
+        {
+            try { _code.Logs(_conn, "OnlinePayment", "Pay: " + detail, IsStaff() ? "Staff" : "Customer"); }
+            catch { }
         }
 
         private bool IsStaff()

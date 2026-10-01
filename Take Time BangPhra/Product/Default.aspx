@@ -164,6 +164,7 @@
                             <asp:DropDownList ID="DropDownList1" runat="server" CssClass="form-control"
                                 DataSourceID="SqlDataSource1" DataTextField="Paid_How" DataValueField="ID"
                                 AutoPostBack="True" OnSelectedIndexChanged="DropDownList1_SelectedIndexChanged"
+                                OnDataBound="DropDownList1_DataBound"
                                 AppendDataBoundItems="true">
                                 <asp:ListItem>--- โปรดเลือก ---</asp:ListItem>
                             </asp:DropDownList>

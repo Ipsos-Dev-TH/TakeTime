@@ -200,6 +200,8 @@ namespace Take_Time_BangPhra.Payments
                 CustomerName = req.CustomerName,
                 CustomerPhone = req.CustomerPhone,
                 CustomerEmail = req.CustomerEmail,
+                ChannelCode = req.ChannelCode,
+                CardBrandHint = req.CardBrandHint,
                 ReturnUrl = PaymentUrls.ReturnUrl(txn.TxnRef),
                 CancelUrl = PaymentUrls.CancelUrl(txn.TxnRef),
                 WebhookUrl = PaymentUrls.WebhookUrl()
@@ -263,6 +265,28 @@ namespace Take_Time_BangPhra.Payments
                                   ?? _store.GetByProviderTxnId(gw.ProviderCode, ev.ProviderTxnId);
 
             int eventId;
+
+            // ตรวจลายเซ็น "ก่อน" กันส่งซ้ำ — เดิมบันทึก Event_ID ก่อนแล้วค่อยตรวจ ⇒ ใครก็ยิงข้อความปลอม
+            // ที่ใช้ Event_ID ล่วงหน้าได้ แล้วเหตุการณ์จริงที่ตามมาจะโดนตีเป็น "ซ้ำ" (เงินเข้าแต่ไม่ถูกบันทึก)
+            // ข้อความปลอมยังเก็บไว้ตรวจย้อนหลัง แต่ใช้ Event_ID แยกที่ไม่ชนของจริง
+            if (!ev.SignatureValid)
+            {
+                string claimedId = ev.EventId;
+                ev.EventId = "BADSIG-" + Guid.NewGuid().ToString("N");
+                try
+                {
+                    _store.LogEvent(ev, gw.ProviderCode, txn == null ? (int?)null : txn.ID,
+                        DumpHeaders(headers), body, remoteIp, out eventId);
+                    _store.MarkEventHandled(eventId, "ลายเซ็นไม่ถูกต้อง — ไม่ดำเนินการ"
+                        + (string.IsNullOrEmpty(claimedId) ? "" : " (อ้าง Event_ID " + claimedId + ")"));
+                }
+                catch { /* บันทึกไม่ได้ก็ยังปฏิเสธ */ }
+                Log("Webhook ปฏิเสธ: ลายเซ็นไม่ถูกต้อง (ref=" + (ev.TxnRef ?? "-") + ", ip=" + remoteIp + ")");
+                outcome.HttpStatus = 401;
+                outcome.Message = "invalid signature";
+                return outcome;
+            }
+
             bool isNew = _store.LogEvent(ev, gw.ProviderCode, txn == null ? (int?)null : txn.ID,
                 DumpHeaders(headers), body, remoteIp, out eventId);
 
@@ -271,15 +295,6 @@ namespace Take_Time_BangPhra.Payments
                 outcome.Accepted = true;
                 outcome.Message = "duplicate event ignored";
                 return outcome;   // เคยรับไปแล้ว — ตอบ 200 เฉย ๆ
-            }
-
-            if (!ev.SignatureValid)
-            {
-                Log("Webhook ปฏิเสธ: ลายเซ็นไม่ถูกต้อง (ref=" + (ev.TxnRef ?? "-") + ", ip=" + remoteIp + ")");
-                _store.MarkEventHandled(eventId, "ลายเซ็นไม่ถูกต้อง — ไม่ดำเนินการ");
-                outcome.HttpStatus = 401;
-                outcome.Message = "invalid signature";
-                return outcome;
             }
 
             if (txn == null)
@@ -309,6 +324,18 @@ namespace Take_Time_BangPhra.Payments
                     Log("Webhook " + txn.TxnRef + ": ยอดไม่ตรง (เกตเวย์=" + ev.Amount.Value.ToString("N2")
                         + " ระบบ=" + txn.TotalPayable.ToString("N2") + ") — ไม่บันทึกว่าจ่ายแล้ว");
                     return "ยอดเงินไม่ตรงกับรายการ — ต้องตรวจสอบด้วยตนเอง";
+                }
+
+                // ข้อความแจ้งกลับไม่มียอด (map ไม่ครบ/รูปแบบเกตเวย์) → ถามสถานะจริงยืนยันก่อน ถ้าตั้งเส้นทางถามไว้
+                // ถามได้และเกตเวย์ยืนยันว่า "ยังไม่จ่าย" หรือยอดไม่ตรง = ไม่บันทึก (รอบตามสถานะจะมาจับเอง)
+                if (!ev.Amount.HasValue)
+                {
+                    string why = ConfirmPaidWithGateway(txn, ev.ProviderTxnId);
+                    if (why != null)
+                    {
+                        Log("Webhook " + txn.TxnRef + ": " + why);
+                        return why;
+                    }
                 }
 
                 bool changed = _store.MarkPaid(txn.ID, ev.ProviderTxnId, ev.Fee, ev.CardBrand, ev.CardLast4);
@@ -452,11 +479,19 @@ namespace Take_Time_BangPhra.Payments
             if (!gw.IsReady) return "เกตเวย์ยังไม่พร้อม";
 
             PaymentStatusResult r = gw.QueryStatus(txn.ProviderTxnId, txn.TxnRef);
-            if (!r.Success && string.IsNullOrEmpty(r.Status))
-                return "ถามสถานะไม่สำเร็จ: " + (r.Message ?? "-");
+            // ตัดสินจากคำตอบที่สำเร็จ (HTTP 2xx) เท่านั้น — คำตอบผิดพลาด (เช่น 401/404 ที่มีฟิลด์ status="error")
+            // ห้ามปิดรายการเป็น "ไม่สำเร็จ" เพราะลูกค้าอาจจ่ายไปแล้วจริง
+            if (r == null || !r.Success)
+                return "ถามสถานะไม่สำเร็จ: " + (r == null ? "-" : (r.Message ?? ("HTTP " + r.HttpStatus)));
 
             if (r.Status == PaymentStatus.Paid)
             {
+                if (!AmountMatches(r.Amount, txn))
+                {
+                    Log("ตามสถานะ " + txn.TxnRef + ": เกตเวย์แจ้งจ่ายแล้วแต่ยอดไม่ตรง (เกตเวย์="
+                        + r.Amount.Value.ToString("N2") + " ระบบ=" + txn.TotalPayable.ToString("N2") + ") — ไม่บันทึกว่าจ่ายแล้ว");
+                    return "ยอดเงินที่เกตเวย์แจ้งไม่ตรงกับรายการ — ต้องตรวจสอบด้วยตนเอง";
+                }
                 if (_store.MarkPaid(txn.ID, r.ProviderTxnId, r.Fee, r.CardBrand, r.CardLast4))
                 {
                     PaymentTransaction fresh = _store.GetById(txn.ID);
@@ -601,35 +636,20 @@ namespace Take_Time_BangPhra.Payments
 
             // ⚠ ต้องเป็นชื่อที่ตรงกับแถวใน Account_Paid_How เป๊ะ ๆ — AccountingSync ค้นด้วย
             // ข้อความนี้ (LookupPaidHowAccountId) เพื่อบังคับ Dr เข้าบัญชีพักเงินเกตเวย์ใน NextAcc
-            // ถ้าส่งชื่อสวย ๆ ("บัตรเครดิต / เดบิต") จะหาไม่เจอ แล้วบัญชีจะเดาเป็นเงินสด
-            // 1) แคตตาล็อกช่องทาง: แยกแหล่งเงินตามเจ้า/วิธี/ยี่ห้อบัตร (เช่น PaySo VISA / AMEX / พร้อมเพย์)
-            //    ให้แต่ละช่องผูกบัญชีพักเงินใน NextAcc แยกกันได้
-            // 2) ไม่เจอ → แหล่งเงินรายผู้ให้บริการที่ตั้งใน Accounting Integration (PHASE19_21) → 3) ค่าตั้งเดิม
-            string methodText = PaymentChannelCatalog.ResolvePaidHowName(txn.Provider, txn.Method, txn.CardBrand);
-            // แหล่งเงินรายเกตเวย์ที่ผู้ดูแลตั้งเองใน Accounting Integration (null = ไม่ได้ตั้ง)
-            string gatewayPaidHow = Take_Time_BangPhra.Integration.AccountingSyncService
-                .ResolveGatewayPaidHowName(_conn, txn.Provider, txn.Method, null);
-            if (string.IsNullOrEmpty(methodText))
-            {
-                methodText = gatewayPaidHow ?? PaymentGatewayConfig.Get("Payment_PaidHow_Name", "Omise (จ่ายออนไลน์)");
-            }
-            else if (!string.IsNullOrEmpty(gatewayPaidHow)
-                     && !string.Equals(gatewayPaidHow, methodText, StringComparison.Ordinal)
-                     && !PaidHowHasNextAccAccount(methodText))
-            {
-                // แถวของแคตตาล็อก (เช่น PaySo VISA ที่ migration เพิ่มให้) ยังไม่ผูกบัญชี NextAcc
-                // แต่ผู้ดูแลตั้งแหล่งเงินรายเกตเวย์ไว้แล้ว → ใช้ค่านั้น ไม่งั้น NextAcc เดาบัญชีเอง (มักเป็นเงินสด)
-                methodText = gatewayPaidHow;
-            }
+            // ลำดับการเลือก (แคตตาล็อก → แหล่งเงินรายเกตเวย์ → ค่าตั้งเดิม) อยู่ที่ PaymentChannelCatalog
+            // ที่เดียว — หน้าจุดรับเงิน (Payment/Charge) แสดงชื่อเดียวกันนี้ให้พนักงาน
+            string methodText = PaymentChannelCatalog.ResolveRecordingPaidHowName(_conn, txn.Provider, txn.Method, txn.CardBrand);
             string notes = "ชำระออนไลน์ผ่าน " + (txn.Provider ?? "-")
                          + " · อ้างอิง " + txn.TxnRef
                          + (string.IsNullOrEmpty(txn.ProviderTxnId) ? "" : " · เลขที่เกตเวย์ " + txn.ProviderTxnId)
                          + (string.IsNullOrEmpty(txn.CardLast4) ? "" : " · บัตร ****" + txn.CardLast4);
 
+            // ยอดกลาง ReservationBalance (ค่าห้อง + ค่าใช้จ่ายในห้อง): ครบยอด = ชำระเต็ม ปิดค่าใช้จ่าย (เช่น ค่าสัตว์เลี้ยง)
+            // และใส่บรรทัดในใบเสร็จ / ไม่ครบ = มัดจำ (ก่อนเช็คอิน) — ดู PaymentService.ProcessReservationPayment
             var svc = new PaymentService(_conn);
-            PaymentResult r = svc.ProcessAdditionalPayment(
+            PaymentResult r = svc.ProcessReservationPayment(
                 reservationId,
-                txn.Amount,                       // ลงบัญชีเฉพาะยอดค่าห้องจริง ไม่รวมค่าธรรมเนียมบัตร
+                txn.Amount,                       // ลงบัญชีเฉพาะยอดรายการจริง ไม่รวมค่าธรรมเนียมบัตร
                 methodText,
                 null,                             // ไม่มีสลิป — เกตเวย์ยืนยันให้แล้ว
                 txn.CreatedBy,
@@ -647,20 +667,6 @@ namespace Take_Time_BangPhra.Payments
             return "บันทึกเข้าการจอง #" + reservationId + " แล้ว"
                  + (promoted ? " · ยืนยันการจองเรียบร้อย (รอชำระเงิน → มัดจำแล้ว)" : "")
                  + (string.IsNullOrEmpty(receiptId) ? "" : " (ใบเสร็จ " + receiptId + ")");
-        }
-
-        /// <summary>แถว Account_Paid_How ชื่อนี้ผูกบัญชี NextAcc แล้วหรือยัง (อ่านไม่ได้ = ถือว่าผูกแล้ว ไม่เปลี่ยนพฤติกรรม)</summary>
-        private bool PaidHowHasNextAccAccount(string paidHowName)
-        {
-            try
-            {
-                DataTable dt = new code().DatabaseQuerySafe(_conn,
-                    "SELECT TOP 1 CASE WHEN Nexaacc_AccountId IS NULL THEN 0 ELSE 1 END AS L FROM Account_Paid_How WHERE Paid_How = @n AND Status = 'True'",
-                    new Dictionary<string, object> { { "@n", paidHowName } });
-                if (dt == null || dt.Rows.Count == 0) return false;
-                return Convert.ToInt32(dt.Rows[0]["L"]) == 1;
-            }
-            catch { return true; }
         }
 
         /// <summary>กิจกรรม — ใช้เมธอดเดิมของ ActivityService</summary>
@@ -780,6 +786,38 @@ namespace Take_Time_BangPhra.Payments
         }
 
         // ── helpers ──────────────────────────────────────────────────────────
+
+        /// <summary>ยอดที่เกตเวย์แจ้งตรงกับรายการไหม (ไม่แจ้งยอด = ไม่มีข้อมูลขัด → true; เผื่อหน่วยสตางค์)</summary>
+        private static bool AmountMatches(decimal? gatewayAmount, PaymentTransaction txn)
+        {
+            if (!gatewayAmount.HasValue || txn == null) return true;
+            decimal g = gatewayAmount.Value;
+            return Math.Abs(g - txn.TotalPayable) <= 0.05m || Math.Abs(g - txn.TotalPayable * 100m) <= 0.05m;
+        }
+
+        /// <summary>
+        /// ยืนยันกับเกตเวย์ว่ารายการจ่ายแล้วจริงด้วยยอดที่ถูก — ใช้เมื่อ webhook ไม่บอกยอด
+        /// คืน null = ยืนยันแล้ว หรือถามไม่ได้ (ยังไม่ได้ตั้งเส้นทางถามสถานะ → เชื่อ webhook ที่ลายเซ็นผ่านแบบเดิม)
+        /// คืนข้อความ = เกตเวย์ตอบชัดว่ายังไม่จ่าย/ยอดไม่ตรง → ไม่บันทึก
+        /// </summary>
+        private string ConfirmPaidWithGateway(PaymentTransaction txn, string providerTxnId)
+        {
+            try
+            {
+                IPaymentGateway gw = Gateway(txn.Provider);
+                if (!gw.IsReady) return null;
+                string ptid = string.IsNullOrEmpty(providerTxnId) ? txn.ProviderTxnId : providerTxnId;
+                PaymentStatusResult r = gw.QueryStatus(ptid, txn.TxnRef);
+                if (r == null || !r.Success || string.IsNullOrEmpty(r.Status)) return null;
+                if (r.Status != PaymentStatus.Paid)
+                    return "webhook แจ้งจ่ายแล้วแต่เกตเวย์ตอบสถานะ " + PaymentStatus.Thai(r.Status) + " — ยังไม่บันทึก รอตามสถานะรอบถัดไป";
+                if (!AmountMatches(r.Amount, txn))
+                    return "ยอดเงินไม่ตรงกับรายการ (เกตเวย์=" + r.Amount.Value.ToString("N2")
+                         + " ระบบ=" + txn.TotalPayable.ToString("N2") + ") — ต้องตรวจสอบด้วยตนเอง";
+                return null;
+            }
+            catch { return null; }
+        }
 
         private static bool IpAllowed(string csv, string ip)
         {
