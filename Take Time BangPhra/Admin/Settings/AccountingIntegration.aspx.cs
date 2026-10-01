@@ -1793,6 +1793,51 @@ namespace Take_Time_BangPhra.Admin.Settings
                 }
                 catch { }
 
+                // ── 4c) เงินประกันโอน → หนี้สิน: ส่วนที่ "หักค่าเสียหาย" ต้องล้างด้วยใบเสร็จค่าเสียหาย ─────
+                //   (ไม่มี JE DMG แล้ว — ใบเสร็จต้องใช้แหล่งเงิน "หักจากเงินประกัน" ที่ผูกบัญชีเดียวกับ SECURITY_DEPOSIT_LIABILITY)
+                try
+                {
+                    var sdCfg = new Integration.AccountingConfig(ConnStr);
+                    if (sdCfg.IsSecurityDepositJournalEnabled)
+                    {
+                        string offName = Take_Time_BangPhra.Payments.SecurityHoldService.FindOffsetPaidHowName(ConnStr);
+                        string liabAcc = "", liabCode = "", offAcc = "";
+                        var lm = _code.DatabaseQuerySafe(ConnStr,
+                            @"SELECT TOP 1 ISNULL(CAST(Nexaacc_AccountId AS NVARCHAR(50)), '') AS Acc, ISNULL(Nexaacc_AccountCode, '') AS Code
+                                FROM Accounting_Account_Mapping WHERE TakeTime_Code = 'SECURITY_DEPOSIT_LIABILITY' AND ISNULL(Is_Active, 1) = 1", null);
+                        if (lm != null && lm.Rows.Count > 0)
+                        {
+                            liabAcc = lm.Rows[0]["Acc"]?.ToString() ?? "";
+                            liabCode = lm.Rows[0]["Code"]?.ToString() ?? "";
+                        }
+                        if (!string.IsNullOrEmpty(offName))
+                        {
+                            var om2 = _code.DatabaseQuerySafe(ConnStr,
+                                @"SELECT TOP 1 ISNULL(CAST(Nexaacc_AccountId AS NVARCHAR(50)), '') AS Acc
+                                    FROM Account_Paid_How WHERE Paid_How = @n AND Status = 'True'",
+                                new Dictionary<string, object> { { "@n", offName } });
+                            if (om2 != null && om2.Rows.Count > 0) offAcc = om2.Rows[0]["Acc"]?.ToString() ?? "";
+                        }
+                        const string sdHow = "\n\nขั้นตอนเมื่อหักค่าเสียหายจากเงินประกันโอน (หน้าเช็คเอาท์): ออกใบเสร็จค่าเสียหายตามยอดที่หัก "
+                            + "โดยเลือกแหล่งเงิน \"หักจากเงินประกัน (Security deposit)\" → NextAcc ลง Dr เงินประกันรอคืน / Cr รายได้ค่าเสียหาย + ภาษีขาย "
+                            + "(ห้ามเลือกเงินสด/บัญชีรับโอน — เงินเข้าธนาคารลงไปแล้วตอนรับโอน จะนับซ้ำ) · ลืมออกใบ = หนี้สินเงินประกันค้างในงบ";
+                        if (string.IsNullOrEmpty(offName))
+                            add("error", "เงินประกันโอน → บัญชี: ยังไม่มีแหล่งเงิน \"หักจากเงินประกัน (Security deposit)\"",
+                                "รัน migration PHASE19_25 แล้วผูกแหล่งเงินนี้กับบัญชีเดียวกับ SECURITY_DEPOSIT_LIABILITY" + sdHow);
+                        else if (string.IsNullOrEmpty(offAcc))
+                            add("error", $"เงินประกันโอน → บัญชี: แหล่งเงิน \"{offName}\" ยังไม่ผูกบัญชี NextAcc",
+                                "ผูกที่ 'วิธีจ่ายเงิน → บัญชี NextAcc' ให้ชี้บัญชีเดียวกับ SECURITY_DEPOSIT_LIABILITY"
+                                + (liabCode.Length > 0 ? " (" + liabCode + ")" : "") + sdHow);
+                        else if (liabAcc.Length > 0 && !string.Equals(liabAcc, offAcc, StringComparison.OrdinalIgnoreCase))
+                            add("error", $"เงินประกันโอน → บัญชี: แหล่งเงิน \"{offName}\" ผูกคนละบัญชีกับ SECURITY_DEPOSIT_LIABILITY",
+                                "ใบเสร็จค่าเสียหายจะไม่ล้างหนี้สินเงินประกัน — แก้ให้ผูกบัญชีเดียวกัน"
+                                + (liabCode.Length > 0 ? " (" + liabCode + ")" : "") + sdHow);
+                        else
+                            add("info", "เงินประกันโอน → บัญชี: เปิดอยู่", "รับโอน/โอนคืนลง JE อัตโนมัติ · ส่วนที่หักค่าเสียหายไม่มี JE" + sdHow);
+                    }
+                }
+                catch { }
+
                 // ── 5) คิวที่ตายค้าง / ค้างนาน ─────────────────────────────────
                 var q = _code.DatabaseQuerySafe(ConnStr,
                     @"SELECT
@@ -3320,7 +3365,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                 foreach (string p in GatewayProviders)
                 {
                     string cur = config.GetConfigValue("Nexaacc_Gateway_PaidHow_" + p, "");
-                    // กฎเดียวกับตอนรับเงินจริง (OnlinePaymentService.ApplyToReservation): แคตตาล็อก → รายเกตเวย์ → ค่ากลาง
+                    // ตัวเดียวกับตอนรับเงินจริง (PaymentChannelCatalog.ResolveRecordingPaidHowName): แคตตาล็อก → รายเกตเวย์ → ค่ากลาง
                     string src;
                     string effective = Integration.AccountingSyncService.ResolveEffectiveGatewayPaidHow(ConnStr, p, null, null, out src);
                     var accP = LookupPaidHowAccount(effective);
@@ -3400,7 +3445,8 @@ namespace Take_Time_BangPhra.Admin.Settings
 
         /// <summary>
         /// ช่องทางที่ลูกค้าเห็น/ช่องทางเกตเวย์ (PaymentChannelCatalog.AllForAdmin) → แหล่งเงินที่ "ใช้จริง" ตอนลงบันทึก
-        ///   เกตเวย์: กฎ ApplyToReservation (ResolveEffectiveGatewayPaidHow — แคตตาล็อก → รายเกตเวย์ → ค่ากลาง)
+        ///   เกตเวย์: ResolveEffectiveGatewayPaidHow → PaymentChannelCatalog.ResolveRecordingPaidHowName (ตัวเดียวกับ
+        ///   OnlinePaymentService.ApplyToReservation — แคตตาล็อก → รายเกตเวย์ → ค่ากลาง)
         ///   ไม่ใช่เกตเวย์ (โอน/QR): ชื่อแถว Account_Paid_How ของช่องทางนั้นตรง ๆ (ลงบันทึกด้วยชื่อนี้)
         /// warn = ลูกค้า/เกตเวย์ใช้ได้แต่แหล่งเงินที่ใช้จริงไม่มีแถว หรือยังไม่ผูกกระเป๋าเงิน/บัญชี NextAcc
         /// (NextAcc จะเดาบัญชีจากวิธีชำระ มักเป็นเงินสด)

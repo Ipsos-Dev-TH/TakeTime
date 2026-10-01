@@ -193,8 +193,9 @@ namespace Take_Time_BangPhra.Integration
         /// <summary>
         /// ลงบัญชีเงินประกันความเสียหายแบบโอน (Security_Hold_Mode = TRANSFER) — <c>Nexaacc_SecurityDeposit_Journal</c>
         /// (PHASE19_24, default ปิด = พฤติกรรมเดิม ไม่ส่งอะไร): รับโอน → JE Dr ธนาคาร (แหล่งเงินของช่องทางรับโอน) /
-        /// Cr SECURITY_DEPOSIT_LIABILITY · โอนคืน → กลับขา · หักค่าเสียหาย → Dr หนี้สิน / Cr ธนาคาร
-        /// (รายได้ค่าเสียหายมาจากใบเสร็จค่าเสียหายตามเดิม ไม่ลงซ้ำ). ref SECDEP-{holdId}-IN/OUT/DMG
+        /// Cr SECURITY_DEPOSIT_LIABILITY · โอนคืน → กลับขา · หักค่าเสียหาย → ไม่มี JE: ใบเสร็จค่าเสียหายเลือกแหล่งเงิน
+        /// "หักจากเงินประกัน (Security deposit)" (PHASE19_25, ผูกบัญชีเดียวกับ SECURITY_DEPOSIT_LIABILITY)
+        /// → Dr หนี้สิน / Cr รายได้ค่าเสียหาย + VAT. ref SECDEP-{holdId}-IN/OUT
         /// </summary>
         public bool IsSecurityDepositJournalEnabled => GetConfig("Nexaacc_SecurityDeposit_Journal", "0") == "1";
 

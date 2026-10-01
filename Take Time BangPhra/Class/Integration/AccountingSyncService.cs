@@ -529,11 +529,13 @@ namespace Take_Time_BangPhra.Integration
         //  Nexaacc_SecurityDeposit_Journal = 1 (PHASE19_24, default 0)
         //   IN  : Dr ธนาคาร (แหล่งเงินของช่องทางรับโอน) / Cr SECURITY_DEPOSIT_LIABILITY   (ยอดรับ)
         //   OUT : Dr SECURITY_DEPOSIT_LIABILITY / Cr ธนาคาร                              (ยอดโอนคืน)
-        //   DMG : Dr SECURITY_DEPOSIT_LIABILITY / Cr ธนาคาร                              (ยอดที่หัก)
-        //  DMG ไม่ลงรายได้: รายได้ค่าเสียหาย + VAT มาจาก "ใบเสร็จค่าเสียหาย" ที่พนักงานออกตามเดิม
-        //  (แหล่งเงิน = บัญชีรับโอน → Dr ธนาคาร / Cr รายได้) — JE DMG ตัด "เงินในธนาคารที่ใบเสร็จนับซ้ำ"
-        //  ออกพร้อมล้างหนี้สิน ⇒ ธนาคารสุทธิ = ยอดที่หัก, หนี้สินสุทธิ = 0, รายได้มาครั้งเดียวจากใบเสร็จ
-        //  ref (ใช้กันซ้ำ): SECDEP-{holdId}-IN / -OUT / -DMG
+        //   หักค่าเสียหาย: **ไม่มี JE แล้ว** (เดิม DMG = Dr หนี้สิน / Cr ธนาคาร ทันที แล้วพึ่งใบเสร็จค่าเสียหายที่
+        //   เลือกแหล่งเงินบัญชีรับโอนมาหักล้าง — ลืมออกใบ/เลือกเงินสด → ธนาคารขาด + ไม่มีรายได้).
+        //   ตอนนี้หนี้สินส่วนที่หักถูกล้างโดยใบเสร็จค่าเสียหายเอง: แหล่งเงิน "หักจากเงินประกัน (Security deposit)"
+        //   (PHASE19_25, Channel_Code SECURITY_DEPOSIT_OFFSET, ผูก NextAcc = บัญชีของ SECURITY_DEPOSIT_LIABILITY)
+        //   ⇒ Dr หนี้สิน / Cr รายได้ค่าเสียหาย + VAT · ธนาคารสุทธิ = ยอดที่หัก, หนี้สินสุทธิ = 0, รายได้มาครั้งเดียว
+        //   (enqueue "DMG" ใหม่ถูกปฏิเสธ · คิว DMG เก่าที่ค้างยังประมวลผลได้ — คู่กับใบเสร็จแบบเดิม)
+        //  ref (ใช้กันซ้ำ): SECDEP-{holdId}-IN / -OUT (-DMG = ของเก่า)
         // ══════════════════════════════════════════════════════════════════════
 
         /// <summary>เข้าคิว JE เงินประกันโอน — คืน queue id, -1 = ปิดสวิตช์/ยังไม่ตั้งค่า/ข้าม (มี log)</summary>
@@ -544,6 +546,13 @@ namespace Take_Time_BangPhra.Integration
             if (!_config.IsConfigured || !_config.IsSecurityDepositJournalEnabled) return -1;
             kind = (kind ?? "").Trim().ToUpperInvariant();
             if (holdId <= 0 || amount <= 0 || (kind != "IN" && kind != "OUT" && kind != "DMG")) return -1;
+            if (kind == "DMG")
+            {
+                // เลิกใช้แล้ว — ส่วนที่หักล้างด้วยใบเสร็จค่าเสียหาย (แหล่งเงิน "หักจากเงินประกัน") ดูหัวข้อด้านบน
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"EnqueueSecurityDepositJournal: ไม่โพสต์ SECDEP-{holdId}-DMG แล้ว — ออกใบเสร็จค่าเสียหายด้วยแหล่งเงิน \"หักจากเงินประกัน (Security deposit)\" เพื่อล้างหนี้สินเงินประกัน", "SYSTEM");
+                return -1;
+            }
 
             string refKey = $"SECDEP-{holdId}-{kind}";
             if (kind != "IN")
@@ -592,6 +601,19 @@ namespace Take_Time_BangPhra.Integration
             if (done > 0) return done;
 
             return InsertQueue("SECURITY_DEPOSIT", reservationId, "SECURITY_DEPOSIT_JOURNAL", payload);
+        }
+
+        /// <summary>
+        /// เงินประกันโอนก้อนนี้ถูกลงบัญชีหนี้สินแล้วหรือยัง — เปิด Nexaacc_SecurityDeposit_Journal + มีคิว SECDEP-{holdId}-IN
+        /// (ค้างส่งหรือสำเร็จแล้ว). ใช้เลือกแหล่งเงินของใบเสร็จค่าเสียหาย (SecurityHoldService.DamageReceiptPaidHowText)
+        /// </summary>
+        public bool HasSecurityDepositInJournal(long holdId)
+        {
+            if (holdId <= 0 || !_config.IsConfigured || !_config.IsSecurityDepositJournalEnabled) return false;
+            string inRef = $"SECDEP-{holdId}-IN";
+            string st;
+            if (FindUnsentEntry("SECURITY_DEPOSIT", "SECURITY_DEPOSIT_JOURNAL", "refKey", inRef, out st) > 0) return true;
+            return FindRecentCompletedEntry("SECURITY_DEPOSIT", "SECURITY_DEPOSIT_JOURNAL", "refKey", inRef, 315360000) > 0;
         }
 
         /// <summary>payload ของคิวตาม ID (null = ไม่พบ/อ่านไม่ได้)</summary>
@@ -2800,55 +2822,32 @@ namespace Take_Time_BangPhra.Integration
         }
 
         /// <summary>
-        /// แหล่งเงินที่ "ใช้จริง" ตอนบันทึกยอดรับผ่านเกตเวย์ — **กฎเดียวกับ OnlinePaymentService.ApplyToReservation**
-        /// (Class/Payments/OnlinePaymentService.cs:608-621 — แก้ที่นั่นต้องแก้ที่นี่ด้วย):
-        ///   1) PaymentChannelCatalog.ResolvePaidHowName(provider, method, cardBrand) (แถวแคตตาล็อกของเจ้านั้น)
-        ///   2) ไม่เจอ → แหล่งเงินรายเกตเวย์ (Nexaacc_Gateway_PaidHow_{P}_{M} → _{P}) → 3) Payment_PaidHow_Name
-        ///   ยกเว้น: แถวแคตตาล็อกยังไม่ผูกบัญชี NextAcc แต่ตั้งแหล่งเงินรายเกตเวย์ไว้ (คนละชื่อ) → ใช้รายเกตเวย์
-        /// ใช้แสดงผลในหน้า Admin เท่านั้น (ไม่ได้ถูกเรียกตอนรับเงินจริง)
+        /// แหล่งเงินที่ "ใช้จริง" ตอนบันทึกยอดรับผ่านเกตเวย์ — ชื่อมาจาก
+        /// <see cref="Take_Time_BangPhra.Payments.PaymentChannelCatalog.ResolveRecordingPaidHowName"/> (จุดเดียวของระบบ
+        /// ที่ OnlinePaymentService.ApplyToReservation และหน้า Payment/Charge ใช้) — ที่นี่เพิ่มแค่ป้าย "ได้มาจากไหน" ให้หน้า Admin:
+        ///   1) แคตตาล็อกช่องทาง (เจ้า + วิธี + ยี่ห้อบัตร) → CATALOG
+        ///   2) แคตตาล็อกยังไม่ผูกบัญชี NextAcc แต่ตั้งแหล่งเงินรายเกตเวย์ไว้ (คนละชื่อ) → GATEWAY_OVERRIDE
+        ///   3) ไม่มีแถวแคตตาล็อก → แหล่งเงินรายเกตเวย์ (Nexaacc_Gateway_PaidHow_{P}_{M} → _{P}) GATEWAY_CONFIG
+        ///      → ไม่ได้ตั้ง → Payment_PaidHow_Name (DEFAULT)
+        /// ใช้แสดงผล/ตรวจสุขภาพในหน้า Admin เท่านั้น
         /// </summary>
         /// <param name="source">CATALOG | GATEWAY_CONFIG | GATEWAY_OVERRIDE (แคตตาล็อกยังไม่ผูกบัญชี) | DEFAULT</param>
         public static string ResolveEffectiveGatewayPaidHow(string connectionString, string provider, string method,
             string cardBrand, out string source)
         {
-            source = "DEFAULT";
-            string fallback = "Omise (จ่ายออนไลน์)";
-            try { fallback = Take_Time_BangPhra.Payments.PaymentGatewayConfig.Get("Payment_PaidHow_Name", fallback); } catch { }
+            string name = Take_Time_BangPhra.Payments.PaymentChannelCatalog
+                .ResolveRecordingPaidHowName(connectionString, provider, method, cardBrand);
 
             string catalogName = null;
             try { catalogName = Take_Time_BangPhra.Payments.PaymentChannelCatalog.ResolvePaidHowName(provider, method, cardBrand); }
             catch { catalogName = null; }
-            string gatewayName = ResolveGatewayPaidHowName(connectionString, provider, method, null);
 
-            if (string.IsNullOrEmpty(catalogName))
-            {
-                if (!string.IsNullOrEmpty(gatewayName)) { source = "GATEWAY_CONFIG"; return gatewayName; }
-                source = "DEFAULT";
-                return fallback;
-            }
-            if (!string.IsNullOrEmpty(gatewayName)
-                && !string.Equals(gatewayName, catalogName, StringComparison.Ordinal)
-                && !PaidHowHasNextAccAccount(connectionString, catalogName))
-            {
-                source = "GATEWAY_OVERRIDE";
-                return gatewayName;
-            }
-            source = "CATALOG";
-            return catalogName;
-        }
-
-        /// <summary>แถวแหล่งเงิน (เปิดใช้) ผูกบัญชี NextAcc แล้วไหม — อ่านไม่ได้ = true (เหมือน OnlinePaymentService.PaidHowHasNextAccAccount)</summary>
-        private static bool PaidHowHasNextAccAccount(string connectionString, string paidHowName)
-        {
-            try
-            {
-                var dt = new code().DatabaseQuerySafe(connectionString,
-                    "SELECT TOP 1 CASE WHEN Nexaacc_AccountId IS NULL THEN 0 ELSE 1 END AS L FROM Account_Paid_How WHERE Paid_How = @n AND Status = 'True'",
-                    new Dictionary<string, object> { { "@n", paidHowName } });
-                if (dt == null || dt.Rows.Count == 0) return false;
-                return Convert.ToInt32(dt.Rows[0]["L"]) == 1;
-            }
-            catch { return true; }
+            if (!string.IsNullOrEmpty(catalogName))
+                source = string.Equals(name, catalogName, StringComparison.Ordinal) ? "CATALOG" : "GATEWAY_OVERRIDE";
+            else
+                source = !string.IsNullOrEmpty(ResolveGatewayPaidHowName(connectionString, provider, method, null))
+                    ? "GATEWAY_CONFIG" : "DEFAULT";
+            return name;
         }
 
         /// <summary>ตัวพิมพ์ใหญ่ + เก็บเฉพาะ A-Z 0-9 _ (ใช้ต่อท้ายชื่อคีย์ config)</summary>

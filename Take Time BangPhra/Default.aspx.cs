@@ -378,7 +378,8 @@ namespace Take_Time_BangPhra
                     code.AdaptSql("SELECT * FROM Reservation RIGHT JOIN Reservation_Accommodation ON Reservation.ID = Reservation_Accommodation.Reservation_ID " +
                     "INNER JOIN Accommodation ON Accommodation.ID = Reservation_Accommodation.Accommodation_ID " +
                     "WHERE @SelectedDate >= CAST(CheckinDate AS date) AND @SelectedDate < CAST(CheckoutDate AS date) " +
-                    "AND ISNULL(Reservation.Status, N'') NOT IN (N'ยกเลิก', N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน', N'เสร็จสิ้น', N'ไม่มาเช็คอิน')"),
+                    // สถานะที่ถือห้อง = เกณฑ์กลาง RescheduleService.SqlHoldsRoom (รวม "ลบจากการเลื่อนวันเข้าพัก" ฯลฯ)
+                    "AND " + global::Take_Time_BangPhra.RescheduleService.SqlHoldsRoom("Reservation")),
                     reservationParams);
                 DataTable dtAccommodation = DatabaseQuery(conn, code.AdaptSql("Select * From Accommodation Where Status = 1 order by OrderID asc"));
                 try

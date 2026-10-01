@@ -16,6 +16,7 @@ namespace Take_Time_BangPhra
     /// กติกา (Compute):
     ///   · ยอดที่รับแล้ว = SUM(Payment_History COMPLETED) ถ้ามีแถว, ไม่มีแถว → ใช้ Reservation.Deposit
     ///   · CHANNEL: ค่าห้องถือว่า OTA จ่ายแล้วเสมอ → หน้างานเก็บแค่ค่าใช้จ่ายในห้องที่ยัง PENDING
+    ///     ยอดที่ OTA ครอบคลุม = OtaCoverageAmount (gross เมื่อราคาห้องตั้งจาก gross, ไม่งั้น OtaAmount net-first)
     ///   · UNKNOWN (ใบ OTA ที่ "ไม่รู้ว่าใครเก็บ" — ระบบรับอีเมลเดาให้ หรือไม่มีข้อมูล): ยังไม่ถือว่า OTA จ่าย
     ///     คงเหลือ = ค่าห้อง + ค่าใช้จ่ายในห้อง − ยอด Payment_History (ไม่นับ Deposit — ใบที่เดาเคยตั้ง Deposit = ยอดเต็ม)
     ///     ⇒ หน้างานเห็นยอดค้างจนกว่าเจ้าหน้าที่จะยืนยันโหมด (SetCollectMode) — ทิศที่ปลอดภัย (ไม่ปล่อยให้ไม่มีใครเก็บ)
@@ -61,6 +62,13 @@ namespace Take_Time_BangPhra
         /// −1 = ไม่มีข้อมูล (ใบเก่าก่อนมีคอลัมน์ OTA_*)
         /// </summary>
         public decimal OtaAmount = -1m;
+        /// <summary>
+        /// CHANNEL: ยอดที่ "ถือว่า OTA เก็บแทนแล้ว" ใช้คิด Due/OtaCovered — ปกติ = OtaAmount (net ก่อน)
+        /// แต่ถ้าราคาห้องในระบบมาจากยอด gross (|TotalPrice − OTA_Gross_Amount| ≤ จำนวนคืน — ใบรุ่นเก่า/REFSELL)
+        /// ใช้ OTA_Gross_Amount แทน ⇒ ค่าคอมมิชชัน OTA (gross − net) ไม่กลายเป็น "ยอดค้าง" ให้หน้างานเก็บตอนเช็คเอาท์
+        /// (OtaAmount คงความหมาย net-first ไว้ เพราะ RevenuePostingService เทียบกับยอด net) · −1 = ไม่ใช่ CHANNEL
+        /// </summary>
+        public decimal OtaCoverageAmount = -1m;
         public decimal Due;              // what the front desk still has to collect (>= 0)
         public decimal Credit;           // overpaid amount (>= 0)
         public decimal Received;         // for display = Total - Due + Credit
@@ -89,7 +97,7 @@ namespace Take_Time_BangPhra
         /// <summary>คำนวณยอด — ไม่แตะฐานข้อมูล (ยกเว้นอ่านค่า tolerance ผ่าน AppCfg ที่ cache ไว้)</summary>
         public static ReservationBalance Compute(int reservationId, string collectMode, decimal roomTotal, decimal charges,
             decimal pendingCharges, decimal paidLedger, int ledgerRows, decimal deposit, decimal otaAmount = -1m,
-            bool unknownDepositIsReal = false, int nights = 0)
+            bool unknownDepositIsReal = false, int nights = 0, decimal otaGross = -1m)
         {
             var b = new ReservationBalance();
             b.ReservationId = reservationId;
@@ -140,9 +148,16 @@ namespace Take_Time_BangPhra
                 decimal ota = otaAmount >= 0m ? otaAmount : (deposit > 0m ? deposit : roomTotal);
                 b.OtaAmount = ota;
                 b.OtaAmountEstimated = otaAmount < 0m;
-                b.OtaCovered = Math.Min(ota, b.Total);
+                // ยอดที่ OTA ครอบคลุม: ราคาห้องตั้งจากยอด gross (ส่วนต่าง ≤ 1 บาท/คืน จากการปัดราคาต่อคืน) → ใช้ gross
+                // ไม่งั้นใบ gross TotalPrice + net OtaAmount ค้าง = ค่าคอมมิชชัน OTA ให้ลูกค้าจ่ายซ้ำตอนเช็คเอาท์
+                decimal coverage = ota;
+                decimal grossTol = nights > 0 ? nights : 0.01m;
+                if (otaGross > 0m && Math.Abs(roomTotal - otaGross) <= grossTol)
+                    coverage = otaGross;
+                b.OtaCoverageAmount = coverage;
+                b.OtaCovered = Math.Min(coverage, b.Total);
                 decimal paidByGuest = ledgerRows > 0 ? paidLedger : 0m;   // Deposit ของใบ OTA = เงิน OTA ไม่ใช่ลูกค้าจ่าย
-                due = roomTotal + charges - ota - paidByGuest;
+                due = roomTotal + charges - coverage - paidByGuest;
                 // ค่าชาร์จที่ยัง PENDING = ยังไม่ได้จ่ายแน่นอน — ต้องไม่ถูกกลบโดยแถว "เงินสดปลอม" ที่หน้าเช็คอินรุ่นเก่า
                 // บังคับลงเต็มยอดค่าห้อง (Payment_History ของใบ OTA ที่เช็คอินก่อนแก้)
                 if (due < pendingCharges) due = pendingCharges;
@@ -231,6 +246,7 @@ namespace Take_Time_BangPhra
             if (dt == null) return result;
             bool hasOtaCol = dt.Columns.Contains("OTA_Payment_Type");
             bool hasOtaAmt = dt.Columns.Contains("OtaAmount");
+            bool hasOtaGross = dt.Columns.Contains("OtaGross");
             bool hasOtaCh = dt.Columns.Contains("OTA_Channel");
             bool hasOtaBk = dt.Columns.Contains("OTA_Booking_ID");
             bool hasCMode = dt.Columns.Contains("OTA_Collect_Mode");
@@ -274,7 +290,8 @@ namespace Take_Time_BangPhra
                     Dec(row["Deposit"]),
                     hasOtaAmt && row["OtaAmount"] != DBNull.Value ? Dec(row["OtaAmount"]) : -1m,
                     source != SourceGuess,
-                    dt.Columns.Contains("StayDays") && row["StayDays"] != DBNull.Value ? Convert.ToInt32(row["StayDays"]) : 0);
+                    dt.Columns.Contains("StayDays") && row["StayDays"] != DBNull.Value ? Convert.ToInt32(row["StayDays"]) : 0,
+                    hasOtaGross && row["OtaGross"] != DBNull.Value ? Dec(row["OtaGross"]) : -1m);
                 b.CollectSource = source;
                 b.IsOta = isOta;
 
@@ -612,7 +629,8 @@ namespace Take_Time_BangPhra
 
             string sql =
                 "SELECT r.ID, ISNULL(r.TotalPrice, 0) AS TotalPrice, ISNULL(r.Deposit, 0) AS Deposit, r.Remark, r.Status, ISNULL(r.StayDays, 0) AS StayDays" +
-                (withOta ? ", r.OTA_Payment_Type, " + OtaAmountSql + " AS OtaAmount" : "") +
+                // OTA_Gross_Amount มาชุดเดียวกับ OtaAmountSql (คอลัมน์ OTA_* รุ่นเดียวกัน) — ไม่มีคอลัมน์ = query พัง → LoadMany ถอยไปแบบพื้นฐาน
+                (withOta ? ", r.OTA_Payment_Type, " + OtaAmountSql + " AS OtaAmount, r.OTA_Gross_Amount AS OtaGross" : "") +
                 (withCh ? ", r.OTA_Channel" : "") +
                 (withBk ? ", r.OTA_Booking_ID" : "") +
                 (withCollect ? ", r.OTA_Collect_Mode, r.OTA_Collect_Source" : "") +

@@ -1992,8 +1992,9 @@ namespace Take_Time_BangPhra.Services
         //   2) เทียบ "เฉพาะวัน" (CAST AS date) — ถ้า CheckinDate/CheckoutDate มีเวลาติดมา (เช่น 14:00)
         //      การเทียบแบบ datetime จะทำให้การจองที่ออกวันนั้น/เข้าช่วงบ่ายวันนั้นกลายเป็นทับกัน
         //   3) ตัดสถานะที่ระบบถือว่าห้องคืนแล้วออกให้ครบชุดเดียวกับ AccommodationAvailabilityService
-        private const string FreeStatusFilter =
-            @"r.Status NOT IN (N'ยกเลิก', N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน', N'เสร็จสิ้น', N'ไม่มาเช็คอิน')";
+        //      → ใช้เกณฑ์กลาง RescheduleService.SqlHoldsRoom (ยกเลิก% / ลบ% เช่น "ลบจากการเลื่อนวันเข้าพัก",
+        //        ไม่มาเช็คอิน, เสร็จสิ้น, ใบเลื่อนที่ไม่มีวันเข้าพัก) — เดิมรายชื่อตายตัว ใบที่ถูกย้ายตอนเลื่อนวันยังกันห้องอยู่
+        private static readonly string FreeStatusFilter = global::Take_Time_BangPhra.RescheduleService.SqlHoldsRoom("r");
 
         /// <summary>
         /// เติม Bookings/PeakOccupied/Blocker ให้ห้องที่ map ไว้ ตามช่วงวันที่ขอ (นับหัวรายคืน)

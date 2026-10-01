@@ -301,8 +301,13 @@ namespace Take_Time_BangPhra
         ///   • ครบยอดค้าง (เผื่อเศษ Balance_Rounding_Tolerance) = ชำระเต็ม → ปิดค่าใช้จ่ายในห้องที่ค้างทั้งหมด
         ///   • ไม่ครบ → เงินตัดค่าห้องก่อน ส่วนที่เกินค่าห้องค่อยปิดค่าใช้จ่ายในห้อง "เก่าสุดก่อน" เฉพาะแถวที่ยอดพอ
         ///     (มัดจำไม่ทำให้ค่าสัตว์เลี้ยงกลายเป็นชำระแล้ว — เก็บตอนเช็คอินเหมือนใบมัดจำของหน้าจอง)
-        ///   • ไม่ครบ + ไม่ได้ปิดค่าใช้จ่ายใด + ยังไม่เช็คอิน = ใบรับมัดจำ (IsDeposit) บรรทัดเดียวแบบ CreateDepositReceipt
-        ///   • อื่น ๆ = ใบเสร็จมีบรรทัดค่าห้อง + บรรทัดค่าใช้จ่ายที่ปิด (แบบ AddProductChargesToReceipt) ยอดรวม = ยอดรับ
+        ///   • ไม่ครบ + ยังไม่เช็คอิน = ใบรับมัดจำ (IsDeposit) บรรทัดเดียวแบบ CreateDepositReceipt — กฎเดียวกับหน้าแก้ไขการจอง
+        ///     (Reserve.aspx.cs: IsDeposit = Deposit &lt; totalPrice) และ CLAUDE.md 6b (รับก่อนเข้าพักไม่ครบ = มัดจำ → Cr เงินรับล่วงหน้า).
+        ///     ค่าใช้จ่ายในห้องที่ยอดครอบคลุมยังถูกปิด (Receipt_ID = ใบมัดจำ) เหมือน Reserve (MarkChargesPaidUpTo หลังออกใบมัดจำ)
+        ///     ⇒ รายได้ค่าใช้จ่ายรับรู้ตอนเช็คเอาท์ผ่านการล้างมัดจำ ไม่รับรู้ก่อนเข้าพัก
+        ///   • อื่น ๆ (ครบยอด หรือเช็คอินแล้ว) = ใบเสร็จมีบรรทัดค่าห้อง + บรรทัดค่าใช้จ่ายที่ปิด (แบบ AddProductChargesToReceipt) ยอดรวม = ยอดรับ
+        ///     รายได้แยกตามบรรทัด: บรรทัดมี ProductType_ID (1 ห้อง / 3 ค่าใช้จ่ายในห้อง) → mapping รายได้ของประเภทนั้น
+        ///     (LookupReceiptLinesEx ใช้ revenueType เป็น override เฉพาะบรรทัดที่ไม่มี ProductType_ID/กรณีไม่มีบรรทัด)
         /// การปิดค่าใช้จ่ายเขียนแบบ WHERE Status = 'PENDING' ต่อแถว ⇒ เรียกซ้ำไม่ปิดซ้ำ
         /// (กันซ้ำระดับรายการเกตเวย์อยู่ที่ Payment_Transaction.Applied_At อยู่แล้ว)
         /// อ่านยอดกลางไม่ได้ → ถอยไปใช้ ProcessAdditionalPayment แบบเดิม
@@ -314,7 +319,8 @@ namespace Take_Time_BangPhra
             HttpPostedFile slipFile = null,
             int? adminId = null,
             string customerPhone = null,
-            string notes = null)
+            string notes = null,
+            long? existingSlipId = null)
         {
             try
             {
@@ -387,11 +393,13 @@ namespace Take_Time_BangPhra
                 bool arrived = status == "เช็คอินแล้ว" || status == "เสร็จสิ้น"
                                || status.StartsWith("เช็คเอาท์", StringComparison.Ordinal)
                                || status.StartsWith("เช็คเอ้าท์", StringComparison.Ordinal);
-                bool isDeposit = !coversAll && covered.Count == 0 && !arrived;
+                // รับก่อนเข้าพักแต่ไม่ครบยอด = มัดจำเสมอ (เดิมมีเงื่อนไข covered.Count == 0 → ยอดที่เผอิญปิดค่าบริการได้
+                // กลายเป็นใบเสร็จรายได้ก่อนเข้าพัก ไม่ตรงกับหน้าแก้ไขการจองที่ใช้ Deposit < totalPrice)
+                bool isDeposit = !coversAll && !arrived;
 
                 // ── สลิป / ใบเสร็จ ──
-                long? slipId = null;
-                if (slipFile != null && slipFile.ContentLength > 0)
+                long? slipId = existingSlipId;   // สลิปที่ลูกค้าแนบไว้แล้วและพนักงานเพิ่งอนุมัติ (ApproveReservationSlip)
+                if (!slipId.HasValue && slipFile != null && slipFile.ContentLength > 0)
                     slipId = UploadPaymentSlip(reservationId, slipFile, customerPhone, adminId);
 
                 string receiptId = GenerateReceiptId();
@@ -499,6 +507,8 @@ namespace Take_Time_BangPhra
                     if (config.IsConfigured && config.Enabled)
                     {
                         var sync = new AccountingSyncService(_connectionString);
+                        // revenueType = fallback เท่านั้น: บรรทัดค่าใช้จ่ายในห้อง (ProductType_ID 3 เช่น ค่าสัตว์เลี้ยง)
+                        // ได้บัญชีรายได้ตามประเภทของบรรทัดเอง ไม่ถูกตีเป็น ROOM_REVENUE (ดู LookupReceiptLinesEx)
                         sync.EnqueueReceipt(reservationId, receiptId, amount, vat, DateTime.Now, GetCustomerName(reservationId),
                             isDeposit: isDeposit, paymentMethod: paymentMethod,
                             revenueType: "ROOM_REVENUE", paymentAccountId: sync.LookupPaidHowAccountId(paymentMethod));
@@ -528,6 +538,166 @@ namespace Take_Time_BangPhra
                 _code.Logs(_connectionString, "Payment Error", ex.Message + " - " + ex.StackTrace, "SYSTEM");
                 return new PaymentResult { Success = false, Message = "เกิดข้อผิดพลาด: " + ex.Message };
             }
+        }
+
+        // ── สลิปที่ลูกค้าแนบเอง → รอพนักงานตรวจก่อนลงรับเงิน ────────────────────────
+        //  เดิมหน้า /Payment/Pay (สแกน QR แนบสลิป) เรียก ProcessReservationPayment ทันที = Payment_History COMPLETED
+        //  + ใบเสร็จ + ส่งบัญชี + เลื่อนใบจองเป็น "มัดจำแล้ว" ทั้งที่ยังไม่มีใครดูสลิป (สลิปปลอม/ยอดไม่ตรง = ยืนยันห้องฟรี)
+        //  ตอนนี้: เก็บสลิป (Payment_Slips VerificationStatus = PENDING) + ยอดที่แจ้ง (Claimed_Amount, PHASE19_25) เท่านั้น
+        //  ใบจองคง "รอชำระเงิน" (ตัวกวาดยกเลิกอัตโนมัติข้ามใบที่มีสลิปรอตรวจ — BookingPayment.CancelStaleUnpaidIfDue)
+        //  พนักงานอนุมัติที่ Account/SlipVerification → ApproveReservationSlip = ลงรับเงินจริงด้วยสลิปเดิม + PromoteIfPending
+
+        private static bool? _hasSlipClaim;
+        private static DateTime _slipClaimCheckedAt = DateTime.MinValue;
+
+        /// <summary>มีคอลัมน์ Payment_Slips.Claimed_Amount (PHASE19_25) — cache; ไม่มีตรวจใหม่ทุก 5 นาที</summary>
+        public bool HasSlipClaimColumn()
+        {
+            if (_hasSlipClaim == true) return true;
+            if (_hasSlipClaim == false && DateTime.Now - _slipClaimCheckedAt < TimeSpan.FromMinutes(5)) return false;
+            bool has = false;
+            try
+            {
+                DataTable dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT COL_LENGTH('Payment_Slips', 'Claimed_Amount') AS C", null);
+                has = dt != null && dt.Rows.Count > 0 && dt.Rows[0]["C"] != DBNull.Value;
+            }
+            catch { has = false; }
+            _hasSlipClaim = has;
+            _slipClaimCheckedAt = DateTime.Now;
+            return has;
+        }
+
+        /// <summary>
+        /// ลูกค้าแนบสลิปโอนค่าจองเอง — เก็บเป็น "รอตรวจ" ไม่สร้าง Payment_History/ใบเสร็จ/บัญชี และไม่เลื่อนสถานะใบจอง
+        /// คืน null = ยังไม่รัน PHASE19_25 (ไม่มี Claimed_Amount) → ผู้เรียกตัดสินใจเอง (ห้าม PromoteIfPending)
+        /// </summary>
+        public PaymentResult SubmitReservationSlipForVerification(int reservationId, decimal amount,
+            HttpPostedFile slipFile, string customerPhone, string notes)
+        {
+            if (!HasSlipClaimColumn()) return null;
+            try
+            {
+                var reservation = _reservationDA.GetReservationByIdAndPhone(reservationId, customerPhone ?? "");
+                if (reservation == null || reservation.Rows.Count == 0)
+                    return new PaymentResult { Success = false, Message = "ไม่พบการจองนี้" };
+                if (amount <= 0)
+                    return new PaymentResult { Success = false, Message = "จำนวนเงินต้องมากกว่า 0" };
+                if (slipFile == null || slipFile.ContentLength <= 0)
+                    return new PaymentResult { Success = false, Message = "กรุณาแนบสลิปการโอนเงิน" };
+
+                string status = reservation.Columns.Contains("Status") && reservation.Rows[0]["Status"] != DBNull.Value
+                    ? Convert.ToString(reservation.Rows[0]["Status"]).Trim() : "";
+                if (status.StartsWith("ยกเลิก", StringComparison.Ordinal) || status.StartsWith("ลบ", StringComparison.Ordinal)
+                    || status == "Cancel" || status == "CANCELLED")
+                    return new PaymentResult { Success = false, Message = "การจองนี้ถูกยกเลิกแล้ว กรุณาติดต่อเจ้าหน้าที่" };
+
+                ReservationBalance bal = null;
+                try { bal = ReservationBalance.Load(_connectionString, reservationId); } catch { bal = null; }
+                if (bal != null && amount > bal.Due + Math.Max(0.01m, ReservationBalance.RoundingTolerance))
+                    return new PaymentResult { Success = false, Message = $"จำนวนเงินเกินยอดค้างชำระ (ค้าง: {bal.Due:N2} บาท)" };
+
+                long slipId = UploadPaymentSlip(reservationId, slipFile, customerPhone, null);
+                _code.DatabaseInsertSafe(_connectionString,
+                    "UPDATE Payment_Slips SET Claimed_Amount = @amt, Notes = @notes WHERE ID = @id",
+                    new Dictionary<string, object>
+                    {
+                        { "@id", slipId }, { "@amt", amount },
+                        { "@notes", string.IsNullOrEmpty(notes) ? (object)DBNull.Value : (notes.Length > 1000 ? notes.Substring(0, 1000) : notes) }
+                    });
+
+                _code.Logs(_connectionString, "Payment Slip",
+                    $"การจอง {reservationId}: ลูกค้าแนบสลิป #{slipId} ยอด {amount:N2} — รอเจ้าหน้าที่ตรวจ (ยังไม่ลงรับเงิน/ใบเสร็จ/บัญชี)", "SYSTEM");
+                try
+                {
+                    Notify.Send(Notify.Ev.PaymentOnline,
+                        "🧾 <b>ลูกค้าแนบสลิปโอน รอตรวจ</b> " + amount.ToString("N2") + " บาท\nการจอง #" + reservationId
+                        + "\nตรวจ/อนุมัติที่หน้า ตรวจสอบสลิป — อนุมัติแล้วระบบจึงลงรับเงิน ออกใบเสร็จ และยืนยันการจอง");
+                }
+                catch { }
+
+                return new PaymentResult
+                {
+                    Success = true,
+                    Message = "ได้รับสลิปแล้ว รอเจ้าหน้าที่ตรวจสอบ",
+                    PaymentId = 0,
+                    ReceiptId = null,
+                    RemainingBalance = bal != null ? bal.Due : 0m
+                };
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "Payment Slip Error", $"การจอง {reservationId}: {ex.Message}", "SYSTEM");
+                return new PaymentResult { Success = false, Message = "บันทึกสลิปไม่สำเร็จ: " + ex.Message };
+            }
+        }
+
+        /// <summary>
+        /// พนักงานอนุมัติสลิปที่ลูกค้าแนบ (SubmitReservationSlipForVerification) → ลงรับเงินจริงด้วยสลิปเดิม
+        /// (Payment_History / ใบเสร็จ / บัญชี ผ่าน ProcessReservationPayment) แล้วเลื่อนใบจอง "รอชำระเงิน" → "มัดจำแล้ว"
+        /// ชิงสถานะ PENDING → APPROVED แบบ atomic ก่อน (กันกดซ้ำ/สองคนกดพร้อมกันลงเงินซ้ำ) — ลงเงินไม่ผ่านคืนเป็น PENDING
+        /// คืน null = ไม่ใช่สลิปแบบรอลงเงิน (ไม่มี Claimed_Amount / ลงเงินไปแล้ว / ยังไม่รัน migration) → ผู้เรียกอนุมัติแบบเดิม
+        /// </summary>
+        public PaymentResult ApproveReservationSlip(long slipId, int? adminId)
+        {
+            if (!HasSlipClaimColumn()) return null;
+            DataTable dt = _code.DatabaseQuerySafe(_connectionString,
+                @"SELECT ps.Reservation_ID, ps.Claimed_Amount, ps.VerificationStatus, CAST(ps.Notes AS NVARCHAR(1000)) AS Notes,
+                         r.Customer_MobilePhone,
+                         CASE WHEN EXISTS (SELECT 1 FROM Payment_History ph WHERE ph.PaymentSlip_ID = ps.ID) THEN 1 ELSE 0 END AS Linked
+                    FROM Payment_Slips ps
+                    LEFT JOIN Reservation r ON r.ID = ps.Reservation_ID
+                   WHERE ps.ID = @id",
+                new Dictionary<string, object> { { "@id", slipId } });
+            if (dt == null || dt.Rows.Count == 0) return null;
+            DataRow s0 = dt.Rows[0];
+            decimal claimed = ToDec(s0["Claimed_Amount"]);
+            if (claimed <= 0m || Convert.ToInt32(s0["Linked"]) > 0 || s0["Reservation_ID"] == DBNull.Value) return null;
+            if (!string.Equals(Convert.ToString(s0["VerificationStatus"]), "PENDING", StringComparison.OrdinalIgnoreCase))
+                return new PaymentResult { Success = false, Message = "สลิปนี้ถูกตรวจไปแล้ว (" + Convert.ToString(s0["VerificationStatus"]) + ")" };
+
+            int reservationId = Convert.ToInt32(s0["Reservation_ID"]);
+            int claimedN = _code.DatabaseInsertSafe(_connectionString,
+                @"UPDATE Payment_Slips
+                     SET VerificationStatus = 'APPROVED', IsVerified = 1, VerifiedBy_ID = @by, VerifiedDate = GETDATE()
+                   WHERE ID = @id AND VerificationStatus = 'PENDING'",
+                new Dictionary<string, object> { { "@id", slipId }, { "@by", adminId.HasValue ? (object)adminId.Value : DBNull.Value } });
+            if (claimedN <= 0)
+                return new PaymentResult { Success = false, Message = "สลิปนี้กำลังถูกตรวจ/ถูกตรวจไปแล้ว — รีเฟรชหน้า" };
+
+            PaymentResult pr;
+            try
+            {
+                string notes = s0["Notes"] == DBNull.Value ? "" : Convert.ToString(s0["Notes"]);
+                pr = ProcessReservationPayment(reservationId, claimed, "โอนเงิน", null, adminId,
+                    s0["Customer_MobilePhone"] == DBNull.Value ? "" : Convert.ToString(s0["Customer_MobilePhone"]),
+                    (notes.Length > 0 ? notes + " · " : "") + "อนุมัติสลิป #" + slipId, slipId);
+            }
+            catch (Exception ex)
+            {
+                pr = new PaymentResult { Success = false, Message = ex.Message };
+            }
+
+            if (pr == null || !pr.Success)
+            {
+                // ลงเงินไม่ผ่าน (เช่น ยอดเกินยอดค้างแล้ว / ใบจองถูกยกเลิก) → คืนสถานะให้ตรวจ/แก้แล้วอนุมัติใหม่ได้
+                _code.DatabaseInsertSafe(_connectionString,
+                    @"UPDATE Payment_Slips SET VerificationStatus = 'PENDING', IsVerified = 0, VerifiedBy_ID = NULL, VerifiedDate = NULL
+                       WHERE ID = @id AND VerificationStatus = 'APPROVED'
+                         AND NOT EXISTS (SELECT 1 FROM Payment_History ph WHERE ph.PaymentSlip_ID = @id)",
+                    new Dictionary<string, object> { { "@id", slipId } });
+                return new PaymentResult
+                {
+                    Success = false,
+                    Message = "อนุมัติไม่สำเร็จ — ลงรับเงินไม่ได้: " + (pr == null ? "-" : pr.Message)
+                };
+            }
+
+            Take_Time_BangPhra.Payments.BookingPayment.PromoteIfPending(_connectionString, reservationId);
+            _code.Logs(_connectionString, "Payment Slip",
+                $"อนุมัติสลิป #{slipId} การจอง {reservationId}: ลงรับเงิน {claimed:N2} ใบเสร็จ {pr.ReceiptId}",
+                adminId.HasValue ? adminId.Value.ToString() : "SYSTEM");
+            return pr;
         }
 
         /// <summary>ค่าใช้จ่ายในห้องที่ยัง PENDING เรียงเก่าสุดก่อน (ตารางไม่มี = ว่าง)</summary>

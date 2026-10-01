@@ -363,15 +363,31 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    ทั้งหน้า PaymentHistory (hint + skip), `EnqueueOtaCashReclass` (คืน -2) และ processor (ArgumentException ก่อนโพสต์).
    **VAT ใบ Receipt type 3:** ตรวจแล้วเข้า ภ.พ.30 (standalone receipt `TaxService.cs:571-591`, มัดจำ `:592-640`) ⇒ RECEIPT_DOC
    ไม่ต้องเปลี่ยนเป็น TaxInvoice.
-13. **แหล่งเงินรายช่องทาง (หน้า Accounting Integration):** "ที่ใช้จริง" ใช้ `ResolveEffectiveGatewayPaidHow` = กฎเดียวกับ
-   `OnlinePaymentService.ApplyToReservation` (`OnlinePaymentService.cs:608-621`: แคตตาล็อก `PaymentChannelCatalog.ResolvePaidHowName`
-   → `Nexaacc_Gateway_PaidHow_{P}[_{M}]` → `Payment_PaidHow_Name`; แถวแคตตาล็อกยังไม่ผูกบัญชีแต่ตั้งรายเกตเวย์ → รายเกตเวย์) —
-   แก้ที่ OnlinePaymentService ต้องแก้ตัวนี้ด้วย. ตารางรายช่องทาง (ลูกค้าเห็น + เกตเวย์) + health check เตือนช่องที่ไม่มีกระเป๋าเงิน.
+13. **แหล่งเงินรายช่องทาง (หน้า Accounting Integration):** "ที่ใช้จริง" = `ResolveEffectiveGatewayPaidHow` ซึ่ง **เรียก**
+   `PaymentChannelCatalog.ResolveRecordingPaidHowName` (ตัวเดียวกับ `OnlinePaymentService.ApplyToReservation` / `Payment/Charge`:
+   แคตตาล็อก → `Nexaacc_Gateway_PaidHow_{P}[_{M}]` → `Payment_PaidHow_Name`; แถวแคตตาล็อกยังไม่ผูกบัญชีแต่ตั้งรายเกตเวย์ → รายเกตเวย์)
+   แล้วเติมแค่ป้าย source (CATALOG/GATEWAY_OVERRIDE/GATEWAY_CONFIG/DEFAULT) — แก้กฎที่ catalog ที่เดียว. ตารางรายช่องทาง + health check.
 14. **เงินประกันความเสียหายแบบโอน → บัญชี (opt-in `Nexaacc_SecurityDeposit_Journal`, PHASE19_24, default 0):** hook ใน
    `SecurityHoldService` (TRANSFER เท่านั้น) → คิว `SECURITY_DEPOSIT_JOURNAL`: รับโอน Dr ธนาคาร (Paid_How ของช่องทางรับโอน) /
-   Cr `SECURITY_DEPOSIT_LIABILITY` (ผังโรงแรม NextAcc 21530) · โอนคืน กลับขา · หักค่าเสียหาย **Dr หนี้สิน / Cr ธนาคาร** (ไม่ลงรายได้ —
-   รายได้+VAT มาจากใบเสร็จค่าเสียหายเดิมที่ Dr ธนาคารเดียวกัน ⇒ ไม่ซ้ำ). ref `SECDEP-{holdId}-IN/OUT/DMG` (กันซ้ำทั้งคิว+JE);
-   OUT/DMG ต้องมี IN (รับก่อนเปิดสวิตช์ = ข้าม) และใช้บัญชีธนาคารของ IN. ข้อจำกัด: ใบเสร็จค่าเสียหายต้องใช้แหล่งเงินเดียวกับบัญชีรับโอน.
+   Cr `SECURITY_DEPOSIT_LIABILITY` (ผังโรงแรม NextAcc 21530) · โอนคืน กลับขา. ref `SECDEP-{holdId}-IN/OUT` (กันซ้ำทั้งคิว+JE);
+   OUT ต้องมี IN (รับก่อนเปิดสวิตช์ = ข้าม) และใช้บัญชีธนาคารของ IN.
+   **หักค่าเสียหาย (ต.ค. 2026 — PHASE19_25): ไม่มี JE `DMG` แล้ว** (เดิม Dr หนี้สิน / Cr ธนาคาร ทันที แล้วพึ่งใบเสร็จค่าเสียหายที่เลือก
+   บัญชีรับโอน → ลืมออกใบ/เลือกเงินสด = ธนาคารขาด + ไม่มีรายได้). หนี้สินส่วนที่หักล้างด้วย **ใบเสร็จค่าเสียหายเอง** ที่เลือกแหล่งเงิน
+   **"หักจากเงินประกัน (Security deposit)"** (`Account_Paid_How`, `Channel_Code=SECURITY_DEPOSIT_OFFSET`, OTHER, ลูกค้าไม่เห็น) —
+   **แอดมินต้องผูกบัญชี NextAcc ของแถวนี้ = บัญชีเดียวกับ `SECURITY_DEPOSIT_LIABILITY`** ⇒ Dr หนี้สิน / Cr รายได้ค่าเสียหาย + VAT.
+   ไม่มี flow สร้างใบเสร็จค่าเสียหายในโค้ด (พนักงานออกเอง) จึง default แหล่งเงินให้อัตโนมัติไม่ได้ → `CaptureDamage` บอกชื่อแหล่งเงิน
+   ที่ต้องใช้ในข้อความผลลัพธ์/บันทึก txn/Telegram + log เตือน (`DamageReceiptPaidHowText`: มี IN แล้ว = แถวหักจากเงินประกัน,
+   ไม่มี IN = บัญชีรับโอนแบบเดิม) + health check ข้อ 4c ตรวจว่าแถวมีและผูกบัญชีเดียวกับหนี้สิน. `EnqueueSecurityDepositJournal("DMG")`
+   ถูกปฏิเสธ; คิว DMG เก่าที่ค้างยังประมวลผลได้ (คู่กับใบเสร็จแบบเดิม).
+15. **มัดจำ vs รายได้ (`PaymentService.ProcessReservationPayment`, ต.ค. 2026):** รับก่อนเข้าพักแต่ไม่ครบยอด = **มัดจำเสมอ**
+   (`isDeposit = !coversAll && !arrived` — ตรงกับหน้าแก้ไขการจอง `IsDeposit = Deposit < totalPrice` และข้อ 6b); ค่าใช้จ่ายในห้องที่ยอด
+   ครอบคลุมยังถูกปิด (Receipt_ID = ใบมัดจำ) เหมือน Reserve `MarkChargesPaidUpTo`. รายได้ต่อบรรทัดมาจาก ProductType_ID ของบรรทัด
+   (ค่าสัตว์เลี้ยง type 3 ไม่ถูกตีเป็น ROOM_REVENUE — `revenueType` เป็น fallback เฉพาะบรรทัดไม่มี type).
+16. **สลิปที่ลูกค้าแนบเอง (`/Payment/Pay` สแกน QR):** ไม่ลงรับเงินทันทีแล้ว — `SubmitReservationSlipForVerification` เก็บ
+   `Payment_Slips` (PENDING) + `Claimed_Amount` (PHASE19_25) ไม่สร้าง Payment_History/ใบเสร็จ/บัญชี และไม่ `PromoteIfPending`; ตัวกวาด
+   `CancelStaleUnpaidIfDue` ข้ามใบที่มีสลิปรอตรวจ. เจ้าหน้าที่อนุมัติที่ `Account/SlipVerification` → `ApproveReservationSlip` (ชิงสถานะ
+   PENDING→APPROVED แบบ atomic → `ProcessReservationPayment(existingSlipId)` → `PromoteIfPending`; ลงเงินไม่ผ่าน = คืน PENDING).
+   ยังไม่รัน migration = ลงรับเงินแบบเดิมแต่ไม่ยืนยันการจองจากสลิปลูกค้า. พนักงานใช้หน้า Pay = เหมือนเดิม.
 
 ## Queue resilience (ส.ค. 2026 — หลังเคส NextAcc ล่มทั้งแอป)
 
@@ -399,7 +415,10 @@ Migrations: **PHASE18_30** (index Logs) และ **PHASE18_31** (`Processing_St
 `SetCollectMode` เท่านั้น (log `Reservation_Collect_Mode_Log`, ล็อกเมื่อ `Ota_Revenue_Ref` โพสต์แล้ว/ใบเสร็จ sync แล้ว).
 เช็คอิน: Due=0 → ข้ามรับเงิน (ไม่มีแถวเงินสดปลอม), UNKNOWN → บังคับเลือก (CHANNEL = Owner/Admin). ⇒ รายได้ค่าห้อง
 Channel Collect ต้องมาจาก `RevenuePostingService.PostOtaRoomRevenueIfDue` (`Nexaacc_OtaRoomRevenue`, ฐาน
-`Nexaacc_OtaRevenue_Basis` NET|GROSS) — ต้องเปิดพร้อม deploy หลังผู้ทำบัญชีตรวจ dry-run. แถวเงินสดปลอมเก่า: หน้า
+`Nexaacc_OtaRevenue_Basis` NET|GROSS) — ต้องเปิดพร้อม deploy หลังผู้ทำบัญชีตรวจ dry-run. **ยอดที่ OTA ครอบคลุม (CHANNEL):**
+`OtaCoverageAmount` = `OTA_Gross_Amount` เมื่อ |TotalPrice − Gross| ≤ จำนวนคืน (ราคาห้องตั้งจาก gross — ใบเก่า/REFSELL) ไม่งั้น
+`OtaAmount` (net-first, คงความหมายเดิมเพราะ RevenuePostingService เทียบกับ net) ⇒ ค่าคอมฯ OTA ไม่กลายเป็นยอดค้างตอนเช็คเอาท์.
+สถานะที่ถือห้องใน `EmailReservationService.FreeStatusFilter` / `Default.aspx` ใช้ `RescheduleService.SqlHoldsRoom` แล้ว. แถวเงินสดปลอมเก่า: หน้า
 `Payment/PaymentHistory.aspx` แท็บ "⚠ เงินสดของใบ OTA" → Status `OTA_RECLASS` / คิว `OTA_CASH_RECLASS`
 (JE Dr OTA_RECEIVABLE / Cr เงินสด, ref `OTA-RECLASS-{receiptId}`, ตั้ง `Ota_Revenue_Ref=RECLASS-…`).
 

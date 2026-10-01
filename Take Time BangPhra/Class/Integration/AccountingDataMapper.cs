@@ -3813,7 +3813,8 @@ namespace Take_Time_BangPhra.Integration
         /// "เงินประกันความเสียหาย" — Services/ChartOfAccountTemplates.cs:441 หรือ 21620 "เงินค้ำประกัน" :130):
         ///   IN  : Dr ธนาคาร / Cr หนี้สินเงินประกัน
         ///   OUT : Dr หนี้สินเงินประกัน / Cr ธนาคาร   (โอนคืน)
-        ///   DMG : Dr หนี้สินเงินประกัน / Cr ธนาคาร   (ส่วนที่หัก — รายได้มาจากใบเสร็จค่าเสียหายที่ Dr ธนาคารเดียวกัน)
+        ///   DMG : Dr หนี้สินเงินประกัน / Cr ธนาคาร   (ของเก่า — ไม่ enqueue ใหม่แล้ว; ส่วนที่หักล้างด้วยใบเสร็จค่าเสียหาย
+        ///         แหล่งเงิน "หักจากเงินประกัน (Security deposit)" → Dr หนี้สิน / Cr รายได้ค่าเสียหาย, PHASE19_25)
         /// Reference = SECDEP-{holdId}-{kind} (ใช้กันซ้ำ)
         /// </summary>
         public CreateJournalEntryRequest MapSecurityDepositJournal(string kind, long holdId, string holdRef,

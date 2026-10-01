@@ -149,7 +149,12 @@ namespace Take_Time_BangPhra.Payments
                        AND ISNULL(r.Deposit, 0) <= 0
                        AND NOT EXISTS (
                              SELECT 1 FROM Payment_History ph
-                              WHERE ph.Reservation_ID = r.ID AND ph.[Status] = 'COMPLETED')",
+                              WHERE ph.Reservation_ID = r.ID AND ph.[Status] = 'COMPLETED')
+                       -- ลูกค้าแนบสลิปแล้ว รอเจ้าหน้าที่ตรวจ (PaymentService.SubmitReservationSlipForVerification) — ห้ามยกเลิก
+                       AND NOT EXISTS (
+                             SELECT 1 FROM Payment_Slips ps
+                              WHERE ps.Reservation_ID = r.ID AND ps.VerificationStatus = 'PENDING'
+                                AND ISNULL(ps.IsActive, 1) = 1)",
                     new Dictionary<string, object>
                     {
                         { "@pending", PendingStatus },

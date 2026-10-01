@@ -6458,9 +6458,13 @@ namespace Take_Time_BangPhra
         /// </summary>
         private bool ValidateCustomerBookingGate()
         {
+            // พนักงานไม่ผ่านด่านนี้ (ลงจองแทนลูกค้า) — ตรวจนอก try เพื่อให้ข้อผิดพลาดของด่านลูกค้าไม่กระทบพนักงาน
+            bool staff;
+            try { staff = IsStaffUser; } catch { staff = false; }
+            if (staff) return true;
+
             try
             {
-                if (IsStaffUser) return true;
 
                 // 📜 กติกาของรีสอร์ต (CheckBox1) — ปุ่มยืนยันกดได้เสมอแล้ว (หน้าเว็บบอกว่ายังขาดอะไร) จึงต้องตรวจที่นี่ด้วย
                 if (CheckBox1 != null && CheckBox1.Visible && !CheckBox1.Checked)
@@ -6515,7 +6519,15 @@ namespace Take_Time_BangPhra
                     }
                 }
             }
-            catch { }
+            catch (Exception gateEx)
+            {
+                // fail closed สำหรับลูกค้า — เดิม catch แล้ว return true = ข้ามการยอมรับนโยบาย/ยอดมัดจำขั้นต่ำได้เมื่อมีข้อผิดพลาด
+                try { code2.Logs(conn, "Reserve - Customer Booking Gate", "ตรวจด่านก่อนจองไม่สำเร็จ (หยุดการจอง): " + gateEx.Message, "SYSTEM"); } catch { }
+                ShowUserError("gateError",
+                    "ระบบตรวจข้อมูลการจองขัดข้องชั่วคราว ยังไม่ได้สร้างการจอง — กรุณากดยืนยันอีกครั้ง หรือติดต่อที่พัก",
+                    null);
+                return false;
+            }
             return true;
         }
 

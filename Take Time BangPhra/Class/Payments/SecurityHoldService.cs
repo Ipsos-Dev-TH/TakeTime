@@ -487,13 +487,25 @@ namespace Take_Time_BangPhra.Payments
             decimal remainder = hold.Amount - amount;
             if (isTransfer) SaveRefundRecord(hold.ID, remainder, refundRef, refundNote);
 
-            // บัญชี (opt-in): ส่วนที่หัก = ล้างหนี้สินคู่กับใบเสร็จค่าเสียหาย (ไม่ลงรายได้ซ้ำ) · ส่วนที่เหลือ = โอนคืน
+            // แหล่งเงินที่ต้องใช้ออก "ใบเสร็จค่าเสียหาย" (คำนวณครั้งเดียว ใช้ทั้งข้อความ/บันทึก/Telegram)
+            string damagePaidHow = isTransfer ? DamageReceiptPaidHowText(hold) : null;
+
+            // บัญชี (opt-in): ส่วนที่เหลือ = โอนคืน (Dr หนี้สิน / Cr ธนาคาร)
+            // ส่วนที่หัก: **ไม่โพสต์ JE "DMG" แล้ว** — เดิม Dr หนี้สิน / Cr ธนาคาร ทันที แล้วพึ่งให้พนักงานออกใบเสร็จค่าเสียหาย
+            // ด้วยแหล่งเงิน = บัญชีรับโอน (Dr ธนาคาร) มาหักล้าง → ถ้าลืมออกใบ/เลือกเงินสด ธนาคารขาด + ไม่มีรายได้.
+            // ตอนนี้หนี้สินที่เหลือ (= ยอดที่หัก) ถูกล้างโดยใบเสร็จค่าเสียหายเอง: แหล่งเงิน "หักจากเงินประกัน (Security deposit)"
+            // (PHASE19_25, ผูกบัญชี NextAcc = บัญชีของ SECURITY_DEPOSIT_LIABILITY) → NextAcc ลง Dr หนี้สิน / Cr รายได้ค่าเสียหาย + VAT
+            // ลืมออกใบ = หนี้สินค้าง (เห็นในงบ/ตรวจสุขภาพ) แทนที่จะเป็นธนาคารขาดเงียบ ๆ
             if (isTransfer)
             {
-                PostSecurityDepositJournal(hold, "DMG", amount, null, string.IsNullOrEmpty(reason) ? null : reason);
                 if (remainder > 0)
                     PostSecurityDepositJournal(hold, "OUT", remainder, null,
                         string.IsNullOrWhiteSpace(refundRef) ? null : "อ้างอิงโอนคืน " + refundRef.Trim());
+                if (HasSecurityDepositLiability(hold))
+                    _code.Logs(_conn, "SecurityHold", "⚠ หักค่าเสียหาย " + amount.ToString("N2") + " จากเงินประกันโอน " + hold.HoldRef
+                        + " (การจอง #" + hold.ReservationId + ") — ไม่โพสต์ JE SECDEP-" + hold.ID + "-DMG: หนี้สินเงินประกันส่วนนี้"
+                        + " ต้องล้างด้วยใบเสร็จค่าเสียหายที่เลือกแหล่งเงิน \"" + damagePaidHow + "\""
+                        + " (ห้ามเลือกเงินสด/บัญชีรับโอน — จะนับเงินซ้ำ)", "System");
             }
 
             // เงินเข้าจริงแล้ว → ลงสมุดรายการชำระเงินกลาง (ตรวจย้อน/ออกใบเสร็จต่อได้)
@@ -515,7 +527,7 @@ namespace Take_Time_BangPhra.Payments
                 store.MarkPaid(txn.ID, hold.ProviderChargeId, null, hold.CardBrand, hold.CardLast4);
                 store.SetApplied(txn.ID,
                     isTransfer
-                        ? "หักจากเงินประกันเงินโอน " + hold.HoldRef + " — ออกใบเสร็จค่าเสียหาย (แหล่งเงิน: " + TransferPaidHowText() + ")"
+                        ? "หักจากเงินประกันเงินโอน " + hold.HoldRef + " — ออกใบเสร็จค่าเสียหาย (แหล่งเงิน: " + damagePaidHow + ")"
                         : isCash
                         ? "หักจากเงินประกันเงินสด " + hold.HoldRef + " — ออกใบเสร็จค่าเสียหาย (แหล่งเงิน: เงินสด)"
                         : "ตัดจากวงเงินประกัน " + hold.HoldRef + " — ออกใบเสร็จค่าเสียหายโดยเลือกแหล่งเงินของเกตเวย์",
@@ -540,12 +552,13 @@ namespace Take_Time_BangPhra.Payments
                     : isCash
                     ? (remainder > 0 ? "\n💵 ต้องคืนเงินสดลูกค้า " + remainder.ToString("N2") + " บาท" : "")
                     : "\nส่วนที่เหลือคืนวงเงินให้ลูกค้าอัตโนมัติ")
-                + " · อย่าลืมออกใบเสร็จค่าเสียหาย");
+                + " · อย่าลืมออกใบเสร็จค่าเสียหาย"
+                + (isTransfer ? " (แหล่งเงิน: " + Notify.E(damagePaidHow) + ")" : ""));
 
             if (isTransfer)
                 return "หักค่าเสียหาย " + amount.ToString("N2") + " บาทแล้ว"
                      + (remainder > 0 ? " — โอนคืนลูกค้า " + remainder.ToString("N2") + " บาท (นอกเกตเวย์)" : "")
-                     + " และออกใบเสร็จค่าเสียหาย (แหล่งเงิน: " + TransferPaidHowText() + ")";
+                     + " และออกใบเสร็จค่าเสียหาย (แหล่งเงิน: " + damagePaidHow + ")";
 
             if (isCash)
                 return "หักค่าเสียหาย " + amount.ToString("N2") + " บาทแล้ว"
@@ -904,12 +917,73 @@ namespace Take_Time_BangPhra.Payments
             }
         }
 
-        /// <summary>ชื่อแหล่งเงินของบัญชีรับโอน (ใช้บอกพนักงานตอนออกใบเสร็จค่าเสียหาย)</summary>
+        /// <summary>ชื่อแหล่งเงินของบัญชีรับโอน (ใช้บอกพนักงานตอนออกใบเสร็จค่าเสียหาย — กรณีเงินประกันไม่ได้ลงบัญชีหนี้สิน)</summary>
         private static string TransferPaidHowText()
         {
             PaymentChannel ch = TransferChannel();
             if (ch == null) return "บัญชีโอนของที่พัก";
             return string.IsNullOrEmpty(ch.PaidHowName) ? ch.Name : ch.PaidHowName;
+        }
+
+        /// <summary>รหัสแคตตาล็อกของแหล่งเงิน "หักจากเงินประกัน (Security deposit)" — seed โดย PHASE19_25</summary>
+        public const string OffsetChannelCode = "SECURITY_DEPOSIT_OFFSET";
+        /// <summary>ชื่อแหล่งเงินตั้งต้นของแถวด้านบน (ใช้เมื่อหาแถวในฐานข้อมูลไม่เจอ)</summary>
+        public const string OffsetPaidHowDefaultName = "หักจากเงินประกัน (Security deposit)";
+
+        /// <summary>
+        /// ชื่อแหล่งเงิน "หักจากเงินประกัน" ที่เปิดใช้อยู่ (หาตาม Channel_Code ก่อน แล้วตามชื่อตั้งต้น) — null = ยังไม่รัน PHASE19_25/ปิดไว้
+        /// </summary>
+        public static string FindOffsetPaidHowName(string connectionString)
+        {
+            var c = new code();
+            // 1) ตามรหัสแคตตาล็อก (ผู้ดูแลเปลี่ยนชื่อแถวได้) — ไม่มีคอลัมน์ Channel_Code (ยังไม่รัน PHASE19_20) = throw → ข้อ 2
+            try
+            {
+                DataTable dt = c.DatabaseQuerySafe(connectionString,
+                    "SELECT TOP 1 Paid_How FROM Account_Paid_How WHERE Status = 'True' AND Channel_Code = @code",
+                    new Dictionary<string, object> { { "@code", OffsetChannelCode } });
+                if (dt != null && dt.Rows.Count > 0 && dt.Rows[0][0] != DBNull.Value)
+                    return dt.Rows[0][0].ToString();
+            }
+            catch { }
+            // 2) ตามชื่อตั้งต้น
+            try
+            {
+                DataTable dt = c.DatabaseQuerySafe(connectionString,
+                    "SELECT TOP 1 Paid_How FROM Account_Paid_How WHERE Status = 'True' AND Paid_How = @nm",
+                    new Dictionary<string, object> { { "@nm", OffsetPaidHowDefaultName } });
+                if (dt != null && dt.Rows.Count > 0 && dt.Rows[0][0] != DBNull.Value)
+                    return dt.Rows[0][0].ToString();
+            }
+            catch { }
+            return null;
+        }
+
+        /// <summary>
+        /// เงินประกันก้อนนี้ถูกลงบัญชีหนี้สินแล้วหรือยัง (มี JE ขาเข้า SECDEP-{id}-IN ในคิว + เปิด Nexaacc_SecurityDeposit_Journal)
+        /// — ใช้เลือกแหล่งเงินของใบเสร็จค่าเสียหาย · อ่านไม่ได้ = false (ตกไปใช้กติกาเดิม: แหล่งเงินบัญชีรับโอน)
+        /// </summary>
+        private bool HasSecurityDepositLiability(HoldRow hold)
+        {
+            try
+            {
+                if (hold == null || !hold.IsTransfer) return false;
+                return new Take_Time_BangPhra.Integration.AccountingSyncService(_conn).HasSecurityDepositInJournal(hold.ID);
+            }
+            catch { return false; }
+        }
+
+        /// <summary>
+        /// แหล่งเงินที่ต้องเลือกตอนออก "ใบเสร็จค่าเสียหาย" ของเงินประกันโอน:
+        ///   ลงบัญชีหนี้สินแล้ว (JE IN) → "หักจากเงินประกัน (Security deposit)" (ผูก NextAcc = บัญชี SECURITY_DEPOSIT_LIABILITY)
+        ///                                  ⇒ ใบเสร็จลง Dr หนี้สิน / Cr รายได้ค่าเสียหาย + VAT (ล้างหนี้สินส่วนที่หักพอดี)
+        ///   ยังไม่ลงบัญชีหนี้สิน (สวิตช์ปิด/รับก่อนเปิด) → บัญชีรับโอนตามเดิม (Dr ธนาคาร / Cr รายได้ — เงินเข้าธนาคารที่ยังไม่เคยลง)
+        /// </summary>
+        private string DamageReceiptPaidHowText(HoldRow hold)
+        {
+            if (!HasSecurityDepositLiability(hold)) return TransferPaidHowText();
+            return FindOffsetPaidHowName(_conn)
+                ?? (OffsetPaidHowDefaultName + " — ⚠ ยังไม่มีแหล่งเงินนี้: รัน migration PHASE19_25 แล้วผูกบัญชีเงินประกันรอคืน");
         }
 
         // ── ภายใน ───────────────────────────────────────────────────────────

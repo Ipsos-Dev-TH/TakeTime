@@ -67,6 +67,8 @@ namespace Take_Time_BangPhra.Account
         /// </summary>
         private DataTable GetSlips(string ocrStatus, string verificationStatus, DateTime? startDate, DateTime? endDate)
         {
+            // สลิปที่ลูกค้าแนบเอง: แสดงยอดที่ลูกค้าแจ้ง (Claimed_Amount, PHASE19_25) — ยอดที่จะลงรับเงินเมื่ออนุมัติ
+            bool hasClaim = new PaymentService(conn).HasSlipClaimColumn();
             string query = @"
                 SELECT
                     ps.ID AS SlipID,
@@ -82,7 +84,7 @@ namespace Take_Time_BangPhra.Account
                     ps.RejectionReason,
                     c.FullName AS CustomerName,
                     c.MobilePhone AS CustomerPhone,
-                    r.Total AS PaymentAmount,
+                    " + (hasClaim ? "COALESCE(ps.Claimed_Amount, r.Total)" : "r.Total") + @" AS PaymentAmount,
                     a.Username AS VerifiedByName,
                     uploader.Username AS UploadedByName
                 FROM Payment_Slips ps
@@ -161,9 +163,9 @@ namespace Take_Time_BangPhra.Account
 
                 if (e.CommandName == "ApproveSlip")
                 {
-                    ApproveSlip(slipId);
-                    lblMessage.Text = "อนุมัติสลิปสำเร็จ";
-                    lblMessage.ForeColor = System.Drawing.Color.Green;
+                    string err = ApproveSlip(slipId, out string okMsg);
+                    lblMessage.Text = err ?? okMsg ?? "อนุมัติสลิปสำเร็จ";
+                    lblMessage.ForeColor = err == null ? System.Drawing.Color.Green : System.Drawing.Color.Red;
                 }
                 else if (e.CommandName == "RejectSlip")
                 {
@@ -185,11 +187,26 @@ namespace Take_Time_BangPhra.Account
         }
 
         /// <summary>
-        /// Approve slip
+        /// Approve slip — คืนข้อความ error (null = สำเร็จ)
+        /// สลิปที่ลูกค้าแนบเองจากหน้า /Payment/Pay (มี Claimed_Amount) = อนุมัติแล้วลงรับเงินจริง (Payment_History / ใบเสร็จ /
+        /// บัญชี) + ยืนยันการจอง ผ่าน PaymentService.ApproveReservationSlip · สลิปอื่น (ลงเงินไปแล้ว) = เปลี่ยนสถานะอย่างเดียวแบบเดิม
         /// </summary>
-        private void ApproveSlip(long slipId)
+        private string ApproveSlip(long slipId, out string okMessage)
         {
+            okMessage = null;
             int adminId = Session["ID"] != null ? Convert.ToInt32(Session["ID"]) : 0;
+
+            PaymentResult pr = new PaymentService(conn).ApproveReservationSlip(slipId, adminId > 0 ? (int?)adminId : null);
+            if (pr != null)
+            {
+                codeInstance.Logs(conn, pr.Success ? "Slip Approved" : "Slip Approve Failed",
+                    $"SlipID: {slipId}, AdminID: {adminId}, {pr.Message}, Receipt: {pr.ReceiptId}",
+                    Session["UserName"]?.ToString() ?? "SYSTEM");
+                if (!pr.Success) return pr.Message;
+                okMessage = "อนุมัติสลิปและลงรับเงินแล้ว"
+                    + (string.IsNullOrEmpty(pr.ReceiptId) ? "" : " — ใบเสร็จ " + pr.ReceiptId);
+                return null;
+            }
 
             string query = @"
                 UPDATE Payment_Slips
@@ -211,6 +228,7 @@ namespace Take_Time_BangPhra.Account
             codeInstance.Logs(conn, "Slip Approved",
                 $"SlipID: {slipId}, AdminID: {adminId}",
                 Session["UserName"]?.ToString() ?? "SYSTEM");
+            return null;
         }
 
         /// <summary>

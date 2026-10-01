@@ -507,6 +507,9 @@ namespace Take_Time_BangPhra.Payment
             pnlManual.Visible = true;
 
             bool requireSlip = PaymentGatewayConfig.GetBool("ManualQr_Require_Slip", true);
+            // ลูกค้าชำระค่าจองเอง: สลิปคือหลักฐานเดียวที่เจ้าหน้าที่ใช้ตรวจก่อนลงรับเงิน → บังคับแนบเสมอ
+            bool customerReservation = SourceType == PaymentSource.Reservation && !IsStaff();
+            if (customerReservation) requireSlip = true;
             if (requireSlip && !fuSlip.HasFile)
             {
                 ShowInfo(pnlManual, "กรุณาแนบสลิปการโอนเงินก่อนกดยืนยัน", true);
@@ -535,9 +538,29 @@ namespace Take_Time_BangPhra.Payment
 
                 if (SourceType == PaymentSource.Reservation)
                 {
-                    // ได้ Payment_History / ใบเสร็จ / ส่งบัญชี เหมือนพนักงานคีย์เอง — ยอดกลาง (ค่าห้อง + ค่าใช้จ่ายในห้อง)
-                    // ครบยอด = ปิดค่าใช้จ่ายในห้อง + มีบรรทัดในใบเสร็จ / ไม่ครบก่อนเช็คอิน = ใบรับมัดจำ
                     var ps = new PaymentService(_conn);
+
+                    // ลูกค้าแนบสลิปเอง → "รอตรวจสลิป": เก็บสลิป + ยอดที่แจ้ง ยังไม่ลงรับเงิน/ใบเสร็จ/บัญชี และไม่ยืนยันการจอง
+                    // (ใบจองคง "รอชำระเงิน" — ตัวกวาดยกเลิกข้ามใบที่มีสลิปรอตรวจ) เจ้าหน้าที่อนุมัติที่ Account/SlipVerification
+                    // → PaymentService.ApproveReservationSlip ลงรับเงิน + ใบเสร็จ + บัญชี + PromoteIfPending
+                    if (customerReservation)
+                    {
+                        PaymentResult sr = ps.SubmitReservationSlipForVerification(
+                            int.Parse(SourceId), Amount, fuSlip.PostedFile, CustomerPhone,
+                            "ชำระผ่านหน้าชำระเงินออนไลน์ (สแกน QR แนบสลิป)");
+                        if (sr != null)
+                        {
+                            if (!sr.Success) { ShowInfo(pnlManual, sr.Message, true); return; }
+                            Done("ได้รับสลิปแล้ว เจ้าหน้าที่จะตรวจสอบและยืนยันการชำระเงินให้โดยเร็วที่สุด");
+                            return;
+                        }
+                        // sr == null: ยังไม่รัน migration PHASE19_25 (ไม่มี Payment_Slips.Claimed_Amount) → ลงรับเงินแบบเดิม
+                        // แต่ "ไม่" เลื่อนสถานะใบจองจากสลิปที่ยังไม่มีใครตรวจ (ดูด้านล่าง)
+                        LogPay("ยังไม่รัน PHASE19_25 — สลิปลูกค้าการจอง " + SourceId + " ลงรับเงินทันที (ไม่ยืนยันการจองจนกว่าเจ้าหน้าที่ตรวจ)");
+                    }
+
+                    // พนักงาน: ได้ Payment_History / ใบเสร็จ / ส่งบัญชี — ยอดกลาง (ค่าห้อง + ค่าใช้จ่ายในห้อง)
+                    // ครบยอด = ปิดค่าใช้จ่ายในห้อง + มีบรรทัดในใบเสร็จ / ไม่ครบก่อนเช็คอิน = ใบรับมัดจำ
                     PaymentResult pr = ps.ProcessReservationPayment(
                         int.Parse(SourceId), Amount, "โอนเงิน",
                         fuSlip.HasFile ? fuSlip.PostedFile : null,
@@ -549,9 +572,10 @@ namespace Take_Time_BangPhra.Payment
                         ShowInfo(pnlManual, pr == null ? "บันทึกไม่สำเร็จ" : pr.Message, true);
                         return;
                     }
-                    // ใบจองที่ลูกค้าจองแล้วรอชำระ (เลือกจ่ายออนไลน์แต่มาโอนแทน) → ได้เงินแล้ว เลื่อนเป็น "มัดจำแล้ว"
-                    // เหมือนเส้นทางเกตเวย์ (เงื่อนไขสถานะเดิมใน UPDATE — ไม่ทับสถานะอื่น)
-                    BookingPayment.PromoteIfPending(_conn, int.Parse(SourceId));
+                    // ใบจองที่ลูกค้าจองแล้วรอชำระ (เลือกจ่ายออนไลน์แต่มาโอนแทน) → เลื่อนเป็น "มัดจำแล้ว"
+                    // เฉพาะพนักงานคีย์เอง (ตรวจเงินแล้ว) — สลิปที่ลูกค้าแนบเองยังไม่ผ่านการตรวจ ห้ามยืนยันการจอง
+                    if (!customerReservation)
+                        BookingPayment.PromoteIfPending(_conn, int.Parse(SourceId));
                     Done("บันทึกการชำระเงินเรียบร้อยแล้ว"
                         + (string.IsNullOrEmpty(pr.ReceiptId) ? "" : " เลขที่ใบเสร็จ " + pr.ReceiptId));
                     return;
