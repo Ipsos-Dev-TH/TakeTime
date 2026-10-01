@@ -534,6 +534,8 @@ namespace Take_Time_BangPhra
 
             string reason = (hdnCancelReason.Value ?? "").Trim();
             if (reason.Length == 0) reason = "ยกเลิกจากหน้ารายการเลื่อนเข้าพัก";
+            // ช่องเหตุผลจำกัด 450 ตัวอักษรฝั่งเบราว์เซอร์ — ตัดซ้ำฝั่งเซิร์ฟเวอร์ (hidden field แก้ได้)
+            if (reason.Length > 450) reason = reason.Substring(0, 450);
             string adminName = Session["User"]?.ToString();
             string userName = Session["UserName"]?.ToString() ?? adminName ?? "User";
 
@@ -639,6 +641,7 @@ namespace Take_Time_BangPhra
             string css = kind == "error" ? "msg-error" : (kind == "warn" ? "msg-warn" : "msg-ok");
             pnlMessage.Visible = true;
             pnlMessage.CssClass = "msg-banner " + css;
+            pnlMessage.Attributes["role"] = kind == "error" ? "alert" : "status";
             litMessage.Text = HttpUtility.HtmlEncode(text);
         }
 

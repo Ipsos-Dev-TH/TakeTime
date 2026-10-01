@@ -221,7 +221,8 @@ namespace Take_Time_BangPhra.Admin.Settings
                         "<div class=\"pg-row\" data-pg-key=\"" + Server.HtmlEncode(key) + "\">"
                         + "<div class=\"pg-label\"><b>" + Server.HtmlEncode(name) + "</b>"
                         + (string.IsNullOrEmpty(desc) ? "" : "<small>" + Server.HtmlEncode(desc) + "</small>")
-                        + "<small style=\"color:#b6c0ba\">" + Server.HtmlEncode(key) + "</small>"
+                        // ชื่อค่าทางเทคนิค — ซ่อนไว้ เปิดดูได้ด้วยติ๊ก "แสดงชื่อค่าทางเทคนิค"
+                        + "<small class=\"pg-key as-tech\">" + Server.HtmlEncode(key) + "</small>"
                         + "</div><div class=\"pg-input\">"));
 
                     Control input = key == "Payment_Methods_Enabled"
@@ -366,7 +367,14 @@ namespace Take_Time_BangPhra.Admin.Settings
             tb.ID = id;
             if (type == "textarea") { tb.TextMode = TextBoxMode.MultiLine; tb.Rows = 6; }
             else if (secret) { tb.TextMode = TextBoxMode.Password; tb.Attributes["placeholder"] = "เว้นว่าง = ใช้ค่าเดิม"; }
-            else if (type == "number") tb.Attributes["inputmode"] = "decimal";
+            else if (type == "number")
+            {
+                tb.Attributes["inputmode"] = "decimal";
+                tb.Attributes["data-as-num"] = "money";   // ตรวจฝั่งเบราว์เซอร์ว่าเป็นตัวเลข (เซิร์ฟเวอร์ใช้ค่าเดิมถ้าแปลงไม่ได้)
+            }
+            // ที่อยู่เว็บต้องขึ้นต้น http(s):// — ตรวจซ้ำฝั่งเซิร์ฟเวอร์ใน Validate()
+            if (key == "Payso_BaseUrl_Sandbox" || key == "Payso_BaseUrl_Production" || key == "Payment_Site_BaseUrl")
+                tb.Attributes["data-as-url"] = "1";
 
             // ค่าลับไม่ส่งค่าจริงออกหน้าเว็บ
             tb.Text = secret ? "" : (value ?? "");
@@ -401,6 +409,13 @@ namespace Take_Time_BangPhra.Admin.Settings
             int? adminId = null;
             try { if (Session["UserID"] != null) adminId = Convert.ToInt32(Session["UserID"]); }
             catch { }
+
+            // ป้ายข้อผิดพลาดรอบก่อนถูกเก็บใน ViewState — ล้างก่อนตรวจใหม่
+            foreach (Control ic in _inputs.Values)
+            {
+                var wc0 = ic as WebControl;
+                if (wc0 != null) wc0.Attributes.Remove("data-as-err");
+            }
 
             foreach (DataRow r in _cfg.Rows)
             {
@@ -438,7 +453,14 @@ namespace Take_Time_BangPhra.Admin.Settings
                 if (secret && string.IsNullOrWhiteSpace(value)) continue;
 
                 string err = Validate(key, value);
-                if (err != null) { problems.Add(err); continue; }
+                if (err != null)
+                {
+                    problems.Add(err);
+                    // แสดงข้อความใต้ช่องที่ผิดด้วย (ไม่ต้องไล่หาจากชื่อคีย์)
+                    var wc = c as WebControl;
+                    if (wc != null) wc.Attributes["data-as-err"] = err;
+                    continue;
+                }
 
                 try { PaymentGatewayConfig.Set(key, value.Trim(), adminId); saved++; }
                 catch (Exception ex) { problems.Add(key + ": " + ex.Message); }
@@ -447,9 +469,15 @@ namespace Take_Time_BangPhra.Admin.Settings
             PaymentGatewayConfig.Invalidate();
 
             if (problems.Count > 0)
-                Msg("err", "บันทึกแล้ว " + saved + " ค่า แต่มีปัญหา:<br/>• " + string.Join("<br/>• ", problems.ToArray()));
+            {
+                var enc = new List<string>();
+                foreach (string pr in problems) enc.Add(Server.HtmlEncode(pr));
+                Msg("err", "บันทึกแล้ว " + saved + " ค่า แต่มี " + problems.Count
+                    + " ค่าที่ยังไม่ได้บันทึก (ไฮไลต์สีแดงในฟอร์ม):<br/>• " + string.Join("<br/>• ", enc.ToArray())
+                    + SettingsUi.StartDirtyMarker);
+            }
             else
-                Msg("ok", "บันทึกการตั้งค่าเรียบร้อยแล้ว (" + saved + " ค่า) — มีผลทันทีภายใน 30 วินาที");
+                Msg("ok", "✓ บันทึกการตั้งค่าเรียบร้อยแล้ว (" + saved + " ค่า) — มีผลทันทีภายใน 30 วินาที");
 
             ShowStateWarning();
             BindTxn();
@@ -672,7 +700,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                 string js = url.Replace("\\", "\\\\").Replace("'", "\\'");
                 return "<a href=\"#\" title=\"" + Server.HtmlEncode(url) + "\" "
                      + "onclick=\"pgCopy('" + Server.HtmlEncode(js) + "',this);return false;\" "
-                     + "style=\"color:#1b7a4b;\">🔗 " + label + "</a>";
+                     + "style=\"color:#5d4037;font-weight:600;\">🔗 " + label + "</a>";
             }
             catch { return ""; }
         }
@@ -751,7 +779,8 @@ namespace Take_Time_BangPhra.Admin.Settings
         private bool _msgWritten;
         private void Msg(string cls, string html, bool append = false)
         {
-            string block = "<div class=\"pg-alert " + cls + "\">" + html + "</div>";
+            string block = "<div class=\"pg-alert " + cls + "\" role=\"" + (cls == "err" ? "alert" : "status") + "\">"
+                + html + "</div>";
             litMsg.Text = (_msgWritten && append) ? litMsg.Text + block : block;
             _msgWritten = true;
         }

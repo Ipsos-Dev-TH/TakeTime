@@ -1,8 +1,9 @@
-﻿<%@ Page Title="" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="PostponeList.aspx.cs" Inherits="Take_Time_BangPhra.PostponeList" validateRequest="false" enableEventValidation="false"  %>
+﻿<%@ Page Title="ผู้เลื่อนเข้าพัก" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="PostponeList.aspx.cs" Inherits="Take_Time_BangPhra.PostponeList" validateRequest="false" enableEventValidation="false"  %>
 <asp:Content ID="Content1" ContentPlaceHolderID="MainContent" runat="server">
     <link rel="stylesheet" href="/Content/jquery-ui.css">
     <link rel="stylesheet" href="/Content/style.css">
     <link rel="stylesheet" type="text/css" href="/Content/GridView2.css">
+    <link rel="stylesheet" href="<%= ResolveUrl("~/Content/admin-settings.css") %>?v=<%= Take_Time_BangPhra.Admin.Settings.SettingsUi.AssetVersion %>" />
     <style type="text/css">
         .wrap { white-space: normal; width: 100px; }
 
@@ -15,13 +16,20 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 15px;
+            margin-bottom: 14px;
             flex-wrap: wrap;
             gap: 10px;
+            background: linear-gradient(135deg, #5d4037, #3e2723);
+            color: #fff;
+            border-radius: 14px;
+            padding: 16px 20px;
         }
+        .page-header h2 { margin: 0 0 4px; font-size: 20px; font-weight: 700; color: #fff; }
+        .page-header p { margin: 0; font-size: 13.5px; opacity: .92; line-height: 1.6; }
 
         .stat-badge {
             display: inline-block;
+            vertical-align: middle;
             background: #f0ad4e;
             color: #fff;
             padding: 4px 12px;
@@ -64,15 +72,16 @@
         .btn-cancel:hover { background-color: #c9302c; }
 
         .btn-refresh {
-            background-color: #5cb85c;
-            color: white;
+            background-color: #fff;
+            color: #5d4037;
             border: none;
-            padding: 6px 14px;
-            border-radius: 4px;
+            padding: 8px 16px;
+            border-radius: 8px;
             cursor: pointer;
-            font-size: 13px;
+            font-size: 13.5px;
+            font-weight: 600;
         }
-        .btn-refresh:hover { background-color: #449d44; }
+        .btn-refresh:hover { background-color: #efebe9; }
 
         .btn-history {
             background-color: #5bc0de;
@@ -197,6 +206,7 @@
             cursor: pointer;
         }
         .btn-modal-confirm:hover { background: #c9302c; }
+        .btn-modal-confirm[disabled] { opacity: .6; cursor: default; }
 
         .no-history { color: #999; font-style: italic; text-align: center; padding: 20px; }
 
@@ -304,38 +314,51 @@
             margin-top: 8px;
         }
 
-        /* Mobile responsive */
+        /* Mobile responsive — ตารางเป็น "การ์ดรายใบ" (tt-cards-ok: สคริปต์กลางใน Site.Master ติดป้ายคอลัมน์ให้)
+           ข้อมูลแต่ละใบยาว (ลูกค้า / มัดจำ / หมายเหตุ) อ่านเป็นการ์ดง่ายกว่าเลื่อนแนวนอน 10 คอลัมน์ */
         @media (max-width: 768px) {
-            .mydatagrid {
-                display: block;
-                overflow-x: auto;
-                -webkit-overflow-scrolling: touch;
-                font-size: 12px;
-            }
-            .mydatagrid th, .mydatagrid td {
-                padding: 6px 4px !important;
-                white-space: nowrap;
-            }
+            .mydatagrid { font-size: 13px; }
+            .mydatagrid .btn-edit, .mydatagrid .btn-cancel { padding: 8px 16px; }
             .page-header {
                 flex-direction: column;
                 align-items: flex-start;
             }
+            .summary-card { flex: 1 1 45%; }
             .toolbar .search-input { max-width: none; }
             .modal-content { width: 95%; padding: 16px; }
         }
     </style>
 
+    <nav class="as-crumb" aria-label="เส้นทาง">
+        <a href="<%= ResolveUrl("~/ReserveTable") %>"><i class="fas fa-calendar-day"></i> งานประจำวัน</a>
+        <span class="sep">›</span><span class="here">ผู้เลื่อนเข้าพัก</span>
+        <a class="as-back" href="<%= ResolveUrl("~/ReservationList") %>">← รายการจองทั้งหมด</a>
+    </nav>
+
     <div class="page-header">
         <div>
-            <strong><span style="font-size: large">รายการผู้เลื่อนเข้าพัก</span></strong>
-            <span class="stat-badge">
-                <asp:Label ID="lblPostponeCount" runat="server" Text="0" /> รายการ
-            </span>
+            <h2><i class="fas fa-clock"></i> ผู้เลื่อนเข้าพัก
+                <span class="stat-badge">
+                    <asp:Label ID="lblPostponeCount" runat="server" Text="0" /> รายการ
+                </span>
+            </h2>
+            <p>ใบจองที่ลูกค้าขอเลื่อนและยังไม่ได้กำหนดวันเข้าพักใหม่ — ไม่กันห้องบนบอร์ด แต่มัดจำยังเป็นเงินที่ต้องให้บริการ/คืนลูกค้า</p>
         </div>
         <div>
-            <asp:Button ID="btnRefresh" runat="server" Text="รีเฟรช" CssClass="btn-refresh" OnClick="btnRefresh_Click" />
+            <asp:Button ID="btnRefresh" runat="server" Text="↻ รีเฟรช" CssClass="btn-refresh" OnClick="btnRefresh_Click" />
         </div>
     </div>
+
+    <details class="as-help">
+        <summary>ใช้หน้านี้อย่างไร</summary>
+        <ul>
+            <li><b>ลงจอง</b> = เปิดใบจองเดิม (เลขเดิม มัดจำเดิม) เพื่อเลือกวันเข้าพักใหม่ — ใบจะหายจากรายการนี้เองเมื่อลงวันแล้ว</li>
+            <li><b>เลื่อน x ครั้ง</b> = กดดูประวัติการเลื่อนทั้งหมด (ใคร เมื่อไร เพราะอะไร)</li>
+            <li>แถว<span style="background:#fff6e5;padding:0 4px;">สีส้ม</span> = ใกล้ครบอายุมัดจำ ·
+                แถว<span style="background:#fdecea;padding:0 4px;">สีแดง</span> = ครบอายุแล้ว (ระบบไม่ยกเลิกให้เอง ต้องตัดสินใจ: ลงวันให้ / คืนเงิน / ริบมัดจำ)</li>
+            <li><b>ยกเลิก</b> ที่หน้านี้ไม่คืนเงินและไม่ริบมัดจำให้อัตโนมัติ — ต้องทำรายการคืนเงิน/บันทึกรายได้ในระบบบัญชีแยกต่างหาก</li>
+        </ul>
+    </details>
 
     <asp:Panel ID="pnlMessage" runat="server" Visible="false" CssClass="msg-banner">
         <asp:Literal ID="litMessage" runat="server" />
@@ -382,7 +405,7 @@
 
     <center>
     <asp:GridView ID="GridView1" runat="server" OnRowDataBound="GridView1_RowDataBound"
-        AutoGenerateColumns="False" CssClass="mydatagrid"
+        AutoGenerateColumns="False" CssClass="mydatagrid tt-cards-ok"
         PagerStyle-CssClass="pager" HeaderStyle-CssClass="header" RowStyle-CssClass="rows"
         EmptyDataText="ไม่มีรายการเลื่อนเข้าพัก">
         <Columns>
@@ -495,12 +518,12 @@
                 การยกเลิกที่หน้านี้ไม่คืนเงินและไม่ริบมัดจำให้อัตโนมัติ
                 หากคืนเงินหรือริบมัดจำ ต้องทำรายการคืนเงิน/บันทึกรายได้ในระบบบัญชีแยกต่างหาก
             </div>
-            <label>เหตุผลในการยกเลิก:</label>
+            <label for="cancelReasonInput">เหตุผลในการยกเลิก:</label>
             <input type="text" id="cancelReasonInput" class="cancel-reason-input"
                 placeholder="ระบุเหตุผล เช่น ลูกค้าขอยกเลิก / คืนมัดจำแล้ว / ริบมัดจำ (ไม่บังคับ)" maxlength="450" />
             <div class="modal-actions">
                 <button type="button" class="btn-modal-cancel" onclick="closeCancelModal()">ปิด</button>
-                <button type="button" class="btn-modal-confirm" onclick="confirmCancel()">ยืนยันยกเลิก</button>
+                <button type="button" class="btn-modal-confirm" id="btnConfirmCancel" onclick="confirmCancel()">ยืนยันยกเลิก</button>
             </div>
         </div>
     </div>
@@ -539,7 +562,9 @@
             var heldNum = parseFloat(held.replace(/,/g, '')) || 0;
             document.getElementById('cancelHeldWarning').style.display = heldNum > 0 ? 'block' : 'none';
             document.getElementById('cancelReasonInput').value = '';
+            document.getElementById('btnConfirmCancel').disabled = false;
             document.getElementById('cancelModal').classList.add('active');
+            setTimeout(function () { try { document.getElementById('cancelReasonInput').focus(); } catch (e) { } }, 50);
         }
 
         function closeCancelModal() {
@@ -554,6 +579,8 @@
             document.getElementById('<%= hdnCancelReservationId.ClientID %>').value = cancelReservationId;
             document.getElementById('<%= hdnCancelReason.ClientID %>').value = reason || 'ยกเลิกจากหน้ารายการเลื่อนเข้าพัก';
 
+            // กันกดซ้ำ (ส่งยกเลิกสองรอบ)
+            document.getElementById('btnConfirmCancel').disabled = true;
             closeCancelModal();
             document.getElementById('<%= btnCancelWithReason.ClientID %>').click();
         }
@@ -638,6 +665,31 @@
             if (e.target.classList && e.target.classList.contains('modal-overlay')) {
                 e.target.classList.remove('active');
             }
+        });
+
+        // Esc ปิดหน้าต่าง / Enter ในช่องเหตุผล = ยืนยัน (ไม่ให้ไปกดปุ่มค้นหาของฟอร์มแทน)
+        document.addEventListener('keydown', function (e) {
+            var k = e.key || e.keyCode;
+            if (k === 'Escape' || k === 'Esc' || k === 27) {
+                closeCancelModal();
+                closeHistoryModal();
+            }
+        });
+        (function () {
+            var inp = document.getElementById('cancelReasonInput');
+            if (!inp) return;
+            inp.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter' || e.keyCode === 13) { e.preventDefault(); confirmCancel(); }
+            });
+        })();
+
+        // ข้อความแจ้งผล (ยกเลิกสำเร็จ/ไม่สำเร็จ) — เลื่อนให้เห็นทันที เพราะ MaintainScrollPositionOnPostBack อยู่กลางตาราง
+        // (รอหลัง window.onload — WebForms คืนตำแหน่งเลื่อนเดิมตอน onload จะทับถ้าเลื่อนก่อน)
+        window.addEventListener('load', function () {
+            setTimeout(function () {
+                var b = document.querySelector('.msg-banner');
+                if (b && b.scrollIntoView) { try { b.scrollIntoView({ block: 'center' }); } catch (e) { b.scrollIntoView(); } }
+            }, 60);
         });
     </script>
 </asp:Content>

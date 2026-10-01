@@ -1,16 +1,18 @@
 <%@ Page Title="เงินประกันความเสียหาย" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="SecurityDeposit.aspx.cs" Inherits="Take_Time_BangPhra.Admin.Settings.SecurityDepositSettings" %>
 
 <asp:Content ID="Content1" ContentPlaceHolderID="MainContent" runat="server">
+    <link rel="stylesheet" href="<%= ResolveUrl("~/Content/admin-settings.css") %>?v=<%= Take_Time_BangPhra.Admin.Settings.SettingsUi.AssetVersion %>" />
+    <script src="<%= ResolveUrl("~/Scripts/admin-settings.js") %>?v=<%= Take_Time_BangPhra.Admin.Settings.SettingsUi.AssetVersion %>"></script>
     <style>
-        .sd-wrap { max-width: 1000px; margin: 0 auto; padding: 12px 12px 60px; }
-        .sd-head { background: linear-gradient(135deg,#1d4e79,#123553); color:#fff;
+        .sd-wrap { max-width: 1000px; margin: 0 auto; padding: 12px 12px 30px; }
+        .sd-head { background: linear-gradient(135deg,#5d4037,#3e2723); color:#fff;
                    border-radius:14px; padding:20px 22px; margin-bottom:16px; }
         .sd-head h2 { margin:0 0 6px; font-size:21px; }
         .sd-head p { margin:0; opacity:.92; font-size:14px; line-height:1.7; }
 
         .sd-card { background:#fff; border-radius:14px; padding:18px 20px; margin-bottom:16px;
                    box-shadow:0 2px 10px rgba(0,0,0,.05); }
-        .sd-card h3 { margin:0 0 4px; font-size:16.5px; color:#123553; }
+        .sd-card h3 { margin:0 0 4px; font-size:16.5px; color:#3e2723; }
         .sd-card .sub { color:#7b8a93; font-size:13px; margin-bottom:14px; line-height:1.65; }
 
         .sd-row { display:flex; gap:16px; padding:11px 0; border-bottom:1px solid #eff2f5; align-items:flex-start; }
@@ -21,14 +23,14 @@
         .sd-in { flex:1; min-width:0; }
         .sd-in input[type=text] { width:100%; max-width:220px; padding:9px 11px; border:1px solid #dbe1e7;
                                   border-radius:9px; font-size:14px; }
-        .sd-in input:focus { outline:0; border-color:#1d4e79; box-shadow:0 0 0 3px rgba(29,78,121,.12); }
+        .sd-in input:focus { outline:0; border-color:#8d6e63; box-shadow:0 0 0 3px rgba(141,110,99,.15); }
         .sd-chk { display:flex; align-items:center; gap:9px; font-size:14px; }
-        .sd-chk input { width:18px; height:18px; accent-color:#1d4e79; }
+        .sd-chk input { width:18px; height:18px; accent-color:#5d4037; }
 
-        .sd-btn { padding:11px 20px; border:0; border-radius:10px; background:#1d4e79; color:#fff;
+        .sd-btn { padding:11px 20px; border:0; border-radius:10px; background:#5d4037; color:#fff;
                   font-size:14.5px; font-weight:600; cursor:pointer; }
-        .sd-btn:hover { background:#163c5e; }
-        .sd-btn.ghost { background:#fff; color:#46545f; border:1.5px solid #dbe1e7; }
+        .sd-btn:hover { background:#4e342e; }
+        .sd-btn.ghost { background:#fff; color:#5d4037; border:1.5px solid #d7ccc8; }
         .sd-actions { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
 
         .sd-alert { padding:12px 15px; border-radius:10px; margin-bottom:14px; font-size:14px; line-height:1.7; }
@@ -45,7 +47,9 @@
         .sd-rooms tr:hover td { background:#fafcfd; }
         .sd-rooms input[type=text] { width:130px; padding:8px 10px; border:1px solid #dbe1e7;
                                      border-radius:8px; font-size:14px; text-align:right; }
-        .sd-rooms input:focus { outline:0; border-color:#1d4e79; box-shadow:0 0 0 3px rgba(29,78,121,.12); }
+        .sd-rooms input:focus { outline:0; border-color:#8d6e63; box-shadow:0 0 0 3px rgba(141,110,99,.15); }
+        .sd-rooms td { vertical-align:top; }
+        .sd-rooms .as-fielderr { max-width:240px; }
         .sd-use { font-size:12.5px; color:#8b959e; }
         .sd-use.own { color:#16653e; font-weight:600; }
 
@@ -62,18 +66,26 @@
                       justify-content:center; background:#fff; font-weight:700; font-size:12px;
                       border:1.5px solid currentColor; flex:none; }
 
-        @media (max-width: 760px) {
+        @media (max-width: 768px) {
             .sd-row { flex-direction:column; gap:7px; }
             .sd-lbl { flex:none; }
             .sd-rooms thead { display:none; }
             .sd-rooms tr { display:block; border-top:1px solid #eff2f5; padding:8px 0; }
-            .sd-rooms td { display:flex; justify-content:space-between; align-items:center;
+            .sd-rooms td { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap;
                            border:0; padding:5px 2px; }
+            .sd-rooms .as-fielderr { flex-basis:100%; max-width:none; text-align:right; }
             .sd-rooms td:before { content:attr(data-th); color:#8b959e; font-size:12.5px; }
         }
     </style>
 
     <div class="sd-wrap">
+        <nav class="as-crumb" aria-label="เส้นทาง">
+            <a href="<%= ResolveUrl("~/Admin/Settings/Index") %>"><i class="fas fa-sliders"></i> ศูนย์ตั้งค่า</a>
+            <span class="sep">›</span><span>การชำระเงิน</span>
+            <span class="sep">›</span><span class="here">เงินประกันความเสียหาย</span>
+            <a class="as-back" href="<%= ResolveUrl("~/Admin/Settings/Index") %>">← กลับศูนย์ตั้งค่า</a>
+        </nav>
+
         <div class="sd-head">
             <h2><i class="fas fa-shield-halved"></i> เงินประกันความเสียหาย</h2>
             <p>
@@ -92,6 +104,7 @@
             <asp:Literal ID="litReady" runat="server" />
         </div>
 
+        <div data-as-dirty="1">
         <!-- ── ค่ากลาง ── -->
         <div class="sd-card">
             <h3>ค่ากลางของที่พัก</h3>
@@ -122,13 +135,15 @@
             <div class="sd-row">
                 <div class="sd-lbl"><b>วงเงินแนะนำ (บาท)</b>
                     <small>ตัวเลขตั้งต้นที่หน้าเช็คอินเติมให้ พนักงานแก้เป็นรายครั้งได้เสมอ</small></div>
-                <div class="sd-in"><asp:TextBox ID="txtDefault" runat="server" /></div>
+                <div class="sd-in"><asp:TextBox ID="txtDefault" runat="server" inputmode="decimal"
+                    data-as-num="money" data-as-min="0" data-as-req="1" data-as-label="วงเงินแนะนำ" /></div>
             </div>
 
             <div class="sd-row">
                 <div class="sd-lbl"><b>เตือนก่อนวงเงินหมดอายุ (ชั่วโมง)</b>
                     <small>เฉพาะโหมดกันวงเงินบัตร: วงเงินบนบัตรอยู่ได้ 7 วันแล้วคืนลูกค้าเอง — ระบบเตือนล่วงหน้าตามค่านี้ · เงินโอน/เงินสดไม่มีวันหมดอายุ (ระบบเตือนเมื่อเช็คเอาท์ไปแล้วยังไม่บันทึกคืน)</small></div>
-                <div class="sd-in"><asp:TextBox ID="txtWarnHours" runat="server" /></div>
+                <div class="sd-in"><asp:TextBox ID="txtWarnHours" runat="server" inputmode="numeric"
+                    data-as-num="int" data-as-min="1" data-as-max="168" data-as-req="1" data-as-label="เวลาเตือนล่วงหน้า" /></div>
             </div>
         </div>
 
@@ -142,10 +157,10 @@
 
             <div class="sd-bulk">
                 <span>เติมให้ทุกห้องพร้อมกัน:</span>
-                <asp:TextBox ID="txtBulk" runat="server" placeholder="เช่น 2000" />
+                <asp:TextBox ID="txtBulk" runat="server" placeholder="เช่น 2000" inputmode="decimal" data-as-nodirty="1" />
                 <asp:Button ID="btnBulk" runat="server" CssClass="sd-btn ghost" Text="เติมทุกห้อง"
                     OnClick="btnBulk_Click" CausesValidation="false"
-                    OnClientClick="return confirm('เขียนทับวงเงินของทุกห้องด้วยค่านี้?');" />
+                    OnClientClick="return confirm('เขียนทับวงเงินของทุกห้องด้วยค่านี้? (ยังไม่บันทึกจนกว่าจะกด บันทึกทั้งหมด)');" />
                 <asp:Button ID="btnClear" runat="server" CssClass="sd-btn ghost" Text="ล้างทุกห้อง (กลับไปใช้ค่ากลาง)"
                     OnClick="btnClear_Click" CausesValidation="false"
                     OnClientClick="return confirm('ล้างวงเงินเฉพาะห้องทั้งหมด ให้กลับไปใช้ค่ากลาง?');" />
@@ -153,10 +168,14 @@
 
             <asp:PlaceHolder ID="phRooms" runat="server" />
         </div>
+        </div>
 
-        <div class="sd-card">
-            <div class="sd-actions">
-                <asp:Button ID="btnSave" runat="server" CssClass="sd-btn" Text="💾 บันทึกทั้งหมด" OnClick="btnSave_Click" />
+        <div class="sd-card as-savebar">
+            <div class="sd-actions as-savebar-row">
+                <asp:Button ID="btnSave" runat="server" CssClass="sd-btn" Text="💾 บันทึกทั้งหมด" OnClick="btnSave_Click"
+                    data-as-validate=".sd-wrap" />
+                <span class="as-dirty-flag">● มีการแก้ไขที่ยังไม่ได้บันทึก</span>
+                <span class="as-clienterr"></span>
                 <a class="sd-btn ghost" style="text-decoration:none;display:inline-block"
                    href="<%= ResolveUrl("~/Payment/Charge") %>">ไปหน้าจุดรับเงิน (รับประกันตอนเช็คอิน)</a>
                 <a class="sd-btn ghost" style="text-decoration:none;display:inline-block"
@@ -171,4 +190,16 @@
             <asp:Literal ID="litHolds" runat="server" />
         </div>
     </div>
+
+    <script>
+        (function () {
+            if (!window.AsSettings) return;
+            var chk = document.getElementById('<%= chkEnabled.ClientID %>');
+            AsSettings.guard('<%= btnSave.ClientID %>', function () {
+                if (chk && chk.defaultChecked && !chk.checked)
+                    return confirm('ปิดเงินประกันความเสียหาย?\nหน้าเช็คอิน/เช็คเอาท์จะไม่แสดงส่วนเงินประกันอีก (รายการที่ค้างอยู่ยังจัดการต่อได้)');
+                return true;
+            });
+        })();
+    </script>
 </asp:Content>

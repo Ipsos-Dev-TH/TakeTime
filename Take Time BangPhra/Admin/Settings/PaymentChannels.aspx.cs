@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Configuration;
 using System.Globalization;
 using System.Text;
 using System.Web.UI;
@@ -23,6 +24,7 @@ namespace Take_Time_BangPhra.Admin.Settings
         private sealed class RowInputs
         {
             public int Id;
+            public string Name;
             public TextBox Code, Sort, Qr, Instructions, Conditions;
             public DropDownList Type, Provider, GatewayCode;
             public CheckBox Customer, Staff, Slip;
@@ -53,7 +55,7 @@ namespace Take_Time_BangPhra.Admin.Settings
             {
                 try { txtPolicy.Text = PaymentChannelCatalog.MasterCancellationPolicy; } catch { }
                 if (Request.QueryString["saved"] != null)
-                    Msg("ok", "บันทึกเรียบร้อยแล้ว — มีผลกับหน้าลูกค้า/พนักงานทันที");
+                    Msg("ok", "✓ บันทึกเรียบร้อยแล้ว — มีผลกับหน้าลูกค้า/พนักงานทันที (ตรวจได้ที่การ์ด \"ลูกค้า/พนักงานเห็นอะไรตอนนี้\")");
             }
             ShowStatus();
             ShowPreview();
@@ -156,8 +158,12 @@ namespace Take_Time_BangPhra.Admin.Settings
                 if (PaymentChannelCatalog.IsNeverCustomer(c.Type)) state += Tag("ลูกค้าไม่เห็นเด็ดขาด", "never");
                 if (virtualRow) state += Tag("ช่องทางเสมือน (ยังไม่มีแถวแหล่งเงิน — รัน PHASE19_20)", "wait");
 
+                // ช่องทางที่ลูกค้าเห็นอยู่ = ขอบเขียว (กวาดตาดูได้ทันทีว่าลูกค้าเห็นอะไร)
+                bool custNow = c.Active && c.CustomerVisible && !PaymentChannelCatalog.IsNeverCustomer(c.Type);
                 phRows.Controls.Add(new LiteralControl(
-                    "<div class=\"pc-ch" + (c.Active ? "" : " off") + "\"><div class=\"pc-ch-head\"><b>"
+                    "<div class=\"pc-ch" + (c.Active ? "" : " off") + (custNow ? " cust" : "") + "\""
+                    + (virtualRow ? "" : " id=\"ch-" + c.PaidHowId + "\"")
+                    + "><div class=\"pc-ch-head\"><b>"
                     + Server.HtmlEncode(c.Name ?? "") + "</b>"
                     + (virtualRow ? "" : "<span class=\"pc-note\">#" + c.PaidHowId + "</span>")
                     + state + "</div>"));
@@ -171,12 +177,30 @@ namespace Take_Time_BangPhra.Admin.Settings
                     continue;
                 }
 
-                var ri = new RowInputs { Id = c.PaidHowId };
+                var ri = new RowInputs { Id = c.PaidHowId, Name = c.Name };
                 string p = "ch_" + c.PaidHowId + "_";
 
-                phRows.Controls.Add(new LiteralControl("<div class=\"pc-grid\">"));
+                // ส่วนที่เจ้าของใช้บ่อย: ใครเห็น → ข้อความแนะนำ/เงื่อนไข → รูป QR
+                phRows.Controls.Add(new LiteralControl("<div class=\"pc-chks\">"));
+                ri.Customer = AddCheck(p + "cust", "ลูกค้าเห็น", c.CustomerVisible);
+                if (PaymentChannelCatalog.IsNeverCustomer(c.Type)) { ri.Customer.Checked = false; ri.Customer.Enabled = false; }
+                ri.Staff = AddCheck(p + "staff", "พนักงานเห็น", c.StaffVisible);
+                ri.Slip = AddCheck(p + "slip", "ต้องแนบสลิป", c.RequiresSlip);
+                phRows.Controls.Add(new LiteralControl("</div><div class=\"pc-grid\">"));
 
-                ri.Code = AddText(p + "code", "รหัสช่องทาง", c.Code, false, "เช่น TRANSFER_KBANK, PAYSO_VISA");
+                ri.Instructions = AddText(p + "ins", "ข้อความแนะนำเมื่อลูกค้าเลือกช่องทางนี้", RawOrEmpty(c, "ins"), true,
+                    "เช่น ชื่อบัญชี / เลขบัญชี / ธนาคาร", "ว่างไว้ = ใช้ข้อมูลบัญชีของ QR แบบเดิม");
+                ri.Conditions = AddText(p + "cond", "เงื่อนไขของช่องทางนี้", c.Conditions ?? "", true,
+                    "เช่น ชนิดบัตรที่รับ ค่าธรรมเนียม ระยะเวลาคืนเงิน", null);
+                ri.Qr = AddText(p + "qr", "รูป QR (ที่อยู่รูป)", RawOrEmpty(c, "qr"), false,
+                    "เช่น /Images/promptpay.png", "ว่างไว้ = ใช้ QR แบบเดิม");
+                phRows.Controls.Add(new LiteralControl("</div>"));
+
+                // ส่วนเทคนิค — ระบบจัดให้แล้ว ปกติไม่ต้องแตะ (พับไว้ ค่ายังส่งกลับครบตอนบันทึก)
+                phRows.Controls.Add(new LiteralControl(
+                    "<details class=\"pc-adv\"><summary>⚙ ตั้งค่าขั้นสูง (รหัส / ชนิด / เกตเวย์ / ลำดับ) — ปกติไม่ต้องแก้</summary>"
+                    + "<div class=\"pc-grid\">"));
+                ri.Code = AddText(p + "code", "รหัสช่องทาง", c.Code, false, "เช่น TRANSFER_KBANK, PAYSO_VISA", null);
                 ri.Type = AddSelect(p + "type", "ชนิด", PaymentChannelCatalog.AllTypes, c.Type, TypeText);
                 ri.Provider = AddSelect(p + "prov", "เกตเวย์",
                     new[] { "", PaymentGatewayConfig.ProviderPayso, PaymentGatewayConfig.ProviderOmise }, c.Provider,
@@ -185,22 +209,11 @@ namespace Take_Time_BangPhra.Admin.Settings
                     new[] { "", PaymentGatewayConfig.MethodCard, PaymentGatewayConfig.MethodQr, PaymentGatewayConfig.MethodInstallment },
                     c.GatewayChannelCode,
                     delegate (string v) { return v.Length == 0 ? "—" : v + " · " + PaymentGatewayConfig.MethodName(v); });
-                ri.Sort = AddText(p + "sort", "ลำดับ (น้อย = ขึ้นก่อน)", c.SortOrder.ToString(CultureInfo.InvariantCulture), false, "");
-                ri.Qr = AddText(p + "qr", "รูป QR (URL)", RawOrEmpty(c, "qr"), false, "เช่น /Images/promptpay.png (ว่าง = ใช้ QR แบบเดิม)");
+                ri.Sort = AddText(p + "sort", "ลำดับ (น้อย = ขึ้นก่อน)", c.SortOrder.ToString(CultureInfo.InvariantCulture), false, "", null);
+                ri.Sort.Attributes["data-as-num"] = "int";
+                phRows.Controls.Add(new LiteralControl("</div></details>"));
 
-                phRows.Controls.Add(new LiteralControl("<div class=\"pc-f pc-wide\"><div class=\"pc-chks\">"));
-                ri.Customer = AddCheck(p + "cust", "ลูกค้าเห็น", c.CustomerVisible);
-                if (PaymentChannelCatalog.IsNeverCustomer(c.Type)) { ri.Customer.Checked = false; ri.Customer.Enabled = false; }
-                ri.Staff = AddCheck(p + "staff", "พนักงานเห็น", c.StaffVisible);
-                ri.Slip = AddCheck(p + "slip", "ต้องแนบสลิป", c.RequiresSlip);
-                phRows.Controls.Add(new LiteralControl("</div></div>"));
-
-                ri.Instructions = AddText(p + "ins", "ข้อความแนะนำเมื่อเลือก", RawOrEmpty(c, "ins"), true,
-                    "เช่น ชื่อบัญชี / เลขบัญชี / ธนาคาร (ว่าง = ใช้ข้อมูลบัญชีของ QR แบบเดิม)");
-                ri.Conditions = AddText(p + "cond", "เงื่อนไขของช่องทางนี้", c.Conditions ?? "", true,
-                    "เช่น ชนิดบัตรที่รับ ค่าธรรมเนียม ระยะเวลาคืนเงิน");
-
-                phRows.Controls.Add(new LiteralControl("</div></div>"));
+                phRows.Controls.Add(new LiteralControl("</div>"));
                 _rows.Add(ri);
             }
         }
@@ -239,15 +252,17 @@ namespace Take_Time_BangPhra.Admin.Settings
             }
         }
 
-        private TextBox AddText(string id, string label, string value, bool multi, string placeholder)
+        private TextBox AddText(string id, string label, string value, bool multi, string placeholder, string hint)
         {
             phRows.Controls.Add(new LiteralControl("<div class=\"pc-f" + (multi ? " pc-wide" : "") + "\"><label>"
                 + Server.HtmlEncode(label) + "</label>"));
             var tb = new TextBox { ID = id, Text = value ?? "" };
             if (multi) { tb.TextMode = TextBoxMode.MultiLine; tb.Rows = 3; }
             if (!string.IsNullOrEmpty(placeholder)) tb.Attributes["placeholder"] = placeholder;
+            tb.Attributes["data-as-label"] = label;
             phRows.Controls.Add(tb);
-            phRows.Controls.Add(new LiteralControl("</div>"));
+            phRows.Controls.Add(new LiteralControl(
+                (string.IsNullOrEmpty(hint) ? "" : "<span class=\"hint\">" + Server.HtmlEncode(hint) + "</span>") + "</div>"));
             return tb;
         }
 
@@ -278,6 +293,14 @@ namespace Take_Time_BangPhra.Admin.Settings
             int? adminId = null;
             try { if (Session["UserID"] != null) adminId = Convert.ToInt32(Session["UserID"]); } catch { }
 
+            // ป้ายข้อผิดพลาดรอบก่อนถูกเก็บใน ViewState — ล้างก่อนตรวจใหม่
+            foreach (RowInputs r0 in _rows)
+            {
+                r0.Code.Attributes.Remove("data-as-err");
+                r0.GatewayCode.Attributes.Remove("data-as-err");
+                r0.Sort.Attributes.Remove("data-as-err");
+            }
+
             // นโยบายยกเลิกหลัก
             try
             {
@@ -294,7 +317,10 @@ namespace Take_Time_BangPhra.Admin.Settings
                 string code = (ri.Code.Text ?? "").Trim();
                 int other;
                 if (code.Length > 0 && seen.TryGetValue(code, out other))
-                    problems.Add("รหัส \"" + code + "\" ซ้ำกันระหว่างแถว #" + other + " และ #" + ri.Id);
+                {
+                    problems.Add(RowLabel(ri) + ": รหัส \"" + code + "\" ซ้ำกับช่องทาง " + RowLabel(FindRow(other)));
+                    ri.Code.Attributes["data-as-err"] = "รหัสนี้ซ้ำกับช่องทางอื่น — ต้องไม่ซ้ำกัน";
+                }
                 else if (code.Length > 0) seen[code] = ri.Id;
             }
 
@@ -304,7 +330,14 @@ namespace Take_Time_BangPhra.Admin.Settings
                 foreach (RowInputs ri in _rows)
                 {
                     int sort;
-                    if (!int.TryParse((ri.Sort.Text ?? "").Trim(), out sort)) sort = 100;
+                    string rawSort = (ri.Sort.Text ?? "").Trim();
+                    if (!int.TryParse(rawSort, out sort))
+                    {
+                        sort = 100;
+                        // เดิมพิมพ์ผิดแล้วกลายเป็น 100 เงียบ ๆ — ยังบันทึกต่อได้ แต่บอกให้รู้
+                        if (rawSort.Length > 0)
+                            ri.Sort.Attributes["data-as-err"] = "ไม่ใช่ตัวเลข — บันทึกเป็น 100 แทน";
+                    }
 
                     var ch = new PaymentChannel
                     {
@@ -323,15 +356,19 @@ namespace Take_Time_BangPhra.Admin.Settings
                     };
 
                     if (ch.Provider.Length > 0 && ch.GatewayChannelCode.Length == 0)
-                    { problems.Add("แถว #" + ri.Id + ": ช่องทางเกตเวย์ต้องเลือก \"วิธีที่ส่งเข้าเกตเวย์\""); continue; }
+                    {
+                        problems.Add(RowLabel(ri) + ": ช่องทางเกตเวย์ต้องเลือก \"วิธีที่ส่งเข้าเกตเวย์\" (ในตั้งค่าขั้นสูง)");
+                        ri.GatewayCode.Attributes["data-as-err"] = "ช่องทางที่ผ่านเกตเวย์ต้องเลือกวิธีนี้";
+                        continue;
+                    }
 
                     try
                     {
                         string err = PaymentChannelCatalog.SaveRow(ch);
-                        if (err != null) problems.Add("แถว #" + ri.Id + ": " + err);
+                        if (err != null) problems.Add(RowLabel(ri) + ": " + err);
                         else saved++;
                     }
-                    catch (Exception ex) { problems.Add("แถว #" + ri.Id + ": " + ex.Message); }
+                    catch (Exception ex) { problems.Add(RowLabel(ri) + ": " + ex.Message); }
                 }
             }
 
@@ -339,12 +376,29 @@ namespace Take_Time_BangPhra.Admin.Settings
 
             if (problems.Count > 0)
             {
-                Msg("err", "บันทึกแล้ว " + saved + " แถว แต่มีปัญหา:<br/>• "
+                Msg("err", "บันทึกแล้ว " + saved + " ช่องทาง แต่มีปัญหา (ช่องที่ต้องแก้ไฮไลต์สีแดงด้านล่าง):<br/>• "
                     + string.Join("<br/>• ", EncodeAll(problems).ToArray()));
                 ShowStatus();
                 ShowPreview();
                 return;
             }
+
+            // จดว่า "ตรวจทานช่องทางแล้ว" — เช็กลิสต์เปิดใช้งานในศูนย์ตั้งค่าอ่านค่านี้ (ไม่มีผลกับการทำงาน)
+            string who = Session["UserName"]?.ToString() ?? Session["User"]?.ToString() ?? "Admin";
+            try
+            {
+                BookingPolicy.SaveSettings(new Dictionary<string, string>
+                {
+                    { SettingsIndex.ChannelsReviewedKey, DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) }
+                }, who);
+            }
+            catch { /* ยังไม่รัน PHASE19_22 (ตารางค่าตั้งการจอง) — ข้ามได้ */ }
+            try
+            {
+                new code().Logs(ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString,
+                    "PaymentChannels", "บันทึกช่องทางชำระเงิน " + saved + " ช่องทาง", who);
+            }
+            catch { }
 
             Response.Redirect(Request.Path + "?saved=1", false);
             System.Web.HttpContext.Current?.ApplicationInstance?.CompleteRequest();
@@ -359,6 +413,18 @@ namespace Take_Time_BangPhra.Admin.Settings
             return list;
         }
 
+        private string RowLabel(RowInputs ri)
+        {
+            if (ri == null) return "(ไม่ทราบ)";
+            return "\"" + (string.IsNullOrEmpty(ri.Name) ? "#" + ri.Id : ri.Name) + "\"";
+        }
+
+        private RowInputs FindRow(int id)
+        {
+            foreach (RowInputs r in _rows) if (r.Id == id) return r;
+            return null;
+        }
+
         private string Tag(string text, string cls)
         {
             return "<span class=\"pc-tag " + cls + "\">" + Server.HtmlEncode(text) + "</span>";
@@ -367,7 +433,11 @@ namespace Take_Time_BangPhra.Admin.Settings
         private bool _msgWritten;
         private void Msg(string cls, string html)
         {
-            string block = "<div class=\"pc-alert " + cls + "\">" + html + "</div>";
+            // บันทึกไม่ผ่าน = ค่าที่แก้ยังไม่ถูกบันทึกทั้งหมด → สคริปต์ส่วนกลางเตือนก่อนออกจากหน้า
+            bool err = cls == "err";
+            string block = "<div class=\"pc-alert " + cls + "\" role=\"" + (err ? "alert" : "status") + "\""
+                + (err ? " data-as-banner=\"err\"" : "") + ">" + html
+                + (err ? SettingsUi.StartDirtyMarker : "") + "</div>";
             litMsg.Text = _msgWritten ? litMsg.Text + block : block;
             _msgWritten = true;
         }

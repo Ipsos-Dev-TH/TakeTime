@@ -1,22 +1,24 @@
 ﻿<%@ Page Title="รับชำระเงินออนไลน์" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="PaymentGateway.aspx.cs" Inherits="Take_Time_BangPhra.Admin.Settings.PaymentGatewaySettings" %>
 
 <asp:Content ID="Content1" ContentPlaceHolderID="MainContent" runat="server">
+    <link rel="stylesheet" href="<%= ResolveUrl("~/Content/admin-settings.css") %>?v=<%= Take_Time_BangPhra.Admin.Settings.SettingsUi.AssetVersion %>" />
+    <script src="<%= ResolveUrl("~/Scripts/admin-settings.js") %>?v=<%= Take_Time_BangPhra.Admin.Settings.SettingsUi.AssetVersion %>"></script>
     <style>
-        .pg-wrap { max-width: 1080px; margin: 0 auto; padding: 12px 12px 60px; }
-        .pg-head { background: linear-gradient(135deg,#1b7a4b,#0f5c37); color:#fff;
+        .pg-wrap { max-width: 1080px; margin: 0 auto; padding: 12px 12px 30px; }
+        .pg-head { background: linear-gradient(135deg,#5d4037,#3e2723); color:#fff;
                    border-radius:14px; padding:20px 22px; margin-bottom:16px; }
         .pg-head h2 { margin:0 0 6px; font-size:21px; }
         .pg-head p { margin:0; opacity:.92; font-size:14px; line-height:1.65; }
 
         .pg-card { background:#fff; border-radius:14px; padding:18px 20px; margin-bottom:16px;
                    box-shadow:0 2px 10px rgba(0,0,0,.05); }
-        .pg-card h3 { margin:0 0 4px; font-size:16.5px; color:#1b4332; }
+        .pg-card h3 { margin:0 0 4px; font-size:16.5px; color:#3e2723; }
         .pg-card .sub { color:#7b8a83; font-size:13px; margin-bottom:14px; }
 
         .pg-row { display:flex; gap:16px; padding:11px 0; border-bottom:1px solid #f0f3f1; align-items:flex-start; }
         .pg-row:last-child { border-bottom:0; }
         .pg-label { flex:0 0 270px; }
-        .pg-label b { display:block; font-size:14.5px; color:#2c3e37; }
+        .pg-label b { display:block; font-size:14.5px; color:#3e2723; }
         .pg-label small { display:block; color:#8b978f; font-size:12.5px; line-height:1.6; margin-top:3px; }
         .pg-input { flex:1; min-width:0; }
         .pg-input input[type=text], .pg-input input[type=password], .pg-input select, .pg-input textarea {
@@ -25,21 +27,25 @@
         }
         .pg-input textarea { min-height:96px; font-family:Consolas,monospace; font-size:12.5px; }
         .pg-input input:focus, .pg-input select:focus, .pg-input textarea:focus {
-            outline:0; border-color:#1b7a4b; box-shadow:0 0 0 3px rgba(27,122,75,.12);
+            outline:0; border-color:#8d6e63; box-shadow:0 0 0 3px rgba(141,110,99,.15);
         }
         .pg-chk { display:flex; align-items:center; gap:9px; font-size:14px; }
-        .pg-chk input { width:18px; height:18px; accent-color:#1b7a4b; }
+        .pg-chk input { width:18px; height:18px; accent-color:#5d4037; }
 
-        .pg-btn { padding:11px 20px; border:0; border-radius:10px; background:#1b7a4b; color:#fff;
+        .pg-btn { padding:11px 20px; border:0; border-radius:10px; background:#5d4037; color:#fff;
                   font-size:14.5px; font-weight:600; cursor:pointer; }
-        .pg-btn:hover { background:#16653e; }
-        .pg-btn.ghost { background:#fff; color:#46584f; border:1.5px solid #dbe3de; }
+        .pg-btn:hover { background:#4e342e; }
+        .pg-btn.ghost { background:#fff; color:#5d4037; border:1.5px solid #d7ccc8; }
+        .pg-toolbar { display:flex; gap:12px; align-items:center; flex-wrap:wrap; justify-content:space-between;
+                      margin:-4px 0 14px; font-size:13px; color:#8d8d8d; }
+        .pg-key { color:#b6aca8; font-family:Consolas,monospace; font-size:11.5px; }
         .pg-actions { display:flex; gap:10px; flex-wrap:wrap; margin-top:6px; }
 
         .pg-alert { padding:12px 15px; border-radius:10px; margin-bottom:14px; font-size:14px; line-height:1.65; }
         .pg-alert.ok { background:#e8f6ee; color:#16653e; }
         .pg-alert.err { background:#fdecec; color:#a12626; }
         .pg-alert.warn { background:#fff6e5; color:#8a5a00; }
+        .pg-alert.info { background:#eef4fb; color:#1d4e79; }
 
         .pg-url { display:flex; gap:8px; align-items:center; background:#f6f9f7; border-radius:9px;
                   padding:10px 12px; font-family:Consolas,monospace; font-size:12.8px; word-break:break-all; }
@@ -80,7 +86,7 @@
         .pg-collapsed h3 { margin-bottom:0; }
         .pg-dim { opacity:.45; }
 
-        @media (max-width: 760px) {
+        @media (max-width: 768px) {
             .pg-row { flex-direction:column; gap:7px; }
             .pg-label { flex:none; }
             .pg-2col { grid-template-columns:1fr; }
@@ -88,6 +94,13 @@
     </style>
 
     <div class="pg-wrap">
+        <nav class="as-crumb" aria-label="เส้นทาง">
+            <a href="<%= ResolveUrl("~/Admin/Settings/Index") %>"><i class="fas fa-sliders"></i> ศูนย์ตั้งค่า</a>
+            <span class="sep">›</span><span>การชำระเงิน</span>
+            <span class="sep">›</span><span class="here">รับชำระเงินออนไลน์</span>
+            <a class="as-back" href="<%= ResolveUrl("~/Admin/Settings/Index") %>">← กลับศูนย์ตั้งค่า</a>
+        </nav>
+
         <div class="pg-head">
             <h2><i class="fas fa-credit-card"></i> รับชำระเงินออนไลน์</h2>
             <p>
@@ -109,16 +122,27 @@
 
         <asp:Literal ID="litMsg" runat="server" />
 
-        <!-- ── ค่าตั้งค่าทั้งหมด (วาดจากฐานข้อมูล จัดกลุ่มเป็นขั้นตอน) ── -->
-        <asp:PlaceHolder ID="phSettings" runat="server" />
+        <div class="pg-toolbar">
+            <span>ไล่ตั้งค่าตามหมายเลขการ์ด ๑ → ๔ · การ์ด "ขั้นสูง" ปกติไม่ต้องแตะ (กดหัวข้อเพื่อกาง)</span>
+            <label class="as-techtoggle"><input type="checkbox" data-as-techtoggle="1" data-as-nodirty="1" />
+                แสดงชื่อค่าทางเทคนิค (สำหรับช่าง/ผู้พัฒนา)</label>
+        </div>
 
-        <div class="pg-card">
-            <div class="pg-actions">
-                <asp:Button ID="btnSave" runat="server" CssClass="pg-btn" Text="💾 บันทึกการตั้งค่า" OnClick="btnSave_Click" />
+        <!-- ── ค่าตั้งค่าทั้งหมด (วาดจากฐานข้อมูล จัดกลุ่มเป็นขั้นตอน) ── -->
+        <div id="pgSettingsRoot" data-as-dirty="1">
+            <asp:PlaceHolder ID="phSettings" runat="server" />
+        </div>
+
+        <div class="pg-card as-savebar">
+            <div class="pg-actions as-savebar-row" style="margin-top:0">
+                <asp:Button ID="btnSave" runat="server" CssClass="pg-btn" Text="💾 บันทึกการตั้งค่า" OnClick="btnSave_Click"
+                    data-as-validate="#pgSettingsRoot" />
                 <asp:Button ID="btnTest" runat="server" CssClass="pg-btn ghost" Text="🔌 ทดสอบการเชื่อมต่อ"
                     OnClick="btnTest_Click" CausesValidation="false" />
                 <asp:Button ID="btnReload" runat="server" CssClass="pg-btn ghost" Text="↻ โหลดค่าใหม่"
                     OnClick="btnReload_Click" CausesValidation="false" />
+                <span class="as-dirty-flag">● มีการแก้ไขที่ยังไม่ได้บันทึก (กด "ทดสอบ" จะใช้ค่าที่บันทึกไว้)</span>
+                <span class="as-clienterr"></span>
             </div>
         </div>
 
@@ -155,7 +179,7 @@
         </asp:Panel>
 
         <!-- ── คืนเงิน (เปิดจากปุ่มในตาราง) ── -->
-        <asp:Panel ID="pnlRefund" runat="server" CssClass="pg-card" Visible="false"
+        <asp:Panel ID="pnlRefund" runat="server" CssClass="pg-card" Visible="false" data-as-scope="refund"
             style="border-left:4px solid #a12626;">
             <h3>↩ คืนเงินลูกค้า</h3>
             <div class="sub">
@@ -171,7 +195,8 @@
                     <small>น้อยกว่ายอดเต็ม = คืนบางส่วน</small></div>
                 <div class="pg-input">
                     <asp:TextBox ID="txtRefundAmount" runat="server" TextMode="Number" step="0.01"
-                        style="max-width:180px;" />
+                        style="max-width:180px;" data-as-num="money" data-as-min="0.01" data-as-req="1"
+                        data-as-label="ยอดที่จะคืน" />
                 </div>
             </div>
             <div class="pg-row">
@@ -181,7 +206,7 @@
             </div>
             <div class="pg-actions">
                 <asp:Button ID="btnDoRefund" runat="server" Text="↩ ยืนยันคืนเงิน"
-                    OnClick="btnDoRefund_Click" UseSubmitBehavior="false"
+                    OnClick="btnDoRefund_Click" UseSubmitBehavior="false" data-as-validate="[data-as-scope=refund]"
                     OnClientClick="if(!confirm('ยืนยันคืนเงินตามยอดที่กรอก? เงินจะถูกส่งกลับช่องทางเดิมของลูกค้า'))return false;this.disabled=true;"
                     style="padding:11px 20px;border:0;border-radius:10px;background:#a12626;color:#fff;font-weight:600;cursor:pointer;" />
                 <asp:Button ID="btnCancelRefund" runat="server" CssClass="pg-btn ghost" Text="ยกเลิก"
@@ -191,8 +216,9 @@
 
         <!-- ── รายการชำระเงินล่าสุด ── -->
         <div class="pg-card">
-            <h3>รายการชำระเงินล่าสุด</h3>
-            <div class="sub">ทุกคำขอ-คำตอบถูกเก็บไว้ ตรวจย้อนหลังได้เสมอ</div>
+            <h3>รายการชำระเงินล่าสุด (60 วัน)</h3>
+            <div class="sub">ทุกคำขอ-คำตอบถูกเก็บไว้ ตรวจย้อนหลังได้เสมอ · "ตรวจสถานะ" = ถามเกตเวย์ใหม่ว่าจ่ายแล้วหรือยัง ·
+                "🔗 ลิงก์" = คัดลอกลิงก์ไปส่งลูกค้าซ้ำ</div>
             <asp:GridView ID="gvTxn" runat="server" AutoGenerateColumns="false" CssClass="pg-grid"
                 GridLines="None" EmptyDataText="ยังไม่มีรายการ" DataKeyNames="ID"
                 OnRowCommand="gvTxn_RowCommand">
@@ -220,7 +246,7 @@
                                 CommandArgument='<%# Eval("ID") %>' Text="ตรวจสถานะ"
                                 Visible='<%# ShowCheck(Eval("Status")) %>' CausesValidation="false" />
                             <asp:LinkButton ID="lbRefund" runat="server" CommandName="StartRefund"
-                                CommandArgument='<%# Eval("ID") %>' Text="↩ คืนเงิน"
+                                CommandArgument='<%# Eval("ID") %>' Text="↩ คืนเงิน" data-as-confirm="เปิดหน้าคืนเงินของรายการนี้? (ยังไม่คืนเงินจนกว่าจะกดยืนยันอีกครั้ง)"
                                 Visible='<%# ShowRefund(Eval("Status"), Eval("Provider")) %>'
                                 CausesValidation="false" style="color:#a12626;" />
                             <%-- ลิงก์ที่เคยส่งให้ลูกค้า — เดิมหาไม่เจออีกเลยหลังปิดหน้าจอ --%>
@@ -303,6 +329,23 @@
             }
 
             apply();
+        })();
+
+        // ── ก่อนกดปุ่ม: ปิดสวิตช์ใหญ่ / โหลดค่าใหม่ทิ้งค่าที่ยังไม่บันทึก ──
+        (function () {
+            if (!window.AsSettings) return;
+            var master = document.querySelector("input[id$='cfg_Payment_Enabled']");
+            AsSettings.guard('<%= btnSave.ClientID %>', function () {
+                if (master && master.defaultChecked && !master.checked)
+                    return confirm('ปิด "เปิดรับชำระเงินออนไลน์"?\nลูกค้าจะไม่เห็นตัวเลือกจ่ายผ่านเกตเวย์อีก (โอน/แนบสลิปยังใช้ได้ตามปกติ)');
+                return true;
+            });
+            AsSettings.guard('<%= btnReload.ClientID %>', function () {
+                return !AsSettings.isDirty() || confirm('ค่าที่แก้ไว้แต่ยังไม่บันทึกจะหายไป — โหลดค่าใหม่จากฐานข้อมูล?');
+            });
+            AsSettings.guard('<%= btnTest.ClientID %>', function () {
+                return !AsSettings.isDirty() || confirm('การทดสอบใช้ค่าที่ "บันทึกแล้ว" เท่านั้น — ค่าที่เพิ่งแก้ยังไม่ถูกใช้\nทดสอบต่อเลยไหม? (ค่าที่แก้ยังอยู่ในฟอร์ม)');
+            });
         })();
     </script>
 </asp:Content>

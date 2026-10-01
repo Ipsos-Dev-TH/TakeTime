@@ -8,6 +8,9 @@ namespace Take_Time_BangPhra.Admin.Settings
 {
     public partial class SettingsIndex
     {
+        /// <summary>litChecklist control.</summary>
+        protected global::System.Web.UI.WebControls.Literal litChecklist;
+
         /// <summary>litGroups control.</summary>
         protected global::System.Web.UI.WebControls.Literal litGroups;
     }

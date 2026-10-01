@@ -111,7 +111,7 @@ namespace Take_Time_BangPhra.Admin.Settings
             }
 
             phRooms.Controls.Add(new LiteralControl(
-                "<div style=\"overflow-x:auto\"><table class=\"ps-rooms\"><thead><tr>"
+                "<div style=\"overflow-x:auto\"><table class=\"ps-rooms tt-no-touch\"><thead><tr>"
                 + "<th>ห้องพัก</th><th style=\"width:90px\">รับสัตว์เลี้ยง</th>"
                 + "<th style=\"width:150px\">สูงสุด (ตัว/ห้อง)</th>"
                 + "<th style=\"width:170px\">ค่าบริการต่อตัว (บาท)</th></tr></thead><tbody>"));
@@ -126,18 +126,30 @@ namespace Take_Time_BangPhra.Admin.Settings
                 phRooms.Controls.Add(new LiteralControl(
                     "<tr><td data-th=\"ห้องพัก\"><b>" + Server.HtmlEncode(name ?? "") + "</b></td><td data-th=\"รับสัตว์เลี้ยง\">"));
                 var chk = new CheckBox { ID = "petok_" + id, Checked = rule.Allowed };
+                chk.InputAttributes["aria-label"] = "รับสัตว์เลี้ยง — " + (name ?? "");
                 phRooms.Controls.Add(chk);
 
                 phRooms.Controls.Add(new LiteralControl("</td><td data-th=\"สูงสุด (ตัว/ห้อง)\">"));
                 var tbMax = new TextBox { ID = "petmax_" + id, Text = rawMax > 0 ? rawMax.ToString(CultureInfo.InvariantCulture) : "" };
                 tbMax.Attributes["inputmode"] = "numeric";
                 tbMax.Attributes["placeholder"] = "เช่น 2";
+                // ตรวจฝั่งเบราว์เซอร์ (ฝั่งเซิร์ฟเวอร์ตรวจซ้ำตอนบันทึกเสมอ): จำนวนเต็ม 0–50, ติ๊ก "รับ" แล้วต้อง ≥ 1
+                tbMax.Attributes["data-as-num"] = "int";
+                tbMax.Attributes["data-as-min"] = "0";
+                tbMax.Attributes["data-as-max"] = "50";
+                tbMax.Attributes["data-as-rowreq"] = "1";
+                tbMax.Attributes["data-as-rowmin"] = "1";
+                tbMax.Attributes["data-as-label"] = "จำนวนสูงสุด";
                 phRooms.Controls.Add(tbMax);
 
                 phRooms.Controls.Add(new LiteralControl("</td><td data-th=\"ค่าบริการต่อตัว\">"));
                 var tbFee = new TextBox { ID = "petfee_" + id, Text = rule.FeePerPet.ToString("0.##", CultureInfo.InvariantCulture) };
                 tbFee.Attributes["inputmode"] = "decimal";
                 tbFee.Attributes["placeholder"] = "0";
+                tbFee.Attributes["data-as-num"] = "money";
+                tbFee.Attributes["data-as-min"] = "0";
+                tbFee.Attributes["data-as-max"] = "99999999";
+                tbFee.Attributes["data-as-label"] = "ค่าบริการต่อตัว";
                 phRooms.Controls.Add(tbFee);
 
                 phRooms.Controls.Add(new LiteralControl("</td></tr>"));
@@ -172,14 +184,21 @@ namespace Take_Time_BangPhra.Admin.Settings
         protected void btnSave_Click(object sender, EventArgs e)
         {
             if (!_authorized) return;
+            // ป้ายข้อผิดพลาดรอบก่อนถูกเก็บใน ViewState — ล้างก่อนตรวจใหม่
+            txtPetPolicy.Attributes.Remove("data-as-err");
+            foreach (KeyValuePair<int, RoomInputs> kv0 in _rooms)
+            {
+                kv0.Value.Max.Attributes.Remove("data-as-err");
+                kv0.Value.Fee.Attributes.Remove("data-as-err");
+            }
             var problems = new List<string>();
             string who = Session["UserName"]?.ToString() ?? Session["User"]?.ToString() ?? "Admin";
 
             string policy = txtPetPolicy.Text ?? "";
             if (chkEnabled.Checked && string.IsNullOrWhiteSpace(policy))
-                problems.Add("เปิดใช้ฟีเจอร์แล้วต้องมีข้อความนโยบายสัตว์เลี้ยง (ลูกค้าต้องติ๊กยอมรับ)");
+                FieldError(problems, txtPetPolicy, null, "เปิดใช้ฟีเจอร์แล้วต้องมีข้อความนโยบายสัตว์เลี้ยง (ลูกค้าต้องติ๊กยอมรับ)");
             if (policy.Length > 20000)
-                problems.Add("นโยบายสัตว์เลี้ยงยาวเกินไป (สูงสุด 20,000 ตัวอักษร)");
+                FieldError(problems, txtPetPolicy, null, "นโยบายสัตว์เลี้ยงยาวเกินไป (สูงสุด 20,000 ตัวอักษร)");
             if (chkEnabled.Checked && _colMissing)
                 problems.Add("ยังเปิดใช้ไม่ได้ — ต้องรัน Database/PHASE19_Migration_23_Pet_Stay.sql ก่อน");
 
@@ -196,14 +215,14 @@ namespace Take_Time_BangPhra.Admin.Settings
                     int max = 0;
                     string rawMax = (ri.Max.Text ?? "").Trim();
                     if (rawMax.Length > 0 && (!int.TryParse(rawMax, NumberStyles.Integer, CultureInfo.InvariantCulture, out max) || max < 0 || max > 50))
-                    { problems.Add(label + ": จำนวนสูงสุดต้องเป็นจำนวนเต็ม 0–50"); continue; }
+                    { FieldError(problems, ri.Max, label, "จำนวนสูงสุดต้องเป็นจำนวนเต็ม 0–50"); continue; }
                     if (allowed && max < 1)
-                    { problems.Add(label + ": รับสัตว์เลี้ยงแล้วต้องระบุจำนวนสูงสุดอย่างน้อย 1 ตัว"); continue; }
+                    { FieldError(problems, ri.Max, label, "รับสัตว์เลี้ยงแล้วต้องระบุจำนวนสูงสุดอย่างน้อย 1 ตัว"); continue; }
 
                     decimal fee = 0m;
                     string rawFee = (ri.Fee.Text ?? "").Trim().Replace(",", "");
                     if (rawFee.Length > 0 && (!decimal.TryParse(rawFee, NumberStyles.Number, CultureInfo.InvariantCulture, out fee) || fee < 0 || fee > 99999999m))
-                    { problems.Add(label + ": ค่าบริการต่อตัวต้องเป็นจำนวนเงินที่ไม่ติดลบ"); continue; }
+                    { FieldError(problems, ri.Fee, label, "ค่าบริการต่อตัวต้องเป็นจำนวนเงินที่ไม่ติดลบ"); continue; }
 
                     updates.Add(new KeyValuePair<int, object[]>(kv.Key, new object[] { allowed, max, Math.Round(fee, 2) }));
                 }
@@ -281,16 +300,24 @@ namespace Take_Time_BangPhra.Admin.Settings
                   .Append(Server.HtmlEncode(PetStay.UnitLabel(PetStay.FeeUnit)))
                   .Append(" · นโยบายสัตว์เลี้ยงฉบับที่ <b>").Append(BookingPolicy.PetVersion).Append("</b></div>");
             }
-            string t = BookingPolicy.Get(BookingPolicy.KeyPet) ?? "";
-            if (t.IndexOf("[แก้ไข", StringComparison.Ordinal) >= 0 || t.IndexOf("ตัวอย่าง —", StringComparison.Ordinal) >= 0)
-                sb.Append("<div class=\"ps-alert warn\">⚠ นโยบายสัตว์เลี้ยงยังมีข้อความตัวอย่าง/ช่อง <b>[แก้ไข: …]</b> — ")
-                  .Append("ลูกค้าจะเห็นตามจริง กรุณาแก้ให้ตรงกฎของที่พักก่อนเปิดใช้</div>");
+            int ph = SettingsUi.CountPlaceholders(BookingPolicy.Get(BookingPolicy.KeyPet));
+            if (ph > 0)
+                sb.Append("<div class=\"ps-alert warn\">⚠ นโยบายสัตว์เลี้ยงที่บันทึกไว้ยังมีข้อความตัวอย่าง/ช่อง <b>[แก้ไข: …]</b> ")
+                  .Append(ph).Append(" จุด — ลูกค้าจะเห็นตามจริง กรุณาแก้ให้ตรงกฎของที่พักก่อนเปิดใช้</div>");
             litInfo.Text = sb.ToString();
         }
 
         private void ShowPreview()
         {
-            litPreview.Text = "<div class=\"ps-prev\">" + BookingPolicy.ToHtml(BookingPolicy.Get(BookingPolicy.KeyPet)) + "</div>";
+            litPreview.Text = "<div class=\"ps-prev\">"
+                + SettingsUi.HighlightPlaceholders(BookingPolicy.ToHtml(BookingPolicy.Get(BookingPolicy.KeyPet))) + "</div>";
+        }
+
+        /// <summary>เก็บข้อผิดพลาด + ติดป้ายที่ช่องนั้น (สคริปต์ส่วนกลางแสดงข้อความใต้ช่องและไฮไลต์)</summary>
+        private static void FieldError(List<string> problems, WebControl field, string label, string message)
+        {
+            problems.Add(string.IsNullOrEmpty(label) ? message : label + ": " + message);
+            if (field != null) field.Attributes["data-as-err"] = message;
         }
 
         private string[] EncodeAll(List<string> items)
@@ -303,7 +330,11 @@ namespace Take_Time_BangPhra.Admin.Settings
         private bool _msgWritten;
         private void Msg(string cls, string html)
         {
-            string block = "<div class=\"ps-alert " + cls + "\">" + html + "</div>";
+            // บันทึกไม่ผ่าน = ค่าที่พิมพ์ยังไม่ถูกบันทึก → สคริปต์ส่วนกลางเตือนก่อนออกจากหน้า
+            bool err = cls == "err";
+            string block = "<div class=\"ps-alert " + cls + "\" role=\"" + (err ? "alert" : "status") + "\""
+                + (err ? " data-as-banner=\"err\"" : "") + ">" + html
+                + (err ? SettingsUi.StartDirtyMarker : "") + "</div>";
             litMsg.Text = _msgWritten ? litMsg.Text + block : block;
             _msgWritten = true;
         }

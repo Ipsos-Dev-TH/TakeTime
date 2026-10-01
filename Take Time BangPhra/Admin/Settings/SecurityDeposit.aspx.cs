@@ -27,6 +27,7 @@ namespace Take_Time_BangPhra.Admin.Settings
 
         private DataTable _rooms;
         private readonly Dictionary<int, TextBox> _roomInputs = new Dictionary<int, TextBox>();
+        private readonly Dictionary<int, string> _roomNames = new Dictionary<int, string>();
         private bool _colMissing;
 
         protected void Page_Init(object sender, EventArgs e)
@@ -159,8 +160,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                 litTransferInfo.Text = "<small style=\"display:block;color:#8b959e;font-size:12.5px;margin-top:6px;line-height:1.6\">"
                     + (ch == null
                         ? "ยังไม่มีช่องทางโอนในระบบ — เพิ่ม/จัดชนิดที่หน้า <b>ช่องทางชำระเงิน</b>"
-                        : "บัญชีรับโอนเงินประกัน: <b>" + Server.HtmlEncode(ch.Name) + "</b> (" + Server.HtmlEncode(ch.Code) + ")"
-                          + " — เปลี่ยนได้ด้วยค่าตั้ง Security_Hold_Transfer_Channel")
+                        : "บัญชีรับโอนเงินประกัน: <b>" + Server.HtmlEncode(ch.Name) + "</b>"
+                          + " — เปลี่ยนบัญชีได้ที่หน้า <a href=\"" + ResolveUrl("~/Admin/Settings/PaymentGateway") + "\">รับชำระเงินออนไลน์</a>"
+                          + " → การ์ด \"วงเงินประกันความเสียหาย\" (ช่อง บัญชีรับโอนเงินประกัน)")
                     + " · <a href=\"" + ResolveUrl("~/Admin/Settings/PaymentChannels") + "\">ช่องทางชำระเงิน</a></small>";
             }
             catch { litTransferInfo.Text = ""; }
@@ -193,7 +195,7 @@ namespace Take_Time_BangPhra.Admin.Settings
             }
 
             phRooms.Controls.Add(new LiteralControl(
-                "<div style=\"overflow-x:auto\"><table class=\"sd-rooms\"><thead><tr>"
+                "<div style=\"overflow-x:auto\"><table class=\"sd-rooms tt-no-touch\"><thead><tr>"
                 + "<th>ห้องพัก</th><th style=\"width:170px\">วงเงินประกัน (บาท)</th>"
                 + "<th style=\"width:190px\">ผลที่ใช้จริง</th></tr></thead><tbody>"));
 
@@ -221,9 +223,13 @@ namespace Take_Time_BangPhra.Admin.Settings
                 var tb = new TextBox { ID = "room_" + id, Text = cur };
                 tb.Attributes["inputmode"] = "decimal";
                 tb.Attributes["placeholder"] = "ใช้ค่ากลาง";
+                tb.Attributes["data-as-num"] = "money";
+                tb.Attributes["data-as-min"] = "0";
+                tb.Attributes["data-as-label"] = "วงเงินประกัน " + (name ?? "");
                 if (_colMissing) tb.Enabled = false;
                 phRooms.Controls.Add(tb);
                 _roomInputs[id] = tb;
+                _roomNames[id] = name;
 
                 string effect = hasOwn
                     ? "<span class=\"sd-use own\">" + Convert.ToDecimal(r["Security_Deposit_Amount"]).ToString("N2")
@@ -267,14 +273,25 @@ namespace Take_Time_BangPhra.Admin.Settings
             int? adminId = null;
             try { if (Session["UserID"] != null) adminId = Convert.ToInt32(Session["UserID"]); } catch { }
 
+            // ป้ายข้อผิดพลาดรอบก่อนถูกเก็บใน ViewState — ล้างก่อนตรวจใหม่
+            txtDefault.Attributes.Remove("data-as-err");
+            txtWarnHours.Attributes.Remove("data-as-err");
+            foreach (TextBox rb in _roomInputs.Values) rb.Attributes.Remove("data-as-err");
+
             // ค่ากลาง
             decimal def;
             if (!TryMoney(txtDefault.Text, out def) || def < 0)
+            {
                 problems.Add("วงเงินแนะนำต้องเป็นตัวเลขไม่ติดลบ");
+                txtDefault.Attributes["data-as-err"] = "ต้องเป็นตัวเลขไม่ติดลบ เช่น 1000";
+            }
 
             int warn;
             if (!int.TryParse((txtWarnHours.Text ?? "").Trim(), out warn) || warn < 1 || warn > 168)
+            {
                 problems.Add("เวลาเตือนล่วงหน้าต้องเป็นจำนวนชั่วโมงระหว่าง 1–168 (7 วัน)");
+                txtWarnHours.Attributes["data-as-err"] = "ใส่จำนวนชั่วโมง 1–168";
+            }
 
             if (problems.Count == 0)
             {
@@ -308,7 +325,11 @@ namespace Take_Time_BangPhra.Admin.Settings
                     {
                         decimal v;
                         if (!TryMoney(raw, out v) || v < 0)
-                        { problems.Add("ห้อง #" + kv.Key + ": \"" + raw + "\" ไม่ใช่จำนวนเงินที่ถูกต้อง"); continue; }
+                        {
+                            problems.Add(RoomLabel(kv.Key) + ": \"" + raw + "\" ไม่ใช่จำนวนเงินที่ถูกต้อง");
+                            kv.Value.Attributes["data-as-err"] = "ไม่ใช่จำนวนเงิน — เว้นว่าง = ใช้ค่ากลาง, 0 = ไม่เก็บ";
+                            continue;
+                        }
                         val = v;
                     }
 
@@ -319,14 +340,17 @@ namespace Take_Time_BangPhra.Admin.Settings
                             new Dictionary<string, object> { { "@v", val }, { "@id", kv.Key } });
                         roomsSaved++;
                     }
-                    catch (Exception ex) { problems.Add("ห้อง #" + kv.Key + ": " + ex.Message); }
+                    catch (Exception ex) { problems.Add(RoomLabel(kv.Key) + ": " + ex.Message); }
                 }
             }
 
             if (problems.Count > 0)
             {
                 // ค้างค่าที่พิมพ์ไว้ให้แก้ต่อได้ ไม่ redirect ทิ้ง
-                Msg("err", "มีปัญหา:<br/>• " + string.Join("<br/>• ", problems.ToArray()));
+                var enc = new List<string>();
+                foreach (string pr in problems) enc.Add(Server.HtmlEncode(pr));
+                Msg("err", "มีปัญหา (ช่องที่ต้องแก้ไฮไลต์สีแดง):<br/>• " + string.Join("<br/>• ", enc.ToArray())
+                    + SettingsUi.StartDirtyMarker);
                 ShowReadiness();
                 ShowHolds();
                 return;
@@ -343,7 +367,7 @@ namespace Take_Time_BangPhra.Admin.Settings
             decimal v;
             if (!TryMoney(txtBulk.Text, out v) || v < 0)
             {
-                Msg("err", "กรุณากรอกจำนวนเงินที่จะเติมให้ทุกห้อง");
+                Msg("err", "กรุณากรอกจำนวนเงินที่จะเติมให้ทุกห้อง (ตัวเลขไม่ติดลบ เช่น 2000)");
                 ShowReadiness(); ShowHolds();
                 return;
             }
@@ -351,7 +375,7 @@ namespace Take_Time_BangPhra.Admin.Settings
             foreach (KeyValuePair<int, TextBox> kv in _roomInputs) kv.Value.Text = s;
             txtBulk.Text = "";
             Msg("warn", "เติมค่าให้ทุกห้องในหน้าจอแล้ว — <b>ยังไม่ได้บันทึก</b> "
-                      + "ตรวจดูก่อนแล้วกด \"บันทึกทั้งหมด\"");
+                      + "ตรวจดูก่อนแล้วกด \"บันทึกทั้งหมด\"" + SettingsUi.StartDirtyMarker);
             ShowReadiness(); ShowHolds();
         }
 
@@ -359,7 +383,7 @@ namespace Take_Time_BangPhra.Admin.Settings
         {
             foreach (KeyValuePair<int, TextBox> kv in _roomInputs) kv.Value.Text = "";
             Msg("warn", "ล้างช่องรายห้องในหน้าจอแล้ว (ทุกห้องจะกลับไปใช้ค่ากลาง) — "
-                      + "<b>ยังไม่ได้บันทึก</b> กด \"บันทึกทั้งหมด\" เพื่อยืนยัน");
+                      + "<b>ยังไม่ได้บันทึก</b> กด \"บันทึกทั้งหมด\" เพื่อยืนยัน" + SettingsUi.StartDirtyMarker);
             ShowReadiness(); ShowHolds();
         }
 
@@ -435,10 +459,18 @@ namespace Take_Time_BangPhra.Admin.Settings
             return decimal.TryParse(t, NumberStyles.Any, CultureInfo.InvariantCulture, out value);
         }
 
+        private string RoomLabel(int id)
+        {
+            string n;
+            return _roomNames.TryGetValue(id, out n) && !string.IsNullOrEmpty(n) ? "ห้อง " + n : "ห้อง #" + id;
+        }
+
         private bool _msgWritten;
         private void Msg(string cls, string html)
         {
-            string block = "<div class=\"sd-alert " + cls + "\">" + html + "</div>";
+            bool err = cls == "err";
+            string block = "<div class=\"sd-alert " + cls + "\" role=\"" + (err ? "alert" : "status") + "\""
+                + (err ? " data-as-banner=\"err\"" : "") + ">" + html + "</div>";
             litMsg.Text = _msgWritten ? litMsg.Text + block : block;
             _msgWritten = true;
         }
