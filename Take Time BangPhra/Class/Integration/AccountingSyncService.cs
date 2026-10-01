@@ -435,13 +435,24 @@ namespace Take_Time_BangPhra.Integration
         /// Reservation.Ota_Revenue_Ref = 'RECLASS-{receiptId}' (job รายได้ OTA จะไม่โพสต์ซ้ำ).
         /// กันซ้ำ: คิวค้าง/เคยสำเร็จของ ref เดียวกัน → คืนรายการเดิม (FAILED = ปลุกกลับเป็น PENDING)
         /// </summary>
-        /// <returns>queue id; -1 = ยังไม่ได้ตั้งค่า NextAcc / ข้อมูลไม่ครบ</returns>
+        /// <returns>queue id; -1 = ยังไม่ได้ตั้งค่า NextAcc / ข้อมูลไม่ครบ; -2 = การจองนี้มีเอกสาร/JE รายได้ OTA แล้ว
+        /// (Ota_Revenue_Ref ขึ้นต้น OTADOC- / OTA-) — ห้าม reclass (ลูกหนี้ OTA ซ้ำ)</returns>
         public long EnqueueOtaCashReclass(long paymentHistoryId, int reservationId, string receiptId,
             decimal amount, DateTime entryDate, string otaChannel = null, string otaBookingId = null,
             DateTime? originalPaymentDate = null, string requestedBy = null)
         {
             if (!_config.IsConfigured) return -1;
             if (paymentHistoryId <= 0 || reservationId <= 0 || amount <= 0 || string.IsNullOrWhiteSpace(receiptId)) return -1;
+
+            // รายได้ส่วน OTA ถูกรับรู้แล้วด้วยเอกสาร OTA (OTADOC-) / JE ลูกหนี้ OTA (OTA-) → Dr ลูกหนี้ OTA อีกรอบ = ซ้ำ
+            string revRef = LookupOtaRevenueRef(reservationId);
+            if (IsOtaRevenuePostedRef(revRef))
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"EnqueueOtaCashReclass: ปฏิเสธ PH#{paymentHistoryId} การจอง #{reservationId} — Ota_Revenue_Ref = {revRef} " +
+                    "(รายได้ OTA ลงด้วยเอกสาร/JE ลูกหนี้ OTA แล้ว — reclass จะรับรู้ลูกหนี้ OTA ซ้ำ)", "SYSTEM");
+                return -2;
+            }
 
             receiptId = receiptId.Trim();
             string refKey = $"OTA-RECLASS-{receiptId}";
@@ -476,6 +487,134 @@ namespace Take_Time_BangPhra.Integration
             if (done > 0) return done;
 
             return InsertQueue("OTA_RECLASS", reservationId, "OTA_CASH_RECLASS", payload);
+        }
+
+        /// <summary>Reservation.Ota_Revenue_Ref ปัจจุบัน (null = ว่าง/อ่านไม่ได้/ยังไม่รัน PHASE18_20)</summary>
+        public string LookupOtaRevenueRef(int reservationId)
+        {
+            if (reservationId <= 0) return null;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 Ota_Revenue_Ref FROM Reservation WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", reservationId } });
+                if (dt != null && dt.Rows.Count > 0 && dt.Rows[0][0] != DBNull.Value)
+                {
+                    string v = dt.Rows[0][0].ToString().Trim();
+                    return v.Length == 0 ? null : v;
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        /// <summary>
+        /// marker บน Reservation.Ota_Revenue_Ref แปลว่า "รายได้ส่วนที่ OTA เก็บถูกรับรู้แล้วเป็นลูกหนี้/พักเงิน OTA" หรือไม่:
+        ///   OTADOC-{id} = เอกสารรับเงิน OTA (CREATE_OTA_SALES_DOCUMENT, Dr บัญชีพักเงิน OTA / Cr รายได้)
+        ///   OTA-{id}    = โหมดเดิม (ใบเสร็จผ่าน OTA_RECEIVABLE, Dr ลูกหนี้ OTA / Cr รายได้)
+        /// ทั้งสองแบบ ห้ามส่ง OTA_CASH_RECLASS (Dr ลูกหนี้ OTA / Cr เงินสด) ซ้ำ — ลูกหนี้ OTA จะเกินจริงเท่ายอดนั้น.
+        /// ไม่นับ RECLASS-… / LEGACY / VOIDED-OTADOC-… (เอกสาร OTA ถูกยกเลิกแล้ว)
+        /// </summary>
+        public static bool IsOtaRevenuePostedRef(string revRef)
+        {
+            if (string.IsNullOrWhiteSpace(revRef)) return false;
+            string v = revRef.Trim();
+            return v.StartsWith("OTADOC-", StringComparison.OrdinalIgnoreCase)
+                || (v.StartsWith("OTA-", StringComparison.OrdinalIgnoreCase)
+                    && !v.StartsWith("OTA-RECLASS", StringComparison.OrdinalIgnoreCase));
+        }
+
+        // ══════════════════════════════════════════════════════════════════════
+        //  เงินประกันความเสียหายแบบโอน (SecurityHoldService, Provider = TRANSFER) → JE (opt-in)
+        //  Nexaacc_SecurityDeposit_Journal = 1 (PHASE19_24, default 0)
+        //   IN  : Dr ธนาคาร (แหล่งเงินของช่องทางรับโอน) / Cr SECURITY_DEPOSIT_LIABILITY   (ยอดรับ)
+        //   OUT : Dr SECURITY_DEPOSIT_LIABILITY / Cr ธนาคาร                              (ยอดโอนคืน)
+        //   DMG : Dr SECURITY_DEPOSIT_LIABILITY / Cr ธนาคาร                              (ยอดที่หัก)
+        //  DMG ไม่ลงรายได้: รายได้ค่าเสียหาย + VAT มาจาก "ใบเสร็จค่าเสียหาย" ที่พนักงานออกตามเดิม
+        //  (แหล่งเงิน = บัญชีรับโอน → Dr ธนาคาร / Cr รายได้) — JE DMG ตัด "เงินในธนาคารที่ใบเสร็จนับซ้ำ"
+        //  ออกพร้อมล้างหนี้สิน ⇒ ธนาคารสุทธิ = ยอดที่หัก, หนี้สินสุทธิ = 0, รายได้มาครั้งเดียวจากใบเสร็จ
+        //  ref (ใช้กันซ้ำ): SECDEP-{holdId}-IN / -OUT / -DMG
+        // ══════════════════════════════════════════════════════════════════════
+
+        /// <summary>เข้าคิว JE เงินประกันโอน — คืน queue id, -1 = ปิดสวิตช์/ยังไม่ตั้งค่า/ข้าม (มี log)</summary>
+        /// <param name="kind">IN | OUT | DMG</param>
+        public long EnqueueSecurityDepositJournal(long holdId, string holdRef, int reservationId, string kind,
+            decimal amount, DateTime entryDate, int paidHowId, string paidHowName, string note)
+        {
+            if (!_config.IsConfigured || !_config.IsSecurityDepositJournalEnabled) return -1;
+            kind = (kind ?? "").Trim().ToUpperInvariant();
+            if (holdId <= 0 || amount <= 0 || (kind != "IN" && kind != "OUT" && kind != "DMG")) return -1;
+
+            string refKey = $"SECDEP-{holdId}-{kind}";
+            if (kind != "IN")
+            {
+                // ขาออกต้องมีขาเข้า — เงินประกันที่รับก่อนเปิดสวิตช์ไม่มีหนี้สินให้ล้าง (ลงแล้วหนี้สินติดลบ)
+                string inRef = $"SECDEP-{holdId}-IN";
+                string st;
+                long inQ = FindUnsentEntry("SECURITY_DEPOSIT", "SECURITY_DEPOSIT_JOURNAL", "refKey", inRef, out st);
+                if (inQ <= 0) inQ = FindRecentCompletedEntry("SECURITY_DEPOSIT", "SECURITY_DEPOSIT_JOURNAL", "refKey", inRef, 315360000);
+                if (inQ <= 0)
+                {
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"EnqueueSecurityDepositJournal: ข้าม {refKey} — ไม่มี {inRef} (รับเงินประกันก่อนเปิด Nexaacc_SecurityDeposit_Journal) ไม่มีหนี้สินให้ล้าง", "SYSTEM");
+                    return -1;
+                }
+                // ใช้บัญชีธนาคารเดียวกับขาเข้า (ช่องทางรับโอนอาจถูกเปลี่ยนหลังรับเงิน)
+                var inPayload = LookupQueuePayloadById(inQ);
+                if (inPayload != null)
+                {
+                    int pid;
+                    if (inPayload.ContainsKey("paidHowId") && int.TryParse(Convert.ToString(inPayload["paidHowId"]), out pid) && pid > 0)
+                        paidHowId = pid;
+                    if (inPayload.ContainsKey("paidHowName") && !string.IsNullOrWhiteSpace(Convert.ToString(inPayload["paidHowName"])))
+                        paidHowName = Convert.ToString(inPayload["paidHowName"]);
+                }
+            }
+
+            var payload = new Dictionary<string, object>
+            {
+                { "refKey", refKey },
+                { "holdId", holdId },
+                { "holdRef", holdRef ?? "" },
+                { "reservationId", reservationId },
+                { "kind", kind },
+                { "amount", amount },
+                { "entryDate", AcctDate(entryDate) },
+                { "paidHowId", paidHowId },
+                { "paidHowName", paidHowName ?? "" },
+                { "note", note ?? "" }
+            };
+
+            string unsentStatus;
+            long existing = FindUnsentEntry("SECURITY_DEPOSIT", "SECURITY_DEPOSIT_JOURNAL", "refKey", refKey, out unsentStatus);
+            if (existing > 0) return existing;
+            long done = FindRecentCompletedEntry("SECURITY_DEPOSIT", "SECURITY_DEPOSIT_JOURNAL", "refKey", refKey, 315360000);
+            if (done > 0) return done;
+
+            return InsertQueue("SECURITY_DEPOSIT", reservationId, "SECURITY_DEPOSIT_JOURNAL", payload);
+        }
+
+        /// <summary>payload ของคิวตาม ID (null = ไม่พบ/อ่านไม่ได้)</summary>
+        private Dictionary<string, object> LookupQueuePayloadById(long queueId)
+        {
+            if (queueId <= 0) return null;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 Payload FROM Accounting_Sync_Queue WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", queueId } });
+                if (dt != null && dt.Rows.Count > 0 && dt.Rows[0][0] != DBNull.Value)
+                    return _serializer.Deserialize<Dictionary<string, object>>(dt.Rows[0][0].ToString());
+            }
+            catch { }
+            return null;
+        }
+
+        /// <summary>เลขอ้างอิงเอกสารรับเงิน OTA (แถว Account_Receipt สังเคราะห์ OTADOC-{reservationId})</summary>
+        public static bool IsOtaSalesDocRef(string receiptNumber)
+        {
+            return !string.IsNullOrWhiteSpace(receiptNumber)
+                && receiptNumber.Trim().StartsWith("OTADOC-", StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>
@@ -1461,6 +1600,15 @@ namespace Take_Time_BangPhra.Integration
         {
             if (!_config.IsConfigured) return -1;
 
+            // เอกสารรับเงิน OTA (OTADOC-) ถูกสร้างโดยคิว CREATE_OTA_SALES_DOCUMENT ไม่ใช่ CREATE_RECEIPT_DOCUMENT →
+            // หา doc id แบบใบเสร็จปกติไม่เจอ (เดิมคืน -1 เงียบ เอกสารค้างใน NextAcc) — ใช้เส้นเฉพาะ
+            // ลบ/ยกเลิกจากหน้าใบเสร็จ = ไม่สร้างใหม่อัตโนมัติ (allowRepost=false)
+            if (IsOtaSalesDocRef(receiptNumber))
+            {
+                string msgOta;
+                return EnqueueVoidOtaSalesDocument(receiptNumber, false, null, "ยกเลิก/ลบใบ " + receiptNumber + " จากหน้าเอกสาร", out msgOta);
+            }
+
             long existing = FindPendingEntry("RECEIPT", "VOID_RECEIPT", "receiptNumber", receiptNumber);
             if (existing > 0) return existing;
 
@@ -1501,6 +1649,266 @@ namespace Take_Time_BangPhra.Integration
                 { "nexaaccId", nexaaccId },
                 { "reason", reason ?? "ยกเลิกจากหน้าเอกสาร (NextAcc-only)" }
             });
+        }
+
+        // ══════════════════════════════════════════════════════════════════════
+        //  ยกเลิกเอกสารรับเงิน OTA (OTADOC-{reservationId}) — สร้างโดยคิว CREATE_OTA_SALES_DOCUMENT
+        //  (company /document type 3) จึงหา doc id จากคิว CREATE_RECEIPT_DOCUMENT ไม่เจอ
+        //  void = company POST /api/companies/{cid}/document/{id}/void
+        //    (Wachira-d/Accounting Controllers/DocumentController.cs:803-815 → DocumentService.VoidDocumentAsync
+        //     Services/Implementations/DocumentService.cs:7782 กลับ JE ของเอกสาร; เอกสารที่อยู่ในรายงานภาษีที่ยื่นแล้ว
+        //     ถูกปฏิเสธ :7805-7811 → คิวล้มพร้อมข้อความ ไม่ปลด marker)
+        // ══════════════════════════════════════════════════════════════════════
+
+        /// <summary>OTADOC-123 → 123 (0 = แปลงไม่ได้)</summary>
+        public static int ParseOtaDocReservationId(string receiptNumber)
+        {
+            if (!IsOtaSalesDocRef(receiptNumber)) return 0;
+            int id;
+            return int.TryParse(receiptNumber.Trim().Substring("OTADOC-".Length), out id) && id > 0 ? id : 0;
+        }
+
+        /// <summary>มีคิว VOID_RECEIPT ที่ "สำเร็จแล้ว" ของเลขนี้หลังคิวที่ระบุไหม (ใช้ตัดสินว่าเอกสารจากคิวนั้นถูกยกเลิกไปแล้ว)</summary>
+        private bool HasCompletedVoidAfter(long afterQueueId, string receiptNumber)
+        {
+            if (afterQueueId <= 0 || string.IsNullOrEmpty(receiptNumber)) return false;
+            try
+            {
+                string esc = receiptNumber.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]");
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 ID FROM Accounting_Sync_Queue
+                       WHERE Action_Type = 'VOID_RECEIPT' AND Status = 'COMPLETED'
+                         AND ID > @after AND Payload LIKE @p",
+                    new Dictionary<string, object>
+                    {
+                        { "@after", afterQueueId },
+                        { "@p", "%\"receiptNumber\":\"" + esc + "\"%" }
+                    });
+                return dt != null && dt.Rows.Count > 0;
+            }
+            catch { return false; }
+        }
+
+        /// <summary>
+        /// GUID เอกสาร NextAcc ของเอกสารรับเงิน OTA: คิว CREATE_OTA_SALES_DOCUMENT ที่สำเร็จล่าสุด (Nexaacc_Response_Id)
+        /// — ถ้ามี VOID ที่สำเร็จหลังคิวนั้น = ถูกยกเลิกแล้ว (คืน Empty) · ไม่พบในคิว → marker บน Account_Receipt
+        /// (DOC:/APR:/{id}) → Account_Receipt.Nexaacc_Doc_Id (PHASE18_32)
+        /// </summary>
+        public Guid LookupOtaSalesDocId(string receiptNumber)
+        {
+            if (!IsOtaSalesDocRef(receiptNumber)) return Guid.Empty;
+            receiptNumber = receiptNumber.Trim();
+            try
+            {
+                string esc = receiptNumber.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]");
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 ID, Nexaacc_Response_Id FROM Accounting_Sync_Queue
+                       WHERE Action_Type = 'CREATE_OTA_SALES_DOCUMENT' AND Status = 'COMPLETED'
+                         AND Nexaacc_Response_Id IS NOT NULL AND Payload LIKE @p
+                       ORDER BY ID DESC",
+                    new Dictionary<string, object> { { "@p", "%\"receiptNumber\":\"" + esc + "\"%" } });
+                if (dt != null && dt.Rows.Count > 0)
+                {
+                    long createId = Convert.ToInt64(dt.Rows[0]["ID"]);
+                    if (HasCompletedVoidAfter(createId, receiptNumber)) return Guid.Empty;
+                    Guid g = ExtractGuid(dt.Rows[0]["Nexaacc_Response_Id"]?.ToString());
+                    if (g != Guid.Empty) return g;
+                }
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync", $"LookupOtaSalesDocId {receiptNumber}: {ex.Message}", "SYSTEM");
+            }
+
+            Guid fromMarker;
+            string note;
+            if (TryResolveVoidDocId(LookupReceiptPaymentMarkerRaw(receiptNumber), out fromMarker, out note))
+                return fromMarker;
+
+            try
+            {
+                var link = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 Nexaacc_Doc_Id FROM Account_Receipt WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", receiptNumber } });
+                Guid g2;
+                if (link != null && link.Rows.Count > 0 && link.Rows[0][0] != DBNull.Value
+                    && Guid.TryParse(link.Rows[0][0].ToString(), out g2) && g2 != Guid.Empty)
+                    return g2;
+            }
+            catch { /* ยังไม่รัน PHASE18_32 */ }
+            return Guid.Empty;
+        }
+
+        /// <summary>
+        /// เข้าคิวยกเลิกเอกสารรับเงิน OTA (OTADOC-{reservationId}) บน NextAcc (ใช้ action VOID_RECEIPT + otaDoc=true
+        /// → ProcessVoidOtaSalesDocument). หลัง void สำเร็จ (ยืนยันสถานะ Voided จาก NextAcc แล้วเท่านั้น):
+        ///   allowRepost=true  → ลบแถวสรุป OTADOC + คืน Reservation.Ota_Revenue_Ref = NULL ⇒ job รายได้ OTA สร้างเอกสารใหม่
+        ///                       รอบถัดไปตามยอด/mapping ปัจจุบัน (เลขเอกสาร NextAcc ใหม่)
+        ///   allowRepost=false → Ota_Revenue_Ref = 'VOIDED-OTADOC-{id}' + แถวสรุป Status='Cancel' ⇒ ไม่สร้างใหม่อัตโนมัติ
+        /// </summary>
+        /// <returns>queue id (&gt;0) หรือ -1 (ดู message)</returns>
+        public long EnqueueVoidOtaSalesDocument(string receiptNumber, bool allowRepost, string requestedBy, string reason, out string message)
+        {
+            message = null;
+            if (!_config.IsConfigured) { message = "ยังไม่ได้ตั้งค่า NextAcc"; return -1; }
+            if (!IsOtaSalesDocRef(receiptNumber)) { message = "ไม่ใช่เลขอ้างอิงเอกสาร OTA (OTADOC-…)"; return -1; }
+            receiptNumber = receiptNumber.Trim();
+
+            // คิวสร้างยังค้าง = retry หลัง void จะสร้างเอกสารใหม่ทันที (marker VOIDED ถูก reset ใน SettleReceiptDocAsync)
+            string unsent;
+            long createQ = FindUnsentEntry("RESERVATION", "CREATE_OTA_SALES_DOCUMENT", "receiptNumber", receiptNumber, out unsent);
+            if (createQ > 0)
+            {
+                message = $"คิวสร้างเอกสาร OTA #{createQ} ยังเป็น {unsent} — ปิด/ลบรายการคิวนั้นก่อน (กันเอกสารถูกสร้างซ้ำหลังยกเลิก)";
+                return -1;
+            }
+
+            long pendingVoid = FindUnsentEntry("RECEIPT", "VOID_RECEIPT", "receiptNumber", receiptNumber, out unsent);
+            if (pendingVoid > 0)
+            {
+                message = $"มีคิวยกเลิกเอกสารนี้อยู่แล้ว #{pendingVoid} ({unsent}) — กด Retry ที่รายการนั้นแทน";
+                return pendingVoid;
+            }
+
+            Guid docId = LookupOtaSalesDocId(receiptNumber);
+            if (docId == Guid.Empty)
+            {
+                message = $"ไม่พบเอกสาร NextAcc ของ {receiptNumber} (ยังไม่เคยสร้างสำเร็จ หรือยกเลิกไปแล้ว)";
+                return -1;
+            }
+
+            int resId = ParseOtaDocReservationId(receiptNumber);
+            var payload = new Dictionary<string, object>
+            {
+                { "receiptNumber", receiptNumber },
+                { "nexaaccId", docId.ToString() },
+                { "otaDoc", true },
+                { "reservationId", resId },
+                { "allowRepost", allowRepost },
+                { "requestedBy", requestedBy ?? "" },
+                { "reason", string.IsNullOrWhiteSpace(reason) ? ("ยกเลิกเอกสารรับเงิน OTA " + receiptNumber) : reason.Trim() }
+            };
+            long qid = InsertQueue("RECEIPT", resId, "VOID_RECEIPT", payload);
+            message = qid > 0
+                ? $"เข้าคิวยกเลิกเอกสาร OTA {receiptNumber} (NextAcc {docId.ToString().Substring(0, 8)}…) #{qid}" +
+                  (allowRepost ? " — หลังยกเลิกสำเร็จ ระบบจะสร้างเอกสารใหม่รอบถัดไป" : " — จะไม่สร้างใหม่อัตโนมัติ")
+                : "เข้าคิวไม่สำเร็จ";
+            _code.Logs(_connectionString, "AccountingSync",
+                $"EnqueueVoidOtaSalesDocument: {receiptNumber} doc={docId} allowRepost={allowRepost} by={requestedBy} → #{qid}", "SYSTEM");
+            return qid;
+        }
+
+        /// <summary>
+        /// ประมวลผล VOID_RECEIPT ของเอกสาร OTA — company /document/{id}/void แล้ว **อ่านสถานะยืนยัน** ว่า Voided/404
+        /// ก่อนปลด marker (ไม่เชื่อการกลืน error แบบ IsAlreadyPostedOrTerminal: ถ้า void ไม่สำเร็จจริงแต่เราคืน
+        /// Ota_Revenue_Ref → job สร้างเอกสารใหม่ = รายได้ซ้ำ)
+        /// </summary>
+        private async Task<string> ProcessVoidOtaSalesDocument(Dictionary<string, object> p)
+        {
+            string receiptNumber = ((p.ContainsKey("receiptNumber") ? p["receiptNumber"]?.ToString() : null) ?? "").Trim();
+            string nexaaccId = p.ContainsKey("nexaaccId") ? p["nexaaccId"]?.ToString() : null;
+            bool allowRepost = p.ContainsKey("allowRepost") && p["allowRepost"] != null && Convert.ToBoolean(p["allowRepost"]);
+            int resId = p.ContainsKey("reservationId") && p["reservationId"] != null ? Convert.ToInt32(p["reservationId"]) : 0;
+            if (resId <= 0) resId = ParseOtaDocReservationId(receiptNumber);
+            string requestedBy = p.ContainsKey("requestedBy") ? p["requestedBy"]?.ToString() : null;
+
+            if (!_config.CanUseCompanyEndpoints)
+                throw new ArgumentException("ยกเลิกเอกสาร OTA ต้องใช้ company endpoint (/api/companies/{id}/document/{doc}/void) — " +
+                    "ตั้ง Company ID + Nexaacc_Company_Endpoints=1 แล้วกด Retry");
+
+            Guid docId;
+            string idNote;
+            if (!TryResolveVoidDocId(nexaaccId, out docId, out idNote))
+                docId = LookupOtaSalesDocId(receiptNumber);
+
+            if (docId == Guid.Empty)
+            {
+                SetReceiptPaymentMarker(receiptNumber, "VOIDED");
+                ReleaseOtaDocMarkerAfterVoid(resId, receiptNumber, allowRepost, requestedBy);
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessVoidOtaSalesDocument: {receiptNumber} ไม่มีเอกสารให้ยกเลิก ({idNote}) — ปลด marker (allowRepost={allowRepost})", "SYSTEM");
+                return "SKIPPED_NO_DOCUMENT";
+            }
+
+            bool gone = false;
+            try
+            {
+                var d = await _apiClient.GetDocumentAsync(docId);
+                if (d?.data != null && d.data.Status == NexaaccDocumentStatus.Voided) gone = true;
+            }
+            catch (AccountingApiException gx) when (gx.StatusCode == 404) { gone = true; }
+            catch { /* อ่านไม่ได้ชั่วคราว → ลอง void แล้วยืนยันสถานะด้านล่าง */ }
+
+            string voidErr = null;
+            if (!gone)
+            {
+                try { await _apiClient.VoidDocumentAsync(docId); }
+                catch (AccountingApiException vx)
+                {
+                    voidErr = $"HTTP {vx.StatusCode}: {DecodeUnicodeEscapes(vx.ResponseBody ?? vx.Message)}";
+                }
+
+                // ยืนยันจากปลายทางเสมอ — ไม่ Voided = ไม่ปลด marker (โยน error ให้คิว retry/คนตรวจ)
+                try
+                {
+                    var chk = await _apiClient.GetDocumentAsync(docId);
+                    gone = chk?.data != null && chk.data.Status == NexaaccDocumentStatus.Voided;
+                }
+                catch (AccountingApiException cx) when (cx.StatusCode == 404) { gone = true; }
+
+                if (!gone)
+                    throw new Exception($"ยกเลิกเอกสาร OTA {receiptNumber} (NextAcc {docId}) ไม่สำเร็จ — สถานะยังไม่เป็น Voided" +
+                        (voidErr == null ? "" : " · " + voidErr) +
+                        " (ถ้างวด/รายงานภาษีปิดแล้ว ต้องปลดล็อกใน NextAcc หรือออกใบลดหนี้แทน)");
+            }
+
+            SetReceiptPaymentMarker(receiptNumber, "VOIDED");
+            try { SetReceiptNextAccDoc(receiptNumber, null, null); } catch { }
+            ClearReceiptPdfCache(receiptNumber);
+            ReleaseOtaDocMarkerAfterVoid(resId, receiptNumber, allowRepost, requestedBy);
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ProcessVoidOtaSalesDocument: voided {receiptNumber} doc={docId} การจอง #{resId} allowRepost={allowRepost} by={requestedBy}", "SYSTEM");
+            return $"VOIDED:{docId}";
+        }
+
+        /// <summary>หลังยกเลิกเอกสาร OTA สำเร็จ — ปลด/ล็อก marker บนการจอง (เฉพาะเมื่อยังชี้เอกสารนี้อยู่ = atomic)</summary>
+        private void ReleaseOtaDocMarkerAfterVoid(int reservationId, string receiptNumber, bool allowRepost, string requestedBy)
+        {
+            if (reservationId <= 0 || string.IsNullOrEmpty(receiptNumber)) return;
+            try
+            {
+                if (allowRepost)
+                {
+                    // ลบแถวสรุปเฉพาะเมื่อ marker = VOIDED (ยืนยันแล้วว่าเอกสารเดิมถูกยกเลิก) → job สร้างแถว+เอกสารใหม่ได้
+                    _code.DatabaseInsertSafe(_connectionString,
+                        @"DELETE FROM Account_Receipt_Detail
+                           WHERE Receipt_ID = @ref
+                             AND EXISTS (SELECT 1 FROM Account_Receipt WHERE ID = @ref AND Nexaacc_Receipt_Payment_Id = 'VOIDED');
+                          DELETE FROM Account_Receipt WHERE ID = @ref AND Nexaacc_Receipt_Payment_Id = 'VOIDED';
+                          UPDATE Reservation SET Ota_Revenue_Ref = NULL WHERE ID = @id AND Ota_Revenue_Ref = @ref;",
+                        new Dictionary<string, object> { { "@ref", receiptNumber }, { "@id", reservationId } });
+                }
+                else
+                {
+                    _code.DatabaseInsertSafe(_connectionString,
+                        @"UPDATE Account_Receipt SET [Status] = 'Cancel' WHERE ID = @ref;
+                          UPDATE Reservation SET Ota_Revenue_Ref = @locked WHERE ID = @id AND Ota_Revenue_Ref = @ref;",
+                        new Dictionary<string, object>
+                        {
+                            { "@ref", receiptNumber }, { "@id", reservationId },
+                            { "@locked", "VOIDED-" + receiptNumber }
+                        });
+                }
+                _code.Logs(_connectionString, "OTA-Revenue",
+                    $"การจอง #{reservationId}: ยกเลิกเอกสาร {receiptNumber} แล้ว → " +
+                    (allowRepost ? "คืนสถานะให้สร้างเอกสารใหม่รอบถัดไป" : "ล็อก Ota_Revenue_Ref = VOIDED-" + receiptNumber + " (ไม่สร้างใหม่อัตโนมัติ)"),
+                    string.IsNullOrWhiteSpace(requestedBy) ? "SYSTEM" : requestedBy);
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ReleaseOtaDocMarkerAfterVoid {receiptNumber}: {ex.Message} — เอกสาร NextAcc ถูกยกเลิกแล้ว ปรับ Reservation.Ota_Revenue_Ref มือ", "SYSTEM");
+            }
         }
 
         /// <summary>
@@ -2391,6 +2799,58 @@ namespace Take_Time_BangPhra.Integration
             return fallbackName;
         }
 
+        /// <summary>
+        /// แหล่งเงินที่ "ใช้จริง" ตอนบันทึกยอดรับผ่านเกตเวย์ — **กฎเดียวกับ OnlinePaymentService.ApplyToReservation**
+        /// (Class/Payments/OnlinePaymentService.cs:608-621 — แก้ที่นั่นต้องแก้ที่นี่ด้วย):
+        ///   1) PaymentChannelCatalog.ResolvePaidHowName(provider, method, cardBrand) (แถวแคตตาล็อกของเจ้านั้น)
+        ///   2) ไม่เจอ → แหล่งเงินรายเกตเวย์ (Nexaacc_Gateway_PaidHow_{P}_{M} → _{P}) → 3) Payment_PaidHow_Name
+        ///   ยกเว้น: แถวแคตตาล็อกยังไม่ผูกบัญชี NextAcc แต่ตั้งแหล่งเงินรายเกตเวย์ไว้ (คนละชื่อ) → ใช้รายเกตเวย์
+        /// ใช้แสดงผลในหน้า Admin เท่านั้น (ไม่ได้ถูกเรียกตอนรับเงินจริง)
+        /// </summary>
+        /// <param name="source">CATALOG | GATEWAY_CONFIG | GATEWAY_OVERRIDE (แคตตาล็อกยังไม่ผูกบัญชี) | DEFAULT</param>
+        public static string ResolveEffectiveGatewayPaidHow(string connectionString, string provider, string method,
+            string cardBrand, out string source)
+        {
+            source = "DEFAULT";
+            string fallback = "Omise (จ่ายออนไลน์)";
+            try { fallback = Take_Time_BangPhra.Payments.PaymentGatewayConfig.Get("Payment_PaidHow_Name", fallback); } catch { }
+
+            string catalogName = null;
+            try { catalogName = Take_Time_BangPhra.Payments.PaymentChannelCatalog.ResolvePaidHowName(provider, method, cardBrand); }
+            catch { catalogName = null; }
+            string gatewayName = ResolveGatewayPaidHowName(connectionString, provider, method, null);
+
+            if (string.IsNullOrEmpty(catalogName))
+            {
+                if (!string.IsNullOrEmpty(gatewayName)) { source = "GATEWAY_CONFIG"; return gatewayName; }
+                source = "DEFAULT";
+                return fallback;
+            }
+            if (!string.IsNullOrEmpty(gatewayName)
+                && !string.Equals(gatewayName, catalogName, StringComparison.Ordinal)
+                && !PaidHowHasNextAccAccount(connectionString, catalogName))
+            {
+                source = "GATEWAY_OVERRIDE";
+                return gatewayName;
+            }
+            source = "CATALOG";
+            return catalogName;
+        }
+
+        /// <summary>แถวแหล่งเงิน (เปิดใช้) ผูกบัญชี NextAcc แล้วไหม — อ่านไม่ได้ = true (เหมือน OnlinePaymentService.PaidHowHasNextAccAccount)</summary>
+        private static bool PaidHowHasNextAccAccount(string connectionString, string paidHowName)
+        {
+            try
+            {
+                var dt = new code().DatabaseQuerySafe(connectionString,
+                    "SELECT TOP 1 CASE WHEN Nexaacc_AccountId IS NULL THEN 0 ELSE 1 END AS L FROM Account_Paid_How WHERE Paid_How = @n AND Status = 'True'",
+                    new Dictionary<string, object> { { "@n", paidHowName } });
+                if (dt == null || dt.Rows.Count == 0) return false;
+                return Convert.ToInt32(dt.Rows[0]["L"]) == 1;
+            }
+            catch { return true; }
+        }
+
         /// <summary>ตัวพิมพ์ใหญ่ + เก็บเฉพาะ A-Z 0-9 _ (ใช้ต่อท้ายชื่อคีย์ config)</summary>
         internal static string NormalizeConfigToken(string s)
         {
@@ -2508,7 +2968,8 @@ namespace Take_Time_BangPhra.Integration
             }
             // เคยสำเร็จแล้ว (ย้อนได้ 10 ปีแบบเดียวกับ OTA_CASH_RECLASS) = ห้ามเข้าคิวซ้ำ
             long done = FindRecentCompletedEntry("RESERVATION", "CREATE_OTA_SALES_DOCUMENT", "receiptNumber", receiptNumber, 315360000);
-            if (done > 0) return done;
+            // ยกเว้น: เอกสารจากคิวนั้นถูกยกเลิกสำเร็จแล้ว (EnqueueVoidOtaSalesDocument allowRepost=true) → สร้างใหม่ได้
+            if (done > 0 && !HasCompletedVoidAfter(done, receiptNumber)) return done;
 
             return InsertQueue("RESERVATION", reservationId, "CREATE_OTA_SALES_DOCUMENT", payload);
         }
@@ -2522,6 +2983,8 @@ namespace Take_Time_BangPhra.Integration
         /// ⇒ ส่ง PaymentAccountId = บัญชีพักเงิน/ลูกหนี้ของ OTA รายช่องทาง → "เงินที่ OTA เก็บแทนเรา" ลงถูกบัญชี
         ///   (ไม่ใช่เงินสด) และปิดยอดตอน OTA โอน payout (JE/รับชำระแยก ฝั่งผู้ทำบัญชี)
         /// idempotent: marker บน Account_Receipt ของ receiptNumber (DOC:→APR:→{docId}) ผ่าน SettleReceiptDocAsync
+        /// ภ.พ.30: Receipt standalone (ไม่มี RelatedDocumentId) ถูกนับภาษีขาย (tax point = TaxPointDate ?? DocumentDate) — TaxService.GenerateVatReport
+        ///   (Services/Implementations/TaxService.cs:571-591) ⇒ ไม่ต้องใช้ TaxInvoice. ยกเลิก: EnqueueVoidOtaSalesDocument
         /// </summary>
         private async Task<string> ProcessOtaSalesDocument(Dictionary<string, object> p)
         {
@@ -2550,6 +3013,13 @@ namespace Take_Time_BangPhra.Integration
             if (rowChk == null || rowChk.Rows.Count == 0)
                 throw new InvalidOperationException(
                     $"ไม่พบแถว Account_Receipt '{receiptNumber}' (ใช้เก็บสถานะกันเอกสารซ้ำ) — ไม่สร้างเอกสาร OTA");
+
+            // การจองต้องยังชี้เอกสารนี้ (Ota_Revenue_Ref = receiptNumber) — ถูกยกเลิก/ล็อก (VOIDED-…) หรือโพสต์ทางอื่นแล้ว
+            // = ห้ามสร้าง (กันคิวเก่าถูก reset/Retry หลังยกเลิกเอกสาร OTA แล้วได้รายได้ซ้ำ)
+            string curRevRef = LookupOtaRevenueRef(reservationId);
+            if (!string.IsNullOrEmpty(curRevRef) && !string.Equals(curRevRef, receiptNumber, StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException(
+                    $"CREATE_OTA_SALES_DOCUMENT {receiptNumber}: การจอง #{reservationId} มี Ota_Revenue_Ref = {curRevRef} แล้ว — ไม่สร้างเอกสาร OTA ซ้ำ");
 
             // บัญชีเงิน: อ่าน mapping "สด" ตอนประมวลผล (ผู้ดูแลแก้ mapping แล้วกด Retry ต้องได้ค่าใหม่)
             var map = LookupOtaChannelMapping(channel);
@@ -2930,7 +3400,8 @@ namespace Take_Time_BangPhra.Integration
                       WHERE q.Status = 'COMPLETED'
                         AND q.Nexaacc_Response_Id IS NOT NULL
                         AND q.Nexaacc_Response_Id <> 'SKIPPED_LOCAL_MODE'
-                        AND (q.Action_Type LIKE 'CREATE_RECEIPT%' OR q.Action_Type LIKE 'CREATE_DEPOSIT%' OR q.Action_Type LIKE 'CREATE_PAYMENT%')
+                        AND (q.Action_Type LIKE 'CREATE_RECEIPT%' OR q.Action_Type LIKE 'CREATE_DEPOSIT%' OR q.Action_Type LIKE 'CREATE_PAYMENT%'
+                             OR q.Action_Type = 'CREATE_OTA_SALES_DOCUMENT')
                         AND q.Payload LIKE @pattern
                       ORDER BY q.ID DESC",
                     new Dictionary<string, object> { { "@pattern", "%\"receiptNumber\":\"" + esc + "\"%" } });
@@ -3602,6 +4073,10 @@ namespace Take_Time_BangPhra.Integration
                 // ── เงินสดของใบ OTA ที่ OTA เก็บจริง (Dr ลูกหนี้ OTA / Cr เงินสด) ──
                 case "OTA_CASH_RECLASS":
                     return await ProcessOtaCashReclass(payload);
+
+                // ── เงินประกันความเสียหายแบบโอน (opt-in Nexaacc_SecurityDeposit_Journal) ──
+                case "SECURITY_DEPOSIT_JOURNAL":
+                    return await ProcessSecurityDepositJournal(payload);
 
                 // ── Deprecated: ไม่ผูกกับเอกสาร — skip ไม่ยิง API ──
                 case "CREATE_DEPOSIT_JOURNAL":
@@ -6593,6 +7068,14 @@ namespace Take_Time_BangPhra.Integration
             }
             else
             {
+                // 2b) การจองนี้ถูกรับรู้รายได้ OTA ด้วยเอกสาร OTA (OTADOC-) / JE ลูกหนี้ OTA (OTA-) ไปแล้ว
+                //     (อาจเกิดหลังสั่งคิวนี้) → Dr ลูกหนี้ OTA อีกรอบ = ลูกหนี้ซ้ำ — หยุดถาวร ให้คนตรวจ
+                string revRefNow = LookupOtaRevenueRef(reservationId);
+                if (IsOtaRevenuePostedRef(revRefNow))
+                    throw new ArgumentException($"OTA_CASH_RECLASS: การจอง #{reservationId} มีเอกสาร/JE รายได้ OTA แล้ว ({revRefNow}) " +
+                        "— ไม่ส่ง JE Dr ลูกหนี้ OTA / Cr เงินสด ซ้ำ (เงินสดที่ใบเสร็จรับไว้น่าจะเป็นส่วนที่ลูกค้าจ่ายหน้างานจริง; " +
+                        "ถ้าเอกสาร OTA ผิด ให้ยกเลิกเอกสาร OTA ที่ Admin → Accounting Integration ก่อน)");
+
                 // 3) ใบเสร็จต้องอยู่ใน NextAcc จริง (ยังไม่ void) — ไม่งั้น Cr เงินสดจะไม่มีคู่
                 string syncState;
                 if (!IsReceiptSyncedForOtaReclass(receiptId, out syncState))
@@ -6632,6 +7115,90 @@ namespace Take_Time_BangPhra.Integration
             // 4) ปรับสถานะในระบบ — best effort (JE โพสต์แล้ว ห้ามโยน error จนคิว retry แล้วเสี่ยงโพสต์ซ้ำ)
             MarkOtaCashReclassDone(phId, reservationId, receiptId, requestedBy, _lastDocNumber ?? reference);
             return resultId;
+        }
+
+        /// <summary>
+        /// SECURITY_DEPOSIT_JOURNAL — ดู EnqueueSecurityDepositJournal. กันซ้ำ: คิว ref เดียวกันที่สำเร็จ + JE ref เดียวกันบน
+        /// NextAcc (JournalExistsByReferenceAsync). ขา OUT/DMG รอจน IN โพสต์แล้ว (ไม่งั้นหนี้สินติดลบ)
+        /// </summary>
+        private async Task<string> ProcessSecurityDepositJournal(Dictionary<string, object> p)
+        {
+            long holdId = Convert.ToInt64(p["holdId"]);
+            string kind = (p["kind"]?.ToString() ?? "").Trim().ToUpperInvariant();
+            decimal amount = Convert.ToDecimal(p["amount"]);
+            DateTime entryDate = ParseAcctDate(p["entryDate"]?.ToString());
+            int reservationId = p.ContainsKey("reservationId") && p["reservationId"] != null ? Convert.ToInt32(p["reservationId"]) : 0;
+            string holdRef = p.ContainsKey("holdRef") ? p["holdRef"]?.ToString() : "";
+            int paidHowId = 0;
+            if (p.ContainsKey("paidHowId") && p["paidHowId"] != null) int.TryParse(Convert.ToString(p["paidHowId"]), out paidHowId);
+            string paidHowName = p.ContainsKey("paidHowName") ? p["paidHowName"]?.ToString() : null;
+            string note = p.ContainsKey("note") ? p["note"]?.ToString() : null;
+
+            if (holdId <= 0 || amount <= 0 || (kind != "IN" && kind != "OUT" && kind != "DMG"))
+                throw new ArgumentException($"SECURITY_DEPOSIT_JOURNAL: payload ไม่ครบ (holdId={holdId}, kind={kind}, amount={amount})");
+
+            string reference = $"SECDEP-{holdId}-{kind}";
+            long doneBefore = FindRecentCompletedEntry("SECURITY_DEPOSIT", "SECURITY_DEPOSIT_JOURNAL", "refKey", reference, 315360000);
+            if (doneBefore > 0 || await JournalExistsByReferenceAsync(reference))
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessSecurityDepositJournal: {reference} โพสต์แล้ว (คิว #{doneBefore}) — ข้าม", "SYSTEM");
+                return "ALREADY_POSTED:" + reference;
+            }
+
+            if (kind != "IN")
+            {
+                string inRef = $"SECDEP-{holdId}-IN";
+                bool inPosted = FindRecentCompletedEntry("SECURITY_DEPOSIT", "SECURITY_DEPOSIT_JOURNAL", "refKey", inRef, 315360000) > 0
+                                || await JournalExistsByReferenceAsync(inRef);
+                if (!inPosted)
+                    throw new Exception($"SECURITY_DEPOSIT_JOURNAL {reference}: รอขารับเงินประกัน {inRef} โพสต์ก่อน (จะลองใหม่อัตโนมัติ)");
+            }
+
+            // บัญชีธนาคาร = แหล่งเงินของช่องทางรับโอน (Account_Paid_How.Nexaacc_AccountId) — อ่านสด (แก้ mapping แล้ว Retry ได้)
+            string bankAccountId = LookupPaidHowNexaaccAccountId(paidHowId, paidHowName);
+            if (string.IsNullOrEmpty(bankAccountId))
+                throw new InvalidOperationException(
+                    $"เงินประกัน {holdRef}: แหล่งเงินของช่องทางรับโอน \"{paidHowName}\" (#{paidHowId}) ยังไม่ผูกบัญชี NextAcc — " +
+                    "ผูกที่ Admin → Accounting Integration → 'วิธีจ่ายเงิน → บัญชี NextAcc' แล้วกด Retry");
+            string accType = LookupCachedAccountType(bankAccountId);
+            if (!string.IsNullOrEmpty(accType) && !accType.Equals("Asset", StringComparison.OrdinalIgnoreCase) && accType != "1")
+                throw new InvalidOperationException(
+                    $"เงินประกัน {holdRef}: บัญชีของแหล่งเงิน \"{paidHowName}\" เป็นประเภท {accType} ไม่ใช่สินทรัพย์ (เงินฝากธนาคาร) — แก้ mapping แล้ว Retry");
+
+            var journal = _mapper.MapSecurityDepositJournal(kind, holdId, holdRef, reservationId, amount, entryDate, bankAccountId, note);
+            var intJournal = _mapper.ConvertJournalToIntegration(journal);
+            var result = await _apiClient.CreateIntegrationJournalAsync(intJournal);
+            Guid journalId = RequireValidDocId(result?.data?.Id, $"SecurityDeposit {reference}");
+
+            _lastDocNumber = result?.data?.DocumentNumber;
+            _lastDocType = "JOURNAL";
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ProcessSecurityDepositJournal: posted {reference} ({_lastDocNumber}) {kind} {amount:N2} การจอง #{reservationId} bank={paidHowName}", "SYSTEM");
+            return journalId.ToString();
+        }
+
+        /// <summary>GUID บัญชี NextAcc ของแหล่งเงิน (Account_Paid_How) — ตาม ID ก่อน แล้วตามชื่อ; null = ยังไม่ผูก</summary>
+        private string LookupPaidHowNexaaccAccountId(int paidHowId, string paidHowName)
+        {
+            try
+            {
+                System.Data.DataTable dt = null;
+                if (paidHowId > 0)
+                    dt = _code.DatabaseQuerySafe(_connectionString,
+                        "SELECT TOP 1 CAST(Nexaacc_AccountId AS NVARCHAR(50)) AS Acc FROM Account_Paid_How WHERE ID = @id",
+                        new Dictionary<string, object> { { "@id", paidHowId } });
+                if ((dt == null || dt.Rows.Count == 0 || dt.Rows[0]["Acc"] == DBNull.Value) && !string.IsNullOrWhiteSpace(paidHowName))
+                    dt = _code.DatabaseQuerySafe(_connectionString,
+                        "SELECT TOP 1 CAST(Nexaacc_AccountId AS NVARCHAR(50)) AS Acc FROM Account_Paid_How WHERE Paid_How = @n AND Status = 'True'",
+                        new Dictionary<string, object> { { "@n", paidHowName.Trim() } });
+                Guid g;
+                if (dt != null && dt.Rows.Count > 0 && dt.Rows[0]["Acc"] != DBNull.Value
+                    && Guid.TryParse(dt.Rows[0]["Acc"].ToString(), out g) && g != Guid.Empty)
+                    return g.ToString();
+            }
+            catch { }
+            return null;
         }
 
         /// <summary>payload ของคิว CREATE_RECEIPT_DOCUMENT ที่สำเร็จล่าสุดของใบเสร็จนี้ (null = ไม่พบ)</summary>
@@ -8999,6 +9566,12 @@ namespace Take_Time_BangPhra.Integration
 
             string reason = p.ContainsKey("reason") ? p["reason"]?.ToString() : null;
             string receiptNumber = p.ContainsKey("receiptNumber") ? p["receiptNumber"]?.ToString() : null;
+
+            // เอกสารรับเงิน OTA (CREATE_OTA_SALES_DOCUMENT) — เส้นเฉพาะ: company void เสมอ (ไม่ขึ้นกับโหมดใบเสร็จ)
+            // + ไม่มีมัดจำ/DEPADJ ให้กลับ + ปลด/ล็อก Reservation.Ota_Revenue_Ref หลังยืนยัน Voided
+            bool otaDocFlag = p.ContainsKey("otaDoc") && p["otaDoc"] != null && Convert.ToBoolean(p["otaDoc"]);
+            if (otaDocFlag || IsOtaSalesDocRef(receiptNumber))
+                return await ProcessVoidOtaSalesDocument(p);
 
             Guid docId;
             string idNote;
@@ -12936,6 +13509,8 @@ namespace Take_Time_BangPhra.Integration
         private long EnqueueReceiptResyncInternal(string receiptNumber)
         {
             if (string.IsNullOrEmpty(receiptNumber) || !_config.IsConfigured) return -1;
+            // เอกสาร OTA สร้างผ่านคิว CREATE_OTA_SALES_DOCUMENT เท่านั้น — สร้างเป็นใบเสร็จ = รายได้ซ้ำ
+            if (IsOtaSalesDocRef(receiptNumber)) return -1;
 
             long pending = FindPendingEntry("RECEIPT", "CREATE_RECEIPT_DOCUMENT", "receiptNumber", receiptNumber);
             if (pending > 0) return pending;
@@ -13129,6 +13704,12 @@ namespace Take_Time_BangPhra.Integration
             if (string.IsNullOrEmpty(receiptNumber)) return (-1, "ไม่ระบุเลขที่ใบเสร็จ", "FAIL");
             if (!_config.IsConfigured) return (-1, "ยังไม่ได้ตั้งค่า NextAcc", "FAIL");
 
+            // เอกสารรับเงิน OTA ไม่ใช่ใบเสร็จปกติ — เส้น resync ใบเสร็จจะ "ไม่พบคิว CREATE_RECEIPT_DOCUMENT" แล้ว
+            // เข้าคิวสร้างใบเสร็จใหม่ = รายได้ห้องซ้ำกับเอกสาร OTA เดิม ⇒ ข้าม (แก้ด้วยการยกเลิกเอกสาร OTA + สร้างใหม่)
+            if (IsOtaSalesDocRef(receiptNumber))
+                return (-1, $"{receiptNumber} เป็นเอกสารรับเงิน OTA — ไม่ resync ผ่านเส้นใบเสร็จ " +
+                    "(ถ้าต้องแก้: Admin → Accounting Integration → \"ยกเลิกเอกสาร OTA\" เลือกให้สร้างใหม่อัตโนมัติ)", "SKIP");
+
             long qid = LookupLatestCompletedCreateQueueId(receiptNumber);
             if (qid <= 0)
             {
@@ -13175,7 +13756,7 @@ namespace Take_Time_BangPhra.Integration
                 new Dictionary<string, object> { { "@rid", reservationId } });
             if (dt == null || dt.Rows.Count == 0) return (0, "การจองนี้ไม่มีใบเสร็จให้ resync");
 
-            int inPlace = 0, fallback = 0, firstSync = 0, recreate = 0, failed = 0;
+            int inPlace = 0, fallback = 0, firstSync = 0, recreate = 0, failed = 0, skipped = 0;
             var lines = new List<string>();
             foreach (System.Data.DataRow r in dt.Rows)
             {
@@ -13185,6 +13766,7 @@ namespace Take_Time_BangPhra.Integration
                 {
                     var (rc, msg, kind) = ResyncSingleReceipt(rn);
                     if (kind == "INPLACE") inPlace++;
+                    else if (kind == "SKIP") skipped++;
                     else if (kind == "FIRST") firstSync++;
                     else if (kind == "RECREATE") recreate++;
                     else if (kind == "FALLBACK") fallback++;
@@ -13203,6 +13785,7 @@ namespace Take_Time_BangPhra.Integration
                 (firstSync > 0 ? $", สร้างครั้งแรก {firstSync} ใบ" : "") +
                 (recreate > 0 ? $", เอกสารเดิมถูกลบ→สร้างใหม่ {recreate} ใบ" : "") +
                 (fallback > 0 ? $", ⚠ void→สร้างใหม่ (เลขเปลี่ยน) {fallback} ใบ" : "") +
+                (skipped > 0 ? $", ข้าม (เอกสาร OTA) {skipped} ใบ" : "") +
                 (failed > 0 ? $", ❌ ไม่สำเร็จ {failed} ใบ" : "") +
                 "\n" + string.Join("\n", lines);
             _code.Logs(_connectionString, "AccountingSync",
@@ -13259,6 +13842,12 @@ namespace Take_Time_BangPhra.Integration
             if (string.IsNullOrWhiteSpace(receiptNumber))
             {
                 LastRepostMessage = "ไม่ได้ระบุเลขที่ใบเสร็จ";
+                return -1;
+            }
+            if (IsOtaSalesDocRef(receiptNumber))
+            {
+                LastRepostMessage = $"{receiptNumber} เป็นเอกสารรับเงิน OTA (ผู้ซื้อ = OTA) — ไม่ออกใบกำกับ/ไม่ repost ผ่านเส้นใบเสร็จ " +
+                    "(แก้เอกสาร: Admin → Accounting Integration → \"ยกเลิกเอกสาร OTA\")";
                 return -1;
             }
 

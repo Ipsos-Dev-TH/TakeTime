@@ -242,7 +242,7 @@ namespace Take_Time_BangPhra.Integration
         // ===== ใบรับรองแทนใบเสร็จรับเงิน (DocumentType=15 CertificateInLieu) =====
         // ตรงกับ NextAcc CreateDocumentRequest (DocumentDtos.cs:50-55) — NextAcc บังคับ
         // CertificateReason + CertifierName เมื่อ DocumentType=15 (DocumentService.cs:1022-1029)
-        // และพิมพ์ลงกรอบ "ข้อมูลใบรับรอง" บน PDF (PdfGenerationService.DocumentRenderer.cs:997-1031)
+        // และพิมพ์ลงกรอบ "ข้อมูลใบรับรอง" บน PDF (PdfGenerationService.DocumentRenderer.cs:997-1032)
         /// <summary>เหตุผลที่ไม่ได้รับใบเสร็จ (บังคับเมื่อเป็นใบรับรองแทนใบเสร็จ)</summary>
         public string CertificateReason { get; set; }
         /// <summary>ชื่อผู้รับรอง (บังคับเมื่อเป็นใบรับรองแทนใบเสร็จ)</summary>
@@ -250,6 +250,12 @@ namespace Take_Time_BangPhra.Integration
         public string CertifierPosition { get; set; }
         public string WitnessName { get; set; }
         public string WitnessPosition { get; set; }
+
+        /// <summary>ข้อความแนบท้ายเฉพาะใบ (NextAcc CreateDocumentRequest.CustomAppendix — DocumentDtos.cs:45, เก็บที่
+        /// DocumentService.cs:1153) — พิมพ์บน PDF ต่อจากกรอบ "ข้อมูลใบรับรอง" (PdfGenerationService.DocumentRenderer.cs:1034-1036,
+        /// HTML: PdfGenerationService.cs:2263-2264). ใช้ใส่ "ผู้รับเงิน (ตัวจริง)" ของใบรับรองแทนใบเสร็จ เพราะ NextAcc
+        /// ไม่มีฟิลด์ผู้รับเงินแยกบนเอกสาร type 15 (มีแค่ CertificateReason/Certifier*/Witness*/PaymentDate — DocumentDtos.cs:50-56)</summary>
+        public string CustomAppendix { get; set; }
     }
 
     public class DocumentLineRequest

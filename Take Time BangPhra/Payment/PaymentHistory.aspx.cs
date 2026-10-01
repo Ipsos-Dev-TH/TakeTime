@@ -570,6 +570,7 @@ namespace Take_Time_BangPhra.Payment
             result.Columns.Add("Notes", typeof(string));
             result.Columns.Add("PreTick", typeof(bool));
             result.Columns.Add("Hint", typeof(string));
+            result.Columns.Add("OtaRevenueRef", typeof(string));
 
             string phStatus = done ? OtaReclassStatus : "COMPLETED";
             string afterCheckin = done ? "" : " AND CAST(ph.PaymentDate AS DATE) >= CAST(r.CheckinDate AS DATE)";
@@ -642,6 +643,18 @@ namespace Take_Time_BangPhra.Payment
             // id เป็นตัวเลขจากฐานข้อมูล (แปลงเป็น int แล้ว) — ปลอดภัยที่จะต่อเป็นรายการ IN
             string idList = string.Join(",", ids);
             var balances = ReservationBalance.LoadMany(connectionString, "r.ID IN (" + idList + ")", null);
+
+            // marker รายได้ OTA (PHASE18_20) — OTADOC-/OTA- = รายได้ส่วน OTA ลงด้วยเอกสาร/JE ลูกหนี้ OTA แล้ว → ห้าม reclass
+            var revRefs = new System.Collections.Generic.Dictionary<int, string>();
+            try
+            {
+                var rr = codeInstance.DatabaseQuerySafe(connectionString,
+                    "SELECT ID, Ota_Revenue_Ref FROM Reservation WHERE ID IN (" + idList + ") AND Ota_Revenue_Ref IS NOT NULL", null);
+                if (rr != null)
+                    foreach (DataRow x in rr.Rows)
+                        revRefs[Convert.ToInt32(x["ID"])] = x["Ota_Revenue_Ref"].ToString().Trim();
+            }
+            catch { /* ยังไม่รัน PHASE18_20 — ไม่มี marker */ }
 
             decimal tol = ReservationBalance.RoundingTolerance;
             Take_Time_BangPhra.Integration.AccountingSyncService sync = null;
@@ -738,8 +751,15 @@ namespace Take_Time_BangPhra.Payment
                 nr["ResStatus"] = resStatus;
                 nr["CheckedOut"] = checkedOut;
                 nr["Notes"] = notes;
+                string revRef;
+                if (!revRefs.TryGetValue(resId, out revRef)) revRef = "";
+                bool revPosted = Take_Time_BangPhra.Integration.AccountingSyncService.IsOtaRevenuePostedRef(revRef);
                 nr["PreTick"] = preTick;
-                nr["Hint"] = preTick ? "เข้าเงื่อนไขครบ" : string.Join(" · ", why);
+                nr["OtaRevenueRef"] = revRef;
+                nr["Hint"] = (preTick ? "เข้าเงื่อนไขครบ" : string.Join(" · ", why))
+                    + (revPosted && hasReceipt
+                        ? (" · ⚠ รายได้ OTA ลงด้วย " + revRef + " แล้ว — ห้ามส่ง JE ปรับเงินสด (ลูกหนี้ OTA ซ้ำ)")
+                        : "");
                 result.Rows.Add(nr);
             }
             return result;
@@ -979,6 +999,15 @@ namespace Take_Time_BangPhra.Payment
                         notes.Add($"#{phId}: ใบเสร็จ {receiptId} — {r["ReceiptState"]} (ไม่ต้อง/ยังส่ง JE ไม่ได้)");
                         continue;
                     }
+                    // การจองนี้มีเอกสาร/JE รายได้ OTA แล้ว (OTADOC-/OTA-) → JE Dr ลูกหนี้ OTA / Cr เงินสด = ลูกหนี้ซ้ำ
+                    string revRef = r.Table.Columns.Contains("OtaRevenueRef") ? Convert.ToString(r["OtaRevenueRef"]) : "";
+                    if (Take_Time_BangPhra.Integration.AccountingSyncService.IsOtaRevenuePostedRef(revRef))
+                    {
+                        skipped++;
+                        notes.Add($"#{phId}: การจอง #{r["ResId"]} มีเอกสารรายได้ OTA แล้ว ({revRef}) — ไม่ส่ง JE ปรับเงินสด " +
+                            "(เงินสดในใบเสร็จน่าจะเป็นส่วนที่ลูกค้าจ่ายหน้างานจริง; ถ้าเอกสาร OTA ผิด ให้ยกเลิกที่ Admin → Accounting Integration ก่อน)");
+                        continue;
+                    }
                     decimal receiptTotal = (decimal)r["ReceiptTotal"];
                     if (receiptTotal > 0m && amount > receiptTotal + tol)
                     {
@@ -996,6 +1025,11 @@ namespace Take_Time_BangPhra.Payment
                         codeInstance.Logs(connectionString, "OTA-Cash-Reclass",
                             $"Payment_History #{phId} การจอง #{r["ResId"]} ใบเสร็จ {receiptId} {amount:N2} → enqueue OTA_CASH_RECLASS #{qid} (Dr ลูกหนี้ OTA / Cr เงินสด)",
                             user);
+                    }
+                    else if (qid == -2)
+                    {
+                        skipped++;
+                        notes.Add($"#{phId}: การจองมีเอกสาร/JE รายได้ OTA แล้ว — ไม่ส่ง JE ปรับเงินสด (กันลูกหนี้ OTA ซ้ำ)");
                     }
                     else
                     {

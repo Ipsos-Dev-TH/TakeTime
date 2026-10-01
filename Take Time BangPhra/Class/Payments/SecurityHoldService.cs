@@ -268,6 +268,10 @@ namespace Take_Time_BangPhra.Payments
                 transferRef, fullNote, adminId, out error);
             if (holdRef == null) return null;
 
+            // บัญชี (opt-in Nexaacc_SecurityDeposit_Journal): Dr ธนาคารของช่องทางรับโอน / Cr หนี้สินเงินประกัน
+            PostSecurityDepositJournal(GetByRef(holdRef), "IN", amount, ch,
+                string.IsNullOrWhiteSpace(transferRef) ? null : "อ้างอิงโอน " + transferRef.Trim());
+
             Notify.Send(Notify.Ev.PaymentHold,
                 "🛡 <b>รับเงินประกันโดยการโอน</b> " + amount.ToString("N2") + " บาท\n"
                 + "การจอง #" + reservationId + " · " + holdRef
@@ -483,6 +487,15 @@ namespace Take_Time_BangPhra.Payments
             decimal remainder = hold.Amount - amount;
             if (isTransfer) SaveRefundRecord(hold.ID, remainder, refundRef, refundNote);
 
+            // บัญชี (opt-in): ส่วนที่หัก = ล้างหนี้สินคู่กับใบเสร็จค่าเสียหาย (ไม่ลงรายได้ซ้ำ) · ส่วนที่เหลือ = โอนคืน
+            if (isTransfer)
+            {
+                PostSecurityDepositJournal(hold, "DMG", amount, null, string.IsNullOrEmpty(reason) ? null : reason);
+                if (remainder > 0)
+                    PostSecurityDepositJournal(hold, "OUT", remainder, null,
+                        string.IsNullOrWhiteSpace(refundRef) ? null : "อ้างอิงโอนคืน " + refundRef.Trim());
+            }
+
             // เงินเข้าจริงแล้ว → ลงสมุดรายการชำระเงินกลาง (ตรวจย้อน/ออกใบเสร็จต่อได้)
             try
             {
@@ -608,6 +621,9 @@ namespace Take_Time_BangPhra.Payments
             if (isTransfer)
             {
                 SaveRefundRecord(hold.ID, hold.Amount, refundRef, refundNote);
+                // บัญชี (opt-in): Dr หนี้สินเงินประกัน / Cr ธนาคาร (โอนคืนเต็มจำนวน)
+                PostSecurityDepositJournal(hold, "OUT", hold.Amount, null,
+                    string.IsNullOrWhiteSpace(refundRef) ? null : "อ้างอิงโอนคืน " + refundRef.Trim());
                 Notify.Send(Notify.Ev.PaymentHold,
                     "✅ <b>บันทึกโอนคืนเงินประกันแล้ว</b> " + hold.Amount.ToString("N2") + " บาท\n"
                     + "การจอง #" + hold.ReservationId
@@ -858,6 +874,33 @@ namespace Take_Time_BangPhra.Payments
             catch (Exception ex)
             {
                 _code.Logs(_conn, "SecurityHold", "บันทึกโอนคืนไม่สำเร็จ (hold " + holdId + "): " + ex.Message, "System");
+            }
+        }
+
+        /// <summary>
+        /// hook บัญชีเงินประกันโอน → คิว SECURITY_DEPOSIT_JOURNAL (AccountingSyncService.EnqueueSecurityDepositJournal)
+        /// ทำงานเฉพาะ Provider = TRANSFER + เปิด Nexaacc_SecurityDeposit_Journal (ปิด = no-op) · พังต้องไม่กระทบการรับ/คืนเงินประกัน
+        /// kind: IN (รับโอน) / OUT (โอนคืน) / DMG (ส่วนที่หักเป็นค่าเสียหาย) — ref SECDEP-{holdId}-{kind}
+        /// </summary>
+        private void PostSecurityDepositJournal(HoldRow hold, string kind, decimal amount, PaymentChannel channel, string note)
+        {
+            try
+            {
+                if (hold == null || !hold.IsTransfer || amount <= 0) return;
+                PaymentChannel ch = channel ?? TransferChannel();
+                int paidHowId = ch != null ? ch.PaidHowId : 0;
+                string paidHowName = ch == null ? null : (string.IsNullOrEmpty(ch.PaidHowName) ? ch.Name : ch.PaidHowName);
+                var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(_conn);
+                long q = sync.EnqueueSecurityDepositJournal(hold.ID, hold.HoldRef, hold.ReservationId, kind, amount,
+                    DateTime.Now, paidHowId, paidHowName, note);
+                if (q > 0)
+                    _code.Logs(_conn, "SecurityHold", "เข้าคิว JE เงินประกัน SECDEP-" + hold.ID + "-" + kind + " "
+                        + amount.ToString("N2") + " (" + hold.HoldRef + ") → คิว #" + q, "System");
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_conn, "SecurityHold", "เข้าคิว JE เงินประกัน " + kind + " ไม่สำเร็จ (hold "
+                    + (hold == null ? "?" : hold.ID.ToString()) + "): " + ex.Message, "System");
             }
         }
 

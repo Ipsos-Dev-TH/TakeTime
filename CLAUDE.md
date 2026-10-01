@@ -341,11 +341,37 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    `AbbreviatedTaxInvoiceRule` (จด VAT + `Company.IsRetailApproved`/`PhoR06ApprovedDate` หรือ site-settings
    `RequirePhoR06ForAbbreviatedTaxInvoice=false`) ไม่งั้น TaxInvoice ของผู้ซื้อ declined/ไม่ครบ = "ใบเสร็จรับเงิน".
    TakeTime บังคับหัวไม่ได้ — ปลดที่ NextAcc. หลัง sync log `หัวเอกสาร NextAcc:` (อ่าน documentTitle กลับ).
+   คำขอให้ ภ.พ.06 ใช้กับสลิปเครื่องเก็บเงินเท่านั้น + ค่าตั้งรายบริษัทสำหรับอย่างย่อแบบเอกสาร A4:
+   `docs/NextAcc_Change_Requests.md` ข้อ ก. (+ ข้อ ข. ผู้รับเงินใบรับรอง, ข้อ ง. ค่าธรรมเนียมเกตเวย์ตอน payout)
 11. **ใบรับรองแทนใบเสร็จรับเงิน (type 15, PHASE19_19):** หน้า `Account/PaymentVoucher.aspx` ติ๊ก "ผู้รับเงินออกใบเสร็จไม่ได้"
    → payload `CREATE_VOUCHER_JOURNAL` มี certificateInLieu → `ProcessCertificateInLieu` (company `/document` type 15 +
    approve: Dr ค่าใช้จ่าย / Cr แหล่งเงิน (+Cr WHT), Paid ทันที). **ห้ามใช้** `/integration/certificates-in-lieu`
    (ตั้งเจ้าหนี้ 21220 ค้าง). ข้อมูลเก็บใน `Account_Payment.Is_Certificate_In_Lieu`/`Cil_*`; `EnqueuePaymentVoucher`
    อ่านจาก DB เองเมื่อผู้เรียกไม่ส่ง (กันปุ่มซิงค์ใหม่ส่งเป็น PV ซ้ำ).
+   **ผู้รับเงินจริง:** NextAcc type 15 ไม่มีฟิลด์ผู้รับเงิน (`DocumentDtos.cs:50-56` มีแค่ Certificate*/Certifier*/Witness*/PaymentDate)
+   → `MapVoucherToCertificateInLieu` ใส่ชื่อ/ที่อยู่ใน **`CustomAppendix`** (`DocumentDtos.cs:45`, พิมพ์ใต้กรอบใบรับรอง
+   `PdfGenerationService.DocumentRenderer.cs:1034-1036`) + Notes. ขอฟิลด์จริงแล้ว: `docs/NextAcc_Change_Requests.md` ข้อ ข.
+12. **เอกสารรับเงิน OTA (OTADOC-{resId}) — void/resync/reclass (ต.ค. 2026):** เอกสารสร้างโดยคิว `CREATE_OTA_SALES_DOCUMENT`
+   (Entity RESERVATION) ⇒ lookup แบบใบเสร็จปกติหาไม่เจอ. `LookupOtaSalesDocId` (คิว CREATE_OTA ที่ COMPLETED ล่าสุด ไม่มี VOID
+   สำเร็จตามหลัง → marker → `Nexaacc_Doc_Id`). `EnqueueVoidReceipt("OTADOC-…")` → `EnqueueVoidOtaSalesDocument` (VOID_RECEIPT +
+   `otaDoc=true`, ปฏิเสธถ้าคิวสร้างยังค้าง) → `ProcessVoidOtaSalesDocument`: company `POST /document/{id}/void`
+   (NextAcc `DocumentController.cs:803-815`; ยื่นภาษีแล้ว = ปฏิเสธ `DocumentService.cs:7805-7811`) แล้ว **GET ยืนยัน Voided** ก่อน
+   ปลด marker: `allowRepost=true` → ลบแถวสรุป + `Ota_Revenue_Ref=NULL` (job สร้างใหม่; `EnqueueOtaSalesDocument` ข้าม dedup เมื่อมี
+   VOID สำเร็จหลัง CREATE เดิม) / `false` → `Ota_Revenue_Ref='VOIDED-OTADOC-{id}'` + แถว Status='Cancel'. ปุ่มแอดมิน:
+   Accounting Integration → "ยกเลิกเอกสาร OTA" (`action=voidOtaDoc`). Resync/Repost/ResyncInternal **ข้าม OTADOC** (เดิมเข้าคิวสร้าง
+   ใบเสร็จใหม่ = รายได้ซ้ำ). **OTA_CASH_RECLASS** ปฏิเสธเมื่อ `Ota_Revenue_Ref` ขึ้นต้น `OTADOC-`/`OTA-` (`IsOtaRevenuePostedRef`) —
+   ทั้งหน้า PaymentHistory (hint + skip), `EnqueueOtaCashReclass` (คืน -2) และ processor (ArgumentException ก่อนโพสต์).
+   **VAT ใบ Receipt type 3:** ตรวจแล้วเข้า ภ.พ.30 (standalone receipt `TaxService.cs:571-591`, มัดจำ `:592-640`) ⇒ RECEIPT_DOC
+   ไม่ต้องเปลี่ยนเป็น TaxInvoice.
+13. **แหล่งเงินรายช่องทาง (หน้า Accounting Integration):** "ที่ใช้จริง" ใช้ `ResolveEffectiveGatewayPaidHow` = กฎเดียวกับ
+   `OnlinePaymentService.ApplyToReservation` (`OnlinePaymentService.cs:608-621`: แคตตาล็อก `PaymentChannelCatalog.ResolvePaidHowName`
+   → `Nexaacc_Gateway_PaidHow_{P}[_{M}]` → `Payment_PaidHow_Name`; แถวแคตตาล็อกยังไม่ผูกบัญชีแต่ตั้งรายเกตเวย์ → รายเกตเวย์) —
+   แก้ที่ OnlinePaymentService ต้องแก้ตัวนี้ด้วย. ตารางรายช่องทาง (ลูกค้าเห็น + เกตเวย์) + health check เตือนช่องที่ไม่มีกระเป๋าเงิน.
+14. **เงินประกันความเสียหายแบบโอน → บัญชี (opt-in `Nexaacc_SecurityDeposit_Journal`, PHASE19_24, default 0):** hook ใน
+   `SecurityHoldService` (TRANSFER เท่านั้น) → คิว `SECURITY_DEPOSIT_JOURNAL`: รับโอน Dr ธนาคาร (Paid_How ของช่องทางรับโอน) /
+   Cr `SECURITY_DEPOSIT_LIABILITY` (ผังโรงแรม NextAcc 21530) · โอนคืน กลับขา · หักค่าเสียหาย **Dr หนี้สิน / Cr ธนาคาร** (ไม่ลงรายได้ —
+   รายได้+VAT มาจากใบเสร็จค่าเสียหายเดิมที่ Dr ธนาคารเดียวกัน ⇒ ไม่ซ้ำ). ref `SECDEP-{holdId}-IN/OUT/DMG` (กันซ้ำทั้งคิว+JE);
+   OUT/DMG ต้องมี IN (รับก่อนเปิดสวิตช์ = ข้าม) และใช้บัญชีธนาคารของ IN. ข้อจำกัด: ใบเสร็จค่าเสียหายต้องใช้แหล่งเงินเดียวกับบัญชีรับโอน.
 
 ## Queue resilience (ส.ค. 2026 — หลังเคส NextAcc ล่มทั้งแอป)
 

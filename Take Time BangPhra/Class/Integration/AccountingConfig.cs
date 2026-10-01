@@ -190,6 +190,14 @@ namespace Take_Time_BangPhra.Integration
         /// <summary>true = โหมดสร้างเอกสารรับเงิน OTA (<see cref="OtaDocumentMode"/> = RECEIPT_DOC)</summary>
         public bool IsOtaDocumentMode => OtaDocumentMode == "RECEIPT_DOC";
 
+        /// <summary>
+        /// ลงบัญชีเงินประกันความเสียหายแบบโอน (Security_Hold_Mode = TRANSFER) — <c>Nexaacc_SecurityDeposit_Journal</c>
+        /// (PHASE19_24, default ปิด = พฤติกรรมเดิม ไม่ส่งอะไร): รับโอน → JE Dr ธนาคาร (แหล่งเงินของช่องทางรับโอน) /
+        /// Cr SECURITY_DEPOSIT_LIABILITY · โอนคืน → กลับขา · หักค่าเสียหาย → Dr หนี้สิน / Cr ธนาคาร
+        /// (รายได้ค่าเสียหายมาจากใบเสร็จค่าเสียหายตามเดิม ไม่ลงซ้ำ). ref SECDEP-{holdId}-IN/OUT/DMG
+        /// </summary>
+        public bool IsSecurityDepositJournalEnabled => GetConfig("Nexaacc_SecurityDeposit_Journal", "0") == "1";
+
         /// <summary>อ่านอีเมลตอบกลับจากกรมสรรพากรแล้วมาร์ค e-Tax ว่านำส่งสำเร็จ (PHASE18_28). default ปิด</summary>
         public bool IsEtaxRdWatchEnabled => GetConfig("Etax_Rd_Watch_Enabled", "0") == "1";
         /// <summary>โดเมน/คำในผู้ส่งที่ถือว่าเป็นอีเมลจากกรมสรรพากร (คั่นจุลภาค)</summary>

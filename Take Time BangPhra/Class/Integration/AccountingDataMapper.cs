@@ -3404,7 +3404,12 @@ namespace Take_Time_BangPhra.Integration
             doc.PaymentDate = voucherDate;
 
             // ผู้รับเงินจริง (เช่น คนขับแท็กซี่) — แบบฟอร์มสรรพากรระบุผู้รับเงินในรายละเอียดรายจ่าย
-            // contact ของเอกสารยังเป็นผู้ขายที่เลือกในหน้า (อาจเป็นผู้ขายกลาง) → ชื่อ/ที่อยู่จริงลงหมายเหตุ
+            // NextAcc ไม่มีฟิลด์ "ผู้รับเงิน" แยกบนเอกสาร type 15 (CreateDocumentRequest มีแค่ CertificateReason/
+            // CertifierName/CertifierPosition/WitnessName/WitnessPosition/PaymentDate — Wachira-d/Accounting
+            // Models/DTOs/Document/DocumentDtos.cs:50-56) และ contact ของเอกสารยังเป็นผู้ขายที่เลือกในหน้า (อาจเป็นผู้ขายกลาง)
+            // → ชื่อ/ที่อยู่จริงลง (1) CustomAppendix = พิมพ์บน PDF ใต้กรอบ "ข้อมูลใบรับรอง" (DocumentRenderer.cs:1034-1036)
+            //   และ (2) หมายเหตุ (พิมพ์เป็น "หมายเหตุ:" — DocumentRenderer.cs:1079-1088) เพื่อค้นหาในระบบ
+            //   คำขอเพิ่มฟิลด์จริง: docs/NextAcc_Change_Requests.md
             string refStr = !string.IsNullOrEmpty(documentNumber) ? documentNumber : $"PV-{voucherId}";
             var notes = new System.Text.StringBuilder();
             notes.Append($"ใบรับรองแทนใบเสร็จรับเงิน {refStr} - {description}");
@@ -3414,6 +3419,12 @@ namespace Take_Time_BangPhra.Integration
                 notes.Append($" | ผู้รับเงิน: {payee}");
                 if (!string.IsNullOrWhiteSpace(cil.PayeeAddress))
                     notes.Append($" ที่อยู่: {cil.PayeeAddress.Trim()}");
+
+                var appendix = new System.Text.StringBuilder();
+                appendix.Append($"ผู้รับเงิน: {payee}");
+                if (!string.IsNullOrWhiteSpace(cil.PayeeAddress))
+                    appendix.Append($"\nที่อยู่ผู้รับเงิน: {cil.PayeeAddress.Trim()}");
+                doc.CustomAppendix = appendix.ToString();
             }
             doc.Notes = notes.ToString();
             return doc;
@@ -3788,6 +3799,69 @@ namespace Take_Time_BangPhra.Integration
                         DebitAmount = 0,
                         CreditAmount = amt,
                         Description = $"กลับเงินสดที่ใบเสร็จ {receiptId} บันทึกเกิน (ไม่ได้รับเงินจริง)"
+                    }
+                }
+            };
+        }
+
+        // ══════════════════════════════════════════════
+        // เงินประกันความเสียหายแบบโอน (SecurityHoldService TRANSFER) — ดู AccountingSyncService.EnqueueSecurityDepositJournal
+        // ══════════════════════════════════════════════
+
+        /// <summary>
+        /// JE เงินประกันโอน — เงินที่ต้องคืน ไม่ใช่รายได้ (หนี้สิน SECURITY_DEPOSIT_LIABILITY, ผังโรงแรม NextAcc 21530
+        /// "เงินประกันความเสียหาย" — Services/ChartOfAccountTemplates.cs:441 หรือ 21620 "เงินค้ำประกัน" :130):
+        ///   IN  : Dr ธนาคาร / Cr หนี้สินเงินประกัน
+        ///   OUT : Dr หนี้สินเงินประกัน / Cr ธนาคาร   (โอนคืน)
+        ///   DMG : Dr หนี้สินเงินประกัน / Cr ธนาคาร   (ส่วนที่หัก — รายได้มาจากใบเสร็จค่าเสียหายที่ Dr ธนาคารเดียวกัน)
+        /// Reference = SECDEP-{holdId}-{kind} (ใช้กันซ้ำ)
+        /// </summary>
+        public CreateJournalEntryRequest MapSecurityDepositJournal(string kind, long holdId, string holdRef,
+            int reservationId, decimal amount, DateTime entryDate, string bankAccountId, string note = null)
+        {
+            kind = (kind ?? "").Trim().ToUpperInvariant();
+            if (amount <= 0) throw new ArgumentException("MapSecurityDepositJournal: amount ต้อง > 0");
+            if (kind != "IN" && kind != "OUT" && kind != "DMG")
+                throw new ArgumentException("MapSecurityDepositJournal: kind ต้องเป็น IN/OUT/DMG");
+            Guid bankId = ResolveAccountId(bankAccountId)
+                ?? throw new ArgumentException("MapSecurityDepositJournal: ไม่มีบัญชีธนาคาร (bankAccountId)");
+            Guid liabilityId = GetAccountId("SECURITY_DEPOSIT_LIABILITY");
+            if (liabilityId == bankId)
+                throw new ArgumentException("MapSecurityDepositJournal: บัญชีหนี้สินเงินประกันกับบัญชีธนาคารเป็นบัญชีเดียวกัน — ตรวจ mapping");
+
+            decimal amt = Math.Round(amount, 2, MidpointRounding.AwayFromZero);
+            string hold = string.IsNullOrWhiteSpace(holdRef) ? ("#" + holdId) : holdRef.Trim();
+            string res = reservationId > 0 ? $" การจอง #{reservationId}" : "";
+            string extra = string.IsNullOrWhiteSpace(note) ? "" : " — " + note.Trim();
+            if (extra.Length > 200) extra = extra.Substring(0, 200);
+
+            bool inbound = kind == "IN";
+            string what = kind == "IN" ? "รับเงินประกันความเสียหาย (โอน)"
+                        : kind == "OUT" ? "โอนคืนเงินประกันความเสียหาย"
+                        : "หักเงินประกันเป็นค่าเสียหาย (รายได้อยู่ในใบเสร็จค่าเสียหาย)";
+
+            return new CreateJournalEntryRequest
+            {
+                EntryDate = entryDate,
+                JournalType = NexaaccJournalType.General,
+                Description = $"{what} {hold}{res}{extra}",
+                Reference = $"SECDEP-{holdId}-{kind}",
+                Lines = new List<JournalEntryLineRequest>
+                {
+                    new JournalEntryLineRequest
+                    {
+                        AccountId = inbound ? bankId : liabilityId,
+                        DebitAmount = amt,
+                        CreditAmount = 0,
+                        Description = inbound ? $"เงินประกันเข้าบัญชี {hold}" : $"ล้างหนี้สินเงินประกัน {hold}"
+                    },
+                    new JournalEntryLineRequest
+                    {
+                        AccountId = inbound ? liabilityId : bankId,
+                        DebitAmount = 0,
+                        CreditAmount = amt,
+                        Description = inbound ? $"หนี้สินเงินประกันรอคืน {hold}"
+                                    : (kind == "OUT" ? $"โอนคืนลูกค้า {hold}" : $"เงินประกันส่วนที่หัก (ใบเสร็จค่าเสียหาย Dr ธนาคารแล้ว) {hold}")
                     }
                 }
             };

@@ -76,6 +76,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "etaxRdWatch", config.IsEtaxRdWatchEnabled },
                     { "etaxRdFrom", config.EtaxRdFromContains },
                     { "otaRoomRevenue", config.IsOtaRoomRevenueEnabled },
+                    { "securityDepositJournal", config.IsSecurityDepositJournalEnabled },
                     { "otaDocumentMode", config.OtaDocumentMode },
                     { "stockInUseGRNI", config.IsStockInUseGRNI },
                     { "stockInSkipJournal", config.IsStockInSkipJournal },
@@ -359,6 +360,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                 case "saveOtaChannelMap":
                     result = SaveOtaChannelMap(data);
                     break;
+                case "voidOtaDoc":
+                    result = VoidOtaDocument(data);
+                    break;
                 default:
                     result = new Dictionary<string, object> { { "success", false }, { "message", "Unknown action" } };
                     break;
@@ -409,6 +413,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                 if (data.ContainsKey("etaxRdWatch")) config.SetConfig("Etax_Rd_Watch_Enabled", BoolToFlag(data["etaxRdWatch"]));
                 if (data.ContainsKey("etaxRdFrom")) config.SetConfig("Etax_Rd_FromContains", data["etaxRdFrom"]?.ToString() ?? "rd.go.th, etax, teda.th");
                 if (data.ContainsKey("otaRoomRevenue")) config.SetConfig("Nexaacc_OtaRoomRevenue", BoolToFlag(data["otaRoomRevenue"]));
+                if (data.ContainsKey("securityDepositJournal")) config.SetConfig("Nexaacc_SecurityDeposit_Journal", BoolToFlag(data["securityDepositJournal"]));
                 // โหมดเอกสาร OTA = นโยบายบัญชี → เขียนเฉพาะเมื่อเปลี่ยนจริง + log (หน้าเว็บส่งมาเฉพาะเมื่อโหลดค่าจริงสำเร็จ)
                 if (data.ContainsKey("otaDocumentMode"))
                 {
@@ -1441,6 +1446,14 @@ namespace Take_Time_BangPhra.Admin.Settings
                         { "message", sync.LastRepostMessage ?? "Re-post ไม่สำเร็จ — ตรวจ payload/เลขใบเสร็จของรายการนี้" } };
                 }
 
+                // เอกสารรับเงิน OTA ที่สร้างแล้ว: แก้ = ยกเลิกเอกสาร (void ยืนยันสถานะ) แล้วให้ระบบสร้างใหม่ — ไม่ repost จากคิวนี้
+                if (rowStatus == "COMPLETED" && rowAction == "CREATE_OTA_SALES_DOCUMENT")
+                {
+                    return new Dictionary<string, object> { { "success", false },
+                        { "message", "เอกสารรับเงิน OTA นี้สร้างสำเร็จแล้ว — ถ้าต้องแก้ ใช้หัวข้อ \"ยกเลิกเอกสาร OTA (OTADOC)\" ในหน้านี้ " +
+                            "แล้วติ๊ก \"สร้างใหม่อัตโนมัติ\" (ระบบ void เอกสารเดิมบน NextAcc ก่อน แล้วสร้างใหม่ตามยอด/การผูกบัญชีปัจจุบัน)" } };
+                }
+
                 // กัน double-post: Retry ซ้ำบนรายการอื่นที่ COMPLETED แล้ว จะรัน processor ใหม่ →
                 // สร้าง JE/เอกสารซ้ำอีกใบบน NextAcc (processor ส่วนใหญ่ไม่ dedupe ระดับ NextAcc)
                 if (rowStatus == "COMPLETED")
@@ -1700,7 +1713,10 @@ namespace Take_Time_BangPhra.Admin.Settings
                     catch { }
                     if (!string.IsNullOrEmpty(gwActive))
                     {
-                        string gwName = Integration.AccountingSyncService.ResolveGatewayPaidHowName(ConnStr, gwActive, null, gwFallback);
+                        // กฎเดียวกับตอนรับเงินจริง (แคตตาล็อก → รายเกตเวย์ → ค่ากลาง) — เดิมดูแค่รายเกตเวย์ → แสดงผิดเมื่อมีแถวแคตตาล็อก
+                        string gwSrc;
+                        string gwName = Integration.AccountingSyncService.ResolveEffectiveGatewayPaidHow(ConnStr, gwActive, null, null, out gwSrc);
+                        if (string.IsNullOrEmpty(gwName)) gwName = gwFallback;
                         var gwRow = _code.DatabaseQuerySafe(ConnStr,
                             @"SELECT TOP 1 ISNULL(CAST(Nexaacc_AccountId AS NVARCHAR(50)), '') AS Acc, ISNULL(Nexaacc_AccountCode, '') AS Code
                                 FROM Account_Paid_How WHERE Paid_How = @n AND Status = 'True'",
@@ -1718,6 +1734,24 @@ namespace Take_Time_BangPhra.Admin.Settings
                                 "ค่าธรรมเนียมเกตเวย์/ส่วนต่างตอนโอนเข้าธนาคาร (payout) ยังไม่ลงอัตโนมัติ — ผู้ทำบัญชีบันทึกตอนกระทบยอด "
                                 + "(Dr ธนาคาร + Dr ค่าธรรมเนียม + Dr ภาษีซื้อ / Cr บัญชีพักเงินเกตเวย์)");
                     }
+
+                    // ช่องทางที่ลูกค้าเห็น/ช่องทางเกตเวย์รายวิธี (PaySo VISA/AMEX/พร้อมเพย์ ฯลฯ) → แหล่งเงินที่ใช้จริงยังไม่ผูกบัญชี
+                    try
+                    {
+                        var chWarn = new List<string>();
+                        foreach (var ch in BuildEffectiveChannelMapping())
+                        {
+                            string w = ch["warn"]?.ToString() ?? "";
+                            if (w.Length == 0) continue;
+                            if (!Convert.ToBoolean(ch["live"]) && !Convert.ToBoolean(ch["customerVisible"])) continue;
+                            chWarn.Add($"{ch["name"]} ({ch["code"]}) → {ch["effective"]} [{ch["source"]}]: {w}");
+                        }
+                        if (chWarn.Count > 0)
+                            add("warn", $"ช่องทางชำระที่ลูกค้า/เกตเวย์ใช้ ยังไม่มีกระเป๋าเงิน/บัญชี NextAcc ({chWarn.Count} ช่องทาง)",
+                                string.Join("\n", chWarn)
+                                + "\n\nวิธีแก้: ผูกแหล่งเงินที่ 'วิธีจ่ายเงิน → บัญชี NextAcc' หรือเลือกแหล่งเงินรายเกตเวย์ในหัวข้อ 'รับชำระออนไลน์ (เกตเวย์)'");
+                    }
+                    catch { }
 
                     // OTA: โหมดเอกสาร + ช่องทางที่ยังไม่มีบัญชี
                     var ocfg = new Integration.AccountingConfig(ConnStr);
@@ -2273,6 +2307,17 @@ namespace Take_Time_BangPhra.Admin.Settings
                 long queueId = long.Parse(Request.QueryString["queueId"] ?? "0");
                 if (Session["User"]?.ToString() != "Owner" && IsSensitiveQueueItem(queueId))
                     return new Dictionary<string, object> { { "success", false }, { "message", "ไม่มีสิทธิ์ดำเนินการกับรายการเงินเดือน" } };
+
+                // เอกสารรับเงิน OTA ที่สำเร็จแล้ว: reset แล้วรันใหม่ = สร้างเอกสารใหม่ทับการยกเลิก/ล็อก (marker VOIDED ถูก reset
+                // ใน SettleReceiptDocAsync) → ต้องผ่าน "ยกเลิกเอกสาร OTA" เท่านั้น
+                var actDt = _code.DatabaseQuerySafe(ConnStr,
+                    "SELECT Status, Action_Type FROM Accounting_Sync_Queue WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", queueId } });
+                if (actDt != null && actDt.Rows.Count > 0
+                    && actDt.Rows[0]["Action_Type"]?.ToString() == "CREATE_OTA_SALES_DOCUMENT"
+                    && actDt.Rows[0]["Status"]?.ToString() == "COMPLETED")
+                    return new Dictionary<string, object> { { "success", false },
+                        { "message", "เอกสารรับเงิน OTA สร้างสำเร็จแล้ว — ใช้หัวข้อ \"ยกเลิกเอกสาร OTA (OTADOC)\" (ติ๊กสร้างใหม่อัตโนมัติ) แทนการ resync คิวนี้" } };
 
                 _code.DatabaseInsertSafe(ConnStr,
                     @"UPDATE Accounting_Sync_Queue
@@ -3275,15 +3320,23 @@ namespace Take_Time_BangPhra.Admin.Settings
                 foreach (string p in GatewayProviders)
                 {
                     string cur = config.GetConfigValue("Nexaacc_Gateway_PaidHow_" + p, "");
-                    string effective = Integration.AccountingSyncService.ResolveGatewayPaidHowName(ConnStr, p, null, fallback);
+                    // กฎเดียวกับตอนรับเงินจริง (OnlinePaymentService.ApplyToReservation): แคตตาล็อก → รายเกตเวย์ → ค่ากลาง
+                    string src;
+                    string effective = Integration.AccountingSyncService.ResolveEffectiveGatewayPaidHow(ConnStr, p, null, null, out src);
+                    var accP = LookupPaidHowAccount(effective);
                     rows.Add(new Dictionary<string, object>
                     {
                         { "provider", p },
                         { "paidHow", cur },
                         { "effective", effective },
+                        { "effectiveSource", GatewaySourceText(src) },
+                        { "effectiveCode", accP.Item2 },
+                        { "effectiveLinked", accP.Item1 },
                         { "active", string.Equals(p, activeProvider, StringComparison.OrdinalIgnoreCase) }
                     });
                 }
+
+                List<Dictionary<string, object>> channels = BuildEffectiveChannelMapping();
 
                 var options = new List<Dictionary<string, object>>();
                 var dt = _code.DatabaseQuerySafe(ConnStr,
@@ -3301,7 +3354,156 @@ namespace Take_Time_BangPhra.Admin.Settings
 
                 return new Dictionary<string, object>
                 {
-                    { "success", true }, { "rows", rows }, { "options", options }, { "fallback", fallback }
+                    { "success", true }, { "rows", rows }, { "options", options }, { "fallback", fallback },
+                    { "channels", channels }
+                };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        private static string GatewaySourceText(string src)
+        {
+            switch (src)
+            {
+                case "CATALOG": return "แคตตาล็อกช่องทาง";
+                case "GATEWAY_CONFIG": return "แหล่งเงินรายเกตเวย์ (ตารางนี้)";
+                case "GATEWAY_OVERRIDE": return "รายเกตเวย์ (แถวแคตตาล็อกยังไม่ผูกบัญชี)";
+                default: return "ค่ากลาง Payment_PaidHow_Name";
+            }
+        }
+
+        /// <summary>(ผูกบัญชีแล้ว, รหัสบัญชี) ของแหล่งเงินชื่อนี้ที่เปิดใช้ — ไม่พบแถว = (false, "")</summary>
+        private Tuple<bool, string, bool> LookupPaidHowAccountFull(string paidHowName)
+        {
+            if (string.IsNullOrWhiteSpace(paidHowName)) return Tuple.Create(false, "", false);
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(ConnStr,
+                    @"SELECT TOP 1 CASE WHEN Nexaacc_AccountId IS NULL THEN 0 ELSE 1 END AS Linked,
+                             ISNULL(Nexaacc_AccountCode, '') AS Code
+                        FROM Account_Paid_How WHERE Paid_How = @n AND Status = 'True'",
+                    new Dictionary<string, object> { { "@n", paidHowName.Trim() } });
+                if (dt == null || dt.Rows.Count == 0) return Tuple.Create(false, "", false);
+                return Tuple.Create(Convert.ToInt32(dt.Rows[0]["Linked"]) == 1, dt.Rows[0]["Code"]?.ToString() ?? "", true);
+            }
+            catch { return Tuple.Create(false, "", false); }
+        }
+
+        private Tuple<bool, string> LookupPaidHowAccount(string paidHowName)
+        {
+            var t = LookupPaidHowAccountFull(paidHowName);
+            return Tuple.Create(t.Item1, t.Item2);
+        }
+
+        /// <summary>
+        /// ช่องทางที่ลูกค้าเห็น/ช่องทางเกตเวย์ (PaymentChannelCatalog.AllForAdmin) → แหล่งเงินที่ "ใช้จริง" ตอนลงบันทึก
+        ///   เกตเวย์: กฎ ApplyToReservation (ResolveEffectiveGatewayPaidHow — แคตตาล็อก → รายเกตเวย์ → ค่ากลาง)
+        ///   ไม่ใช่เกตเวย์ (โอน/QR): ชื่อแถว Account_Paid_How ของช่องทางนั้นตรง ๆ (ลงบันทึกด้วยชื่อนี้)
+        /// warn = ลูกค้า/เกตเวย์ใช้ได้แต่แหล่งเงินที่ใช้จริงไม่มีแถว หรือยังไม่ผูกกระเป๋าเงิน/บัญชี NextAcc
+        /// (NextAcc จะเดาบัญชีจากวิธีชำระ มักเป็นเงินสด)
+        /// </summary>
+        private List<Dictionary<string, object>> BuildEffectiveChannelMapping()
+        {
+            var list = new List<Dictionary<string, object>>();
+            IList<Take_Time_BangPhra.Payments.PaymentChannel> all;
+            try { all = Take_Time_BangPhra.Payments.PaymentChannelCatalog.AllForAdmin(); }
+            catch { return list; }
+            if (all == null) return list;
+
+            foreach (var c in all)
+            {
+                if (c == null || !c.Active) continue;
+                bool gateway = c.IsGateway;
+                if (!gateway && !c.CustomerVisible) continue;   // เฉพาะช่องที่ลูกค้าเห็น + ช่องเกตเวย์
+
+                string effective, src;
+                if (gateway)
+                {
+                    // ยี่ห้อบัตรจริงมาจากเกตเวย์ตอนจ่าย — จำลองด้วยรหัส/ชื่อช่อง (PAYSO_AMEX → AMEX) ให้เลือกแถวเดียวกับของจริง
+                    effective = Integration.AccountingSyncService.ResolveEffectiveGatewayPaidHow(
+                        ConnStr, c.Provider, c.GatewayChannelCode, (c.Code ?? "") + " " + (c.Name ?? ""), out src);
+                }
+                else
+                {
+                    effective = string.IsNullOrEmpty(c.PaidHowName) ? c.Name : c.PaidHowName;
+                    src = "ROW";
+                }
+
+                var acc = LookupPaidHowAccountFull(effective);
+                string warn = "";
+                if (!acc.Item3)
+                    warn = $"ไม่มีแหล่งเงินชื่อ \"{effective}\" ที่เปิดใช้ — NextAcc จะเดาบัญชีเอง (มักเป็นเงินสด)";
+                else if (!acc.Item1)
+                    warn = gateway
+                        ? "แหล่งเงินที่ใช้จริงยังไม่ผูกกระเป๋าเงิน/บัญชี NextAcc — ควรเป็นบัญชีพักเงินเกตเวย์ (11340) หรือกระเป๋าเงิน Digital"
+                        : "ยังไม่ผูกบัญชีธนาคาร NextAcc — ยอดโอนจะถูกเดาเป็นเงินสด";
+
+                list.Add(new Dictionary<string, object>
+                {
+                    { "code", c.Code ?? "" },
+                    { "name", c.Name ?? "" },
+                    { "type", c.Type ?? "" },
+                    { "provider", c.Provider ?? "" },
+                    { "method", c.GatewayChannelCode ?? "" },
+                    { "customerVisible", c.CustomerVisible },
+                    { "live", !gateway || c.GatewayLive },
+                    { "unavailable", c.Unavailable ?? "" },
+                    { "effective", effective ?? "" },
+                    { "source", src == "ROW" ? "แถวแหล่งเงินของช่องทาง" : GatewaySourceText(src) },
+                    { "accountCode", acc.Item2 },
+                    { "linked", acc.Item1 },
+                    { "warn", warn }
+                });
+            }
+            return list;
+        }
+
+        /// <summary>
+        /// ยกเลิกเอกสารรับเงิน OTA (OTADOC-{การจอง}) บน NextAcc — company POST /document/{id}/void ผ่านคิว
+        /// (AccountingSyncService.EnqueueVoidOtaSalesDocument). input: reservationId (ตัวเลข หรือ "OTADOC-123"),
+        /// allowRepost (true = หลังยกเลิกสำเร็จให้ระบบสร้างเอกสารใหม่รอบถัดไป), reason
+        /// </summary>
+        private Dictionary<string, object> VoidOtaDocument(Dictionary<string, object> data)
+        {
+            try
+            {
+                string input = ((data != null && data.ContainsKey("reservationId") ? data["reservationId"]?.ToString() : "") ?? "").Trim();
+                int resId = 0;
+                if (input.StartsWith("OTADOC-", StringComparison.OrdinalIgnoreCase))
+                    resId = Integration.AccountingSyncService.ParseOtaDocReservationId("OTADOC-" + input.Substring("OTADOC-".Length));
+                else
+                    int.TryParse(input.TrimStart('#'), out resId);
+                if (resId <= 0)
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ระบุเลขการจอง (ตัวเลข) หรือ OTADOC-เลขการจอง" } };
+
+                string receiptNumber = "OTADOC-" + resId;
+                bool allowRepost = data.ContainsKey("allowRepost") && data["allowRepost"] != null && Convert.ToBoolean(data["allowRepost"]);
+                string reason = data.ContainsKey("reason") ? (data["reason"]?.ToString() ?? "").Trim() : "";
+
+                var sync = new Integration.AccountingSyncService(ConnStr);
+                string cur = sync.LookupOtaRevenueRef(resId);
+                if (!string.Equals(cur, receiptNumber, StringComparison.OrdinalIgnoreCase))
+                    return new Dictionary<string, object>
+                    {
+                        { "success", false },
+                        { "message", $"การจอง #{resId}: Ota_Revenue_Ref = '{(cur ?? "(ว่าง)")}' ไม่ใช่ {receiptNumber} — ไม่มีเอกสาร OTA ที่ใช้งานอยู่ให้ยกเลิก" }
+                    };
+
+                string user = Session["UserName"]?.ToString();
+                if (string.IsNullOrWhiteSpace(user)) user = Session["User"]?.ToString() ?? "admin";
+                string msg;
+                long qid = sync.EnqueueVoidOtaSalesDocument(receiptNumber, allowRepost, user,
+                    string.IsNullOrEmpty(reason) ? null : reason, out msg);
+                _code.Logs(ConnStr, "AccountingConfig",
+                    $"voidOtaDoc {receiptNumber} allowRepost={allowRepost} reason='{reason}' → {qid} {msg}", user);
+                return new Dictionary<string, object>
+                {
+                    { "success", qid > 0 },
+                    { "message", (msg ?? "") + (qid > 0 ? " — กด \"Process Queue ตอนนี้\" หรือรอรอบอัตโนมัติ แล้วตรวจผลในคิว" : "") },
+                    { "queueId", qid }
                 };
             }
             catch (Exception ex)

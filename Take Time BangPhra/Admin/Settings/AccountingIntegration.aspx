@@ -259,6 +259,21 @@
                         (ไม่ลงเป็นเงินสดผิด ๆ). ต้องรัน migration <code>PHASE18_20</code> และ <code>PHASE18_11</code>
                     </div>
                 </div>
+                <div class="config-item">
+                    <label>เงินประกันความเสียหาย (รับโอน) → ลงบัญชีหนี้สิน</label>
+                    <select id="cfgSecurityDepositJournal">
+                        <option value="false">ปิด — ตามเดิม (เงินประกันไม่เข้าบัญชี)</option>
+                        <option value="true">เปิด — รับโอน Dr ธนาคาร / Cr เงินประกันรอคืน · โอนคืน/หักค่าเสียหาย กลับขา</option>
+                    </select>
+                    <div class="help-text">
+                        ใช้กับโหมดรับเงินประกันแบบ<b>โอนเข้าบัญชีโรงแรม</b> (Security_Hold_Mode = TRANSFER):
+                        รับโอน → <b>Dr ธนาคาร (แหล่งเงินของช่องทางรับโอน) · Cr <code>SECURITY_DEPOSIT_LIABILITY</code></b>;
+                        โอนคืน → กลับขา; หักค่าเสียหาย → <b>Dr หนี้สิน · Cr ธนาคาร</b> เฉพาะส่วนที่หัก
+                        (รายได้ค่าเสียหาย + VAT มาจาก<b>ใบเสร็จค่าเสียหาย</b>ที่ออกตามเดิมด้วยแหล่งเงินเดียวกัน — ไม่ลงรายได้ซ้ำ).
+                        ต้องรัน migration <code>PHASE19_24</code> + ผูก <code>SECURITY_DEPOSIT_LIABILITY</code> (ผังโรงแรม NextAcc 21530)
+                        + ผูกบัญชีของแหล่งเงินรับโอน. เงินประกันที่รับก่อนเปิดตัวเลือกนี้จะไม่ถูกลงขาออก (ไม่มีหนี้สินให้ล้าง)
+                    </div>
+                </div>
                 <div class="config-item" style="margin-left:20px;">
                     <label>เงินค่าห้องที่ OTA เก็บแทน (Channel Collect) → สร้างเอกสารใน NextAcc</label>
                     <select id="cfgOtaDocumentMode" onchange="this.setAttribute('data-loaded','1');">
@@ -1332,6 +1347,17 @@
                     <tbody id="gwPaidHowBody"><tr><td colspan="3" style="text-align:center; color:#999;">กด "โหลด"</td></tr></tbody>
                 </table>
             </div>
+            <p style="font-size:12px; color:#666; margin:10px 0 6px;">
+                <b>แหล่งเงินที่ใช้จริงรายช่องทาง</b> (ช่องที่ลูกค้าเห็น + ช่องเกตเวย์) — ลำดับเดียวกับตอนรับเงินจริง:
+                แคตตาล็อกช่องทาง (แยกวิธี/ยี่ห้อบัตร) &rarr; แหล่งเงินรายเกตเวย์ด้านบน &rarr; ค่ากลาง.
+                แถวสีส้ม = แหล่งเงินที่ใช้จริงยังไม่มีกระเป๋าเงิน/บัญชี NextAcc (NextAcc จะเดาเป็นเงินสด)
+            </p>
+            <div style="overflow-x:auto;">
+                <table class="queue-table">
+                    <thead><tr><th>ช่องทาง</th><th>เกตเวย์/วิธี</th><th>แหล่งเงินที่ใช้จริง</th><th>ที่มา</th><th>บัญชี NextAcc</th></tr></thead>
+                    <tbody id="gwChannelBody"><tr><td colspan="5" style="text-align:center; color:#999;">กด "โหลด"</td></tr></tbody>
+                </table>
+            </div>
             <div class="test-result" id="gwPaidHowResult"></div>
         </div>
 
@@ -1360,6 +1386,21 @@
                 </table>
             </div>
             <div class="test-result" id="otaMapResult"></div>
+
+            <h4 style="margin-top:18px;"><i class="fas fa-ban"></i> ยกเลิกเอกสาร OTA (OTADOC) ใน NextAcc</h4>
+            <p style="font-size:12px; color:#666; margin-bottom:8px;">
+                ใช้เมื่อเอกสารรับเงิน OTA ที่ระบบสร้าง (อ้างอิง <code>OTADOC-เลขการจอง</code>) ผิด — ยกเลิกเอกสารบน NextAcc
+                (กลับรายการบัญชีของเอกสาร) แล้ว <b>ปลด/ล็อก</b> เครื่องหมาย <code>Ota_Revenue_Ref</code> ให้ปลอดภัย.
+                ติ๊ก "สร้างใหม่อัตโนมัติ" = หลังยกเลิกสำเร็จ ระบบสร้างเอกสารใหม่รอบถัดไปตามยอด/การผูกบัญชีปัจจุบัน (เลขเอกสารใหม่);
+                ไม่ติ๊ก = ไม่สร้างใหม่ (เช่น การจองถูกยกเลิก/รายได้ไม่ควรรับรู้). เอกสารที่อยู่ในรายงานภาษีที่ยื่นแล้ว NextAcc จะไม่ยอมยกเลิก
+            </p>
+            <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                <input type="text" id="otaVoidResId" placeholder="เลขการจอง หรือ OTADOC-123" style="padding:6px; width:200px;" />
+                <input type="text" id="otaVoidReason" placeholder="เหตุผล (บันทึกใน log)" style="padding:6px; flex:1; min-width:200px;" />
+                <label style="font-size:13px;"><input type="checkbox" id="otaVoidRepost" /> สร้างใหม่อัตโนมัติ</label>
+                <button type="button" class="btn-warning" onclick="voidOtaDoc()"><i class="fas fa-ban"></i> ยกเลิกเอกสาร OTA</button>
+            </div>
+            <div class="test-result" id="otaVoidResult"></div>
         </div>
 
         <!-- Expense Category → Account Mapping -->
@@ -1474,6 +1515,8 @@
                 document.getElementById('cfgEtaxRdWatch').value = cfg.etaxRdWatch ? 'true' : 'false';
                 document.getElementById('cfgEtaxRdFrom').value = cfg.etaxRdFrom || '';
                 document.getElementById('cfgOtaRoomRevenue').value = cfg.otaRoomRevenue ? 'true' : 'false';
+                var sdj = document.getElementById('cfgSecurityDepositJournal');
+                if (sdj) { sdj.value = cfg.securityDepositJournal ? 'true' : 'false'; sdj.setAttribute('data-loaded', '1'); }
                 // โหมดเอกสาร OTA: ส่งกลับตอนบันทึกเฉพาะเมื่อโหลดค่าจริงแล้ว (กันรีเซ็ตนโยบายเงียบ ๆ)
                 var odmSel = document.getElementById('cfgOtaDocumentMode');
                 if (odmSel && cfg.otaDocumentMode) { odmSel.value = cfg.otaDocumentMode; odmSel.setAttribute('data-loaded', '1'); }
@@ -1608,6 +1651,7 @@
                 etaxRdWatch: document.getElementById('cfgEtaxRdWatch').value === 'true',
                 etaxRdFrom: document.getElementById('cfgEtaxRdFrom').value.trim(),
                 otaRoomRevenue: document.getElementById('cfgOtaRoomRevenue').value === 'true',
+                securityDepositJournal: document.getElementById('cfgSecurityDepositJournal').value === 'true',
                 stockQtySync: document.getElementById('cfgStockQtySync').value === 'true',
                 stockQtyPull: document.getElementById('cfgStockQtyPull').value === 'true',
                 attachFiles: document.getElementById('cfgAttachFiles').value,
@@ -3022,10 +3066,34 @@
                                 + waEsc(o.name + (o.linked ? ' → ' + o.code : ' (ยังไม่ผูกบัญชี)')) + '</option>';
                         });
                         s += '</select>';
+                        var eff = waEsc(row.effective || '')
+                            + (row.effectiveLinked ? ' <span style="color:#27ae60;">→ ' + waEsc(row.effectiveCode || '') + '</span>'
+                                                   : ' <span style="color:#e67e22;">(ยังไม่ผูกบัญชี)</span>')
+                            + (row.effectiveSource ? '<div style="font-size:11px;color:#888;">' + waEsc(row.effectiveSource) + '</div>' : '');
                         html += '<tr><td><strong>' + waEsc(row.provider) + '</strong>' + (row.active ? ' <span class="status-badge status-connected">ใช้อยู่</span>' : '') + '</td>'
-                            + '<td>' + s + '</td><td>' + waEsc(row.effective || '') + '</td></tr>';
+                            + '<td>' + s + '</td><td>' + eff + '</td></tr>';
                     });
                     body.innerHTML = html;
+                    var cb = document.getElementById('gwChannelBody');
+                    if (cb) {
+                        var ch = data.channels || [];
+                        if (!ch.length) { cb.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#999;">ไม่มีช่องทางที่ลูกค้าเห็น/ช่องเกตเวย์</td></tr>'; }
+                        else {
+                            var h2 = '';
+                            ch.forEach(function(c) {
+                                var warnRow = !!c.warn;
+                                h2 += '<tr' + (warnRow ? ' style="background:#fff4e5;"' : '') + '>'
+                                    + '<td><strong>' + waEsc(c.name) + '</strong><div style="font-size:11px;color:#888;">' + waEsc(c.code) + ' · ' + waEsc(c.type)
+                                    + (c.customerVisible ? ' · ลูกค้าเห็น' : '') + (c.live ? '' : ' · ยังใช้ไม่ได้' + (c.unavailable ? ' (' + waEsc(c.unavailable) + ')' : '')) + '</div></td>'
+                                    + '<td>' + waEsc((c.provider || '-') + (c.method ? ' / ' + c.method : '')) + '</td>'
+                                    + '<td>' + waEsc(c.effective) + '</td>'
+                                    + '<td style="font-size:12px;">' + waEsc(c.source) + '</td>'
+                                    + '<td>' + (c.linked ? '<span style="color:#27ae60;">' + waEsc(c.accountCode || '✓') + '</span>'
+                                                         : '<span style="color:#e67e22;">⚠ ' + waEsc(c.warn || 'ยังไม่ผูก') + '</span>') + '</td></tr>';
+                            });
+                            cb.innerHTML = h2;
+                        }
+                    }
                 })
                 .catch(function(err) { body.innerHTML = '<tr><td colspan="3" style="color:red;">' + waEsc(err.message) + '</td></tr>'; });
         }
@@ -3043,6 +3111,28 @@
                     el.className = 'test-result ' + (data.success ? 'success' : 'error');
                     el.innerHTML = (data.success ? '✓ ' : '✗ ') + waEsc(data.message);
                     loadGatewayPaidHow();
+                })
+                .catch(function(err) { el.className = 'test-result error'; el.innerHTML = '✗ ' + waEsc(err.message); });
+        }
+
+        // ── ยกเลิกเอกสาร OTA (OTADOC) ──
+        function voidOtaDoc() {
+            var el = document.getElementById('otaVoidResult');
+            var rid = (document.getElementById('otaVoidResId').value || '').trim();
+            if (!rid) { el.className = 'test-result error'; el.textContent = '✗ ระบุเลขการจอง'; return; }
+            var repost = document.getElementById('otaVoidRepost').checked;
+            if (!confirm('ยกเลิกเอกสาร OTA ของการจอง ' + rid + ' ใน NextAcc?\n'
+                + (repost ? 'หลังยกเลิกสำเร็จ ระบบจะสร้างเอกสารใหม่รอบถัดไป' : 'จะไม่สร้างใหม่อัตโนมัติ'))) return;
+            el.className = 'test-result loading'; el.textContent = 'กำลังเข้าคิว...';
+            fetch(pageUrl + '?action=voidOtaDoc', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'voidOtaDoc', reservationId: rid, allowRepost: repost,
+                    reason: (document.getElementById('otaVoidReason').value || '').trim() })
+            })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    el.className = 'test-result ' + (data.success ? 'success' : 'error');
+                    el.innerHTML = (data.success ? '✓ ' : '✗ ') + waEsc(data.message || '');
                 })
                 .catch(function(err) { el.className = 'test-result error'; el.innerHTML = '✗ ' + waEsc(err.message); });
         }
