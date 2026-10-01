@@ -16,362 +16,205 @@
             border-radius: 15px;
             box-shadow: 0 10px 30px rgba(0,0,0,0.2);
             overflow: hidden;
-            min-height: auto;
+            color: #3E2723;
+            font-size: 15px;
+            line-height: 1.55;
         }
 
         .confirmation-header {
             text-align: center;
-            padding: 10px 15px;
+            padding: 16px 15px 14px;
             background: linear-gradient(135deg, #5d4037 0%, #8d6e63 100%);
             color: white;
         }
 
-        .success-badge {
-            background: #4caf50;
+        .confirmation-header h1 { margin: 6px 0 0; font-size: 1.45em; }
+        .confirmation-header p { margin: 0; opacity: 0.9; font-size: 0.9em; }
+
+        .success-badge, .error-badge {
             color: white;
-            padding: 4px 12px;
-            border-radius: 12px;
-            font-size: 0.8em;
+            padding: 5px 14px;
+            border-radius: 14px;
+            font-size: 0.85em;
             font-weight: bold;
             display: inline-block;
-            margin-bottom: 5px;
         }
+        .success-badge { background: #4caf50; }
+        .error-badge { background: #e53935; }
+
+        .rc-code {
+            display: inline-block; margin-top: 10px; background: rgba(255,255,255,0.16); border-radius: 10px;
+            padding: 6px 14px; font-size: 1em;
+        }
+        .rc-code b { font-size: 1.35em; letter-spacing: 0.04em; }
+
+        .instruction-text {
+            text-align: center;
+            color: rgba(255,255,255,0.92);
+            font-size: 0.85em;
+            margin-top: 8px;
+        }
+
+        /* สถานะการชำระเงิน + ขั้นตอนถัดไป */
+        .rc-status { margin: 14px 14px 4px; border-radius: 12px; padding: 12px 16px; border: 1px solid; }
+        .rc-status h2 { margin: 0 0 4px; font-size: 1.08em; }
+        .rc-status p { margin: 0 0 4px; }
+        .rc-ok { background: #E8F5E9; border-color: #A5D6A7; color: #1B5E20; }
+        .rc-wait { background: #FFF8E1; border-color: #FFE082; color: #6D4C41; }
+        .rc-info { background: #E3F2FD; border-color: #90CAF9; color: #0D47A1; }
+        .rc-bad { background: #FFEBEE; border-color: #EF9A9A; color: #B71C1C; }
+        .rc-off { background: #F5F5F5; border-color: #E0E0E0; color: #616161; }
+        .rc-pay-btn {
+            display: inline-flex; align-items: center; justify-content: center; min-height: 44px; margin-top: 8px;
+            padding: 8px 20px; border-radius: 22px; background: #2E7D32; color: #fff !important; font-weight: bold; text-decoration: none;
+        }
+        .rc-next { margin: 8px 14px 0; background: #FAFAFA; border: 1px solid #EEE; border-radius: 12px; padding: 10px 16px; }
+        .rc-next b { color: #5D4037; }
+        .rc-next ol { margin: 6px 0 0; padding-left: 20px; }
+        .rc-next li { margin: 2px 0; }
 
         .main-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 0;
-            min-height: auto;
         }
 
-        .left-column {
-            padding: 10px;
-            background: #fafafa;
-        }
+        .left-column { padding: 12px; background: #fafafa; min-width: 0; }
+        .right-column { padding: 12px; background: #f5f5f5; border-left: 2px solid #d7ccc8; min-width: 0; }
 
-        .right-column {
-            padding: 10px;
-            background: #f5f5f5;
-            border-left: 2px solid #d7ccc8;
-        }
-
-        .info-card {
+        .info-card, .detail-card, .slip-card {
             background: white;
-            padding: 8px 10px;
-            border-radius: 6px;
-            margin-bottom: 8px;
-            border-left: 3px solid #8d6e63;
+            padding: 10px 12px;
+            border-radius: 8px;
+            margin-bottom: 10px;
             box-shadow: 0 2px 5px rgba(0,0,0,0.05);
         }
+        .info-card { border-left: 3px solid #8d6e63; }
+        .slip-card { text-align: left; }
 
-        .info-card h3 {
+        .info-card h3, .detail-card h3, .slip-card h3 {
             color: #5d4037;
-            margin: 0 0 5px 0;
-            font-size: 0.85em;
+            margin: 0 0 6px 0;
+            font-size: 1em;
             border-bottom: 1px solid #d7ccc8;
-            padding-bottom: 3px;
+            padding-bottom: 4px;
         }
 
         .info-row {
             display: flex;
             justify-content: space-between;
-            margin-bottom: 3px;
-            padding: 2px 0;
-            font-size: 0.75em;
+            gap: 10px;
+            padding: 3px 0;
+            font-size: 0.95em;
         }
+        .info-label { font-weight: bold; color: #5d4037; flex: 0 0 auto; }
+        .info-value { color: #333; text-align: right; flex: 1; min-width: 0; word-break: break-word; }
 
-        .info-label {
-            font-weight: bold;
-            color: #5d4037;
-            min-width: 100px;
-        }
-
-        .info-value {
-            color: #333;
-            text-align: right;
-            flex: 1;
-        }
-        
         .payment-card {
             background: linear-gradient(135deg, #fff8e1 0%, #ffecb3 100%);
-            padding: 8px;
-            border-radius: 6px;
-            border: 1px solid #ffd54f;
-            margin: 6px 0;
-        }
-
-        .slip-card {
-            background: white;
             padding: 8px 10px;
-            border-radius: 6px;
-            text-align: center;
-            margin-bottom: 8px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            border-radius: 8px;
+            border: 1px solid #ffd54f;
         }
+        .rc-due { font-size: 1.1em; }
 
         .slip-image {
             width: 100%;
-            max-height: 100px;
-            border-radius: 4px;
+            max-height: 220px;
+            border-radius: 6px;
             border: 1px solid #d7ccc8;
             object-fit: contain;
             background: #f9f9f9;
         }
 
-        .detail-card {
-            background: white;
+        .accommodation-box, .items-box, .remark-box {
+            background: #f9f9f9;
             padding: 8px 10px;
             border-radius: 6px;
-            margin-bottom: 8px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-        }
-
-        .detail-card h3 {
-            color: #5d4037;
-            margin: 0 0 5px 0;
-            font-size: 0.85em;
-            border-bottom: 1px solid #e0e0e0;
-            padding-bottom: 3px;
-        }
-
-        /* รายการที่พัก - แสดงทั้งหมดไม่ scroll */
-        .accommodation-box {
-            background: #f9f9f9;
-            padding: 6px;
-            border-radius: 4px;
-            font-size: 0.7em;
-            line-height: 1.4;
+            font-size: 0.93em;
+            line-height: 1.6;
             border-left: 2px solid #8d6e63;
         }
+        .items-box { max-height: 220px; overflow-y: auto; }
+        .remark-box { background: #fff3e0; border-left-color: #ff9800; max-height: 160px; overflow-y: auto; }
 
-        /* รายการของเช่า/สินค้า - ล็อคขนาดและมี scroll */
-        .items-box {
-            background: #f9f9f9;
-            padding: 6px;
-            border-radius: 4px;
-            font-size: 0.7em;
-            line-height: 1.4;
-            max-height: 80px;
-            overflow-y: auto;
-            border-left: 2px solid #8d6e63;
-        }
+        .rc-slip-item { margin-bottom: 8px; padding: 8px 10px; background: #f5f5f5; border-radius: 6px; font-size: 0.9em; }
+        .rc-slip-item a { color: #1976d2; text-decoration: none; font-weight: bold; display: inline-block; padding: 6px 0; }
+        .rc-docs { margin-top: 8px; padding: 8px 10px; background: linear-gradient(135deg, #e8f5e8 0%, #f1f8e9 100%); border-radius: 6px; border: 1px solid #c8e6c9; }
+        .rc-docs a { color: #2e7d32; text-decoration: none; font-weight: bold; display: inline-block; padding: 6px 0; }
 
-        /* หมายเหตุ */
-        .remark-box {
-            background: #fff3e0;
-            padding: 6px;
-            border-radius: 4px;
-            font-size: 0.7em;
-            line-height: 1.4;
-            max-height: 60px;
-            overflow-y: auto;
-            border-left: 2px solid #ff9800;
-        }
-        
+        /* นโยบาย/สัตว์เลี้ยง (พับได้) */
+        .rc-section { margin: 0 12px 10px; }
+        .rc-collapse > summary { cursor: pointer; font-weight: bold; color: #5d4037; padding: 8px 0; min-height: 28px; list-style-position: inside; }
+        .rc-collapse > summary span { font-weight: normal; color: #999; font-size: 0.9em; }
+
         .action-buttons {
             text-align: center;
-            padding: 10px;
+            padding: 12px;
             background: white;
             border-top: 1px solid #d7ccc8;
         }
 
-        .btn-receipt {
-            background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);
-            color: white;
-            padding: 6px 15px;
-            border: none;
-            border-radius: 12px;
-            font-size: 0.75em;
-            font-weight: bold;
-            cursor: pointer;
-            margin: 0 3px;
-        }
-
         .btn-print {
-            background: linear-gradient(135deg, #2196f3 0%, #1976d2 100%);
+            background: linear-gradient(135deg, #8d6e63 0%, #5d4037 100%);
             color: white;
-            padding: 6px 15px;
+            min-height: 48px;
+            padding: 10px 24px;
             border: none;
-            border-radius: 12px;
-            font-size: 0.75em;
+            border-radius: 24px;
+            font-size: 1em;
             font-weight: bold;
             cursor: pointer;
-            margin: 0 3px;
+            margin: 4px;
+            font-family: inherit;
         }
 
-        .instruction-text {
-            text-align: center;
-            color: rgba(255,255,255,0.9);
-            font-size: 0.65em;
-            margin-top: 3px;
-        }
-
-        .receipt-section {
-            background: linear-gradient(135deg, #e8f5e8 0%, #f1f8e9 100%);
-            padding: 6px;
-            border-radius: 4px;
-            border: 1px solid #c8e6c9;
-            margin-top: 6px;
-            font-size: 0.7em;
-        }
-
-        /* Custom scrollbar */
-        .items-box::-webkit-scrollbar,
-        .remark-box::-webkit-scrollbar {
-            width: 3px;
-        }
-
-        .items-box::-webkit-scrollbar-track,
-        .remark-box::-webkit-scrollbar-track {
-            background: #f1f1f1;
-        }
-
-        .items-box::-webkit-scrollbar-thumb,
-        .remark-box::-webkit-scrollbar-thumb {
-            background: #bcaaa4;
-        }
-        
         @media print {
-            .action-buttons, .instruction-text {
-                display: none;
-            }
+            .action-buttons, .instruction-text, .rc-pay-btn { display: none; }
+            body { background: #fff; }
         }
-        
-        /* Mobile Optimization */
-        @media (max-width: 768px) {
-            body {
-                padding: 3px;
-            }
 
-            .confirmation-container {
-                border-radius: 8px;
-                min-height: auto;
-            }
-
-            .confirmation-header {
-                padding: 8px 10px;
-            }
-
-            .confirmation-header h1 {
-                font-size: 1em;
-                margin: 2px 0;
-            }
-
-            .success-badge {
-                font-size: 0.7em;
-                padding: 3px 10px;
-            }
-
-            .main-grid {
-                grid-template-columns: 1fr 1fr;
-                min-height: auto;
-                gap: 0;
-            }
-
-            .right-column {
-                border-left: 1px solid #d7ccc8;
-                border-top: none;
-            }
-
-            .left-column, .right-column {
-                padding: 6px;
-            }
-
-            .info-card, .slip-card, .detail-card {
-                padding: 6px 8px;
-                margin-bottom: 6px;
-            }
-
-            .info-card h3, .slip-card h3, .detail-card h3 {
-                font-size: 0.75em;
-                margin-bottom: 4px;
-            }
-
-            .info-row {
-                flex-direction: column;
-                margin-bottom: 2px;
-            }
-
-            .info-label {
-                min-width: auto;
-                margin-bottom: 1px;
-                font-size: 0.65em;
-            }
-
-            .info-value {
-                text-align: left;
-                font-size: 0.7em;
-            }
-
-            .slip-image {
-                max-height: 80px;
-            }
-
-            .btn-receipt, .btn-print {
-                padding: 5px 12px;
-                font-size: 0.7em;
-                margin: 2px;
-            }
-
-            .accommodation-box {
-                font-size: 0.65em;
-                line-height: 1.3;
-                padding: 5px;
-            }
-
-            .items-box {
-                max-height: 60px;
-                font-size: 0.65em;
-                line-height: 1.3;
-                padding: 5px;
-            }
-
-            .remark-box {
-                max-height: 50px;
-                font-size: 0.65em;
-                line-height: 1.3;
-                padding: 5px;
-            }
-
-            .instruction-text {
-                font-size: 0.6em;
-            }
-
-            .action-buttons {
-                padding: 8px;
-            }
+        /* มือถือ: คอลัมน์เดียว ตัวอักษรอ่านง่าย */
+        @media (max-width: 700px) {
+            body { padding: 4px; }
+            .confirmation-container { border-radius: 10px; font-size: 15px; }
+            .main-grid { grid-template-columns: 1fr; }
+            .right-column { border-left: 0; border-top: 2px solid #d7ccc8; }
+            .left-column, .right-column { padding: 10px; }
+            .rc-status, .rc-next { margin-left: 10px; margin-right: 10px; }
+            .rc-section { margin: 0 10px 10px; }
+            .btn-print { width: 100%; }
         }
     </style>
-    <br /><br />
+    <br />
     <div class="confirmation-container">
         <!-- Header Section -->
         <div class="confirmation-header">
-            <div class="success-badge">
-                <asp:Label ID="Label10" runat="server" Text=""></asp:Label>
-            </div>
-            <h1 style="margin: 3px 0; font-size: 1.3em;">การยืนยันการจอง</h1>
-            <p style="margin: 0; opacity: 0.9; font-size: 0.8em;">Reservation Confirmation</p>
+            <asp:Label ID="Label10" runat="server" Text="" CssClass="success-badge"></asp:Label>
+            <h1>การยืนยันการจอง</h1>
+            <p>Reservation Confirmation</p>
+            <div class="rc-code">รหัสการจอง (Booking No.) <b>#<asp:Label ID="Label1" runat="server"></asp:Label></b></div>
             <div class="instruction-text">
-                <strong>📱 กรุณาบันทึกภาพหน้าจอนี้เพื่อใช้ยืนยันในการลงทะเบียนเข้าพัก</strong>
+                <strong>📱 กรุณาบันทึกหน้านี้ไว้ และแสดงรหัสการจองตอนเช็คอิน</strong><br />
+                Please save this page and show your booking number at check-in.
             </div>
         </div>
+
+        <%-- สถานะการชำระเงิน + ขั้นตอนถัดไป (โอน: ได้รับสลิป/รอตรวจ · ออนไลน์: ชำระแล้ว/รอชำระ) --%>
+        <asp:Literal ID="litNextSteps" runat="server" />
 
         <div class="main-grid">
             <!-- Left Column -->
             <div class="left-column">
                 <!-- Basic Information -->
                 <div class="info-card">
-                    <h3>📋 ข้อมูลการจอง</h3>
-                    <div class="info-row">
-                        <span class="info-label">รหัสการจอง:</span>
-                        <span class="info-value"><asp:Label ID="Label1" runat="server" style="font-weight: bold; color: #d32f2f;"></asp:Label></span>
-                    </div>
+                    <h3>👤 ข้อมูลผู้จอง <span style="font-weight:normal; color:#999; font-size:0.85em;">Guest</span></h3>
                     <div class="info-row">
                         <span class="info-label">ชื่อ-นามสกุล:</span>
                         <span class="info-value"><asp:Label ID="Label2" runat="server"></asp:Label></span>
                     </div>
                     <div class="info-row">
-                        <span class="info-label">ชื่อเล่น:</span>
+                        <span class="info-label">Facebook / Line:</span>
                         <span class="info-value"><asp:Label ID="Label3" runat="server"></asp:Label></span>
                     </div>
                     <div class="info-row">
@@ -382,14 +225,14 @@
 
                 <!-- Stay Information -->
                 <div class="info-card">
-                    <h3>🏨 ข้อมูลการเข้าพัก</h3>
+                    <h3>🏨 ข้อมูลการเข้าพัก <span style="font-weight:normal; color:#999; font-size:0.85em;">Stay</span></h3>
                     <div class="info-row">
-                        <span class="info-label">วันที่เช็คอิน:</span>
-                        <span class="info-value"><asp:Label ID="Label5" runat="server" style="color: #388e3c;"></asp:Label></span>
+                        <span class="info-label">เช็คอิน:</span>
+                        <span class="info-value"><asp:Label ID="Label5" runat="server" style="color: #388e3c; font-weight: bold;"></asp:Label></span>
                     </div>
                     <div class="info-row">
-                        <span class="info-label">วันที่เช็คเอาท์:</span>
-                        <span class="info-value"><asp:Label ID="Label6" runat="server" style="color: #388e3c;"></asp:Label></span>
+                        <span class="info-label">เช็คเอาท์:</span>
+                        <span class="info-value"><asp:Label ID="Label6" runat="server" style="color: #388e3c; font-weight: bold;"></asp:Label></span>
                     </div>
                     <div class="info-row">
                         <span class="info-label">จำนวนคืน:</span>
@@ -399,23 +242,23 @@
 
                 <!-- Payment Summary -->
                 <div class="info-card">
-                    <h3>💰 สรุปการชำระเงิน</h3>
+                    <h3>💰 สรุปการชำระเงิน <span style="font-weight:normal; color:#999; font-size:0.85em;">Payment</span></h3>
                     <div class="payment-card">
                         <div class="info-row">
                             <span class="info-label">ราคารวมทั้งหมด:</span>
-                            <span class="info-value" style="color: #d32f2f;">
-                                ฿<asp:Label ID="Label11" runat="server" style="font-weight: bold;"></asp:Label>
+                            <span class="info-value" style="color: #d32f2f; font-weight: bold;">
+                                ฿<asp:Label ID="Label11" runat="server"></asp:Label>
                             </span>
                         </div>
                         <div class="info-row">
-                            <span class="info-label">ยอดมัดจำที่ชำระแล้ว:</span>
-                            <span class="info-value" style="color: #388e3c;">
-                                ฿<asp:Label ID="Label12" runat="server" style="font-weight: bold;"></asp:Label>
+                            <span class="info-label">ชำระแล้ว:</span>
+                            <span class="info-value" style="color: #388e3c; font-weight: bold;">
+                                ฿<asp:Label ID="Label12" runat="server"></asp:Label>
                             </span>
                         </div>
-                        <div class="info-row">
+                        <div class="info-row rc-due">
                             <span class="info-label">ยอดคงเหลือ:</span>
-                            <span class="info-value" style="color: #f57c00; font-weight: bold;">
+                            <span class="info-value" style="color: #e65100; font-weight: bold;">
                                 ฿<asp:Label ID="Label13" runat="server"></asp:Label>
                             </span>
                         </div>
@@ -424,7 +267,7 @@
 
                 <!-- Remark -->
                 <div class="detail-card">
-                    <h3>📝 หมายเหตุ</h3>
+                    <h3>📝 หมายเหตุ / คำขอพิเศษ</h3>
                     <div class="remark-box">
                         <asp:Label ID="Label14" runat="server" style="white-space: pre-line;"></asp:Label>
                     </div>
@@ -435,7 +278,7 @@
             <div class="right-column">
                 <!-- Accommodation Details -->
                 <div class="detail-card">
-                    <h3>🛌 รายการที่พัก</h3>
+                    <h3>🛌 ห้องพัก <span style="font-weight:normal; color:#999; font-size:0.85em;">Room(s)</span></h3>
                     <div class="accommodation-box">
                         <asp:Label ID="Label8" runat="server" style="white-space: pre-line;"></asp:Label>
                     </div>
@@ -443,7 +286,7 @@
 
                 <!-- Rent Items and Product Charges -->
                 <div class="detail-card">
-                    <h3>🛍️ รายการของเช่า/สินค้า</h3>
+                    <h3>🛍️ ของเช่า / ค่าบริการเพิ่มเติม</h3>
                     <div class="items-box">
                         <asp:Label ID="Label9" runat="server" style="white-space: pre-line;"></asp:Label>
                     </div>
@@ -451,33 +294,25 @@
 
                 <!-- Slip Image & Receipts -->
                 <div class="slip-card">
-                    <h3>📷 สลิปการโอนเงิน & ใบกำกับภาษี</h3>
+                    <h3>📷 หลักฐานการชำระเงิน &amp; เอกสาร</h3>
                     <asp:Label ID="lblSlipCount" runat="server"
-                        style="display: block; color: #4caf50; font-weight: bold; margin-bottom: 6px; font-size: 0.7em;"></asp:Label>
+                        style="display: block; color: #2e7d32; font-weight: bold; margin-bottom: 6px; font-size: 0.9em;"></asp:Label>
 
                     <asp:Repeater ID="rptPaymentSlips" runat="server">
                         <ItemTemplate>
-                            <div style="margin-bottom: 6px; padding: 5px; background: #f5f5f5; border-radius: 4px; font-size: 0.7em;">
-                                <div style="margin-bottom: 2px; font-size: 0.85em;">
-                                    <strong>📅 วันที่:</strong> <%# Eval("PaymentDate", "{0:dd/MM/yyyy HH:mm}") %>
-                                </div>
-                                <div style="margin-bottom: 2px; font-size: 0.85em;">
-                                    <strong>💰 จำนวน:</strong> <%# Eval("PaymentAmount", "{0:N2}") %> บาท
-                                </div>
-                                <div style="margin-bottom: 2px; font-size: 0.85em;">
-                                    <strong>📝 ประเภท:</strong> <%# Eval("PaymentType") %>
-                                </div>
+                            <div class="rc-slip-item">
+                                <div><strong>📅</strong> <%# Eval("PaymentDate", "{0:dd/MM/yyyy HH:mm}") %>
+                                    · <strong>฿<%# Eval("PaymentAmount", "{0:N2}") %></strong>
+                                    · <%# Eval("PaymentType") %></div>
                                 <div>
-                                    <a href='<%# ResolveUrl("~/" + Eval("SlipFileURL").ToString()) %>'
-                                       target="_blank"
-                                       style="color: #1976d2; text-decoration: none; font-weight: bold; font-size: 0.85em;">
+                                    <a href='<%# ResolveUrl("~/" + Eval("SlipFileURL").ToString()) %>' target="_blank" rel="noopener">
                                         🔗 ดูสลิปการโอนเงิน
                                     </a>
                                 </div>
                             </div>
                         </ItemTemplate>
                         <FooterTemplate>
-                            <div style="color: #999; font-style: italic; margin-top: 6px; font-size: 0.7em;">
+                            <div style="color: #999; font-style: italic; margin-top: 6px; font-size: 0.9em;">
                                 <%# (((System.Web.UI.WebControls.Repeater)Container.Parent).Items.Count == 0) ? "ไม่พบสลิปการโอนเงิน" : "" %>
                             </div>
                         </FooterTemplate>
@@ -486,48 +321,42 @@
                     <asp:Image ID="Image1" runat="server" CssClass="slip-image" Visible="false" />
 
                     <!-- Receipt Links Section -->
-                    <asp:Panel ID="pnlReceiptLinks" runat="server" Visible="false"
-                        style="margin-top: 8px; padding: 6px; background: linear-gradient(135deg, #e8f5e8 0%, #f1f8e9 100%); border-radius: 4px; border: 1px solid #c8e6c9;">
-                        <div style="font-size: 0.7em; color: #2e7d32; font-weight: bold; margin-bottom: 4px;">
+                    <asp:Panel ID="pnlReceiptLinks" runat="server" Visible="false" CssClass="rc-docs">
+                        <div style="font-size: 0.9em; color: #2e7d32; font-weight: bold; margin-bottom: 2px;">
                             🧾 เอกสารการชำระเงิน (ใบเสร็จ/ใบกำกับภาษี)
                         </div>
                         <asp:Repeater ID="rptReceipts" runat="server">
                             <ItemTemplate>
-                                <div style="margin: 2px 0;">
-                                    <a href='<%# GetReceiptPDFUrl(Eval("ID"), Eval("UID"), Eval("Created_Date")) %>'
-                                       target="_blank"
-                                       style="color: #4caf50; text-decoration: none; font-weight: bold; font-size: 0.75em;">
+                                <div>
+                                    <a href='<%# GetReceiptPDFUrl(Eval("ID"), Eval("UID"), Eval("Created_Date")) %>' target="_blank" rel="noopener">
                                         📄 <%# GetReceiptDocLabel(Eval("IsDeposit")) %> <%# Eval("ID") %> (<%# Eval("Total_Amount", "{0:N2}") %> บาท)
                                     </a>
                                 </div>
                             </ItemTemplate>
                         </asp:Repeater>
                     </asp:Panel>
-
-                    <p style="color: #666; margin: 4px 0 0 0; font-size: 0.65em;">
-                        <em>หลักฐานการชำระเงิน</em>
-                    </p>
                 </div>
             </div>
         </div>
 
         <!-- 🐾 สัตว์เลี้ยงเข้าพัก (แสดงเฉพาะใบจองที่มีสัตว์เลี้ยง — ตั้งค่าที่ Admin/Settings/PetStay) -->
-        <asp:Panel ID="pnlPetInfo" runat="server" Visible="false" CssClass="detail-card"
-            style="margin-top: 8px;">
-            <h3>🐾 สัตว์เลี้ยงเข้าพัก</h3>
+        <asp:Panel ID="pnlPetInfo" runat="server" Visible="false" CssClass="detail-card rc-section">
+            <h3>🐾 สัตว์เลี้ยงเข้าพัก <span style="font-weight:normal; color:#999; font-size:0.85em;">Pets</span></h3>
             <asp:Literal ID="litPetInfo" runat="server" />
         </asp:Panel>
 
-        <!-- Booking Policies (ตั้งค่าที่ Admin/Settings/BookingPolicies) -->
-        <asp:Panel ID="pnlPolicies" runat="server" Visible="false" CssClass="detail-card"
-            style="margin-top: 8px;">
-            <h3>📜 เงื่อนไขและนโยบายการจอง</h3>
-            <asp:Literal ID="litPolicies" runat="server" />
+        <!-- Booking Policies (ตั้งค่าที่ Admin/Settings/BookingPolicies) — พับไว้ แตะเพื่อดู -->
+        <asp:Panel ID="pnlPolicies" runat="server" Visible="false" CssClass="detail-card rc-section">
+            <details class="rc-collapse">
+                <summary>📜 เงื่อนไขและนโยบายการจอง <span>(แตะเพื่อดู · Booking policies)</span></summary>
+                <asp:Literal ID="litPolicies" runat="server" />
+            </details>
         </asp:Panel>
 
         <!-- Action Buttons -->
         <div class="action-buttons">
-            <button type="button" class="btn-print" onclick="captureAndDownload()">🖨️ บันทึกหน้านี้เป็นรูป</button>
+            <button type="button" class="btn-print" onclick="captureAndDownload(this)">📥 บันทึกหน้านี้เป็นรูป (Save as image)</button>
+            <button type="button" class="btn-print" onclick="window.print()">🖨️ พิมพ์ (Print)</button>
         </div>
     </div>
 
@@ -535,64 +364,46 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 
     <script>
-        // Add some interactive effects
-        document.addEventListener('DOMContentLoaded', function () {
-            // Add fade-in animation to cards
-            const cards = document.querySelectorAll('.info-card, .detail-card, .slip-card');
-            cards.forEach((card, index) => {
-                card.style.opacity = '0';
-                card.style.transform = 'translateY(5px)';
-                card.style.transition = 'all 0.3s ease';
-
-                setTimeout(() => {
-                    card.style.opacity = '1';
-                    card.style.transform = 'translateY(0)';
-                }, index * 50);
-            });
-        });
-
         // Capture and download page as image
-        function captureAndDownload() {
-            const element = document.querySelector('.confirmation-container');
-            const buttons = document.querySelector('.action-buttons');
+        function captureAndDownload(btn) {
+            var element = document.querySelector('.confirmation-container');
+            var buttons = document.querySelector('.action-buttons');
+            if (!element) return;
+            if (typeof html2canvas === 'undefined') {
+                alert('ไม่สามารถสร้างรูปได้ในขณะนี้ — กรุณาใช้การจับภาพหน้าจอแทน');
+                return;
+            }
 
-            // Hide buttons before capture
+            // เปิดนโยบายที่พับไว้ให้ติดในรูป แล้วคืนสถานะเดิมหลังบันทึก
+            var details = element.querySelectorAll('details');
+            var wasOpen = [];
+            for (var i = 0; i < details.length; i++) { wasOpen.push(details[i].open); details[i].open = true; }
+
             if (buttons) buttons.style.display = 'none';
+            var originalText = btn ? btn.textContent : '';
+            if (btn) { btn.textContent = '⏳ กำลังสร้างรูป...'; btn.disabled = true; }
 
-            // Show loading message
-            const originalText = event.target.textContent;
-            event.target.textContent = '⏳ กำลังสร้างรูป...';
-            event.target.disabled = true;
+            function restore() {
+                for (var j = 0; j < details.length; j++) details[j].open = wasOpen[j];
+                if (buttons) buttons.style.display = 'block';
+                if (btn) { btn.textContent = originalText; btn.disabled = false; }
+            }
 
             html2canvas(element, {
                 scale: 2, // Higher quality
                 useCORS: true,
                 logging: false,
                 backgroundColor: '#ffffff'
-            }).then(canvas => {
-                // Convert to image and download
-                const link = document.createElement('a');
-                const timestamp = new Date().getTime();
-                link.download = 'การยืนยันการจอง_' + timestamp + '.png';
+            }).then(function (canvas) {
+                var link = document.createElement('a');
+                link.download = 'การยืนยันการจอง_' + new Date().getTime() + '.png';
                 link.href = canvas.toDataURL('image/png');
                 link.click();
-
-                // Restore buttons
-                if (buttons) buttons.style.display = 'block';
-                event.target.textContent = originalText;
-                event.target.disabled = false;
-
-                // Show success message
-                alert('✅ บันทึกรูปเรียบร้อยแล้ว!');
-            }).catch(error => {
+                restore();
+            }).catch(function (error) {
                 console.error('Error capturing page:', error);
-
-                // Restore buttons
-                if (buttons) buttons.style.display = 'block';
-                event.target.textContent = originalText;
-                event.target.disabled = false;
-
-                alert('❌ เกิดข้อผิดพลาดในการบันทึกรูป กรุณาลองใหม่อีกครั้ง');
+                restore();
+                alert('❌ เกิดข้อผิดพลาดในการบันทึกรูป กรุณาลองใหม่อีกครั้ง หรือจับภาพหน้าจอแทน');
             });
         }
     </script>

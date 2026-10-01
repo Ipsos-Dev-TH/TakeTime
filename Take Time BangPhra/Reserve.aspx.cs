@@ -69,6 +69,9 @@ namespace Take_Time_BangPhra
             _paymentDA = new PaymentDataAccess(conn);
 
             this.MaintainScrollPositionOnPostBack = true;
+            // ขั้น "ยืนยันเงื่อนไข" — Page_PreRender ตัดสินซ่อน/แสดงทุกคำขอ; ระหว่างคำขอต้องเปิดไว้ก่อน
+            // ไม่งั้น pnlPetPolicy/pnlPolicyAccept.Visible (ลูก) อ่านได้ false ตามค่าที่ซ่อนไว้ของคำขอก่อน
+            if (divTermsStep != null) divTermsStep.Visible = true;
             string date = Request.QueryString["date"];
             string accom = Request.QueryString["accom"];
             string couponcode = Request.QueryString["couponcode"];
@@ -300,6 +303,17 @@ namespace Take_Time_BangPhra
                     if (divSlipHint != null) divSlipHint.Visible = false;
                     // รูปบัญชีธนาคารตั้งต้น (สำหรับลูกค้าโอน) — ซ่อน; แนบสลิปแล้ว Button3_Click แสดงรูปสลิปเอง
                     if (!IsPostBack) Image1.Visible = false;
+                }
+                else
+                {
+                    // ลูกค้าจองเอง: ปุ่มยืนยันกดได้เสมอ — หน้าเว็บบอกว่ายังขาดอะไร (ไม่ต้องรอ postback ทีละช่อง)
+                    // ทุกเงื่อนไขตรวจซ้ำฝั่ง server ใน Button1_Click (ValidateCustomerBookingGate / ValidatePetStay)
+                    Button1.Enabled = true;
+                    // ยอดโอน: ตรวจขั้นต่ำตอนกดยืนยัน (ไม่ reload ทั้งหน้าระหว่างพิมพ์)
+                    TextBox5.AutoPostBack = false;
+                    // มือถือ: ตารางห้องพักแสดงเป็นการ์ดห้องละใบ (CSS กลางใน Site.Master — ต้องสั่งเปิดรายหน้า)
+                    if ((GridView1.CssClass ?? "").IndexOf("tt-cards-ok", StringComparison.Ordinal) < 0)
+                        GridView1.CssClass = (GridView1.CssClass ?? "") + " tt-cards-ok";
                 }
             }
 
@@ -1250,6 +1264,8 @@ namespace Take_Time_BangPhra
             {
                 // 🔧 For reserve mode (new reservation), use calculated totalPrice
                 TextBox4.Text = Session["totalPrice"]?.ToString() ?? "0";
+                // Button1_Click ตั้ง TextBox4 จาก Session["OldPrice"] → ใช้ยอดที่คำนวณสดในคำขอนี้ (ไม่ใช่ยอดของหน้าก่อนหน้า)
+                if (command == "reserve") Session["OldPrice"] = TextBox4.Text;
             }
 
             // 🐾 สัตว์เลี้ยงเข้าพัก — ต้องอยู่ท้ายสุด: TextBox4/Label2 เพิ่งได้ยอดจริงด้านบน
@@ -1721,19 +1737,30 @@ namespace Take_Time_BangPhra
                                             // เป็น "ห้องเดิม" จึงไม่เคยถูกตรวจว่าว่างในวันใหม่ ⇒ ลงวันทับห้องที่คนอื่นจองแล้วได้
                                             // → ตรวจห้องเดิมด้วย (CheckAvailability ตัดใบนี้ออกเองแล้ว ไม่ชนกับตัวเอง)
                                             bool rebookFromPostpone = false;
+                                            // ใบปกติ (ไม่ได้เลื่อน) ที่เปลี่ยนวันเข้าพัก/จำนวนคืน: ห้องเดิมของใบก็ต้องว่างในช่วงวันใหม่ด้วย
+                                            // (เดิมตรวจเฉพาะห้องที่เพิ่มใหม่ → ย้ายวันทับห้องที่คนอื่นจองไว้แล้วได้)
+                                            bool editDatesMoved = false;
                                             try
                                             {
                                                 DataTable dtCurDate = code2.DatabaseQuerySafe(conn,
-                                                    "SELECT CheckinDate FROM [Reservation] WHERE ID = @id",
+                                                    "SELECT CheckinDate, CheckoutDate FROM [Reservation] WHERE ID = @id",
                                                     new Dictionary<string, object> { { "@id", Convert.ToInt32(id) } });
                                                 if (dtCurDate != null && dtCurDate.Rows.Count > 0)
                                                 {
                                                     object curIn = dtCurDate.Rows[0]["CheckinDate"];
                                                     rebookFromPostpone = curIn == DBNull.Value
                                                         || RescheduleService.IsPlaceholderDate(Convert.ToDateTime(curIn));
+                                                    if (!rebookFromPostpone)
+                                                    {
+                                                        object curOut = dtCurDate.Rows[0]["CheckoutDate"];
+                                                        DateTime curInDate = Convert.ToDateTime(curIn).Date;
+                                                        editDatesMoved = curInDate != editCheckinDate.Value.Date
+                                                            || curOut == DBNull.Value
+                                                            || Convert.ToDateTime(curOut).Date != editCheckoutDate.Date;
+                                                    }
                                                 }
                                             }
-                                            catch { rebookFromPostpone = false; }
+                                            catch { rebookFromPostpone = false; editDatesMoved = false; }
 
                                             // Check each selected room to see if it's NEW (not in old accommodations)
                                             foreach (GridViewRow row in GridView1.Rows)
@@ -1755,8 +1782,9 @@ namespace Take_Time_BangPhra
                                                         }
                                                     }
 
-                                                    // Only check availability for NEW rooms (+ ทุกห้องเมื่อลงวันใหม่ให้ใบที่เลื่อนไว้)
-                                                    if (!isExistingRoom || rebookFromPostpone)
+                                                    // Only check availability for NEW rooms (+ ทุกห้องเมื่อลงวันใหม่ให้ใบที่เลื่อนไว้
+                                                    //  หรือเมื่อเปลี่ยนวัน/จำนวนคืนของใบปกติ — CheckAvailability ตัดใบนี้ออกเอง ไม่ชนกับตัวเอง)
+                                                    if (!isExistingRoom || rebookFromPostpone || editDatesMoved)
                                                     {
                                                         // ✅ Get requested people count
                                                         int requestedPeople = 1; // Default
@@ -2278,12 +2306,32 @@ namespace Take_Time_BangPhra
                                                     $"Reservation ID: {id}, Amount: {additionalDeposit}, Total: {totalPrice}, NewDeposit: {Deposit}, IsDeposit: {IsDeposit}, CheckBox4: {CheckBox4.Checked}",
                                                     Session["User"]?.ToString());
 
+                                                // 🏨 เงินที่รับเพิ่มครั้งนี้ปิดค่าใช้จ่ายในห้องที่ค้างได้เท่าที่ "ครอบคลุมจริง" เท่านั้น
+                                                //    (เดิมทุกแถว PENDING ถูกทำเป็นชำระแล้ว แม้รับมัดจำเพิ่มนิดเดียว → ยอดค้าง/ใบเช็คอินผิด)
+                                                decimal chargeCoverEdit = ChargeCoverageAfterPayment(Convert.ToInt32(id), totalPrice, Deposit);
+
                                                 if (CheckBox4.Checked == false)
                                                 {
                                                     // 🏨 Add product charges to receipt
                                                     AddProductChargesToReceipt(Convert.ToInt32(id), dtReserve);
 
-                                                    string receiptId = createReceipt(id, Convert.ToDouble(additionalDeposit), dtReserve, IsDeposit, docCreatedDate, CheckBox5.Checked);
+                                                    // createReceipt ปิดทุกแถว PENDING เสมอ → ปิดเองหลังออกใบตามยอดที่ครอบคลุม
+                                                    string receiptId;
+                                                    _keepChargesPendingOnReceipt = true;
+                                                    try
+                                                    {
+                                                        receiptId = createReceipt(id, Convert.ToDouble(additionalDeposit), dtReserve, IsDeposit, docCreatedDate, CheckBox5.Checked);
+                                                    }
+                                                    finally
+                                                    {
+                                                        _keepChargesPendingOnReceipt = false;
+                                                    }
+                                                    if (!string.IsNullOrEmpty(receiptId))
+                                                    {
+                                                        // ใบกำกับ/ใบเสร็จเต็มจำนวน (ไม่ใช่มัดจำ) แสดงทุกรายการค้างเป็นบรรทัดแล้ว → ปิดทั้งหมด
+                                                        MarkChargesPaidUpTo(Convert.ToInt32(id), receiptId,
+                                                            IsFullPaymentReceipt(receiptId) ? decimal.MaxValue : chargeCoverEdit);
+                                                    }
 
                                                     // ✅ Enqueue to accounting sync (async, non-blocking)
                                                     EnqueueAccountingSync(id, Convert.ToDouble(additionalDeposit), IsDeposit, TextBox3.Text);
@@ -2298,12 +2346,12 @@ namespace Take_Time_BangPhra
                                                 }
                                                 else
                                                 {
-                                                    // 🏨 ไม่สร้างใบเสร็จ แต่รับเงินแล้ว → mark charges as PAID
+                                                    // 🏨 ไม่สร้างใบเสร็จ แต่รับเงินแล้ว → ปิดค่าใช้จ่ายค้างเท่าที่เงินครอบคลุม (เก่าสุดก่อน)
                                                     try
                                                     {
-                                                        MarkProductChargesAsPaid(Convert.ToInt32(id), "MANUAL_PAYMENT");
+                                                        MarkChargesPaidUpTo(Convert.ToInt32(id), "MANUAL_PAYMENT", chargeCoverEdit);
                                                         code2.Logs(conn, "Reserve Edit - Manual Payment",
-                                                            $"Marked charges as PAID without receipt for Reservation {id}",
+                                                            $"Charges settled up to {chargeCoverEdit:N2} without receipt for Reservation {id}",
                                                             Session["User"]?.ToString());
 
                                                         // ✅ Create Payment_History record (without Receipt_ID)
@@ -2600,6 +2648,26 @@ namespace Take_Time_BangPhra
                                             {
                                                 if (TextBox12.Text == null || TextBox12.Text == "")
                                                 {
+                                                    // วันเดิมของใบ (อ่านก่อนเขียนทับเป็นวันแทน 1990) — บันทึกลงประวัติการเลื่อนแบบเดียวกับปุ่ม "เลื่อนเข้าพัก"
+                                                    DateTime? ppOldIn = null;
+                                                    DateTime? ppOldOut = null;
+                                                    int ppOldDays = 0;
+                                                    try
+                                                    {
+                                                        DataTable dtPpDates = reservationDA.GetReservationDates(Convert.ToInt32(id));
+                                                        if (dtPpDates != null && dtPpDates.Rows.Count > 0)
+                                                        {
+                                                            ppOldIn = dtPpDates.Rows[0]["CheckinDate"] != DBNull.Value
+                                                                ? (DateTime?)Convert.ToDateTime(dtPpDates.Rows[0]["CheckinDate"]) : null;
+                                                            ppOldOut = dtPpDates.Rows[0]["CheckoutDate"] != DBNull.Value
+                                                                ? (DateTime?)Convert.ToDateTime(dtPpDates.Rows[0]["CheckoutDate"]) : null;
+                                                            ppOldDays = dtPpDates.Rows[0]["StayDays"] != DBNull.Value
+                                                                ? Convert.ToInt32(dtPpDates.Rows[0]["StayDays"]) : 0;
+                                                        }
+                                                    }
+                                                    catch { ppOldIn = null; ppOldOut = null; ppOldDays = 0; }
+                                                    bool ppHadRealDate = ppOldIn.HasValue && !RescheduleService.IsPlaceholderDate(ppOldIn);
+
                                                     // No check-in date: mark as postponed
                                                     reservationDA.UpdateReservation(
                                                         Convert.ToInt32(id),
@@ -2619,9 +2687,12 @@ namespace Take_Time_BangPhra
                                                         short? adminId = Session["UserID"] != null ? (short?)Convert.ToInt16(Session["UserID"]) : null;
                                                         rescheduleService.MarkAsPostponed(
                                                             Convert.ToInt32(id),
-                                                            "แก้ไขการจอง - ยังไม่กำหนดวันเข้าพัก",
+                                                            ppHadRealDate ? "เลื่อนเข้าพักจากหน้าแก้ไขการจอง (ลบวันเข้าพักแล้วบันทึก)" : "แก้ไขการจอง - ยังไม่กำหนดวันเข้าพัก",
                                                             adminId,
-                                                            Session["User"]?.ToString());
+                                                            Session["User"]?.ToString(),
+                                                            ppHadRealDate ? ppOldIn : null,
+                                                            ppHadRealDate ? ppOldOut : null,
+                                                            ppHadRealDate ? (int?)ppOldDays : null);
                                                     }
                                                     catch (Exception postponeEx)
                                                     {
@@ -4012,15 +4083,9 @@ namespace Take_Time_BangPhra
                                             // ประตูกลาง — เปิด/ปิดได้ที่ ศูนย์ตั้งค่า → การแจ้งเตือน
                                             Notify.Send(Notify.Ev.BookingNew, message);
 
-                                            // ✅ Reload page to show uploaded slip image (don't redirect to Confirmed yet)
-                                            // This allows user to see the uploaded slip before confirming
-                                            if (FileUpload1.HasFile)
-                                            {
-                                                // Reload the same reserve page to show the slip
-                                                Response.Redirect($"./Reserve?command=reserve&date={TextBox12.Text}", false);
-                                                HttpContext.Current.ApplicationInstance.CompleteRequest();
-                                            }
-                                            else if (PayNowChosen)
+                                            // การจองถูกบันทึกแล้ว — ไปหน้ายืนยันเสมอ (หน้ายืนยันแสดงสลิปที่แนบ + สถานะรอตรวจ)
+                                            // เดิมแนบสลิปพร้อมกดยืนยัน = เด้งกลับมาหน้าจองว่าง ๆ ลูกค้าเข้าใจว่ายังไม่สำเร็จแล้วจองซ้ำ
+                                            if (PayNowChosen)
                                             {
                                                 // เลือกจ่ายออนไลน์ → พาไปหน้าชำระเงินต่อทันที
                                                 // (เดิมทางนี้ไปหน้ายืนยันเลย ลูกค้าไม่เคยถูกพาไปจ่าย — ทำไว้เฉพาะใน catch)
@@ -4035,13 +4100,8 @@ namespace Take_Time_BangPhra
                                         catch(Exception ex) {
                                             code2.Logs(conn, "Check Telegram", "Error"+ex, "SYSTEM");
 
-                                            // ✅ Reload page to show uploaded slip image even on Telegram error
-                                            if (FileUpload1.HasFile)
-                                            {
-                                                Response.Redirect($"./Reserve?command=reserve&date={TextBox12.Text}", false);
-                                                HttpContext.Current.ApplicationInstance.CompleteRequest();
-                                            }
-                                            else if (PayNowChosen)
+                                            // การจองถูกบันทึกแล้ว — ไปหน้ายืนยัน (ไม่เด้งกลับหน้าจองว่าง ๆ แม้แนบสลิปมาด้วย)
+                                            if (PayNowChosen)
                                             {
                                                 // เลือกจ่ายทันที → พาไปหน้าชำระเงินต่อเลย
                                                 // ใบจองอยู่สถานะ "รอชำระเงิน" กันห้องไว้ให้แล้ว
@@ -4094,24 +4154,26 @@ namespace Take_Time_BangPhra
                                 }
                                 
                             }
-                            else
+                            else if (checkpaymentselect == 0)
                             {
-                                ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('กรุณาอัพโหลดสลิป');", true);
+                                // (ไม่ได้เลือกวิธีชำระ = แจ้งเตือนไปแล้วด้านบน ไม่ต้องซ้ำ)
+                                ShowUserError("needSlip", "กรุณาแนบสลิปการโอนเงิน (เลือกไฟล์รูปสลิป แล้วกดยืนยันอีกครั้ง)", FileUpload1);
                             }
                         }
                         else
                         {
-                            ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('กรุณาระบุยอดจำนวนเงินที่โอนมามัดจำ');", true);
+                            ShowUserError("needDeposit", "กรุณาระบุยอดจำนวนเงินที่โอนมามัดจำ", TextBox5);
                         }
                     }
                     else
                     {
-                        ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('กรุณาเลือกที่พักที่ต้องการจอง');", true);
+                        ShowUserError("needRoom", "กรุณาเลือกที่พักที่ต้องการจองอย่างน้อย 1 ห้อง", GridView1);
                     }
                 }
                 else
                 {
-                    ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('กรุณาระบุเบอร์โทรศัพท์ หรือ เลขสาขาให้ครบ5หลัก');", true);
+                    ShowUserError("needPhone", "กรุณาระบุเบอร์โทรศัพท์ หรือ เลขสาขาให้ครบ 5 หลัก",
+                        TextBox1.Text.Length > 0 ? (Control)TextBox18 : TextBox1);
                 }
         }
 
@@ -6257,7 +6319,7 @@ namespace Take_Time_BangPhra
                 string name = DropDownList2.SelectedItem != null ? DropDownList2.SelectedItem.Text : "";
                 litChannelInfo.Text = BuildChannelInfoHtml(pc, isGw, name);
 
-                Button1.Text = isGw ? "ยืนยันการจองและไปชำระเงิน (Submit & Pay)" : "ยืนยันการจอง(Submit)";
+                Button1.Text = isGw ? "ยืนยันการจองและไปชำระเงิน (Confirm & Pay)" : "ยืนยันการจอง (Confirm Booking)";
                 ApplyPayNowUi();   // ซ่อน/แสดงช่องแนบสลิป + เติมยอดมัดจำขั้นต่ำให้ช่องทางออนไลน์
             }
             catch (Exception uiEx)
@@ -6317,7 +6379,7 @@ namespace Take_Time_BangPhra
                 if (!string.IsNullOrWhiteSpace(instructions))
                     sb.Append("<div>").Append(BookingPolicy.ToHtml(instructions)).Append("</div>");
                 else
-                    sb.Append("<div>โอนยอดมัดจำตามจำนวนด้านบนเข้าบัญชีนี้ แล้ว<b>อัปโหลดสลิป</b>ในช่องด้านล่าง</div>");
+                    sb.Append("<div>โอนยอดมัดจำ (ดูยอดในขั้น \"สรุปยอด\") เข้าบัญชีนี้ แล้ว<b>ระบุยอดที่โอนและแนบสลิป</b>ด้านล่าง</div>");
                 if (!string.IsNullOrWhiteSpace(conditions))
                 {
                     sb.Append("<div style=\"margin-top:6px;\"><b>เงื่อนไข</b><br/>")
@@ -6400,31 +6462,282 @@ namespace Take_Time_BangPhra
             {
                 if (IsStaffUser) return true;
 
+                // 📜 กติกาของรีสอร์ต (CheckBox1) — ปุ่มยืนยันกดได้เสมอแล้ว (หน้าเว็บบอกว่ายังขาดอะไร) จึงต้องตรวจที่นี่ด้วย
+                if (CheckBox1 != null && CheckBox1.Visible && !CheckBox1.Checked)
+                {
+                    ShowUserError("rulesNotAccepted",
+                        "กรุณาติ๊กยอมรับกติกาของรีสอร์ต (รวมถึงงดใช้เสียงดังหลัง 22.30 น.) ก่อนยืนยันการจอง",
+                        CheckBox1);
+                    return false;
+                }
+
                 // 🐾 แจ้งให้ตรงเรื่อง — ยังไม่ยอมรับนโยบายสัตว์เลี้ยง (PolicyAcceptSatisfied รวมเงื่อนไขนี้ด้วย)
                 if (!PetPolicySatisfied)
                 {
-                    ClientScript.RegisterStartupScript(this.GetType(), "petPolicyNotAccepted",
-                        "alert('กรุณาอ่านและติ๊กยอมรับ นโยบายการนำสัตว์เลี้ยงเข้าพัก ก่อนยืนยันการจอง');", true);
+                    ShowUserError("petPolicyNotAccepted",
+                        "กรุณาอ่านและติ๊กยอมรับ \"นโยบายการนำสัตว์เลี้ยงเข้าพัก\" ก่อนยืนยันการจอง",
+                        chkAcceptPetPolicy);
                     return false;
                 }
 
                 if (!PolicyAcceptSatisfied)
                 {
-                    ClientScript.RegisterStartupScript(this.GetType(), "policyNotAccepted",
-                        "alert('กรุณาอ่านและติ๊กยอมรับ ข้อกำหนดและเงื่อนไข / นโยบายความเป็นส่วนตัว / นโยบายการคืนเงิน / นโยบายการยกเลิก ก่อนยืนยันการจอง');", true);
+                    ShowUserError("policyNotAccepted",
+                        "กรุณาอ่านและติ๊กยอมรับ ข้อกำหนดและเงื่อนไข / นโยบายความเป็นส่วนตัว / นโยบายการคืนเงิน / นโยบายการยกเลิก ก่อนยืนยันการจอง",
+                        chkAcceptPolicy);
                     return false;
                 }
 
                 if (IsGatewayChannelType(SelectedChannelType()) && !PayNowChosen)
                 {
-                    ClientScript.RegisterStartupScript(this.GetType(), "gatewayOff",
-                        "alert('ช่องทางชำระออนไลน์ปิดชั่วคราว กรุณาเลือกช่องทางโอนเงินแล้วแนบสลิป');", true);
+                    ShowUserError("gatewayOff",
+                        "ช่องทางชำระออนไลน์ปิดชั่วคราว กรุณาเลือกช่องทางโอนเงินแล้วแนบสลิป",
+                        DropDownList2);
                     ApplyCustomerChannelUi();
                     return false;
+                }
+
+                // 💵 โอนเอง: ยอดโอนต้องมีและไม่ต่ำกว่าเกณฑ์มัดจำขั้นต่ำ (กติกาเดียวกับ TextBox5_TextChanged = 80%)
+                //    เดิม TextBox5_TextChanged ล้างยอดเป็น 0 แล้วการจองยังเดินต่อด้วยมัดจำ 0 บาทได้
+                if (!PayNowChosen)
+                {
+                    decimal depIn;
+                    decimal.TryParse((TextBox5.Text ?? "").Trim(), NumberStyles.Number, CultureInfo.InvariantCulture, out depIn);
+                    int minDepIn;
+                    int.TryParse((Label2.Text ?? "").Trim(), out minDepIn);
+                    if (depIn <= 0m || (minDepIn > 0 && depIn < minDepIn * 0.8m))
+                    {
+                        ShowUserError("depositMin",
+                            "กรุณาระบุยอดเงินที่โอน — อย่างน้อยยอดมัดจำขั้นต่ำ ฿" + minDepIn.ToString("N0")
+                            + " (หรือโอนเต็มจำนวนก็ได้)",
+                            TextBox5);
+                        return false;
+                    }
                 }
             }
             catch { }
             return true;
+        }
+
+        /// <summary>ลูกค้าจองเอง (ไม่ได้ล็อกอินพนักงาน) ในหน้าจองใหม่</summary>
+        private bool IsCustomerReserveMode
+        {
+            get
+            {
+                try { return !IsStaffUser && Request.QueryString["command"] == "reserve"; }
+                catch { return false; }
+            }
+        }
+
+        /// <summary>
+        /// แจ้งผู้ใช้: ลูกค้าจองเอง = ข้อความสีแดงใต้ช่องที่ต้องแก้ + เลื่อนไปให้เห็น (ไม่ใช่ alert)
+        /// พนักงาน/โหมดอื่น = alert แบบเดิม. key ซ้ำ = แสดงครั้งเดียว
+        /// </summary>
+        private void ShowUserError(string key, string message, Control near)
+        {
+            try
+            {
+                string msgJs = HttpUtility.JavaScriptStringEncode(message ?? "");
+                string script;
+                if (IsCustomerReserveMode)
+                {
+                    string target = "";
+                    try { if (near != null) target = near.ClientID; } catch { target = ""; }
+                    script = "if (window.rvShowError) { rvShowError('" + HttpUtility.JavaScriptStringEncode(target) + "', '" + msgJs
+                        + "'); } else { alert('" + msgJs + "'); }";
+                }
+                else
+                {
+                    script = "alert('" + msgJs + "');";
+                }
+                ClientScript.RegisterStartupScript(this.GetType(), "rvErr_" + key, script, true);
+            }
+            catch { }
+        }
+
+        // ══════════════════════════════════════════════════════════════════════
+        //  หน้าตาขั้นตอนการจอง (ลูกค้า): การ์ดสรุปยอด + ด่านบอกว่ายังขาดอะไร (JS) — ส่วนแสดงผลล้วน
+        //  ทุกเงื่อนไขยังตรวจฝั่ง server ใน Button1_Click เหมือนเดิม
+        // ══════════════════════════════════════════════════════════════════════
+
+        /// <summary>คลาสของกล่องหลัก — ใช้แยกหน้าตาลูกค้า/พนักงานใน CSS</summary>
+        public string ContainerCss
+        {
+            get
+            {
+                try
+                {
+                    if (IsCustomerReserveMode) return "rv-cust";
+                    return IsStaffUser ? "rv-staff" : "";
+                }
+                catch { return ""; }
+            }
+        }
+
+        /// <summary>เปิดด่านฝั่งเบราว์เซอร์ (บอกว่ายังขาดอะไร) เฉพาะลูกค้าจองเอง</summary>
+        public string CustomerGateJs
+        {
+            get { try { return IsCustomerReserveMode ? "true" : "false"; } catch { return "false"; } }
+        }
+
+        /// <summary>คำนวณค่าสัตว์เลี้ยงสดฝั่งเบราว์เซอร์ (จองใหม่ + แก้ไข) — ยอดจริงคำนวณซ้ำที่ server</summary>
+        public string LivePetsJs
+        {
+            get
+            {
+                try
+                {
+                    string cmd = Request.QueryString["command"];
+                    return (cmd == "reserve" || cmd == "edit") && pnlPetStay != null && pnlPetStay.Visible ? "true" : "false";
+                }
+                catch { return "false"; }
+            }
+        }
+
+        /// <summary>สรุปยอดสั้น ๆ เหนือปุ่มยืนยัน (ลูกค้าจองเอง) — ตัวเลขอัปเดตสดโดย JS</summary>
+        public string SubmitRecapHtml
+        {
+            get
+            {
+                try
+                {
+                    if (!IsCustomerReserveMode || !_rvAnyRoomSelected) return "";
+                    return "<div class=\"rv-recap\">ยอดรวม <b>฿<span data-rv=\"total\">" + _rvTotalText
+                        + "</span></b><span class=\"rv-recap-sep\">·</span>มัดจำขั้นต่ำ <b>฿<span data-rv=\"mindep\">"
+                        + _rvMinDepText + "</span></b></div>";
+                }
+                catch { return ""; }
+            }
+        }
+
+        private bool _rvAnyRoomSelected;
+        private string _rvTotalText = "0.00";
+        private string _rvMinDepText = "0";
+
+        private static string MoneyText(decimal v)
+        {
+            return v.ToString("N2", CultureInfo.InvariantCulture);
+        }
+
+        protected void Page_PreRender(object sender, EventArgs e)
+        {
+            // ส่วนแสดงผลทั้งหมด — ล้มต้องไม่กระทบการจอง
+            try
+            {
+                // เหตุการณ์หลัง Page_Load (เช่น เปลี่ยนวันที่ → ตารางห้องถูกโหลดใหม่ ไม่มีห้องที่ติ๊ก) ทำให้ขั้นสัตว์เลี้ยง
+                // ค้างอยู่ทั้งที่ไม่มีห้อง → ซ่อนไว้ก่อน (คำขอถัดไป Page_Load คำนวณใหม่ตามห้องที่เลือก)
+                string cmdPr = Request.QueryString["command"];
+                if ((cmdPr == "reserve" || cmdPr == "edit") && pnlPetStay != null && pnlPetStay.Visible)
+                {
+                    bool anyChecked = false;
+                    foreach (GridViewRow row in GridView1.Rows)
+                    {
+                        CheckBox chk = row.FindControl("chkSelect") as CheckBox;
+                        if (chk != null && chk.Checked) { anyChecked = true; break; }
+                    }
+                    if (!anyChecked || !GridView1.Visible) HidePetUi();
+                }
+            }
+            catch { }
+
+            try { RenderPriceSummary(); }
+            catch (Exception ex)
+            {
+                try { code2.Logs(conn, "Reserve - Price Summary", ex.Message, "SYSTEM"); } catch { }
+                try { if (litPriceSummary != null) litPriceSummary.Text = ""; } catch { }
+            }
+
+            try
+            {
+                // แนบสลิปแล้ว (รูปไม่ใช่รูปบัญชีตั้งต้น) → ด่านฝั่งเบราว์เซอร์ไม่ต้องขอสลิปซ้ำ
+                if (Image1 != null && Image1.Visible && !string.IsNullOrEmpty(Image1.ImageUrl)
+                    && Image1.ImageUrl != "./Images/บัญชี.png")
+                    Image1.Attributes["data-uploaded"] = "1";
+            }
+            catch { }
+
+            try
+            {
+                // ขั้น "ยืนยันเงื่อนไข" แสดงเมื่อมีอะไรให้ดู/ติ๊กอย่างน้อย 1 อย่าง (พนักงานลงจอง = ไม่มีเลย → ซ่อนทั้งขั้น)
+                if (divTermsStep != null)
+                {
+                    divTermsStep.Visible = (pnlPolicySection != null && pnlPolicySection.Visible)
+                        || (divRules != null && divRules.Visible)
+                        || (CheckBox1 != null && CheckBox1.Visible)
+                        || (pnlPolicyAccept != null && pnlPolicyAccept.Visible)
+                        || (pnlPetPolicy != null && pnlPetPolicy.Visible);
+                }
+            }
+            catch { }
+        }
+
+        /// <summary>การ์ด "สรุปยอด" ของลูกค้า: ค่าห้อง + ของเช่า + ค่าสัตว์เลี้ยง (+ ส่วนลดที่คิดในราคาห้องแล้ว) = รวม, มัดจำขั้นต่ำ</summary>
+        private void RenderPriceSummary()
+        {
+            if (litPriceSummary == null) return;
+            litPriceSummary.Text = "";
+            if (!IsCustomerReserveMode) return;
+
+            _rvAnyRoomSelected = false;
+            int roomCount = 0;
+            foreach (GridViewRow row in GridView1.Rows)
+            {
+                CheckBox chk = row.FindControl("chkSelect") as CheckBox;
+                if (chk != null && chk.Checked) roomCount++;
+            }
+            _rvAnyRoomSelected = roomCount > 0 && GridView1.Visible;
+
+            var sb = new StringBuilder();
+            sb.Append("<div class=\"rv-sum-card\" id=\"rvSumCard\">");
+            if (!_rvAnyRoomSelected)
+            {
+                sb.Append("<div class=\"rv-sum-empty\">เลือกวันที่และห้องพักในขั้นที่ 1 แล้วยอดจะแสดงที่นี่<br/>")
+                  .Append("<span class=\"rv-muted\">Select your dates and room(s) in step 1 to see the price.</span></div></div>");
+                litPriceSummary.Text = sb.ToString();
+                return;
+            }
+
+            decimal accom = ToDecimalSafe(Session["PriceAccom"]);
+            decimal items = ToDecimalSafe(Session["PriceItems"]);
+            decimal total;
+            if (!decimal.TryParse((TextBox4.Text ?? "").Trim(), NumberStyles.Number, CultureInfo.InvariantCulture, out total))
+                total = accom + items + _rvPetFeeApplied;
+            int minDep;
+            if (!int.TryParse((Label2.Text ?? "").Trim(), out minDep)) minDep = 0;
+            int nights;
+            if (!int.TryParse(DropDownList1.SelectedValue, out nights) || nights < 1) nights = 1;
+            bool petsShown = pnlPetStay != null && pnlPetStay.Visible && chkHasPet != null && chkHasPet.Checked;
+            string coupon = Convert.ToString(Session["UseCoupon"] ?? "false");
+            bool couponOn = coupon.Length > 0 && !string.Equals(coupon, "false", StringComparison.OrdinalIgnoreCase);
+
+            _rvTotalText = MoneyText(total);
+            _rvMinDepText = minDep.ToString("N0", CultureInfo.InvariantCulture);
+
+            sb.Append("<div class=\"rv-sum-row\"><span>ค่าห้องพัก <span class=\"rv-muted\">(")
+              .Append(roomCount).Append(" ห้อง × ").Append(nights).Append(" คืน · Room)</span></span><b>฿")
+              .Append(MoneyText(accom)).Append("</b></div>");
+            if (items > 0m)
+            {
+                sb.Append("<div class=\"rv-sum-row\"><span>ของเช่า <span class=\"rv-muted\">(Rent items)</span></span><b>฿")
+                  .Append(MoneyText(items)).Append("</b></div>");
+            }
+            if (petsShown)
+            {
+                sb.Append("<div class=\"rv-sum-row\"><span>🐾 ค่าบริการสัตว์เลี้ยง <span class=\"rv-muted\">(Pet fee)</span></span><b>฿<span data-rv=\"petfee\">")
+                  .Append(MoneyText(_rvPetFeeApplied)).Append("</span></b></div>");
+            }
+            if (couponOn)
+            {
+                sb.Append("<div class=\"rv-sum-row rv-sum-disc\"><span>🎁 ส่วนลด <span class=\"rv-muted\">(Discount)</span></span>")
+                  .Append("<span>ใช้รหัสแล้ว — คิดในราคาห้องด้านบน</span></div>");
+            }
+            sb.Append("<div class=\"rv-sum-row rv-sum-total\"><span>รวมทั้งหมด <span class=\"rv-muted\">(Total)</span></span><b>฿<span data-rv=\"total\">")
+              .Append(_rvTotalText).Append("</span></b></div>");
+            sb.Append("<div class=\"rv-sum-row rv-sum-dep\"><span>มัดจำขั้นต่ำเพื่อยืนยันการจอง <span class=\"rv-muted\">(Min. deposit)</span></span><b>฿<span data-rv=\"mindep\">")
+              .Append(_rvMinDepText).Append("</span></b></div>");
+            sb.Append("<div class=\"rv-sum-note\">ชำระมัดจำขั้นต่ำเพื่อยืนยันการจอง ส่วนที่เหลือชำระเมื่อเช็คอิน — หรือชำระเต็มจำนวนเลยก็ได้</div>");
+            sb.Append("</div>");
+            litPriceSummary.Text = sb.ToString();
         }
 
         /// <summary>บันทึกการยอมรับนโยบายของลูกค้าบนใบจองที่เพิ่งสร้าง (ล้มไม่กระทบการจอง)</summary>
@@ -6904,29 +7217,23 @@ namespace Take_Time_BangPhra
         protected void TextBox5_TextChanged(object sender, EventArgs e)
         {
             
-            int minDeposit = Convert.ToInt32(Label2.Text);
-            try
-            {
-                if (Session["permission"].ToString() == "True")
-                {
+            int minDeposit;
+            if (!int.TryParse((Label2.Text ?? "").Trim(), out minDeposit)) minDeposit = 0;
+            if (IsStaffUser) return;   // พนักงานลงยอดได้อิสระ (เหมือนเดิม)
+            // ลูกค้าจองเอง: ไม่ล้างยอดกลางทางเมื่อ postback จากช่องอื่น (เช่น ติ๊กสัตว์เลี้ยง) —
+            // ตรวจยอดขั้นต่ำครั้งเดียวตอนกดยืนยัน (ValidateCustomerBookingGate) + หน้าเว็บบอกก่อนกด
+            if (IsCustomerReserveMode) return;
 
-                }
-                else
-                {
-                    if (Convert.ToDecimal(TextBox5.Text) < minDeposit * 0.8m)
-                    {
-                        TextBox5.Text = "0";
-                        ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('กรุณาโอนยอดมัดจำจองมากกว่ายอดมัดจำจองขั้นต่ำ');", true);
-                    }
-                }
-            }
-            catch
+            decimal typed;
+            if (!decimal.TryParse((TextBox5.Text ?? "").Trim(), NumberStyles.Number, CultureInfo.InvariantCulture, out typed))
+                typed = 0m;
+            if (typed < minDeposit * 0.8m)
             {
-                if (Convert.ToDecimal(TextBox5.Text) < minDeposit * 0.8m)
-                {
-                    TextBox5.Text = "0";
-                    ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('กรุณาโอนยอดมัดจำจองมากกว่ายอดมัดจำจองขั้นต่ำ');", true);
-                }
+                TextBox5.Text = "0";
+                // ข้อความใต้ช่องยอดโอน (key เดียวกับด่านใน Button1_Click → แสดงครั้งเดียว)
+                ShowUserError("depositMin",
+                    "กรุณาโอนยอดมัดจำไม่น้อยกว่ายอดมัดจำขั้นต่ำ ฿" + minDeposit.ToString("N0") + " (หรือโอนเต็มจำนวนก็ได้)",
+                    TextBox5);
             }
 
 
@@ -7299,9 +7606,19 @@ namespace Take_Time_BangPhra
                         Image1.Visible = true;
                         Image1.DataBind();
 
-                        // ✅ Show success message
-                        ClientScript.RegisterStartupScript(this.GetType(), "uploadSuccess",
-                            "alert('✅ อัพโหลดสลิปสำเร็จ!\\n\\n📎 ไฟล์: " + FileUpload1.FileName.Replace("'", "\\'") + "\\n✅ แสดงรูปด้านล่างแล้ว\\n\\nกด \"บันทึก\" เพื่อบันทึกข้อมูล');", true);
+                        // ✅ Show success message (ลูกค้า: ข้อความสีเขียวใต้ช่องสลิป ไม่ใช่ alert)
+                        if (IsCustomerReserveMode)
+                        {
+                            ClientScript.RegisterStartupScript(this.GetType(), "uploadSuccess",
+                                "if (window.rvShowOk) { rvShowOk('" + HttpUtility.JavaScriptStringEncode(FileUpload1.ClientID)
+                                + "', '" + HttpUtility.JavaScriptStringEncode("✅ แนบสลิปแล้ว (" + FileUpload1.FileName + ") — ตรวจรูปด้านล่าง แล้วกด \"ยืนยันการจอง\"")
+                                + "'); }", true);
+                        }
+                        else
+                        {
+                            ClientScript.RegisterStartupScript(this.GetType(), "uploadSuccess",
+                                "alert('✅ อัพโหลดสลิปสำเร็จ!\\n\\n📎 ไฟล์: " + FileUpload1.FileName.Replace("'", "\\'") + "\\n✅ แสดงรูปด้านล่างแล้ว\\n\\nกด \"บันทึก\" เพื่อบันทึกข้อมูล');", true);
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -7315,12 +7632,12 @@ namespace Take_Time_BangPhra
                 }
                 else
                 {
-                    ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('กรุณาเลือกไฟล์ที่ต้องการจะอัพโหลดก่อน');", true);
+                    ShowUserError("slipNoFile", "กรุณาเลือกไฟล์รูปสลิปก่อนกดอัปโหลด", FileUpload1);
                 }
             }
             else
             {
-                ClientScript.RegisterStartupScript(this.GetType(), "myalert", "alert('กรุณาระบุเบอร์โทรศัพท์ก่อน');", true);
+                ShowUserError("slipNoPhone", "กรุณาระบุเบอร์โทรศัพท์ก่อนแนบสลิป (ใช้ตั้งชื่อไฟล์สลิป)", TextBox1);
             }
         }
 
@@ -7334,18 +7651,183 @@ namespace Take_Time_BangPhra
 
         protected void GridView1_RowEditing(object sender, GridViewEditEventArgs e)
         {
+            // DataBind สร้างแถวใหม่ทั้งหมด → ห้องที่ติ๊ก/จำนวนคน/จำนวนสัตว์เลี้ยง/ราคาที่แสดงหาย — จำไว้แล้วคืนค่า
+            Dictionary<int, RoomRowSnap> snap = SnapshotRoomGrid();
             GridView1.EditIndex = e.NewEditIndex;
             DataTable dtAccom = (DataTable)Session["dtAccommodation"];
             GridView1.DataSource = dtAccom;
             GridView1.DataBind();
+            RestoreRoomGrid(snap, -1, e.NewEditIndex);
+            ReapplyPetUiAfterGridRebind();
         }
 
         protected void GridView1_RowCancelingEdit(object sender, GridViewCancelEditEventArgs e)
         {
+            Dictionary<int, RoomRowSnap> snap = SnapshotRoomGrid();
             GridView1.EditIndex = -1;
             DataTable dtAccom = (DataTable)Session["dtAccommodation"];
             GridView1.DataSource = dtAccom;
             GridView1.DataBind();
+            // แถวที่ยกเลิกแก้ไข = กลับเป็นราคาเดิมในตาราง (ไม่คืนค่าที่พิมพ์ค้างไว้)
+            RestoreRoomGrid(snap, e.RowIndex, -1);
+            ReapplyPetUiAfterGridRebind();
+        }
+
+        // ── จำ/คืนสถานะแถวของตารางห้องพักเมื่อ GridView1 ถูก DataBind ใหม่กลางคำขอ (แก้ราคา/ยกเลิกแก้ไข) ──
+        private sealed class RoomRowSnap
+        {
+            public bool Checked;
+            public string People;
+            public bool PeopleEnabled;
+            public string Pets;
+            public string Price;          // ข้อความราคาที่แสดงอยู่ (null = แถวอยู่ในโหมดแก้ไข)
+            public System.Drawing.Color BackColor;
+        }
+
+        private Dictionary<int, RoomRowSnap> SnapshotRoomGrid()
+        {
+            var snap = new Dictionary<int, RoomRowSnap>();
+            try
+            {
+                foreach (GridViewRow row in GridView1.Rows)
+                {
+                    var s = new RoomRowSnap();
+                    CheckBox chk = row.FindControl("chkSelect") as CheckBox;
+                    TextBox ppl = row.FindControl("txtPeopleStay") as TextBox;
+                    TextBox pet = row.FindControl("txtPetCount") as TextBox;
+                    s.Checked = chk != null && chk.Checked;
+                    s.People = ppl != null ? ppl.Text : null;
+                    s.PeopleEnabled = ppl == null || ppl.Enabled;
+                    s.Pets = pet != null ? PostedPetText(pet) : null;
+                    s.BackColor = row.BackColor;
+                    s.Price = null;
+                    if (row.Cells.Count > 4)
+                    {
+                        TextBox priceBox = row.Cells[4].Controls.Count > 0 ? row.Cells[4].Controls[0] as TextBox : null;
+                        if (priceBox == null) s.Price = row.Cells[4].Text;
+                    }
+                    snap[row.RowIndex] = s;
+                }
+            }
+            catch (Exception ex)
+            {
+                try { code2.Logs(conn, "Reserve - Grid Snapshot", ex.Message, "SYSTEM"); } catch { }
+            }
+            return snap;
+        }
+
+        /// <summary>
+        /// คืนสถานะแถวหลัง DataBind. skipPriceRow = แถวที่ใช้ราคาจากแหล่งข้อมูล (เพิ่งแก้/ยกเลิก),
+        /// editRow = แถวที่เพิ่งเข้าโหมดแก้ไข (ใส่ราคาที่แสดงอยู่ลงช่องแก้ไขแทนราคาตั้งต้น)
+        /// </summary>
+        private void RestoreRoomGrid(Dictionary<int, RoomRowSnap> snap, int skipPriceRow, int editRow)
+        {
+            if (snap == null || snap.Count == 0) return;
+            try
+            {
+                foreach (GridViewRow row in GridView1.Rows)
+                {
+                    RoomRowSnap s;
+                    if (!snap.TryGetValue(row.RowIndex, out s)) continue;
+                    CheckBox chk = row.FindControl("chkSelect") as CheckBox;
+                    TextBox ppl = row.FindControl("txtPeopleStay") as TextBox;
+                    TextBox pet = row.FindControl("txtPetCount") as TextBox;
+                    if (chk != null) chk.Checked = s.Checked;
+                    if (ppl != null && s.People != null) { ppl.Text = s.People; ppl.Enabled = s.PeopleEnabled; }
+                    if (pet != null && s.Pets != null) pet.Text = s.Pets;
+                    row.BackColor = s.BackColor;
+
+                    if (row.RowIndex == skipPriceRow || s.Price == null || row.Cells.Count <= 4) continue;
+                    if (row.RowIndex == editRow)
+                    {
+                        TextBox priceBox = row.Cells[4].Controls.Count > 0 ? row.Cells[4].Controls[0] as TextBox : null;
+                        if (priceBox != null) priceBox.Text = HttpUtility.HtmlDecode(s.Price);
+                    }
+                    else
+                    {
+                        row.Cells[4].Text = s.Price;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                try { code2.Logs(conn, "Reserve - Grid Restore", ex.Message, "SYSTEM"); } catch { }
+            }
+        }
+
+        /// <summary>หลัง DataBind กลางคำขอ: จัดช่องสัตว์เลี้ยงใหม่ (ค่า/สิทธิ์/ข้อมูลให้ JS) โดยไม่แตะยอดเงิน</summary>
+        private void ReapplyPetUiAfterGridRebind()
+        {
+            try
+            {
+                string command = Request.QueryString["command"];
+                if (!PetStay.Enabled || pnlPetStay == null || !pnlPetStay.Visible) return;
+                if (command != "reserve" && command != "edit") return;
+                int rid = 0;
+                if (command == "edit") int.TryParse(Request.QueryString["id"], out rid);
+                ComputePetStay(rid > 0 ? LoadPetState(rid) : null, true);
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// แก้ราคาห้องในตาราง (พนักงาน): คำนวณยอดใหม่ด้วยสูตรเดียวกับ Page_Load —
+        /// ค่าห้อง+ของเช่า (+ ค่าใช้จ่ายในห้องทั้งหมด/ส่วนลดสมาชิก ในโหมดแก้ไข/เช็คอิน) แล้วบวกค่าสัตว์เลี้ยงซ้ำ
+        /// (เดิม RecalculateTotalPrice ทับยอดที่รวมค่าสัตว์เลี้ยงไปแล้ว → ยอดหายไป 1 รอบ)
+        /// </summary>
+        private void RecalculateAfterGridEdit()
+        {
+            string command = Request.QueryString["command"];
+            string id = Request.QueryString["id"];
+            try
+            {
+                RecalculateTotalPrice();   // Session PriceAccom/PriceItems/totalPrice + TextBox4 (จองใหม่ = ค่าห้อง+ของเช่า)
+            }
+            catch (Exception recalcEx)
+            {
+                // ราคาในตารางอ่านไม่ได้ → คงยอดเดิมไว้ (กดบันทึก/รีเฟรชครั้งถัดไป Page_Load คำนวณใหม่ทั้งหมด)
+                try { code2.Logs(conn, "Reserve - RecalculateTotalPrice", recalcEx.Message, "SYSTEM"); } catch { }
+                return;
+            }
+
+            if (command == "edit" || command == "checkin")
+            {
+                try
+                {
+                    decimal accom = ToDecimalSafe(Session["PriceAccom"]);
+                    decimal items = ToDecimalSafe(Session["PriceItems"]);
+                    decimal charges = ToDecimalSafe(Session["ProductCharges"]);   // Page_Load: ทุกแถวที่ไม่ยกเลิก + Room Service
+                    decimal original = accom + items + charges;
+                    decimal final = original;
+                    if (pnlLoyaltyDiscount != null && pnlLoyaltyDiscount.Visible)
+                    {
+                        try
+                        {
+                            var tierSvc = new TierBenefitsService(conn);
+                            var disc = tierSvc.CalculateAccommodationDiscount(TextBox1.Text, original);
+                            if (disc.Success && disc.DiscountAmount > 0)
+                            {
+                                final = disc.FinalAmount;
+                                lblOriginalPrice.Text = original.ToString("N2");
+                                lblDiscountAmount.Text = disc.DiscountAmount.ToString("N2");
+                                Session["LoyaltyDiscountAmount"] = disc.DiscountAmount;
+                                Session["LoyaltyOriginalPrice"] = original;
+                            }
+                        }
+                        catch { }
+                    }
+                    Session["totalPrice"] = (double)original;
+                    TextBox4.Text = final.ToString();
+                    Session["OldPrice"] = TextBox4.Text;
+                }
+                catch (Exception ex)
+                {
+                    try { code2.Logs(conn, "Reserve - Recalc After Grid Edit", ex.Message, "SYSTEM"); } catch { }
+                }
+            }
+
+            // ค่าสัตว์เลี้ยง (จองใหม่: บวกเข้ายอด/มัดจำขั้นต่ำ — ไม่บวกซ้ำ · แก้ไข: ส่วนต่างเมื่อจำนวนเปลี่ยน)
+            ApplyPetStay(command, id);
         }
 
         protected void GridView2_RowCancelingEdit(object sender, GridViewCancelEditEventArgs e)
@@ -7360,16 +7842,21 @@ namespace Take_Time_BangPhra
         {
             DataTable dtAccom = (DataTable)Session["dtAccommodation"];
             TextBox txtPrice = (TextBox)GridView1.Rows[e.RowIndex].Cells[4].Controls[0];
+
+            // จำห้องที่ติ๊ก/จำนวนคน/จำนวนสัตว์เลี้ยง/ราคาที่แสดงของทุกแถวก่อน DataBind (เดิมหายหมด →
+            // จำนวนสัตว์เลี้ยงกลับเป็นห้องละ 1 และยอดรวมไม่มีค่าสัตว์เลี้ยงไป 1 รอบ)
+            Dictionary<int, RoomRowSnap> snap = SnapshotRoomGrid();
             GridView1.EditIndex = -1;
 
             // อัพเดทราคาใหม่
             dtAccom.Rows[Convert.ToInt32(e.RowIndex)]["Price"] = txtPrice.Text;
 
-            // คำนวณยอดรวมใหม่ทันที
-            RecalculateTotalPrice();
-
             GridView1.DataSource = dtAccom;
             GridView1.DataBind();
+            RestoreRoomGrid(snap, e.RowIndex, -1);
+
+            // คำนวณยอดรวมใหม่ทันที (จากแถวที่คืนค่าแล้ว) + ค่าสัตว์เลี้ยง
+            RecalculateAfterGridEdit();
         }
 
         private void RecalculateTotalPrice()
@@ -7453,7 +7940,13 @@ namespace Take_Time_BangPhra
         protected void CheckBox1_CheckedChanged(object sender, EventArgs e)
         {
             // CheckBox1 is for accepting terms and conditions on first-time booking
-            // ลูกค้าจองเอง: ต้องติ๊กยอมรับนโยบาย (chkAcceptPolicy) ด้วยถึงจะกดยืนยันได้
+            // ลูกค้าจองเอง: ไม่ AutoPostBack แล้ว — ปุ่มกดได้เสมอ หน้าเว็บบอกว่ายังขาดอะไร และ server ตรวจซ้ำตอนกดยืนยัน
+            // (ValidateCustomerBookingGate: กติกา + นโยบาย + นโยบายสัตว์เลี้ยง)
+            if (IsCustomerReserveMode)
+            {
+                Button1.Enabled = true;
+                return;
+            }
             if (CheckBox1.Checked == true && PolicyAcceptSatisfied)
             {
                 Button1.Enabled = true;
@@ -9474,6 +9967,100 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
             }
         }
 
+        /// <summary>
+        /// ยอดเงินที่ "ครอบคลุม" ค่าใช้จ่ายในห้องที่ค้าง (PENDING) หลังรับเงินครั้งนี้:
+        /// เงินที่รับทั้งหมดจ่ายค่าห้อง/ของเช่า/รายการที่ชำระแล้วก่อน ส่วนที่เกินจึงนับเป็นค่าใช้จ่ายค้าง
+        /// pageTotal = ยอดรวมในหน้า (รวมค่าใช้จ่ายในห้องทุกแถวที่ไม่ยกเลิก), paidAfter = ยอดรับรวมหลังรับครั้งนี้
+        /// </summary>
+        private decimal ChargeCoverageAfterPayment(int reservationId, decimal pageTotal, decimal paidAfter)
+        {
+            try
+            {
+                decimal pendingAll = _roomChargeDA != null ? _roomChargeDA.GetTotalPendingCharges(reservationId) : 0m;
+                decimal coverage = paidAfter - (pageTotal - pendingAll);
+                return coverage > 0m ? coverage : 0m;
+            }
+            catch (Exception ex)
+            {
+                try { code2.Logs(conn, "Reserve - Charge Coverage", "Reservation " + reservationId + ": " + ex.Message, "SYSTEM"); } catch { }
+                return 0m;   // อ่านไม่ได้ = ไม่ปิดรายการใด (ค้างไว้ปลอดภัยกว่าปิดเกินเงินที่ได้รับ)
+            }
+        }
+
+        /// <summary>
+        /// ปิดค่าใช้จ่ายในห้องที่ค้าง "เก่าสุดก่อน" เฉพาะรายการที่เงินครอบคลุมเต็มรายการ — ที่เหลือคง PENDING
+        /// (ใบเช็คอิน/ยอดค้างยังเห็นครบ). coverage = decimal.MaxValue = ปิดทั้งหมด (ชำระเต็มจำนวน)
+        /// </summary>
+        private int MarkChargesPaidUpTo(int reservationId, string receiptId, decimal coverage)
+        {
+            int marked = 0;
+            try
+            {
+                if (reservationId <= 0 || coverage <= 0m) return 0;
+                DataTable dtPend = code2.DatabaseQuerySafe(conn,
+                    @"SELECT ID, ISNULL(TotalAmount, 0) AS TotalAmount
+                        FROM Reservation_Product_Charges
+                       WHERE Reservation_ID = @rid AND Status = 'PENDING'
+                       ORDER BY ChargedDate ASC, ID ASC",
+                    new Dictionary<string, object> { { "@rid", reservationId } });
+                if (dtPend == null) return 0;
+
+                decimal remaining = coverage;
+                decimal settled = 0m;
+                foreach (DataRow r in dtPend.Rows)
+                {
+                    decimal amt = Convert.ToDecimal(r["TotalAmount"]);
+                    if (amt > remaining + 0.005m) break;   // เก่าสุดก่อน — รายการนี้ยังไม่ครอบคลุม หยุด (ไม่ข้ามไปปิดรายการใหม่กว่า)
+                    code2.DatabaseInsertSafe(conn,
+                        @"UPDATE Reservation_Product_Charges
+                             SET Status = 'PAID', IsPaid = 1, Receipt_ID = @receiptId, PaymentDate = @paymentDate
+                           WHERE ID = @id AND Status = 'PENDING'",
+                        new Dictionary<string, object>
+                        {
+                            { "@receiptId", receiptId },
+                            { "@paymentDate", DateTime.Now },
+                            { "@id", Convert.ToInt64(r["ID"]) }
+                        });
+                    if (coverage != decimal.MaxValue) remaining -= amt;
+                    settled += amt;
+                    marked++;
+                }
+
+                code2.Logs(conn, "MarkChargesPaidUpTo",
+                    "Reservation " + reservationId + ", Receipt " + receiptId + ": ปิด " + marked + "/" + dtPend.Rows.Count
+                    + " รายการ (฿" + settled.ToString("N2") + ")"
+                    + (coverage == decimal.MaxValue ? " — ชำระเต็มจำนวน" : " — ยอดครอบคลุม ฿" + coverage.ToString("N2")),
+                    Session["User"]?.ToString() ?? "SYSTEM");
+            }
+            catch (Exception ex)
+            {
+                try
+                {
+                    code2.Logs(conn, "MarkChargesPaidUpTo Error",
+                        "Reservation " + reservationId + ", Receipt " + receiptId + ": " + ex.Message,
+                        Session["User"]?.ToString() ?? "SYSTEM");
+                }
+                catch { }
+            }
+            return marked;
+        }
+
+        /// <summary>ใบที่เพิ่งออกเป็นใบชำระเต็ม (ไม่ใช่ใบมัดจำ) หรือไม่ — createReceipt อาจพลิกมัดจำเป็นชำระเต็มเอง</summary>
+        private bool IsFullPaymentReceipt(string receiptId)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(receiptId)) return false;
+                DataTable dt = code2.DatabaseQuerySafe(conn,
+                    "SELECT ISNULL(IsDeposit, 0) AS IsDeposit FROM Account_Receipt WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", receiptId } });
+                if (dt == null || dt.Rows.Count == 0) return false;
+                string v = Convert.ToString(dt.Rows[0]["IsDeposit"]);
+                return !(v == "1" || string.Equals(v, "True", StringComparison.OrdinalIgnoreCase));
+            }
+            catch { return false; }
+        }
+
         // 🔧 Event handler when number of guests is changed
         protected void txtPeopleStay_TextChanged(object sender, EventArgs e)
         {
@@ -9525,6 +10112,8 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
             public decimal ActiveTotal;
             public bool HasPaid;
             public string Notes;
+            /// <summary>หน่วยคิดเงินที่ตกลงไว้ตอนจอง (จาก Notes "PET_FEE:NIGHT|STAY" ของแถวค่าบริการ) — null = ไม่มีแถว</summary>
+            public string Unit;
 
             public int TotalPets
             {
@@ -9545,6 +10134,39 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
         private bool _petStateLoaded;
         private string _petSavedSummary;     // ข้อความสรุปสำหรับแจ้งเตือนการจองใหม่
         private bool _keepChargesPendingOnReceipt;   // createReceipt ไม่ปิดค่าใช้จ่ายในห้อง (ใบมัดจำตอนจองใหม่ที่มีค่าสัตว์เลี้ยง)
+        private decimal _rvPetFeeApplied;    // ค่าสัตว์เลี้ยงที่คิดในยอดของหน้านี้ (คำขอนี้) — การ์ดสรุปยอด + ตัวคำนวณสดฝั่งเบราว์เซอร์
+        private int _rvMinDepBase = -1;      // มัดจำขั้นต่ำ "ก่อน" บวกค่าสัตว์เลี้ยง — กันบวกซ้ำเมื่อ ApplyPetStay ถูกเรียกซ้ำในคำขอเดียว
+
+        /// <summary>Notes "PET_FEE:NIGHT" → "NIGHT" (ไม่ใช่แถวสัตว์เลี้ยง/อ่านไม่ออก = null)</summary>
+        private static string PetUnitFromNotes(string notes)
+        {
+            if (string.IsNullOrEmpty(notes) || !notes.StartsWith(PetStay.ChargeNotePrefix, StringComparison.Ordinal)) return null;
+            int colon = notes.IndexOf(':');
+            if (colon < 0) return null;
+            string u = notes.Substring(colon + 1).Trim().ToUpperInvariant();
+            if (u == PetStay.UnitStay) return PetStay.UnitStay;
+            if (u == PetStay.UnitNight) return PetStay.UnitNight;
+            return null;
+        }
+
+        /// <summary>
+        /// จำนวนสัตว์เลี้ยงที่ผู้ใช้กรอกมาจริงในคำขอนี้ — อ่านจาก Request.Form ก่อน (ไม่พึ่ง TextChanged/AutoPostBack)
+        /// ไม่มีค่าในฟอร์ม (ช่องถูกปิด/ยังไม่เคยแสดง/สร้างใหม่) → ใช้ค่าบนคอนโทรล
+        /// </summary>
+        private string PostedPetText(TextBox box)
+        {
+            if (box == null) return "";
+            try
+            {
+                if (IsPostBack)
+                {
+                    string posted = Request.Form[box.UniqueID];
+                    if (posted != null) return posted;
+                }
+            }
+            catch { }
+            return box.Text ?? "";
+        }
 
         /// <summary>ลูกค้ายอมรับนโยบายสัตว์เลี้ยงแล้ว (หรือไม่ต้อง — ไม่มีสัตว์เลี้ยง/พนักงาน/ปิดฟีเจอร์)</summary>
         private bool PetPolicySatisfied
@@ -9601,6 +10223,8 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
             try
             {
                 if (pnlPetStay != null) pnlPetStay.Visible = false;
+                // นโยบายสัตว์เลี้ยง + ติ๊กยอมรับ อยู่ในบล็อก "ยืนยันเงื่อนไข" (นอก pnlPetStay) → ต้องซ่อนเองด้วย
+                if (pnlPetPolicy != null) pnlPetPolicy.Visible = false;
                 SetPetColumnVisible(false);
             }
             catch { }
@@ -9630,13 +10254,26 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
                     st.Counts[aid] = prev + n;
                 }
 
+                // อ่านทุกแถว (รวมที่ยกเลิก) เพื่อรู้ "ราคาต่อตัว + หน่วย" ที่ตกลงไว้ตอนจอง:
+                //  · แถวที่ยังมีผล = ราคาที่ใช้จริง · แถวที่ยกเลิก (ปรับจำนวน/ยกเว้น) = ใช้เป็นราคาตั้งต้นเมื่อไม่มีแถวที่ยังมีผล
+                //  ⇒ เปลี่ยนค่าตั้งกลาง (ค่าบริการ/หน่วย NIGHT↔STAY) ภายหลัง ไม่ทำให้ใบเดิมถูกคิดราคาใหม่
                 DataTable dtPetCharges = code2.DatabaseQuerySafe(conn,
-                    @"SELECT Pet_Accommodation_ID, Quantity, UnitPrice, TotalAmount, Status
+                    @"SELECT Pet_Accommodation_ID, Quantity, UnitPrice, TotalAmount, Status, Notes
                         FROM Reservation_Product_Charges
-                       WHERE Reservation_ID = @rid AND Pet_Accommodation_ID IS NOT NULL AND Status <> 'CANCELLED'", p);
+                       WHERE Reservation_ID = @rid AND Pet_Accommodation_ID IS NOT NULL
+                       ORDER BY ID", p);
+                var cancelledPrice = new Dictionary<int, decimal>();
+                string cancelledUnit = null;
                 foreach (DataRow r in dtPetCharges.Rows)
                 {
                     int aid = Convert.ToInt32(r["Pet_Accommodation_ID"]);
+                    string rowUnit = dtPetCharges.Columns.Contains("Notes") ? PetUnitFromNotes(Convert.ToString(r["Notes"])) : null;
+                    if (string.Equals(Convert.ToString(r["Status"]), "CANCELLED", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (r["UnitPrice"] != DBNull.Value) cancelledPrice[aid] = Convert.ToDecimal(r["UnitPrice"]);
+                        if (rowUnit != null) cancelledUnit = rowUnit;
+                        continue;
+                    }
                     decimal qty = r["Quantity"] == DBNull.Value ? 0m : Convert.ToDecimal(r["Quantity"]);
                     decimal prevQty;
                     st.ActiveQty.TryGetValue(aid, out prevQty);
@@ -9644,7 +10281,13 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
                     if (r["UnitPrice"] != DBNull.Value) st.UnitPrice[aid] = Convert.ToDecimal(r["UnitPrice"]);
                     if (r["TotalAmount"] != DBNull.Value) st.ActiveTotal += Convert.ToDecimal(r["TotalAmount"]);
                     if (string.Equals(Convert.ToString(r["Status"]), "PAID", StringComparison.OrdinalIgnoreCase)) st.HasPaid = true;
+                    if (rowUnit != null) st.Unit = rowUnit;
                 }
+                foreach (KeyValuePair<int, decimal> cp in cancelledPrice)
+                {
+                    if (!st.UnitPrice.ContainsKey(cp.Key)) st.UnitPrice[cp.Key] = cp.Value;
+                }
+                if (st.Unit == null) st.Unit = cancelledUnit;
 
                 DataTable dtNotes = code2.DatabaseQuerySafe(conn, "SELECT Pet_Notes FROM Reservation WHERE ID = @rid", p);
                 if (dtNotes.Rows.Count > 0 && dtNotes.Rows[0]["Pet_Notes"] != DBNull.Value)
@@ -9698,6 +10341,8 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
         {
             var calc = new PetCalc();
             try { calc.Unit = PetStay.FeeUnit; } catch { calc.Unit = PetStay.UnitNight; }
+            // ใบเดิม (แก้ไข): ใช้หน่วยที่ตกลงไว้ตอนจอง — เปลี่ยนค่าตั้งกลางภายหลังต้องไม่ทำให้ใบเดิมถูกคิดราคาใหม่
+            if (priceRef != null && !string.IsNullOrEmpty(priceRef.Unit)) calc.Unit = priceRef.Unit;
             int nights;
             if (!int.TryParse(DropDownList1.SelectedValue, out nights) || nights < 1) nights = 1;
             calc.Nights = nights;
@@ -9706,6 +10351,14 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
             bool hasPet = chkHasPet != null && chkHasPet.Checked;
             bool editable = GridView1.Enabled;
             var candidates = new List<PetRowRef>();
+
+            // ตั้งต้น "ห้องละ 1 ตัว" เฉพาะตอนเพิ่งติ๊กมีสัตว์เลี้ยง / เพิ่งเลือกห้อง — ไม่ใช่ทุกครั้งที่ผลรวมเป็น 0
+            // (เดิมลูกค้าใส่ 0 ทุกห้องแล้วกดยืนยัน → ระบบเติม 1 ให้เองแล้วจองไปพร้อมค่าบริการ)
+            string evtTarget = "";
+            try { if (IsPostBack) evtTarget = Request.Form["__EVENTTARGET"] ?? ""; } catch { }
+            bool justEnabledPets = (chkHasPet != null && evtTarget == chkHasPet.UniqueID)
+                                   || (evtTarget.StartsWith(GridView1.UniqueID + "$", StringComparison.Ordinal)
+                                       && evtTarget.EndsWith("chkSelect", StringComparison.Ordinal));
 
             foreach (GridViewRow row in GridView1.Rows)
             {
@@ -9729,6 +10382,20 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
                 if (priceRef != null && priceRef.UnitPrice.TryGetValue(aid, out agreed)) rule.FeePerPet = agreed;
 
                 bool selected = chk != null && chk.Checked;
+                string roomName = Convert.ToString(ar["AccomName"]);
+                if (applyUi)
+                {
+                    // ข้อมูลให้ฝั่งเบราว์เซอร์ย้ายช่องกรอกไปไว้ในขั้น "สัตว์เลี้ยง" + คำนวณยอดสด (server คำนวณซ้ำเสมอ)
+                    txt.Attributes["data-pet"] = "1";
+                    txt.Attributes["data-room"] = roomName;
+                    txt.Attributes["data-sel"] = selected ? "1" : "0";
+                    if (lbl != null)
+                    {
+                        lbl.Attributes["data-room"] = roomName;
+                        lbl.Attributes["data-sel"] = selected ? "1" : "0";
+                        lbl.CssClass = "rv-petinfo";
+                    }
+                }
                 if (!rule.Allowed)
                 {
                     if (applyUi)
@@ -9744,6 +10411,10 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
                 {
                     txt.Visible = true;
                     txt.Attributes["max"] = rule.MaxPets.ToString();
+                    txt.Attributes["data-max"] = rule.MaxPets.ToString();
+                    txt.Attributes["data-fee"] = rule.FeePerPet.ToString("0.00", CultureInfo.InvariantCulture);
+                    txt.Attributes["data-mult"] = calc.Unit == PetStay.UnitStay ? "1" : nights.ToString();
+                    txt.Attributes["inputmode"] = "numeric";
                     if (lbl != null)
                         lbl.Text = "สูงสุด " + rule.MaxPets + " ตัว · ฿" + PetStay.Money(rule.FeePerPet) + " " + PetStay.UnitLabel(calc.Unit);
                 }
@@ -9760,18 +10431,19 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
                 {
                     Box = txt,
                     AccomId = aid,
-                    AccomName = Convert.ToString(ar["AccomName"]),
+                    AccomName = roomName,
                     Rule = rule
                 });
             }
 
             // จำนวนต่อห้อง: ติดลบ = 0, เกินสูงสุด = ปรับเป็นสูงสุด (ห้องเดียวกันที่ไม่รับถูกตัดไปแล้วด้านบน)
+            // อ่านค่าที่ส่งมากับฟอร์มจริง (PostedPetText) — กรอกแล้วกดยืนยันทันทีก็ไม่หาย
             var counts = new int[candidates.Count];
             int sum = 0;
             for (int k = 0; k < candidates.Count; k++)
             {
                 int n;
-                if (!int.TryParse((candidates[k].Box.Text ?? "").Trim(), out n) || n < 0) n = 0;
+                if (!int.TryParse((PostedPetText(candidates[k].Box) ?? "").Trim(), out n) || n < 0) n = 0;
                 if (n > candidates[k].Rule.MaxPets)
                 {
                     n = candidates[k].Rule.MaxPets;
@@ -9781,8 +10453,8 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
                 sum += n;
             }
 
-            // เพิ่งติ๊ก "มีสัตว์เลี้ยง" (ทุกห้องยังเป็น 0) → ตั้งต้นห้องละ 1 ตัวให้แก้ต่อ
-            if (applyUi && editable && hasPet && sum == 0)
+            // เพิ่งติ๊ก "มีสัตว์เลี้ยง" / เพิ่งเลือกห้อง (ทุกห้องยังเป็น 0) → ตั้งต้นห้องละ 1 ตัวให้แก้ต่อ
+            if (applyUi && editable && hasPet && sum == 0 && justEnabledPets)
             {
                 for (int k = 0; k < candidates.Count; k++) { counts[k] = 1; sum++; }
             }
@@ -9877,7 +10549,10 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
                 {
                     chkHasPet.Checked = false;
                     chkAcceptPetPolicy.Checked = false;
+                    pnlPetPolicy.Visible = false;
                     SetPetColumnVisible(false);
+                    _rvPetFeeApplied = 0m;
+                    ApplyPetMinDeposit(command, 0m);
                     SyncCustomerSubmitForPets(command);
                     return;
                 }
@@ -9898,6 +10573,8 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
 
                 string extra = "";
                 decimal fee = has ? calc.TotalFee : 0m;
+                _rvPetFeeApplied = fee;
+                bool petLocked = false;
                 if (command == "reserve")
                 {
                     if (fee > 0m)
@@ -9905,16 +10582,19 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
                         decimal baseTotal = 0m;
                         try { baseTotal = Convert.ToDecimal(Session["totalPrice"]?.ToString() ?? "0"); } catch { }
                         TextBox4.Text = (baseTotal + fee).ToString();
-
-                        // มัดจำขั้นต่ำเก็บค่าสัตว์เลี้ยงล่วงหน้าเต็มจำนวน (Label2 อ่านด้วย Convert.ToInt32 → ปัดขึ้นเป็นบาท)
-                        int minDep;
-                        if (int.TryParse((Label2.Text ?? "").Trim(), out minDep))
-                            Label2.Text = (minDep + (int)Math.Ceiling(fee)).ToString();
                     }
+
+                    // มัดจำขั้นต่ำเก็บค่าสัตว์เลี้ยงล่วงหน้าเต็มจำนวน (Label2 อ่านด้วย Convert.ToInt32 → ปัดขึ้นเป็นบาท)
+                    ApplyPetMinDeposit(command, fee);
+
+                    // Button1_Click ตั้ง TextBox4 จาก Session["OldPrice"] — ต้องเป็นยอดที่เพิ่งคำนวณจากจำนวนที่ส่งมาในคำขอนี้
+                    // (เดิมเป็นยอดของหน้าก่อนหน้า → กรอกจำนวนสัตว์เลี้ยงแล้วกดยืนยันทันที ยอด/สถานะ "ชำระเต็ม" ผิด)
+                    Session["OldPrice"] = TextBox4.Text;
                 }
                 else if (command == "edit" && st != null)
                 {
                     PetCalc desiredCalc = has ? calc : new PetCalc();
+                    petLocked = st.HasPaid;
                     if (PetSelectionChanged(desiredCalc, st))
                     {
                         if (st.HasPaid)
@@ -9938,7 +10618,11 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
                     }
                 }
 
-                litPetSummary.Text = BuildPetSummaryHtml(calc, has, extra);
+                // ข้อมูลตั้งต้นให้ตัวคำนวณสดฝั่งเบราว์เซอร์: ยอดในหน้าตอนนี้คิดค่าสัตว์เลี้ยงไว้เท่าไร / ล็อกไหม
+                string petMeta = "<span id=\"rvPetMeta\" style=\"display:none;\" data-mode=\"" + (command == "reserve" ? "reserve" : "edit")
+                    + "\" data-fee0=\"" + fee.ToString("0.00", CultureInfo.InvariantCulture)
+                    + "\" data-lock=\"" + (petLocked ? "1" : "0") + "\"></span>";
+                litPetSummary.Text = BuildPetSummaryHtml(calc, has, extra) + petMeta;
                 SyncCustomerSubmitForPets(command);
             }
             catch (Exception ex)
@@ -9946,6 +10630,26 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
                 HidePetUi();
                 try { code2.Logs(conn, "Reserve - Pet Stay UI", ex.Message, "SYSTEM"); } catch { }
             }
+        }
+
+        /// <summary>
+        /// จองใหม่: มัดจำขั้นต่ำ (Label2) = มัดจำตามห้อง + ค่าสัตว์เลี้ยงเต็มจำนวน (ปัดขึ้นเป็นบาท)
+        /// จำค่าก่อนบวกไว้ครั้งแรก ⇒ เรียกซ้ำในคำขอเดียว (เช่น หลังแก้ราคาห้องในตาราง) ไม่บวกซ้ำ
+        /// </summary>
+        private void ApplyPetMinDeposit(string command, decimal fee)
+        {
+            try
+            {
+                if (command != "reserve") return;
+                if (_rvMinDepBase < 0)
+                {
+                    int md;
+                    if (!int.TryParse((Label2.Text ?? "").Trim(), out md)) return;
+                    _rvMinDepBase = md;
+                }
+                Label2.Text = (_rvMinDepBase + (fee > 0m ? (int)Math.Ceiling(fee) : 0)).ToString();
+            }
+            catch { }
         }
 
         /// <summary>
@@ -9958,7 +10662,9 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
             {
                 if (command != "reserve" || IsStaffUser) return;
                 if (CheckBox1 == null || !CheckBox1.Visible) return;
-                Button1.Enabled = CheckBox1.Checked && PolicyAcceptSatisfied;
+                // ลูกค้า: ปุ่มกดได้เสมอ — หน้าเว็บบอกว่ายังขาดอะไร (กติกา/นโยบาย/นโยบายสัตว์เลี้ยง ฯลฯ)
+                // และ Button1_Click ตรวจซ้ำฝั่ง server ทุกข้อ (ValidateCustomerBookingGate / ValidatePetStay)
+                Button1.Enabled = true;
             }
             catch { }
         }
@@ -9966,17 +10672,21 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
         private string BuildPetSummaryHtml(PetCalc calc, bool has, string extraHtml)
         {
             var sb = new StringBuilder();
-            sb.Append("<div style=\"margin-top:6px; font-size:0.92em; color:#6D4C41; line-height:1.65;\">");
+            sb.Append("<div class=\"rv-pet-summary\">");
             if (!has)
             {
-                sb.Append("ห้องที่เลือกรับสัตว์เลี้ยงได้ — ติ๊กด้านบนถ้ามีสัตว์เลี้ยงมาด้วย แล้วระบุจำนวนในคอลัมน์ 🐾 ของตารางห้องพัก");
+                sb.Append("ห้องที่เลือกรับสัตว์เลี้ยงได้ — ติ๊กด้านบนถ้ามีสัตว์เลี้ยงมาด้วย แล้วระบุจำนวนของแต่ละห้อง");
             }
             else if (calc.TotalPets <= 0)
             {
-                sb.Append("ระบุจำนวนสัตว์เลี้ยงของแต่ละห้องในคอลัมน์ 🐾 ของตารางห้องพัก");
+                sb.Append("ระบุจำนวนสัตว์เลี้ยงของแต่ละห้อง (ใส่ 0 ถ้าห้องนั้นไม่มี)");
+                sb.Append("<div class=\"rv-pet-total\">รวมค่าบริการสัตว์เลี้ยง <b>฿<span data-rv=\"petfee\">")
+                  .Append(PetStay.Money(0m)).Append("</span></b></div>");
             }
             else
             {
+                // บรรทัดแยกรายห้องจาก server (สำรองกรณีปิด JavaScript) — มี JS แล้วแต่ละห้องแสดงยอดสดในรายการด้านบนแทน
+                sb.Append("<div class=\"rv-pet-srvlines\">");
                 foreach (PetLine l in calc.Lines)
                 {
                     sb.Append("• ").Append(Server.HtmlEncode(l.AccomName ?? "")).Append(": ")
@@ -9984,8 +10694,10 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
                     if (calc.Unit != PetStay.UnitStay) sb.Append(" × ").Append(calc.Nights).Append(" คืน");
                     sb.Append(" = <b>฿").Append(PetStay.Money(l.Total)).Append("</b><br/>");
                 }
-                sb.Append("รวมค่าบริการสัตว์เลี้ยง <b>฿").Append(PetStay.Money(calc.TotalFee))
-                  .Append("</b> — บวกเข้าราคารวมแล้ว (ใบเสร็จแสดงเป็นรายการ \"ค่าบริการสัตว์เลี้ยง\" แยกจากค่าห้อง)");
+                sb.Append("</div>");
+                sb.Append("<div class=\"rv-pet-total\">รวมค่าบริการสัตว์เลี้ยง <b>฿<span data-rv=\"petfee\">")
+                  .Append(PetStay.Money(calc.TotalFee))
+                  .Append("</span></b> <span class=\"rv-muted\">— รวมในยอดสรุปแล้ว (ใบเสร็จแสดงเป็นรายการ \"ค่าบริการสัตว์เลี้ยง\" แยกจากค่าห้อง)</span></div>");
             }
             sb.Append(extraHtml ?? "").Append("</div>");
             return sb.ToString();
@@ -10007,7 +10719,23 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
             pnlPetDetail.Visible = true;
             txtPetNotes.ReadOnly = true;
             pnlPetPolicy.Visible = false;
-            litPetSummary.Text = "<div style=\"margin-top:6px; font-size:0.92em; color:#6D4C41; line-height:1.65;\">"
+            // ให้ฝั่งเบราว์เซอร์ย้ายจำนวนต่อห้อง (อ่านอย่างเดียว) มาแสดงในขั้นสัตว์เลี้ยงเหมือนหน้าจอง
+            try
+            {
+                DataTable dtA = Session["dtAccommodation"] as DataTable;
+                foreach (GridViewRow row in GridView1.Rows)
+                {
+                    TextBox txt = row.FindControl("txtPetCount") as TextBox;
+                    CheckBox chk = row.FindControl("chkSelect") as CheckBox;
+                    if (txt == null || dtA == null || row.RowIndex >= dtA.Rows.Count) continue;
+                    txt.Attributes["data-pet"] = "1";
+                    txt.Attributes["data-room"] = Convert.ToString(dtA.Rows[row.RowIndex]["AccomName"]);
+                    txt.Attributes["data-sel"] = chk != null && chk.Checked ? "1" : "0";
+                    txt.Enabled = false;
+                }
+            }
+            catch { }
+            litPetSummary.Text = "<div class=\"rv-pet-summary\">"
                 + "สัตว์เลี้ยงที่แจ้งไว้ <b>" + total + " ตัว</b> · ค่าบริการ <b>฿" + PetStay.Money(st.ActiveTotal) + "</b>"
                 + (st.HasPaid ? " (ชำระแล้ว)" : " (อยู่ในรายการค่าใช้จ่ายในห้อง — รวมในยอดที่ต้องชำระแล้ว)")
                 + "</div>";
@@ -10023,8 +10751,9 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
 
                 if (_petClamped)
                 {
-                    ClientScript.RegisterStartupScript(this.GetType(), "petClamped",
-                        "alert('จำนวนสัตว์เลี้ยงเกินที่ห้องรับได้ — ระบบปรับเป็นจำนวนสูงสุดของห้องให้แล้ว\\nกรุณาตรวจสอบยอดอีกครั้งแล้วกดยืนยัน');", true);
+                    ShowUserError("petClamped",
+                        "จำนวนสัตว์เลี้ยงเกินที่ห้องรับได้ — ระบบปรับเป็นจำนวนสูงสุดของห้องให้แล้ว\nกรุณาตรวจสอบยอดอีกครั้งแล้วกดยืนยัน",
+                        pnlPetStay);
                     return false;
                 }
 
@@ -10033,15 +10762,17 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
                 PetCalc calc = ComputePetStay(rid > 0 ? LoadPetState(rid) : null, false);
                 if (calc.TotalPets <= 0)
                 {
-                    ClientScript.RegisterStartupScript(this.GetType(), "petNoCount",
-                        "alert('กรุณาระบุจำนวนสัตว์เลี้ยงในห้องที่รับสัตว์เลี้ยง (คอลัมน์ 🐾) หรือเอาเครื่องหมาย มีสัตว์เลี้ยงเข้าพัก ออก');", true);
+                    ShowUserError("petNoCount",
+                        "กรุณาระบุจำนวนสัตว์เลี้ยงของห้องที่รับสัตว์เลี้ยง หรือเอาเครื่องหมาย \"มีสัตว์เลี้ยงเข้าพัก\" ออก",
+                        pnlPetStay);
                     return false;
                 }
 
                 if (command == "reserve" && !IsStaffUser && (chkAcceptPetPolicy == null || !chkAcceptPetPolicy.Checked))
                 {
-                    ClientScript.RegisterStartupScript(this.GetType(), "petPolicyGate",
-                        "alert('กรุณาอ่านและติ๊กยอมรับ นโยบายการนำสัตว์เลี้ยงเข้าพัก ก่อนยืนยันการจอง');", true);
+                    ShowUserError("petPolicyGate",
+                        "กรุณาอ่านและติ๊กยอมรับ \"นโยบายการนำสัตว์เลี้ยงเข้าพัก\" ก่อนยืนยันการจอง",
+                        chkAcceptPetPolicy);
                     return false;
                 }
             }
