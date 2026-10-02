@@ -51,6 +51,10 @@ namespace Take_Time_BangPhra
         protected global::System.Web.UI.WebControls.Panel pnlSettingsNav;
         protected global::System.Web.UI.WebControls.PlaceHolder phNavSettingsOwner;
 
+        /// <summary>PWA: manifest/apple meta (head) + แผ่นชวนติดตั้งแอพ — เฉพาะผู้ดูแลที่ล็อกอิน</summary>
+        protected global::System.Web.UI.WebControls.PlaceHolder phPwaHead;
+        protected global::System.Web.UI.WebControls.PlaceHolder phPwaInstall;
+
         /// <summary>
         /// Label1 control.
         /// </summary>

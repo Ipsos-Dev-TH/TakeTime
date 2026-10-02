@@ -544,6 +544,15 @@
     <Content Include="DisplayReserve.aspx" />
     <Content Include="DisplayToday.aspx" />
     <Content Include="favicon.ico" />
+    <Content Include="manifest.webmanifest" />
+    <Content Include="sw.js" />
+    <Content Include="offline.html" />
+    <Content Include="Scripts\pwa.js" />
+    <Content Include="Images\App\icon-192.png" />
+    <Content Include="Images\App\icon-512.png" />
+    <Content Include="Images\App\icon-maskable-192.png" />
+    <Content Include="Images\App\icon-maskable-512.png" />
+    <Content Include="Images\App\apple-touch-icon.png" />
     <Content Include="robots.txt" />
     <Content Include="sitemap.xml" />
     <Content Include="llms.txt" />

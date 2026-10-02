@@ -119,6 +119,19 @@
     <webopt:bundlereference runat="server" path="~/Content/css" />
     <link href="~/favicon.ico" rel="shortcut icon" type="image/x-icon" />
 
+    <%-- ===================== PWA (แอพหลังบ้าน "Take Time Admin") =====================
+         theme-color ใช้ได้ทุกหน้า; manifest + apple meta ส่งเฉพาะผู้ดูแลที่ล็อกอิน (Site.Master.cs → phPwaHead)
+         ลูกค้าจึงไม่เห็นปุ่ม "ติดตั้ง Take Time Admin" ในเบราว์เซอร์. Service worker (/sw.js) ลงทะเบียนจาก /Scripts/pwa.js --%>
+    <meta name="theme-color" content="#5D4037" />
+    <asp:PlaceHolder ID="phPwaHead" runat="server" Visible="false">
+        <link rel="manifest" href="/manifest.webmanifest" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+        <meta name="apple-mobile-web-app-title" content="TakeTime" />
+        <link rel="apple-touch-icon" sizes="180x180" href="/Images/App/apple-touch-icon.png" />
+    </asp:PlaceHolder>
+
     <!-- Font Awesome for icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
         
@@ -1089,6 +1102,10 @@
                                     <li><a runat="server" href="~/Admin/HR/OTEntry">
                                         <i class="fas fa-clock"></i> บันทึกชั่วโมง OT
                                     </a></li>
+                                    <li role="separator" class="divider" data-tt-pwa-menu="1"></li>
+                                    <li data-tt-pwa-menu="1"><a href="#" data-tt-pwa-open="1">
+                                        <i class="fas fa-mobile-alt"></i> ติดตั้งแอพบนเครื่องนี้
+                                    </a></li>
                                 </ul>
                             </li>
                         </asp:PlaceHolder>
@@ -1151,6 +1168,93 @@
             </footer>
         </div>
         </div>
+
+        <%-- ===================== PWA install sheet (เฉพาะผู้ดูแลที่ล็อกอิน) =====================
+             แสดงอัตโนมัติจนกว่าจะติ๊ก "ไม่ต้องแจ้งเตือนอีก" (จำในเครื่องแยกตามผู้ใช้) · "ภายหลัง" = ซ่อน 1 วัน
+             เปิดเองได้ตลอดจากเมนู พนักงาน → ติดตั้งแอพบนเครื่องนี้. ตรรกะทั้งหมดอยู่ใน /Scripts/pwa.js --%>
+        <asp:PlaceHolder ID="phPwaInstall" runat="server" Visible="false">
+            <style>
+                .tt-pwa { position: fixed; left: 20px; bottom: 20px; z-index: 10050; width: 380px; max-width: calc(100vw - 24px);
+                    background: #fff; color: #3E2723; border-radius: 16px; overflow: hidden;
+                    box-shadow: 0 12px 36px rgba(62, 39, 35, .28); border: 1px solid #D7CCC8;
+                    font-family: 'Prompt', sans-serif; animation: ttPwaIn .28s ease-out; }
+                .tt-pwa[hidden] { display: none !important; }
+                @keyframes ttPwaIn { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+                .tt-pwa-head { display: flex; gap: 12px; align-items: center; padding: 14px 44px 12px 14px;
+                    background: linear-gradient(135deg, #5D4037 0%, #4E342E 100%); color: #fff; }
+                .tt-pwa-head img { width: 52px; height: 52px; border-radius: 12px; background: #EFEBE9; flex: 0 0 auto; }
+                .tt-pwa-title { font-weight: 600; font-size: 1.02rem; line-height: 1.35; }
+                .tt-pwa-sub { font-size: .8rem; opacity: .88; line-height: 1.4; margin-top: 2px; }
+                .tt-pwa-x { position: absolute; top: 8px; right: 8px; width: 32px; height: 32px; border: 0; border-radius: 50%;
+                    background: rgba(255, 255, 255, .15); color: #fff; font-size: 20px; line-height: 32px; padding: 0; cursor: pointer; }
+                .tt-pwa-x:hover { background: rgba(255, 255, 255, .3); }
+                .tt-pwa-body { padding: 12px 16px 4px; font-size: .9rem; line-height: 1.55; }
+                .tt-pwa-body ol { margin: 4px 0 6px; padding-left: 20px; }
+                .tt-pwa-body li { margin-bottom: 4px; }
+                .tt-pwa-body .tt-pwa-note { font-size: .78rem; color: #8D6E63; margin: 4px 0 6px; }
+                .tt-pwa-body i.fas, .tt-pwa-body i.fa-solid { color: #5D4037; }
+                .tt-pwa-never { display: flex; align-items: center; gap: 8px; margin: 6px 16px 0; font-size: .85rem;
+                    font-weight: 400; color: #6D4C41; cursor: pointer; user-select: none; }
+                .tt-pwa-never input { width: 17px; height: 17px; margin: 0; accent-color: #5D4037; cursor: pointer; }
+                .tt-pwa-saved { display: none; margin: 2px 16px 0 41px; font-size: .75rem; color: #8D6E63; }
+                .tt-pwa-actions { display: flex; gap: 8px; justify-content: flex-end; padding: 12px 16px 14px; }
+                .tt-pwa-actions button { font: inherit; font-size: .9rem; border-radius: 10px; padding: 9px 16px; cursor: pointer; }
+                .tt-pwa-later { background: #fff; color: #5D4037; border: 1px solid #BCAAA4; }
+                .tt-pwa-later:hover { background: #EFEBE9; }
+                .tt-pwa-install { background: #5D4037; color: #fff; border: 1px solid #5D4037; font-weight: 600; }
+                .tt-pwa-install:hover { background: #4E342E; }
+                .tt-pwa-install[hidden] { display: none; }
+                @media (max-width: 600px) {
+                    .tt-pwa { left: 12px; right: 12px; bottom: 12px; width: auto; max-width: none;
+                        padding-bottom: env(safe-area-inset-bottom, 0); }
+                    .tt-pwa-actions button { flex: 1 1 0; padding: 11px 12px; }
+                }
+                @media print { .tt-pwa { display: none !important; } }
+            </style>
+            <div id="ttPwaSheet" class="tt-pwa" role="dialog" aria-live="polite" aria-labelledby="ttPwaTitle"
+                 data-user="<%: PwaUserKey %>" hidden>
+                <button type="button" class="tt-pwa-x" data-pwa="close" aria-label="ปิด">&times;</button>
+                <div class="tt-pwa-head">
+                    <img src="/Images/App/icon-192.png" alt="" />
+                    <div>
+                        <div id="ttPwaTitle" class="tt-pwa-title">ติดตั้งแอพ Take Time บนเครื่องนี้</div>
+                        <div class="tt-pwa-sub">เปิดระบบหลังบ้านจากหน้าจอโฮมได้ทันที เต็มจอ ไม่ต้องพิมพ์ที่อยู่เว็บ</div>
+                    </div>
+                </div>
+                <div class="tt-pwa-body">
+                    <div data-pwa-mode="prompt" hidden>
+                        กด <b>ติดตั้งแอพ</b> แล้วยืนยันในหน้าต่างของเบราว์เซอร์ ไอคอน Take Time จะอยู่บนหน้าจอโฮม/เมนูแอพของเครื่อง
+                    </div>
+                    <div data-pwa-mode="ios" hidden>
+                        <ol>
+                            <li>แตะปุ่ม <b>แชร์</b> <i class="fas fa-arrow-up-from-bracket"></i> (iPhone: แถบด้านล่าง · iPad: มุมขวาบน)</li>
+                            <li>เลื่อนลงแล้วเลือก <b>เพิ่มไปยังหน้าจอโฮม</b> <i class="far fa-square-plus"></i></li>
+                            <li>กด <b>เพิ่ม</b> ที่มุมขวาบน</li>
+                        </ol>
+                        <div class="tt-pwa-note" data-pwa-ios-other hidden>ถ้าไม่พบเมนูนี้ ให้เปิดหน้านี้ด้วย Safari แล้วทำตามขั้นตอนอีกครั้ง</div>
+                    </div>
+                    <div data-pwa-mode="manual" hidden>
+                        <ol>
+                            <li>เปิดเมนูของเบราว์เซอร์ <i class="fas fa-ellipsis-vertical"></i></li>
+                            <li>เลือก <b>ติดตั้งแอพ</b> หรือ <b>เพิ่มลงในหน้าจอหลัก</b> (Safari บน Mac: เมนู ไฟล์ → <b>เพิ่มไปยัง Dock</b>)</li>
+                        </ol>
+                        <div class="tt-pwa-note">ถ้าติดตั้งไว้แล้ว เปิดได้จากไอคอน Take Time บนหน้าจอโฮม/เมนูแอพ</div>
+                    </div>
+                    <div data-pwa-mode="installed" hidden>
+                        แอพ Take Time ติดตั้งบนเครื่องนี้แล้ว <i class="fas fa-circle-check"></i> เปิดได้จากไอคอนบนหน้าจอโฮม/เมนูแอพ
+                    </div>
+                    <div data-pwa-mode="insecure" hidden>
+                        การติดตั้งแอพต้องเปิดเว็บผ่าน <b>https://</b> เท่านั้น กรุณาเปิดระบบด้วยที่อยู่ https แล้วลองอีกครั้ง
+                    </div>
+                </div>
+                <label class="tt-pwa-never"><input type="checkbox" data-pwa="never" /> ไม่ต้องแจ้งเตือนอีก</label>
+                <div class="tt-pwa-saved" data-pwa="saved">จะไม่แจ้งเตือนอีก — เปิดได้จากเมนู พนักงาน → ติดตั้งแอพบนเครื่องนี้</div>
+                <div class="tt-pwa-actions">
+                    <button type="button" class="tt-pwa-later" data-pwa="later">ภายหลัง</button>
+                    <button type="button" class="tt-pwa-install" data-pwa="install" hidden><i class="fas fa-download"></i> ติดตั้งแอพ</button>
+                </div>
+            </div>
+        </asp:PlaceHolder>
 
         <!-- Global Chat Notification System (for logged-in admin users) -->
         <asp:Panel ID="pnlChatNotification" runat="server" Visible="false">
@@ -2116,5 +2220,7 @@
         })();
     </script>
     </form>
+    <%-- PWA: ลงทะเบียน service worker (ทุกหน้า, เฉพาะ https/localhost) + ตรรกะแผ่นชวนติดตั้งแอพ (ทำงานเมื่อมี #ttPwaSheet) --%>
+    <script src="/Scripts/pwa.js?v=1"></script>
 </body>
 </html>

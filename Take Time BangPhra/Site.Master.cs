@@ -48,6 +48,11 @@ namespace Take_Time_BangPhra
                                            || Perm.CanView(Perm.HrPayroll) || Perm.CanView(Perm.HrAsset);
                     pnlSettingsNav.Visible = Perm.CanView(Perm.SysSettings);
                     phNavSettingsOwner.Visible = isOwner;
+
+                    // PWA: ลิงก์ manifest + แผ่นชวนติดตั้งแอพ — เฉพาะผู้ดูแลที่ล็อกอิน
+                    // (ลูกค้าไม่เห็นปุ่ม "ติดตั้ง Take Time Admin" ในเบราว์เซอร์)
+                    phPwaHead.Visible = true;
+                    phPwaInstall.Visible = true;
                 }
                 else
                 {
@@ -67,6 +72,8 @@ namespace Take_Time_BangPhra
             catch
             {
                 // Hide admin controls on error
+                phPwaHead.Visible = false;
+                phPwaInstall.Visible = false;
                 pnlAdminNav.Visible = false;
                 pnlFinanceNav.Visible = false;
                 pnlSettingsNav.Visible = false;
@@ -82,6 +89,24 @@ namespace Take_Time_BangPhra
             // ต้องเรียกหลังบล็อกสิทธิ์ด้านบน — ไม่งั้นค่า Visible ของแชท/เมนูถูกบล็อกบนเขียนทับ
             ApplyFeatureToggles();
             ApplyPublicChatWidget();
+        }
+
+        /// <summary>
+        /// คีย์ผู้ใช้สำหรับจำค่า "ไม่ต้องแจ้งเตือนอีก" ของแผ่นชวนติดตั้งแอพ (localStorage แยกตามผู้ดูแลแต่ละคน)
+        /// — ใช้ใน markup ผ่าน &lt;%: %&gt; (HTML-encode แล้ว)
+        /// </summary>
+        protected string PwaUserKey
+        {
+            get
+            {
+                try
+                {
+                    string u = Session["UserName"]?.ToString();
+                    if (string.IsNullOrWhiteSpace(u)) u = Session["UserID"]?.ToString();
+                    return string.IsNullOrWhiteSpace(u) ? "admin" : u.Trim().ToLowerInvariant();
+                }
+                catch { return "admin"; }
+            }
         }
 
         /// <summary>
