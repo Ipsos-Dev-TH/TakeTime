@@ -10376,7 +10376,7 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
             {
                 TextBox txt = row.FindControl("txtPetCount") as TextBox;
                 if (txt == null) continue;
-                Label lbl = row.FindControl("lblPetInfo") as Label;
+                System.Web.UI.WebControls.Label lbl = row.FindControl("lblPetInfo") as System.Web.UI.WebControls.Label;
                 CheckBox chk = row.FindControl("chkSelect") as CheckBox;
                 DataRow ar = (dtA != null && row.RowIndex < dtA.Rows.Count) ? dtA.Rows[row.RowIndex] : null;
                 if (ar == null) continue;
