@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
@@ -17,6 +17,7 @@ namespace Take_Time_BangPhra.Voucher
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.SalesVoucher)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             if (!IsPostBack)
             {
                 // Check permission

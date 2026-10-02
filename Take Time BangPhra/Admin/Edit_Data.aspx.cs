@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Web;
@@ -84,6 +84,7 @@ namespace Take_Time_BangPhra.Admin
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.SysDatabase)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             try
             {
                 if (Session["permission"].ToString() == "True" && Session["User"].ToString() == "Owner")

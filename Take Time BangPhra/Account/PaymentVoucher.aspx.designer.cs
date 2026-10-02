@@ -150,6 +150,21 @@ namespace Take_Time_BangPhra.Account.Report
         protected global::System.Web.UI.WebControls.DropDownList ddlLineCategory;
 
         /// <summary>
+        /// ddlPaidHowNexaacc control (แหล่งจ่ายเงินจากผังบัญชี NextAcc โดยตรง).
+        /// </summary>
+        protected global::System.Web.UI.WebControls.DropDownList ddlPaidHowNexaacc;
+
+        /// <summary>
+        /// ddlLineChargeNexaacc control (ผังบัญชีค่าใช้จ่ายจาก NextAcc โดยตรง ต่อรายการ).
+        /// </summary>
+        protected global::System.Web.UI.WebControls.DropDownList ddlLineChargeNexaacc;
+
+        /// <summary>
+        /// ddlVatClaim control (เคลม/ไม่เคลมภาษีซื้อ §82/5).
+        /// </summary>
+        protected global::System.Web.UI.WebControls.DropDownList ddlVatClaim;
+
+        /// <summary>
         /// TextBox1 control.
         /// </summary>
         /// <remarks>
@@ -396,5 +411,55 @@ namespace Take_Time_BangPhra.Account.Report
         /// lblNextAccPaymentStatus control.
         /// </summary>
         protected global::System.Web.UI.WebControls.Label lblNextAccPaymentStatus;
+
+        /// <summary>
+        /// lnkNextAccPdf control (เปิด PDF ทางการจาก NextAcc).
+        /// </summary>
+        protected global::System.Web.UI.WebControls.LinkButton lnkNextAccPdf;
+
+        /// <summary>
+        /// chkCertInLieu control (ออกใบรับรองแทนใบเสร็จรับเงิน).
+        /// </summary>
+        protected global::System.Web.UI.WebControls.CheckBox chkCertInLieu;
+
+        /// <summary>
+        /// pnlCertInLieu control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlCertInLieu;
+
+        /// <summary>
+        /// txtCilReason control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtCilReason;
+
+        /// <summary>
+        /// txtCilPayeeName control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtCilPayeeName;
+
+        /// <summary>
+        /// txtCilPayeeAddress control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtCilPayeeAddress;
+
+        /// <summary>
+        /// txtCilCertifierName control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtCilCertifierName;
+
+        /// <summary>
+        /// txtCilCertifierPosition control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtCilCertifierPosition;
+
+        /// <summary>
+        /// txtCilWitnessName control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtCilWitnessName;
+
+        /// <summary>
+        /// txtCilWitnessPosition control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtCilWitnessPosition;
     }
 }

@@ -26,6 +26,7 @@ namespace Take_Time_BangPhra.Product
         AddressHelper addressHelper;
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.SalesStock)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             addressHelper = new AddressHelper(conn);
             try
             {
@@ -240,16 +241,23 @@ namespace Take_Time_BangPhra.Product
                     decimal.TryParse(TextBox3.Text, out price);
                 }
 
+                // ⛔ ช่องค้นหาว่าง = ไม่มีอะไรให้เพิ่ม (เดิมค้นด้วยค่าว่างจะไปแมตช์สินค้าที่ไม่มีบาร์โค้ด
+                //    แล้วเพิ่มสินค้านั้นเข้ารายการเองโดยผู้ใช้ไม่ได้สั่ง)
+                string searchText = (TextBox1.Text ?? "").Trim();
+                if (searchText.Length == 0) return;
+
                 // SECURE: Product lookup with parameterized query
                 var productParams = new Dictionary<string, object>
                 {
-                    { "@ProductName", TextBox1.Text.Trim() },
-                    { "@Barcode", TextBox1.Text.Trim() }
+                    { "@ProductName", searchText },
+                    { "@Barcode", searchText }
                 };
 
+                // เทียบ Barcode เฉพาะแถวที่มีบาร์โค้ดจริง — สินค้าที่บาร์โค้ดว่าง/NULL ห้ามติดมากับการค้น
                 DataTable dtProduct = code.DatabaseQuerySafe(conn,
                     "SELECT * FROM [Taketime].[dbo].[Product] " +
-                    "WHERE [Product_Name] = @ProductName OR Barcode = @Barcode",
+                    "WHERE [Product_Name] = @ProductName " +
+                    "   OR (Barcode = @Barcode AND LTRIM(RTRIM(ISNULL(Barcode,''))) <> '')",
                     productParams);
 
                 if (dtProduct.Rows.Count > 0)

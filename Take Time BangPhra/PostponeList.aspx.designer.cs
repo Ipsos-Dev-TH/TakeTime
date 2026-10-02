@@ -32,5 +32,33 @@ namespace Take_Time_BangPhra
         protected global::System.Web.UI.WebControls.HiddenField hdnCancelReason;
 
         protected global::System.Web.UI.WebControls.Button btnCancelWithReason;
+
+        protected global::System.Web.UI.WebControls.Panel pnlMessage;
+
+        protected global::System.Web.UI.WebControls.Literal litMessage;
+
+        protected global::System.Web.UI.WebControls.Label lblSummaryCount;
+
+        protected global::System.Web.UI.WebControls.Label lblTotalHeld;
+
+        protected global::System.Web.UI.WebControls.Label lblExpiringCount;
+
+        protected global::System.Web.UI.WebControls.Label lblExpiredCount;
+
+        protected global::System.Web.UI.WebControls.Label lblOldestDays;
+
+        protected global::System.Web.UI.WebControls.Literal litPolicy;
+
+        protected global::System.Web.UI.WebControls.Panel pnlSearch;
+
+        protected global::System.Web.UI.WebControls.TextBox txtSearch;
+
+        protected global::System.Web.UI.WebControls.DropDownList ddlFilter;
+
+        protected global::System.Web.UI.WebControls.Button btnSearch;
+
+        protected global::System.Web.UI.WebControls.Button btnClearSearch;
+
+        protected global::System.Web.UI.WebControls.Label lblShown;
     }
 }

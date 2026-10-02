@@ -250,12 +250,109 @@
         .close:hover {
             color: #000;
         }
+
+        .tab-bar {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+
+        .tab-btn {
+            background: #ecf0f1;
+            color: #2c3e50;
+            border: 1px solid #d5dbdb;
+            border-radius: 4px;
+            padding: 8px 16px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .tab-btn.active {
+            background: #2c3e50;
+            color: white;
+            border-color: #2c3e50;
+        }
+
+        .alert-success {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+
+        .alert-danger {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+
+        .alert-warning {
+            background-color: #fff3cd;
+            border: 1px solid #ffeeba;
+            color: #856404;
+        }
+
+        .ota-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin: 15px 0;
+        }
+
+        .btn-ota {
+            border: none;
+            border-radius: 4px;
+            padding: 8px 14px;
+            cursor: pointer;
+            font-size: 13px;
+            color: white;
+        }
+
+        .btn-ota-confirm { background-color: #e67e22; }
+        .btn-ota-je { background-color: #8e44ad; }
+        .btn-ota-hotel { background-color: #16a085; }
+        .btn-ota-undo { background-color: #7f8c8d; }
+
+        .ota-table-wrap {
+            overflow-x: auto;
+        }
+
+        .ota-table td, .ota-table th {
+            font-size: 13px;
+            vertical-align: top;
+        }
+
+        .ota-sub {
+            color: #7f8c8d;
+            font-size: 12px;
+        }
+
+        .ota-hint {
+            color: #a04000;
+            font-size: 12px;
+        }
     </style>
 
     <div class="history-container">
         <h2 style="color: #2c3e50; margin-bottom: 30px;">
             <i class="fa fa-history"></i> ประวัติการชำระเงิน
         </h2>
+
+        <asp:Panel ID="pnlSuccess" runat="server" CssClass="alert alert-success" Visible="false">
+            <asp:Label ID="lblSuccess" runat="server"></asp:Label>
+        </asp:Panel>
+        <asp:Panel ID="pnlError" runat="server" CssClass="alert alert-danger" Visible="false">
+            <asp:Label ID="lblError" runat="server"></asp:Label>
+        </asp:Panel>
+
+        <div class="tab-bar">
+            <asp:Button ID="btnTabMain" runat="server" Text="รายการชำระเงิน" CssClass="tab-btn active"
+                OnClick="btnTabMain_Click" CausesValidation="false" />
+            <asp:Button ID="btnTabOta" runat="server" Text="⚠ เงินสดของใบ OTA ที่ควรตรวจ" CssClass="tab-btn"
+                OnClick="btnTabOta_Click" CausesValidation="false" Visible="false" />
+        </div>
+
+        <asp:Panel ID="pnlMainView" runat="server">
 
         <!-- Summary Cards -->
         <div class="summary-cards">
@@ -326,6 +423,7 @@
                         <asp:ListItem Value="COMPLETED">สำเร็จ</asp:ListItem>
                         <asp:ListItem Value="PENDING">รอดำเนินการ</asp:ListItem>
                         <asp:ListItem Value="CANCELLED">ยกเลิก</asp:ListItem>
+                        <asp:ListItem Value="OTA_RECLASS">OTA เก็บ (ไม่ใช่เงินสดรับ)</asp:ListItem>
                     </asp:DropDownList>
                 </div>
 
@@ -415,6 +513,131 @@
                 <p>ลองเปลี่ยนเกณฑ์การค้นหาหรือกรองข้อมูลใหม่</p>
             </asp:Panel>
         </div>
+        </asp:Panel>
+
+        <!-- ⚠ เงินสดของใบ OTA ที่ควรตรวจ (Owner/Admin เท่านั้น — ไม่มีอะไรเปลี่ยนจนกว่าจะกดยืนยัน) -->
+        <asp:Panel ID="pnlOtaView" runat="server" Visible="false">
+            <div class="history-card">
+                <div class="card-header">
+                    <span><i class="fa fa-exclamation-triangle"></i> เงินสดของใบ OTA ที่ควรตรวจ</span>
+                </div>
+
+                <div class="alert alert-info">
+                    หน้าเช็คอินรุ่นเก่าบังคับบันทึกค่าห้องของใบ OTA ที่ <b>OTA เก็บเงินไปแล้ว (Channel Collect)</b>
+                    เป็น "รับเงิน" (ค่าเริ่มต้นเงินสด) ทำให้รายงานเงินสดเกินจริง. รายการด้านล่างเป็นแถวที่น่าสงสัย —
+                    ระบบติ๊กไว้ล่วงหน้าเฉพาะแถวที่ชัดเจนครบทุกข้อ (ไม่มีใบเสร็จ · เงินสด · หมายเหตุ "เช็คอิน…" · ไม่มีสลิป ·
+                    โหมดไม่ได้มาจากการเดา · ยอดตรงยอด OTA) โปรดตรวจแล้วกดยืนยันเอง.
+                    แถวที่ <b>มีใบเสร็จ</b> จะไม่ถูกยกเลิกใบเสร็จ แต่ส่งรายการปรับปรุง Dr ลูกหนี้ OTA / Cr เงินสด เข้าบัญชีแทน.
+                </div>
+
+                <div class="filter-section">
+                    <div class="filter-group">
+                        <label class="filter-label">แสดง</label>
+                        <asp:DropDownList ID="ddlOtaMode" runat="server" CssClass="filter-control" AutoPostBack="true"
+                            OnSelectedIndexChanged="ddlOtaMode_SelectedIndexChanged">
+                            <asp:ListItem Value="PENDING">รายการที่ควรตรวจ (ยังนับเป็นเงินรับ)</asp:ListItem>
+                            <asp:ListItem Value="DONE">ปรับเป็น "OTA เก็บ" แล้ว (ย้อนกลับได้)</asp:ListItem>
+                        </asp:DropDownList>
+                    </div>
+                    <div class="filter-group">
+                        <label class="filter-label">&nbsp;</label>
+                        <asp:Button ID="btnOtaRefresh" runat="server" Text="โหลดใหม่" CssClass="btn-filter"
+                            OnClick="btnOtaRefresh_Click" CausesValidation="false" />
+                    </div>
+                </div>
+
+                <p><asp:Literal ID="litOtaSummary" runat="server"></asp:Literal></p>
+                <asp:Literal ID="litOtaNotice" runat="server"></asp:Literal>
+
+                <div class="ota-actions">
+                    <asp:Button ID="btnOtaConfirm" runat="server" CssClass="btn-ota btn-ota-confirm"
+                        Text="ยืนยัน: เป็นเงินที่ OTA เก็บ (ไม่ได้รับเงินสด)" OnClick="btnOtaConfirm_Click"
+                        OnClientClick="return confirm('ปรับแถวที่ติ๊ก (เฉพาะที่ไม่มีใบเสร็จ) เป็น เงินที่ OTA เก็บ — ไม่นับเป็นเงินรับอีกต่อไป?\nย้อนกลับได้ภายหลัง');" />
+                    <asp:Button ID="btnOtaReclassJe" runat="server" CssClass="btn-ota btn-ota-je"
+                        Text="ส่งกลับรายการบัญชี (Dr ลูกหนี้ OTA / Cr เงินสด)" OnClick="btnOtaReclassJe_Click"
+                        OnClientClick="return confirm('ส่งรายการปรับปรุง Dr ลูกหนี้ OTA / Cr เงินสด เข้า NextAcc สำหรับแถวที่ติ๊ก (เฉพาะที่มีใบเสร็จ)?\nใบเสร็จเดิมไม่ถูกยกเลิก');" />
+                    <asp:Button ID="btnOtaHotel" runat="server" CssClass="btn-ota btn-ota-hotel"
+                        Text="เงินสดนี้รับจริง → เก็บเงินหน้างาน" OnClick="btnOtaHotel_Click"
+                        OnClientClick="return confirm('เปลี่ยนการจองของแถวที่ติ๊กเป็น เก็บเงินหน้างาน (โรงแรมเก็บเงินเอง)?\nแถวเงินคงเป็นเงินรับตามเดิม');" />
+                    <asp:Button ID="btnOtaUndo" runat="server" CssClass="btn-ota btn-ota-undo"
+                        Text="ย้อนกลับ (นับเป็นเงินรับตามเดิม)" OnClick="btnOtaUndo_Click" Visible="false"
+                        OnClientClick="return confirm('ย้อนแถวที่ติ๊กกลับเป็นเงินรับ (สำเร็จ)?');" />
+                </div>
+
+                <div class="ota-table-wrap">
+                    <asp:GridView ID="gvOta" runat="server" CssClass="payment-table ota-table"
+                        AutoGenerateColumns="False" DataKeyNames="PhId"
+                        EmptyDataText="ไม่พบรายการที่ต้องตรวจ">
+                        <Columns>
+                            <asp:TemplateField HeaderText="เลือก">
+                                <ItemTemplate>
+                                    <asp:CheckBox ID="chkOta" runat="server" Checked='<%# Convert.ToBoolean(Eval("PreTick")) %>' />
+                                </ItemTemplate>
+                            </asp:TemplateField>
+
+                            <asp:TemplateField HeaderText="การจอง / ผู้เข้าพัก">
+                                <ItemTemplate>
+                                    <asp:HyperLink ID="lnkOtaRes" runat="server" Target="_blank"
+                                        NavigateUrl='<%# "~/Reserve?command=edit&id=" + Eval("ResId") %>'
+                                        Text='<%# "#" + Eval("ResId") %>'></asp:HyperLink>
+                                    <div><%#: Eval("Guest") %></div>
+                                    <div class="ota-sub"><%#: Eval("ResStatus") %></div>
+                                </ItemTemplate>
+                            </asp:TemplateField>
+
+                            <asp:TemplateField HeaderText="OTA / เลขจอง">
+                                <ItemTemplate>
+                                    <div><%#: Eval("OtaChannel") %></div>
+                                    <div class="ota-sub"><%#: Eval("OtaBookingId") %></div>
+                                </ItemTemplate>
+                            </asp:TemplateField>
+
+                            <asp:TemplateField HeaderText="ยอด OTA">
+                                <ItemTemplate>
+                                    <%# Convert.ToDecimal(Eval("OtaAmount")) > 0 ? Convert.ToDecimal(Eval("OtaAmount")).ToString("N2") : "-" %>
+                                </ItemTemplate>
+                            </asp:TemplateField>
+
+                            <asp:TemplateField HeaderText="ที่บันทึกรับ">
+                                <ItemTemplate>
+                                    <b><%# Convert.ToDecimal(Eval("Amount")).ToString("N2") %></b>
+                                    <div class="ota-sub"><%#: Eval("Method") %></div>
+                                </ItemTemplate>
+                            </asp:TemplateField>
+
+                            <asp:TemplateField HeaderText="บันทึกโดย / วันที่">
+                                <ItemTemplate>
+                                    <div><%#: Eval("RecordedBy") %></div>
+                                    <div class="ota-sub"><%# Convert.ToDateTime(Eval("PaymentDate")).ToString("dd/MM/yyyy HH:mm") %></div>
+                                </ItemTemplate>
+                            </asp:TemplateField>
+
+                            <asp:TemplateField HeaderText="ใบเสร็จ">
+                                <ItemTemplate>
+                                    <div><%#: Convert.ToBoolean(Eval("HasReceipt")) ? Eval("ReceiptId").ToString() : "ไม่มีใบเสร็จ" %></div>
+                                    <div class="ota-sub"><%#: Eval("ReceiptState") %></div>
+                                    <div class="ota-sub"><%#: Eval("ReclassState") %></div>
+                                </ItemTemplate>
+                            </asp:TemplateField>
+
+                            <asp:TemplateField HeaderText="โหมด / ที่มา">
+                                <ItemTemplate>
+                                    <div><%#: Eval("Mode") %></div>
+                                    <div class="ota-sub"><%#: Eval("ModeSource") %></div>
+                                </ItemTemplate>
+                            </asp:TemplateField>
+
+                            <asp:TemplateField HeaderText="หมายเหตุ">
+                                <ItemTemplate>
+                                    <div class="ota-sub"><%#: Eval("Notes") %></div>
+                                    <div class="ota-hint"><%#: Eval("Hint") %></div>
+                                </ItemTemplate>
+                            </asp:TemplateField>
+                        </Columns>
+                    </asp:GridView>
+                </div>
+            </div>
+        </asp:Panel>
     </div>
 
     <!-- Modal for viewing slip/receipt -->

@@ -1,4 +1,4 @@
-<%@ Page Title="AI Knowledge Base" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="AIKnowledgeBase.aspx.cs" Inherits="Take_Time_BangPhra.Admin.Settings.AIKnowledgeBase" %>
+﻿<%@ Page Title="AI Knowledge Base" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="AIKnowledgeBase.aspx.cs" Inherits="Take_Time_BangPhra.Admin.Settings.AIKnowledgeBase" %>
 
 <asp:Content ID="Content1" ContentPlaceHolderID="MainContent" runat="server">
     <style>
@@ -171,7 +171,7 @@
             </div>
 
             <div style="overflow-x: auto;">
-                <table class="kb-table">
+                <table class="kb-table tt-cards-ok">
                     <thead>
                         <tr>
                             <th style="width:90px;">หมวดหมู่</th>
@@ -196,7 +196,7 @@
                 <span style="color:#666; font-size:13px;"><i class="fas fa-info-circle"></i> รูปแบบที่เรียนรู้จากการตอบของพนักงาน (confidence เพิ่มขึ้นทุกครั้งที่ถูกใช้ซ้ำ)</span>
             </div>
             <div style="overflow-x: auto;">
-                <table class="pattern-table">
+                <table class="pattern-table tt-cards-ok">
                     <thead>
                         <tr>
                             <th>Input Pattern</th>

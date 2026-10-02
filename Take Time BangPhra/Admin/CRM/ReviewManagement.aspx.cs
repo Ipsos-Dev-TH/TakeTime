@@ -1,4 +1,4 @@
-// ===========================================================================
+﻿// ===========================================================================
 // ReviewManagement.aspx.cs
 // Review Management - Approve/reject reviews, add responses, view analytics
 // ===========================================================================
@@ -25,6 +25,8 @@ namespace Take_Time_BangPhra.Admin.CRM
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.CrmReview)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
+            if (!Feature.Guard(this, "Reviews", "~/Default")) return;   // ฟีเจอร์ถูกปิด (ตั้งค่าระบบ → หมวดฟีเจอร์)
             _code = new code();
             _reviewService = new ReviewService(_connectionString);
 

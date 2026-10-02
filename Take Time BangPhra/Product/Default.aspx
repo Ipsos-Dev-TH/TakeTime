@@ -1,4 +1,4 @@
-<%@ Page Title="ขายสินค้า" Language="C#" MaintainScrollPositionOnPostback="true" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="Default.aspx.cs" Inherits="Take_Time_BangPhra.Product.Default" %>
+<%@ Page Title="ขายสินค้า" Language="C#" MaintainScrollPositionOnPostback="true" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="Default.aspx.cs" Inherits="Take_Time_BangPhra.Product.Default" EnableEventValidation="false" %>
 <%@ Register assembly="Microsoft.ReportViewer.WebForms" namespace="Microsoft.Reporting.WebForms" tagprefix="rsweb" %>
 
 <asp:Content ID="Content1" ContentPlaceHolderID="MainContent" runat="server">
@@ -164,6 +164,7 @@
                             <asp:DropDownList ID="DropDownList1" runat="server" CssClass="form-control"
                                 DataSourceID="SqlDataSource1" DataTextField="Paid_How" DataValueField="ID"
                                 AutoPostBack="True" OnSelectedIndexChanged="DropDownList1_SelectedIndexChanged"
+                                OnDataBound="DropDownList1_DataBound"
                                 AppendDataBoundItems="true">
                                 <asp:ListItem>--- โปรดเลือก ---</asp:ListItem>
                             </asp:DropDownList>
@@ -335,6 +336,15 @@
     <!-- Scripts -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
     <script>
+        // มือถือ (โดยเฉพาะ iOS Safari) restore หน้าจาก back-forward cache พร้อมค่าฟอร์มเก่า →
+        // ViewState/EventValidation ไม่ตรงกับ session ปัจจุบัน → กดปุ่มแล้ว Invalid postback / ตะกร้าค้าง
+        // เจอ restore จาก cache → โหลดหน้าใหม่ให้สดเสมอ
+        window.addEventListener('pageshow', function (e) {
+            // ใช้ replace() ไม่ใช่ reload() — reload เบราว์เซอร์จะ "คืนค่าฟอร์มเดิม" กลับมาด้วย
+            // (ชื่อสินค้าที่ค้างในช่องค้นหาจะถูกยัดกลับ แล้วโดนเพิ่มลงตะกร้าซ้ำ), replace = โหลดสดจริง
+            if (e.persisted) window.location.replace(window.location.href);
+        });
+
         function checkEnter(event) {
             if (event.key === 'Enter') {
                 __doPostBack('<%= TextBox1.UniqueID %>', '');

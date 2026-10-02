@@ -67,5 +67,17 @@ namespace Take_Time_BangPhra.Admin
         /// To modify move field declaration from designer file to code-behind file.
         /// </remarks>
         protected global::System.Web.UI.WebControls.Button Button2;
-    }
+    
+        /// <summary>litTitle control.</summary>
+        protected global::System.Web.UI.WebControls.Literal litTitle;
+
+        /// <summary>litSub control.</summary>
+        protected global::System.Web.UI.WebControls.Literal litSub;
+
+        /// <summary>pnlLineLogin control.</summary>
+        protected global::System.Web.UI.WebControls.Panel pnlLineLogin;
+
+        /// <summary>btnLineLogin control.</summary>
+        protected global::System.Web.UI.WebControls.LinkButton btnLineLogin;
+}
 }

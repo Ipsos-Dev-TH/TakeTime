@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
@@ -41,6 +41,35 @@ namespace Take_Time_BangPhra
         {
             try
             {
+                // ── บล็อกเช็คเอาท์เมื่อยังมีชาร์จเข้าห้องค้างชำระ (PENDING) ──
+                // charge PENDING ลง COGS ไปแล้วตอนชาร์จ แต่รายได้จะลงก็ต่อเมื่อถูกยัดเข้าใบเสร็จ
+                // (AddProductChargesToReceipt) — ถ้าปล่อยเช็คเอาท์ทั้งที่ยังค้าง รายได้ส่วนนี้จะหาย
+                // ถาวร (มีแต่ต้นทุน ไม่มีรายได้ บน NextAcc). เดิม gate อยู่แค่หน้า UI — บังคับที่ service ด้วย
+                try
+                {
+                    var pendDt = _code.DatabaseQuerySafe(_connectionString,
+                        @"SELECT ISNULL(SUM(TotalAmount), 0) FROM Reservation_Product_Charges
+                          WHERE Reservation_ID = @rid AND Status = 'PENDING'",
+                        new Dictionary<string, object> { { "@rid", reservationId } });
+                    decimal pendingCharges = pendDt != null && pendDt.Rows.Count > 0
+                        ? Convert.ToDecimal(pendDt.Rows[0][0]) : 0m;
+                    if (pendingCharges > 0.01m)
+                    {
+                        return new CheckoutResult
+                        {
+                            Success = false,
+                            Message = $"มีสินค้าชาร์จเข้าห้องค้างชำระ {pendingCharges:N2} บาท — " +
+                                      "กรุณาชำระ/ออกใบเสร็จ (รวมรายการชาร์จ) ที่หน้า Reserve ก่อนเช็คเอาท์ " +
+                                      "เพื่อให้รายได้ลงบัญชี NextAcc ครบ"
+                        };
+                    }
+                }
+                catch (Exception pex)
+                {
+                    _code.Logs(_connectionString, "Checkout",
+                        $"Pending-charge check failed for Reservation #{reservationId}: {pex.Message} (ไม่บล็อก)", "SYSTEM");
+                }
+
                 // Capture reservation data BEFORE sp_ProcessCheckout, because the SP
                 // may zero out Reservation.Deposit during checkout processing.
                 var resData = GetReservationData(reservationId);
@@ -52,12 +81,24 @@ namespace Take_Time_BangPhra
                 // Detect under-paid checkout: ลูกค้าจองห้อง 1600 จ่ายมัดจำ 500 แล้วเช็คเอาท์โดยไม่จ่ายเพิ่ม
                 // → รายได้ที่ยังไม่ได้รับ = TotalPrice - TotalPaid → log warning + validation
                 decimal expectedPayable = totalPrice + damageCharge + missingItemsCharge;
-                if (totalPaid + 0.01m < expectedPayable)
+                // ยอดค้างจริงใช้กฎเดียวกับทุกหน้าจอ (ReservationBalance): ใบ OTA Channel Collect ค่าห้องถูก
+                // OTA เก็บแล้ว — เดิมเทียบกับ Payment_History ล้วน ⇒ เตือน "ชำระไม่ครบ" เท็จทุกใบ OTA ที่ไม่มี
+                // แถวรับเงิน (หลังแก้หน้าเช็คอินไม่ให้ลงเงินสดปลอมแล้ว จะเป็นทุกใบ)
+                decimal outstanding;
+                ReservationBalance bal = null;
+                try { bal = ReservationBalance.Load(_connectionString, reservationId); } catch { }
+                if (bal != null)
+                    outstanding = Math.Max(0m, bal.Due + damageCharge + missingItemsCharge - bal.Credit);
+                else
+                    outstanding = Math.Max(0m, expectedPayable - totalPaid);
+                if (outstanding > 0.01m)
                 {
-                    decimal outstanding = expectedPayable - totalPaid;
                     var validation = AccountingArithmeticValidator.ValidationResult.Fail(
                         "CHECKOUT_UNDERPAID",
-                        $"ลูกค้า checkout โดยยอดชำระไม่ครบ: ราคาห้อง+ค่าเสียหาย {expectedPayable:N2} - ชำระแล้ว {totalPaid:N2} = ค้างชำระ {outstanding:N2} บาท",
+                        bal != null
+                            ? $"ลูกค้า checkout โดยยอดชำระไม่ครบ: ยอดรวม+ค่าเสียหาย {bal.Total + damageCharge + missingItemsCharge:N2} - รับแล้ว {bal.Received:N2} = ค้างชำระ {outstanding:N2} บาท" +
+                              (bal.IsChannelCollect ? $" (ใบ OTA Channel Collect — OTA เก็บแล้ว {bal.OtaCovered:N2} ยอดค้างคือส่วนเกิน/ของเสริม/ค่าเสียหาย)" : "")
+                            : $"ลูกค้า checkout โดยยอดชำระไม่ครบ: ราคาห้อง+ค่าเสียหาย {expectedPayable:N2} - ชำระแล้ว {totalPaid:N2} = ค้างชำระ {outstanding:N2} บาท",
                         expectedPayable, totalPaid, blocking: false);
                     AccountingArithmeticValidator.LogValidationFailure("CHECKOUT", reservationId.ToString(), validation, adminId.ToString());
                     _code.Logs(_connectionString, "Checkout",

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.IO;
@@ -79,19 +79,41 @@ namespace Take_Time_BangPhra.Services
 
         #region Conversations
 
-        public DataTable GetConversations(string channelFilter = null, string statusFilter = null, string search = null, int limit = 50)
+        /// <summary>
+        /// รายการสนทนา พร้อมตัวกรอง/เรียง/แบ่งหน้า
+        ///
+        /// ⚠ เดิมเป็น TOP 50 เรียง UnreadCount DESC, LastMessageDate DESC เท่านั้น ⇒ พังสองทาง:
+        ///   1. มีสนทนามากกว่า 50 → ที่เหลือหายไปเฉย ๆ ไม่มีทางเข้าถึง (ไม่มีหน้าถัดไป)
+        ///   2. พอเปิดอ่าน UnreadCount กลายเป็น 0 → ร่วงไปท้ายลำดับ → ถ้ามียังไม่อ่านเกิน 50
+        ///      รายการที่เพิ่งอ่านจะหลุดออกนอก TOP 50 ทันที = "กดเปิดแล้วหายไปเลย"
+        ///
+        /// replyFilter: NEEDS_REPLY = ข้อความล่าสุดมาจากลูกค้า (เรายังไม่ตอบ) — ตัวที่ต้องใช้บ่อยสุด
+        ///              REPLIED     = เราตอบไปแล้วเป็นคนสุดท้าย
+        /// </summary>
+        public DataTable GetConversations(string channelFilter = null, string statusFilter = null,
+            string search = null, int limit = 50, string replyFilter = null, string sort = null,
+            int offset = 0, bool unreadOnly = false)
         {
-            string sql = @"SELECT TOP (@Limit)
+            if (limit <= 0 || limit > 200) limit = 50;
+            if (offset < 0) offset = 0;
+
+            // lastDir = ทิศทางของข้อความล่าสุด — ใช้ทั้งกรอง "ยังไม่ตอบ" และแสดงป้ายในรายการ
+            string sql = @"SELECT
                     c.ID, c.ChannelCode, c.Status, c.Priority, c.AssignedTo, c.Tags,
                     c.LastMessageDate, c.LastMessagePreview, c.UnreadCount,
                     ct.DisplayName, ct.AvatarUrl, ct.MobilePhone, ct.Customer_MobilePhone,
-                    ch.ChannelName, ch.IconClass, ch.BrandColor
+                    ch.ChannelName, ch.IconClass, ch.BrandColor,
+                    ISNULL(lm.Direction, '') AS LastDirection,
+                    CASE WHEN ISNULL(lm.Direction, 'IN') = 'IN' THEN 1 ELSE 0 END AS NeedsReply,
+                    DATEDIFF(MINUTE, c.LastMessageDate, GETDATE()) AS WaitingMinutes
                 FROM OmniChannel_Conversations c
                 JOIN OmniChannel_Contacts ct ON c.ContactID = ct.ID
                 JOIN OmniChannel_Channels ch ON c.ChannelCode = ch.ChannelCode
+                OUTER APPLY (SELECT TOP 1 m.Direction FROM OmniChannel_Messages m
+                             WHERE m.ConversationID = c.ID ORDER BY m.ID DESC) lm
                 WHERE 1=1";
 
-            var parms = new Dictionary<string, object> { { "@Limit", limit } };
+            var parms = new Dictionary<string, object>();
 
             if (!string.IsNullOrEmpty(channelFilter) && channelFilter != "ALL")
             {
@@ -104,20 +126,72 @@ namespace Take_Time_BangPhra.Services
                 sql += " AND c.Status = @Status";
                 parms["@Status"] = statusFilter;
             }
-            else
-            {
-                sql += " AND c.Status IN ('OPEN','PENDING')";
-            }
+            // statusFilter = ALL → ไม่กรองสถานะเลย (เดิมบังคับ OPEN/PENDING ทำให้ RESOLVED หาไม่เจอ)
+
+            if (unreadOnly) sql += " AND c.UnreadCount > 0";
+
+            if (replyFilter == "NEEDS_REPLY")
+                sql += " AND ISNULL(lm.Direction, 'IN') = 'IN'";
+            else if (replyFilter == "REPLIED")
+                sql += " AND lm.Direction = 'OUT'";
 
             if (!string.IsNullOrEmpty(search))
             {
-                sql += " AND (ct.DisplayName LIKE @Search OR ct.MobilePhone LIKE @Search OR c.LastMessagePreview LIKE @Search)";
+                sql += " AND (ct.DisplayName LIKE @Search OR ct.MobilePhone LIKE @Search OR c.LastMessagePreview LIKE @Search"
+                 + "      OR ct.Email LIKE @Search OR c.Subject LIKE @Search OR c.Tags LIKE @Search)";
                 parms["@Search"] = "%" + search + "%";
             }
 
-            sql += " ORDER BY c.UnreadCount DESC, c.LastMessageDate DESC";
+            // เรียงลำดับ — ค่าเริ่มต้นเปลี่ยนเป็น "ใหม่สุดก่อน" ล้วน ๆ
+            // ไม่เอา UnreadCount มานำหน้า เพราะทำให้รายการ "กระโดด" ทันทีที่กดอ่าน
+            switch ((sort ?? "").ToUpperInvariant())
+            {
+                case "OLDEST":       sql += " ORDER BY c.LastMessageDate ASC"; break;
+                case "UNREAD":       sql += " ORDER BY c.UnreadCount DESC, c.LastMessageDate DESC"; break;
+                case "WAITING":      sql += " ORDER BY CASE WHEN ISNULL(lm.Direction,'IN')='IN' THEN 0 ELSE 1 END, c.LastMessageDate ASC"; break;
+                case "NAME":         sql += " ORDER BY ct.DisplayName ASC, c.LastMessageDate DESC"; break;
+                default:             sql += " ORDER BY c.LastMessageDate DESC"; break;
+            }
+
+            // แบ่งหน้าแทน TOP — ดูรายการที่เกินหน้าแรกได้จริง
+            sql += " OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY";
+            parms["@Offset"] = offset;
+            parms["@Limit"] = limit;
 
             return _code.DatabaseQuerySafe(_connStr, sql, parms);
+        }
+
+        /// <summary>จำนวนสนทนาตามตัวกรองปัจจุบัน — ให้ UI รู้ว่ายังมีอีกกี่รายการ</summary>
+        public int CountConversations(string channelFilter = null, string statusFilter = null,
+            string search = null, string replyFilter = null, bool unreadOnly = false)
+        {
+            string sql = @"SELECT COUNT(*) AS N
+                FROM OmniChannel_Conversations c
+                JOIN OmniChannel_Contacts ct ON c.ContactID = ct.ID
+                OUTER APPLY (SELECT TOP 1 m.Direction FROM OmniChannel_Messages m
+                             WHERE m.ConversationID = c.ID ORDER BY m.ID DESC) lm
+                WHERE 1=1";
+            var parms = new Dictionary<string, object>();
+
+            if (!string.IsNullOrEmpty(channelFilter) && channelFilter != "ALL")
+            { sql += " AND c.ChannelCode = @Channel"; parms["@Channel"] = channelFilter; }
+            if (!string.IsNullOrEmpty(statusFilter) && statusFilter != "ALL")
+            { sql += " AND c.Status = @Status"; parms["@Status"] = statusFilter; }
+            if (unreadOnly) sql += " AND c.UnreadCount > 0";
+            if (replyFilter == "NEEDS_REPLY") sql += " AND ISNULL(lm.Direction, 'IN') = 'IN'";
+            else if (replyFilter == "REPLIED") sql += " AND lm.Direction = 'OUT'";
+            if (!string.IsNullOrEmpty(search))
+            {
+                sql += " AND (ct.DisplayName LIKE @Search OR ct.MobilePhone LIKE @Search OR c.LastMessagePreview LIKE @Search"
+                 + "      OR ct.Email LIKE @Search OR c.Subject LIKE @Search OR c.Tags LIKE @Search)";
+                parms["@Search"] = "%" + search + "%";
+            }
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connStr, sql, parms.Count > 0 ? parms : null);
+                return dt?.Rows.Count > 0 ? Convert.ToInt32(dt.Rows[0]["N"]) : 0;
+            }
+            catch { return 0; }
         }
 
         public DataTable GetConversationDetail(long conversationId)
@@ -258,6 +332,40 @@ namespace Take_Time_BangPhra.Services
             }
         }
 
+        // ── คอลัมน์ AI ของ OmniChannel_Messages มีอยู่จริงไหม ─────────────────────
+        // IsAIGenerated / AIConfidence / AISource มาจาก PHASE14_Migration_02 ซึ่งบางเครื่อง
+        // ยังไม่ได้รัน ⇒ INSERT ที่อ้างคอลัมน์พวกนี้จะล้มทั้งก้อน ("Invalid column name")
+        // ทำให้ตอบข้อความไม่ได้เลย ทั้งที่การตอบปกติไม่ได้ต้องใช้ค่าเหล่านี้
+        //
+        // ตรวจครั้งเดียวแล้วจำไว้: ถ้ามีคอลัมน์ = จำถาวร / ถ้ายังไม่มี = ตรวจซ้ำทุก 5 นาที
+        // เพื่อให้พอรันไมเกรชันเสร็จ ระบบกลับมาบันทึกข้อมูล AI เองโดยไม่ต้องรีสตาร์ท
+        private static bool _aiColsKnownPresent;
+        private static DateTime _aiColsCheckedAt = DateTime.MinValue;
+        private static readonly object _aiColsLock = new object();
+
+        private bool HasAiColumns()
+        {
+            lock (_aiColsLock)
+            {
+                if (_aiColsKnownPresent) return true;
+                if ((DateTime.UtcNow - _aiColsCheckedAt) < TimeSpan.FromMinutes(5)) return false;
+                _aiColsCheckedAt = DateTime.UtcNow;
+
+                try
+                {
+                    DataTable dt = _code.DatabaseQuerySafe(_connStr,
+                        @"SELECT COUNT(*) AS Cnt FROM INFORMATION_SCHEMA.COLUMNS
+                           WHERE TABLE_NAME = 'OmniChannel_Messages'
+                             AND COLUMN_NAME IN ('IsAIGenerated','AIConfidence','AISource')", null);
+                    _aiColsKnownPresent = dt != null && dt.Rows.Count > 0
+                                          && Convert.ToInt32(dt.Rows[0]["Cnt"]) >= 3;
+                }
+                catch { _aiColsKnownPresent = false; }
+
+                return _aiColsKnownPresent;
+            }
+        }
+
         public SendMessageResult SendMessage(long conversationId, string content, string senderName,
             string messageType = "TEXT", string mediaUrl = null,
             bool isAI = false, double aiConfidence = 0, string aiSource = null)
@@ -270,20 +378,31 @@ namespace Take_Time_BangPhra.Services
 
                 string channelCode = dtConv.Rows[0]["ChannelCode"].ToString();
 
+                // คอลัมน์ AI (IsAIGenerated/AIConfidence/AISource) มาจาก PHASE14_Migration_02
+                // ระบบที่ยังไม่ได้รันไมเกรชันนั้นจะไม่มีคอลัมน์ ⇒ เดิม INSERT พังทั้งก้อน
+                // = "กดตอบกลับแล้ว error" ทั้งที่ข้อความปกติไม่ได้ต้องใช้ค่าพวกนี้เลย
+                bool ai = HasAiColumns();
+                var pSend = new Dictionary<string, object>
+                {
+                    { "@ConvId", conversationId },
+                    { "@Sender", senderName },
+                    { "@MType", messageType },
+                    { "@Content", content },
+                    { "@MUrl", mediaUrl != null ? (object)mediaUrl : DBNull.Value }
+                };
+                if (ai)
+                {
+                    pSend["@IsAI"] = isAI;
+                    pSend["@AICnf"] = isAI ? (object)aiConfidence : DBNull.Value;
+                    pSend["@AISrc"] = aiSource != null ? (object)aiSource : DBNull.Value;
+                }
+
                 _code.DatabaseInsertSafe(_connStr,
-                    @"INSERT INTO OmniChannel_Messages (ConversationID, Direction, SenderName, MessageType, Content, MediaUrl, IsRead, DeliveryStatus, IsAIGenerated, AIConfidence, AISource, Created_Date)
-                      VALUES (@ConvId, 'OUT', @Sender, @MType, @Content, @MUrl, 1, 'SENT', @IsAI, @AICnf, @AISrc, GETDATE())",
-                    new Dictionary<string, object>
-                    {
-                        { "@ConvId", conversationId },
-                        { "@Sender", senderName },
-                        { "@MType", messageType },
-                        { "@Content", content },
-                        { "@MUrl", mediaUrl != null ? (object)mediaUrl : DBNull.Value },
-                        { "@IsAI", isAI },
-                        { "@AICnf", isAI ? (object)aiConfidence : DBNull.Value },
-                        { "@AISrc", aiSource != null ? (object)aiSource : DBNull.Value }
-                    });
+                    "INSERT INTO OmniChannel_Messages (ConversationID, Direction, SenderName, MessageType, Content, MediaUrl, IsRead, DeliveryStatus"
+                    + (ai ? ", IsAIGenerated, AIConfidence, AISource" : "") + ", Created_Date) "
+                    + "VALUES (@ConvId, 'OUT', @Sender, @MType, @Content, @MUrl, 1, 'SENT'"
+                    + (ai ? ", @IsAI, @AICnf, @AISrc" : "") + ", GETDATE())",
+                    pSend);
 
                 _code.DatabaseInsertSafe(_connStr,
                     "UPDATE OmniChannel_Conversations SET LastMessageDate = GETDATE(), LastMessagePreview = @Preview, Updated_Date = GETDATE() WHERE ID = @Id",
@@ -295,7 +414,21 @@ namespace Take_Time_BangPhra.Services
 
                 DeliverOutbound(channelCode, conversationId, content);
 
-                return new SendMessageResult { Success = true };
+                // ── รายงานผลส่งออกจริง ────────────────────────────────────────────
+                // DeliverOutbound เป็น fire-and-forget + กลืน exception ⇒ เดิมคืน Success=true
+                // เสมอ ต่อให้ SMTP ไม่ได้ตั้งค่า/ส่งไม่ออก ⇒ พนักงานเห็น "ส่งสำเร็จ" แล้วเข้าใจว่า
+                // ลูกค้าได้รับแล้ว ทั้งที่ข้อความค้างอยู่ในระบบเฉย ๆ (อาการ "ตอบไม่ได้" แบบเงียบ)
+                // อ่านสถานะที่ตัวส่งเขียนไว้กลับมาบอกผู้ใช้ตรง ๆ
+                string delivery = ReadLastOutboundStatus(conversationId);
+                return new SendMessageResult
+                {
+                    Success = true,
+                    DeliveryStatus = delivery,
+                    Warning = delivery == "FAILED"
+                        ? "บันทึกข้อความแล้ว แต่ส่งออกช่องทาง " + channelCode + " ไม่สำเร็จ — "
+                          + "ลูกค้ายังไม่ได้รับ (ดูสาเหตุที่ log แล้วตรวจการตั้งค่าช่องทาง)"
+                        : null
+                };
             }
             catch (Exception ex)
             {
@@ -325,12 +458,51 @@ namespace Take_Time_BangPhra.Services
                     case "TELEGRAM":
                         DeliverToTelegram(conversationId, content);
                         break;
+                    case "EMAIL":
+                        // สะพานแชท↔อีเมลลูกค้า OTA (Agoda/Booking relay) — ตอบเป็นอีเมลเบื้องหลัง
+                        new EmailChatService(_connStr).DeliverToEmail(conversationId, content);
+                        break;
+                    case "TIKTOK":
+                        DeliverToTikTok(conversationId, content);
+                        break;
+                    // WEBCHAT ไม่มี outbound push — ลูกค้าดึงคำตอบผ่าน endpoint เอง (polling/หลังส่ง)
                 }
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Trace.TraceError("OmniChannel.DeliverOutbound [{0}]: {1}", channelCode, ex.Message);
+                // มาร์คให้ตรงกับความจริง — ไม่งั้นข้อความค้างสถานะ SENT ทั้งที่ไม่เคยออกจากระบบ
+                MarkLastOutboundStatus(conversationId, "FAILED");
+                _code.Logs(_connStr, "OmniChannel",
+                    $"ส่งออกช่องทาง {channelCode} ไม่สำเร็จ (conv {conversationId}): {ex.Message}", "SYSTEM");
             }
+        }
+
+        /// <summary>สถานะส่งออกของข้อความขาออกล่าสุด — ใช้บอกผู้ใช้ว่าถึงลูกค้าจริงไหม</summary>
+        private string ReadLastOutboundStatus(long conversationId)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connStr,
+                    @"SELECT TOP 1 DeliveryStatus FROM OmniChannel_Messages
+                      WHERE ConversationID = @Id AND Direction = 'OUT' ORDER BY ID DESC",
+                    new Dictionary<string, object> { { "@Id", conversationId } });
+                return dt?.Rows.Count > 0 ? dt.Rows[0][0]?.ToString() : null;
+            }
+            catch { return null; }
+        }
+
+        private void MarkLastOutboundStatus(long conversationId, string status)
+        {
+            try
+            {
+                _code.DatabaseInsertSafe(_connStr,
+                    @"UPDATE OmniChannel_Messages SET DeliveryStatus = @S
+                      WHERE ID = (SELECT MAX(ID) FROM OmniChannel_Messages
+                                  WHERE ConversationID = @Id AND Direction = 'OUT')",
+                    new Dictionary<string, object> { { "@S", status }, { "@Id", conversationId } });
+            }
+            catch { }
         }
 
         private void DeliverToLine(long conversationId, string content)
@@ -408,6 +580,27 @@ namespace Take_Time_BangPhra.Services
                 new JavaScriptSerializer().Serialize(body), null);
         }
 
+        /// <summary>
+        /// ส่งข้อความออกทาง TikTok Business Messaging.
+        /// TikTok DM API ยังจำกัดสิทธิ์ (ต้องได้รับอนุมัติ scope + business account) และรูปแบบ
+        /// endpoint ต่างกันตามรุ่นที่ได้รับอนุมัติ → ให้ตั้ง sendUrl + accessToken เองในหน้าตั้งค่า
+        /// ช่องทาง (ถ้าไม่ตั้ง = รับข้อความเข้ากล่องแชทได้ แต่ตอบต้องพนักงานตอบผ่านแอป TikTok)
+        /// </summary>
+        private void DeliverToTikTok(long conversationId, string content)
+        {
+            var config = GetChannelConfig("TIKTOK");
+            string token = config.ContainsKey("accessToken") ? config["accessToken"]?.ToString() : "";
+            string sendUrl = config.ContainsKey("sendUrl") ? config["sendUrl"]?.ToString() : "";
+            if (string.IsNullOrEmpty(token) || string.IsNullOrEmpty(sendUrl)) return;
+
+            string recipientId = GetPlatformUserId(conversationId);
+            if (string.IsNullOrEmpty(recipientId)) return;
+
+            var body = new { recipient_id = recipientId, message = new { text = content } };
+            PostJson(sendUrl, new JavaScriptSerializer().Serialize(body),
+                new Dictionary<string, string> { { "Authorization", "Bearer " + token } });
+        }
+
         private string GetPlatformUserId(long conversationId)
         {
             DataTable dt = _code.DatabaseQuerySafe(_connStr,
@@ -483,8 +676,10 @@ namespace Take_Time_BangPhra.Services
 
                         string textConfirm = aiSvc.GenerateBookingConfirmationText(reservationId);
                         _code.DatabaseInsertSafe(_connStr,
-                            @"INSERT INTO OmniChannel_Messages (ConversationID, Direction, SenderName, MessageType, Content, IsRead, DeliveryStatus, IsAIGenerated, AISource, Created_Date)
-                              VALUES (@ConvId, 'OUT', N'AI Assistant', 'TEXT', @Content, 1, 'SENT', 1, 'BOOKING_CONFIRM', GETDATE())",
+                            "INSERT INTO OmniChannel_Messages (ConversationID, Direction, SenderName, MessageType, Content, IsRead, DeliveryStatus"
+                            + (HasAiColumns() ? ", IsAIGenerated, AISource" : "") + ", Created_Date) "
+                            + "VALUES (@ConvId, 'OUT', N'AI Assistant', 'TEXT', @Content, 1, 'SENT'"
+                            + (HasAiColumns() ? ", 1, 'BOOKING_CONFIRM'" : "") + ", GETDATE())",
                             new Dictionary<string, object>
                             {
                                 { "@ConvId", conversationId },
@@ -530,8 +725,10 @@ namespace Take_Time_BangPhra.Services
                         DeliverLineFlexMessage(conversationId, flexJson, "Booking #" + reservationId + " - " + newStatus);
 
                         _code.DatabaseInsertSafe(_connStr,
-                            @"INSERT INTO OmniChannel_Messages (ConversationID, Direction, SenderName, MessageType, Content, IsRead, DeliveryStatus, IsAIGenerated, AISource, Created_Date)
-                              VALUES (@ConvId, 'OUT', N'AI Assistant', 'TEXT', @Content, 1, 'SENT', 1, 'BOOKING_STATUS', GETDATE())",
+                            "INSERT INTO OmniChannel_Messages (ConversationID, Direction, SenderName, MessageType, Content, IsRead, DeliveryStatus"
+                            + (HasAiColumns() ? ", IsAIGenerated, AISource" : "") + ", Created_Date) "
+                            + "VALUES (@ConvId, 'OUT', N'AI Assistant', 'TEXT', @Content, 1, 'SENT'"
+                            + (HasAiColumns() ? ", 1, 'BOOKING_STATUS'" : "") + ", GETDATE())",
                             new Dictionary<string, object>
                             {
                                 { "@ConvId", conversationId },
@@ -598,5 +795,11 @@ namespace Take_Time_BangPhra.Services
     {
         public bool Success { get; set; }
         public string Error { get; set; }
+
+        /// <summary>สถานะส่งออกจริง (SENT / FAILED) — บันทึกได้เสมอ ไม่ได้แปลว่าส่งถึงลูกค้า</summary>
+        public string DeliveryStatus { get; set; }
+
+        /// <summary>ข้อความเตือนเมื่อบันทึกได้แต่ส่งออกไม่สำเร็จ (null = ปกติ)</summary>
+        public string Warning { get; set; }
     }
 }

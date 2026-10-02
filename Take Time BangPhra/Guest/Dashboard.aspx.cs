@@ -30,11 +30,42 @@ namespace Take_Time_BangPhra.Guest
                 return;
             }
 
+            ApplyFeatureToggles();
+
             if (!IsPostBack)
             {
                 LoadGuestInfo();
                 LoadQuickStats();
             }
+        }
+
+        /// <summary>ซ่อนการ์ด/ปุ่มของโมดูลที่ปิดไว้ (ตั้งค่าระบบ → หมวดฟีเจอร์)</summary>
+        private void ApplyFeatureToggles()
+        {
+            try
+            {
+                bool rs = Feature.On("RoomService");
+                bool hk = Feature.On("Housekeeping");
+                bool act = Feature.On("Activities");
+                bool pts = Feature.On("Loyalty");
+                bool rev = Feature.On("Reviews");
+                bool chat = Feature.On("Chat");
+
+                phQaRoomService.Visible = rs;
+                phSvcRoomService.Visible = rs;
+                phBnRoomService.Visible = rs;
+                phQaHousekeeping.Visible = hk;
+                phSvcHousekeeping.Visible = hk;
+                phSvcActivities.Visible = act;
+                phSvcActivityBooking.Visible = act;
+                phBnActivities.Visible = act;
+                phSvcPoints.Visible = pts;
+                phPromoReview.Visible = rev;
+                phSvcReview.Visible = rev;
+                phBnReview.Visible = rev;
+                phSvcChat.Visible = chat;
+            }
+            catch { /* ยังไม่มีตาราง config → โชว์ครบตามเดิม */ }
         }
 
         /// <summary>

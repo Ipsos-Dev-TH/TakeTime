@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.SqlClient;
@@ -63,14 +63,23 @@ public class LeaveService
             using (SqlCommand cmd = new SqlCommand())
             {
                 cmd.Connection = conn;
-                cmd.CommandText = @"
-                    SELECT
-                        ID, LeaveTypeName, LeaveTypeCode, Description,
-                        DeductSalary, RequiresMedicalCert, AnnualQuota,
-                        RequiresApproval, IsActive, DisplayOrder
-                    FROM Leave_Types
-                    WHERE IsActive = 1
-                    ORDER BY DisplayOrder, LeaveTypeName";
+                // คอลัมน์กฎใบรับรองแพทย์เพิ่งมีใน PHASE19_Migration_14 — ยังไม่รันก็ต้องไม่พัง
+                cmd.CommandText = HasMedCertColumns()
+                    ? @"SELECT ID, LeaveTypeName, LeaveTypeCode, Description,
+                               DeductSalary, RequiresMedicalCert, AnnualQuota,
+                               RequiresApproval, IsActive, DisplayOrder,
+                               MedicalCertAfterDays, NoCertAction
+                          FROM Leave_Types
+                         WHERE IsActive = 1
+                         ORDER BY DisplayOrder, LeaveTypeName"
+                    : @"SELECT ID, LeaveTypeName, LeaveTypeCode, Description,
+                               DeductSalary, RequiresMedicalCert, AnnualQuota,
+                               RequiresApproval, IsActive, DisplayOrder,
+                               CAST(NULL AS DECIMAL(5,2)) AS MedicalCertAfterDays,
+                               'BLOCK' AS NoCertAction
+                          FROM Leave_Types
+                         WHERE IsActive = 1
+                         ORDER BY DisplayOrder, LeaveTypeName";
 
                 using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
                 {
@@ -117,13 +126,20 @@ public class LeaveService
             using (SqlCommand cmd = new SqlCommand())
             {
                 cmd.Connection = conn;
-                cmd.CommandText = @"
-                    SELECT
-                        ID, LeaveTypeName, LeaveTypeCode, Description,
-                        DeductSalary, RequiresMedicalCert, AnnualQuota,
-                        RequiresApproval, IsActive, DisplayOrder
-                    FROM Leave_Types
-                    ORDER BY DisplayOrder, LeaveTypeName";
+                cmd.CommandText = HasMedCertColumns()
+                    ? @"SELECT ID, LeaveTypeName, LeaveTypeCode, Description,
+                               DeductSalary, RequiresMedicalCert, AnnualQuota,
+                               RequiresApproval, IsActive, DisplayOrder,
+                               MedicalCertAfterDays, NoCertAction
+                          FROM Leave_Types
+                         ORDER BY DisplayOrder, LeaveTypeName"
+                    : @"SELECT ID, LeaveTypeName, LeaveTypeCode, Description,
+                               DeductSalary, RequiresMedicalCert, AnnualQuota,
+                               RequiresApproval, IsActive, DisplayOrder,
+                               CAST(NULL AS DECIMAL(5,2)) AS MedicalCertAfterDays,
+                               'BLOCK' AS NoCertAction
+                          FROM Leave_Types
+                         ORDER BY DisplayOrder, LeaveTypeName";
 
                 using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
                 {
@@ -146,7 +162,9 @@ public class LeaveService
         bool requiresMedicalCert,
         decimal annualQuota,
         bool requiresApproval,
-        int displayOrder)
+        int displayOrder,
+        decimal? medicalCertAfterDays = null,
+        string noCertAction = "BLOCK")
     {
         try
         {
@@ -156,12 +174,19 @@ public class LeaveService
                 using (SqlCommand cmd = new SqlCommand())
                 {
                     cmd.Connection = conn;
-                    cmd.CommandText = @"
-                        INSERT INTO Leave_Types
-                        (LeaveTypeName, LeaveTypeCode, Description, DeductSalary,
-                         RequiresMedicalCert, AnnualQuota, RequiresApproval, IsActive, DisplayOrder)
-                        VALUES
-                        (@Name, @Code, @Desc, @Deduct, @MedCert, @Quota, @Approval, 1, @Order)";
+                    cmd.CommandText = HasMedCertColumns()
+                        ? @"INSERT INTO Leave_Types
+                            (LeaveTypeName, LeaveTypeCode, Description, DeductSalary,
+                             RequiresMedicalCert, AnnualQuota, RequiresApproval, IsActive, DisplayOrder,
+                             MedicalCertAfterDays, NoCertAction)
+                            VALUES
+                            (@Name, @Code, @Desc, @Deduct, @MedCert, @Quota, @Approval, 1, @Order,
+                             @CertAfter, @NoCert)"
+                        : @"INSERT INTO Leave_Types
+                            (LeaveTypeName, LeaveTypeCode, Description, DeductSalary,
+                             RequiresMedicalCert, AnnualQuota, RequiresApproval, IsActive, DisplayOrder)
+                            VALUES
+                            (@Name, @Code, @Desc, @Deduct, @MedCert, @Quota, @Approval, 1, @Order)";
 
                     cmd.Parameters.AddWithValue("@Name", leaveTypeName);
                     cmd.Parameters.AddWithValue("@Code", leaveTypeCode ?? "");
@@ -171,6 +196,13 @@ public class LeaveService
                     cmd.Parameters.AddWithValue("@Quota", annualQuota);
                     cmd.Parameters.AddWithValue("@Approval", requiresApproval);
                     cmd.Parameters.AddWithValue("@Order", displayOrder);
+                    if (HasMedCertColumns())
+                    {
+                        cmd.Parameters.AddWithValue("@CertAfter",
+                            medicalCertAfterDays.HasValue ? (object)medicalCertAfterDays.Value : DBNull.Value);
+                        cmd.Parameters.AddWithValue("@NoCert",
+                            string.IsNullOrEmpty(noCertAction) ? "BLOCK" : noCertAction);
+                    }
 
                     cmd.ExecuteNonQuery();
                     return (true, "สร้างประเภทการลาสำเร็จ");
@@ -196,7 +228,9 @@ public class LeaveService
         decimal annualQuota,
         bool requiresApproval,
         bool isActive,
-        int displayOrder)
+        int displayOrder,
+        decimal? medicalCertAfterDays = null,
+        string noCertAction = "BLOCK")
     {
         try
         {
@@ -218,6 +252,10 @@ public class LeaveService
                             IsActive = @Active,
                             DisplayOrder = @Order
                         WHERE ID = @ID";
+                    if (HasMedCertColumns())
+                        cmd.CommandText = cmd.CommandText.Replace(
+                            "DisplayOrder = @Order",
+                            "DisplayOrder = @Order, MedicalCertAfterDays = @CertAfter, NoCertAction = @NoCert");
 
                     cmd.Parameters.AddWithValue("@ID", leaveTypeId);
                     cmd.Parameters.AddWithValue("@Name", leaveTypeName);
@@ -229,6 +267,13 @@ public class LeaveService
                     cmd.Parameters.AddWithValue("@Approval", requiresApproval);
                     cmd.Parameters.AddWithValue("@Active", isActive);
                     cmd.Parameters.AddWithValue("@Order", displayOrder);
+                    if (HasMedCertColumns())
+                    {
+                        cmd.Parameters.AddWithValue("@CertAfter",
+                            medicalCertAfterDays.HasValue ? (object)medicalCertAfterDays.Value : DBNull.Value);
+                        cmd.Parameters.AddWithValue("@NoCert",
+                            string.IsNullOrEmpty(noCertAction) ? "BLOCK" : noCertAction);
+                    }
 
                     cmd.ExecuteNonQuery();
                     return (true, "อัพเดทประเภทการลาสำเร็จ");
@@ -574,6 +619,35 @@ public class LeaveService
     /// <summary>
     /// Create leave request
     /// </summary>
+    /// <summary>
+    /// ตาราง Leave_Types มีคอลัมน์กฎใบรับรองแพทย์แล้วหรือยัง (PHASE19_Migration_14)
+    /// ยังไม่รันไฟล์ก็ทำงานได้ตามกฎเดิม — ตรวจครั้งเดียวแล้วจำไว้
+    /// </summary>
+    private static bool? _hasMedCertCols;
+    private bool HasMedCertColumns()
+    {
+        if (_hasMedCertCols.HasValue) return _hasMedCertCols.Value;
+        try
+        {
+            using (SqlConnection c = new SqlConnection(connectionString))
+            {
+                c.Open();
+                using (SqlCommand k = new SqlCommand(@"
+                    SELECT COUNT(*) FROM sys.columns
+                     WHERE object_id = OBJECT_ID('dbo.Leave_Types')
+                       AND name IN ('MedicalCertAfterDays','NoCertAction')", c))
+                {
+                    _hasMedCertCols = Convert.ToInt32(k.ExecuteScalar()) >= 2;
+                }
+            }
+        }
+        catch { _hasMedCertCols = false; }
+        return _hasMedCertCols.Value;
+    }
+
+    /// <summary>ล้างค่าที่จำไว้ — เรียกหลังรัน migration โดยไม่ต้องรีสตาร์ทเว็บ</summary>
+    public static void InvalidateSchemaCache() { _hasMedCertCols = null; }
+
     public LeaveOperationResultLong CreateLeaveRequest(
         short adminId, byte leaveTypeId, DateTime startDate, DateTime endDate,
         decimal totalDays, string reason, string medicalCertPath = null,
@@ -598,13 +672,23 @@ public class LeaveService
                         string requestNumber = "LR-" + DateTime.Now.ToString("yyMMdd") + "-" + adminId + "-" + DateTime.Now.ToString("ss");
 
                         // Get leave type details
-                        cmd.CommandText = @"
-                            SELECT DeductSalary, RequiresMedicalCert
-                            FROM Leave_Types WHERE ID = @LeaveTypeID";
+                        // MedicalCertAfterDays / NoCertAction มาจาก PHASE19_Migration_14
+                        // ยังไม่รันไฟล์ = ไม่มีคอลัมน์ → ใช้กฎเดิม (ไม่พัง)
+                        // ⚠ ใส่ CASE WHEN COL_LENGTH(...) ใน SELECT ไม่ช่วย เพราะ SQL Server
+                        //    ตรวจชื่อคอลัมน์ตอน parse ทั้ง statement ⇒ ต้องแยก SQL สองชุด
+                        bool hasCertCols = HasMedCertColumns();
+                        cmd.CommandText = hasCertCols
+                            ? @"SELECT DeductSalary, RequiresMedicalCert,
+                                       MedicalCertAfterDays, NoCertAction
+                                  FROM Leave_Types WHERE ID = @LeaveTypeID"
+                            : @"SELECT DeductSalary, RequiresMedicalCert
+                                  FROM Leave_Types WHERE ID = @LeaveTypeID";
                         cmd.Parameters.AddWithValue("@LeaveTypeID", leaveTypeId);
 
                         bool deductSalary = false;
                         bool requiresMedicalCert = false;
+                        decimal? certAfterDays = null;
+                        string noCertAction = "BLOCK";
 
                         using (SqlDataReader reader = cmd.ExecuteReader())
                         {
@@ -612,14 +696,46 @@ public class LeaveService
                             {
                                 deductSalary = Convert.ToBoolean(reader["DeductSalary"]);
                                 requiresMedicalCert = Convert.ToBoolean(reader["RequiresMedicalCert"]);
+                                if (hasCertCols)
+                                {
+                                    if (reader["MedicalCertAfterDays"] != DBNull.Value)
+                                        certAfterDays = Convert.ToDecimal(reader["MedicalCertAfterDays"]);
+                                    string act = Convert.ToString(reader["NoCertAction"]);
+                                    if (!string.IsNullOrEmpty(act)) noCertAction = act.Trim().ToUpperInvariant();
+                                }
                             }
                         }
 
-                        // Check if medical certificate is required but not provided
-                        if (requiresMedicalCert && string.IsNullOrEmpty(medicalCertPath))
+                        // ── ใบรับรองแพทย์: ต้องใช้จริงไหมกับ "จำนวนวันที่ลาครั้งนี้" ──
+                        //
+                        // MedicalCertAfterDays = เกินกี่วันถึงต้องใช้
+                        //   NULL → ต้องใช้ทุกกรณี (พฤติกรรมเดิมก่อนมีคอลัมน์นี้)
+                        //   1    → ลา 1 วันไม่ต้องใช้ · ลา 2 วันขึ้นไปต้องใช้
+                        bool certNeeded = requiresMedicalCert
+                            && (!certAfterDays.HasValue || totalDays > certAfterDays.Value);
+                        bool certMissing = certNeeded && string.IsNullOrEmpty(medicalCertPath);
+
+                        if (certMissing && noCertAction != "DEDUCT")
                         {
+                            // BLOCK = ปฏิเสธคำขอไปเลย (พฤติกรรมเดิม)
                             transaction.Rollback();
-                            return new LeaveOperationResultLong(false, "Medical certificate is required for this leave type", 0);
+                            return new LeaveOperationResultLong(false,
+                                "ลาเกิน " + (certAfterDays.HasValue ? certAfterDays.Value.ToString("0.##") : "0")
+                                + " วัน ต้องแนบใบรับรองแพทย์", 0);
+                        }
+
+                        // DEDUCT = รับคำขอไว้ แต่หักเงินทั้งจำนวนวันที่ลา
+                        // (ไม่ใช่หักเฉพาะวันที่เกินเกณฑ์ — ตามกฎที่ตั้งไว้ว่า "ไม่มีใบรับรอง = หักหมด")
+                        bool deductedForMissingCert = certMissing;
+                        if (deductedForMissingCert)
+                        {
+                            deductSalary = true;
+                            // ต่อท้ายเหตุผลให้เห็นชัดว่าโดนหักเพราะอะไร ไม่งั้นพนักงานเห็นแต่
+                            // ยอดหักโผล่มาโดยไม่รู้สาเหตุ แล้วมาเถียงกันตอนออกสลิป
+                            string why = "[ไม่ได้แนบใบรับรองแพทย์ (ลาเกิน "
+                                + (certAfterDays.HasValue ? certAfterDays.Value.ToString("0.##") : "0")
+                                + " วันต้องแนบ) จึงหักเงินตามระเบียบ]";
+                            reason = string.IsNullOrEmpty(reason) ? why : (reason + " " + why);
                         }
 
                         // Calculate deduction amount if applicable

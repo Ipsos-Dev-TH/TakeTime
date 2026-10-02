@@ -257,6 +257,45 @@
             color: #f39c12;
             font-size: 20px;
         }
+
+        /* ป้ายสั้นในข้อมูลการจอง (สัตว์เลี้ยง / วิธีเก็บเงิน OTA) — สีชุดเดียวกับตารางรายวัน */
+        .stay-badge {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 11px;
+            font-size: 13px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .sb-ok    { background: #e8f5e9; color: #1b7a43; }
+        .sb-warn  { background: #fff3e0; color: #c25e00; }
+        .sb-muted { background: #f1f1f1; color: #6b6b6b; }
+
+        /* มือถือ: ข้อมูลการจองเรียงคอลัมน์เดียว, ลดขอบ */
+        @media (max-width: 600px) {
+            .checkout-container {
+                margin: 10px auto;
+                padding: 10px;
+            }
+
+            .checkout-card {
+                padding: 15px;
+            }
+
+            .info-section {
+                grid-template-columns: 1fr;
+            }
+
+            .summary-row {
+                flex-wrap: wrap;
+                gap: 4px;
+            }
+
+            .star {
+                font-size: 32px;
+            }
+        }
     </style>
 
     <div class="checkout-container">
@@ -313,6 +352,9 @@
                     <span class="info-label">วันเช็คเอาท์</span>
                     <span class="info-value"><asp:Label ID="lblCheckoutDate" runat="server"></asp:Label></span>
                 </div>
+
+                <%-- 🐾 สัตว์เลี้ยง / วิธีเก็บเงินของใบ OTA (แสดงเฉพาะเมื่อมีข้อมูล) --%>
+                <asp:Literal ID="litStayExtras" runat="server"></asp:Literal>
             </div>
         </div>
 
@@ -341,6 +383,48 @@
             </div>
         </asp:Panel>
 
+        <!-- วงเงินประกันความเสียหาย (แสดงเฉพาะเมื่อการจองนี้มีวงเงินกันไว้) -->
+        <asp:Panel ID="pnlSecurityHold" runat="server" CssClass="checkout-card" Visible="false"
+            style="border-left:4px solid #1d6fb8;">
+            <h3 style="margin:0 0 6px;">🛡 วงเงินประกันความเสียหาย</h3>
+            <div style="color:#5a6b62;font-size:13.5px;margin-bottom:10px;">
+                <asp:Literal ID="litHoldInfo" runat="server" />
+            </div>
+            <asp:Literal ID="litHoldMsg" runat="server" />
+            <asp:Panel ID="pnlHoldActions" runat="server">
+                <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+                    <div>
+                        <label style="display:block;font-weight:600;font-size:13px;margin-bottom:4px;">
+                            ค่าเสียหายที่จะตัด (บาท)</label>
+                        <asp:TextBox ID="txtCaptureAmount" runat="server" TextMode="Number" step="0.01"
+                            style="padding:9px 11px;border:1.5px solid #dbe3de;border-radius:8px;width:150px;font-size:16px;" />
+                    </div>
+                    <div style="flex:1;min-width:180px;">
+                        <label style="display:block;font-weight:600;font-size:13px;margin-bottom:4px;">
+                            เหตุผล/รายละเอียดความเสียหาย</label>
+                        <asp:TextBox ID="txtCaptureReason" runat="server" placeholder="เช่น ผ้าเช็ดตัวหาย 2 ผืน"
+                            style="width:100%;padding:9px 11px;border:1.5px solid #dbe3de;border-radius:8px;font-size:14px;" />
+                    </div>
+                    <%-- เงินประกันโอน: เลขอ้างอิง/บัญชีที่โอนคืน (บันทึกคู่กับผู้ทำ+เวลา) --%>
+                    <asp:Panel ID="pnlHoldRefundRef" runat="server" Visible="false" style="flex:1;min-width:200px;">
+                        <label style="display:block;font-weight:600;font-size:13px;margin-bottom:4px;">
+                            เลขอ้างอิงการโอนคืน / บัญชีลูกค้า</label>
+                        <asp:TextBox ID="txtHoldRefundRef" runat="server" MaxLength="100"
+                            placeholder="เช่น KBANK 123-4-56789-0 · รายการ 0915"
+                            style="width:100%;padding:9px 11px;border:1.5px solid #dbe3de;border-radius:8px;font-size:14px;" />
+                    </asp:Panel>
+                    <asp:Button ID="btnCaptureHold" runat="server" Text="💥 ตัดค่าเสียหาย"
+                        OnClick="btnCaptureHold_Click" UseSubmitBehavior="false"
+                        OnClientClick="if(!confirm('ตัดค่าเสียหายจากวงเงินประกันตามยอดที่กรอก? ส่วนที่เหลือจะคืนลูกค้าทันที'))return false;this.disabled=true;"
+                        style="padding:11px 16px;border:0;border-radius:9px;background:#c0392b;color:#fff;font-weight:600;cursor:pointer;min-height:44px;" />
+                    <asp:Button ID="btnReleaseHold" runat="server" Text="✅ คืนวงเงินทั้งหมด (ไม่มีความเสียหาย)"
+                        OnClick="btnReleaseHold_Click" UseSubmitBehavior="false"
+                        OnClientClick="if(!confirm('คืนวงเงินประกันทั้งหมดให้ลูกค้า?'))return false;this.disabled=true;"
+                        style="padding:11px 16px;border:0;border-radius:9px;background:#1b7a4b;color:#fff;font-weight:600;cursor:pointer;min-height:44px;" />
+                </div>
+            </asp:Panel>
+        </asp:Panel>
+
         <!-- Checkout Checklist -->
         <div class="checkout-card">
             <div class="card-header">
@@ -355,6 +439,11 @@
                         <div class="checklist-description">
                             ตรวจสอบความเสียหายของห้อง อุปกรณ์ และเฟอร์นิเจอร์
                         </div>
+                        <div style="margin-top:6px;">
+                            <label style="font-size:0.85em;color:#c0392b;">ค่าเสียหาย (บาท) — กรอกเมื่อพบความเสียหาย (ไม่ติ๊กช่องนี้):</label>
+                            <asp:TextBox ID="txtDamageAmount" runat="server" TextMode="Number" step="0.01" min="0"
+                                Style="max-width:160px;display:inline-block;" placeholder="0.00" />
+                        </div>
                     </div>
                 </div>
 
@@ -364,6 +453,11 @@
                         <div class="checklist-label">ตรวจนับอุปกรณ์ครบถ้วน</div>
                         <div class="checklist-description">
                             ผ้าเช็ดตัว ผ้าปูที่นอน หมอน ไม้แขวนเสื้อ รีโมท ฯลฯ
+                        </div>
+                        <div style="margin-top:6px;">
+                            <label style="font-size:0.85em;color:#c0392b;">ค่าอุปกรณ์สูญหาย (บาท) — กรอกเมื่อของหาย (ไม่ติ๊กช่องนี้):</label>
+                            <asp:TextBox ID="txtMissingAmount" runat="server" TextMode="Number" step="0.01" min="0"
+                                Style="max-width:160px;display:inline-block;" placeholder="0.00" />
                         </div>
                     </div>
                 </div>

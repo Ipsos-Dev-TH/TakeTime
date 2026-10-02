@@ -26,6 +26,7 @@ namespace Take_Time_BangPhra.Product
         AddressHelper addressHelper;
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.SalesStock)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             addressHelper = new AddressHelper(conn);
 
             try
@@ -190,16 +191,23 @@ namespace Take_Time_BangPhra.Product
 
         protected void Button3_Click(object sender, EventArgs e)
         {
+            // ⛔ ช่องค้นหาว่าง = ไม่มีอะไรให้เพิ่ม (เดิมค้นด้วยค่าว่างจะไปแมตช์สินค้าที่ไม่มีบาร์โค้ด
+            //    แล้วเพิ่มสินค้านั้นเข้ารายการเองโดยผู้ใช้ไม่ได้สั่ง)
+            string searchText = (TextBox1.Text ?? "").Trim();
+            if (searchText.Length == 0) return;
+
             // SECURE: Product lookup with parameterized query
             var productParams = new Dictionary<string, object>
             {
-                { "@ProductName", TextBox1.Text ?? "" },
-                { "@Barcode", TextBox1.Text ?? "" }
+                { "@ProductName", searchText },
+                { "@Barcode", searchText }
             };
 
+            // เทียบ Barcode เฉพาะแถวที่มีบาร์โค้ดจริง — สินค้าที่บาร์โค้ดว่าง/NULL ห้ามติดมากับการค้น
             DataTable dtProduct = code.DatabaseQuerySafe(conn,
                 "SELECT * FROM [Taketime].[dbo].[Product] " +
-                "WHERE [Product_Name] = @ProductName OR Barcode = @Barcode",
+                "WHERE [Product_Name] = @ProductName " +
+                "   OR (Barcode = @Barcode AND LTRIM(RTRIM(ISNULL(Barcode,''))) <> '')",
                 productParams);
             if (dtProduct.Rows.Count > 0)
             {
@@ -283,7 +291,8 @@ namespace Take_Time_BangPhra.Product
                 try
                 {
                     var config = new Take_Time_BangPhra.Integration.AccountingConfig(conn);
-                    if (config.IsConfigured && config.Enabled && !config.IsVoucherLocal)
+                    // ปิด JE รับของ (invoice-only): ให้ใบกำกับซื้อที่ OCR โพสต์บัญชีทั้งหมดแทน
+                    if (config.IsConfigured && config.Enabled && !config.IsVoucherLocal && !config.IsStockInSkipJournal)
                     {
                         var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(conn);
                         DateTime receiveDate = DateTime.Now;
@@ -292,7 +301,9 @@ namespace Take_Time_BangPhra.Product
                             int productId = Convert.ToInt32(row["ID"]);
                             string productName = row["Product_Name"]?.ToString() ?? "";
                             decimal qty = Convert.ToDecimal(row["Amount"]);
-                            decimal cost = Convert.ToDecimal(row["PricePerUnit"]);
+                            // dtOrder ไม่มีคอลัมน์ "PricePerUnit" (schema: ...,Sell_Price,Price_Total,...)
+                            // เดิมอ่าน row["PricePerUnit"] → throw ทุกครั้ง → catch เงียบ → stock-in ไม่เคย sync
+                            decimal cost = Convert.ToDecimal(row["Sell_Price"]);
                             sync.EnqueueStockIn(productId, productName, qty, cost, receiveDate, "ระบบจัดซื้อ TakeTime", null, false,
                                 $"PIN-{productId}-{receiveDate:yyyyMMddHHmmss}");
                         }

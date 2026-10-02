@@ -38,6 +38,9 @@ namespace Take_Time_BangPhra.Payment
                 ddlPaymentMethod.DataValueField = "ID";
                 ddlPaymentMethod.DataBind();
 
+                // ไม่ให้เลือกช่องทางเกตเวย์ (PaySo/Omise — ลงบันทึกอัตโนมัติเมื่อเกตเวย์ยืนยัน) และช่องที่ปิด "พนักงานเห็น"
+                Payments.PaymentChannelCatalog.RemoveNonStaffItems(ddlPaymentMethod.Items, true, false);
+
                 // Add default item at the beginning
                 ddlPaymentMethod.Items.Insert(0, new ListItem("-- เลือกวิธีการชำระ --", ""));
             }
@@ -118,6 +121,8 @@ namespace Take_Time_BangPhra.Payment
 
                     // Set max amount in textbox
                     txtPaymentAmount.Text = remainingBalance.ToString("0.00");
+
+                    ShowOnlinePayLink(reservationId, row["Customer_MobilePhone"].ToString(), remainingBalance);
                 }
                 else
                 {
@@ -227,6 +232,32 @@ namespace Take_Time_BangPhra.Payment
             catch (Exception ex)
             {
                 ShowError("เกิดข้อผิดพลาด: " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// ลิงก์ให้ลูกค้าจ่ายเอง — โผล่เฉพาะเมื่อเปิดฟีเจอร์ "รับชำระเงินออนไลน์"
+        /// ปิดอยู่ = ไม่มีอะไรเปลี่ยนบนหน้านี้เลย
+        /// </summary>
+        private void ShowOnlinePayLink(int reservationId, string customerPhone, decimal remaining)
+        {
+            try
+            {
+                var svc = new Payments.OnlinePaymentService(connectionString);
+                if (!svc.IsAvailable || remaining <= 0) return;
+
+                string url = Payments.PaymentUrls.SiteBase()
+                    + "/Payment/Pay?src=" + Payments.PaymentSource.Reservation
+                    + "&id=" + reservationId
+                    + "&ph=" + Uri.EscapeDataString(customerPhone ?? "");
+
+                txtPayLink.Text = url;
+                lnkOpenPay.NavigateUrl = url;
+                pnlOnlineLink.Visible = true;
+            }
+            catch
+            {
+                // ยังไม่ได้ติดตั้ง/ตั้งค่า → ไม่แสดงอะไร หน้าเดิมทำงานปกติ
             }
         }
 

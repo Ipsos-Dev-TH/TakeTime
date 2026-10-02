@@ -33,6 +33,15 @@ namespace Take_Time_BangPhra
         protected global::System.Web.UI.WebControls.Label Label1;
 
         /// <summary>
+        /// litNextSteps control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Literal litNextSteps;
+
+        /// <summary>
         /// Label2 control.
         /// </summary>
         /// <remarks>
@@ -184,5 +193,41 @@ namespace Take_Time_BangPhra
         /// To modify move field declaration from designer file to code-behind file.
         /// </remarks>
         protected global::System.Web.UI.WebControls.Repeater rptReceipts;
+
+        /// <summary>
+        /// pnlPolicies control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Panel pnlPolicies;
+
+        /// <summary>
+        /// litPolicies control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Literal litPolicies;
+
+        /// <summary>
+        /// pnlPetInfo control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Panel pnlPetInfo;
+
+        /// <summary>
+        /// litPetInfo control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Literal litPetInfo;
     }
 }
