@@ -260,7 +260,7 @@
     <div class="card">
         <h3>&#x1F4DD; รีวิวล่าสุด</h3>
         <div class="filter-bar">
-            <select id="filterSource"><option value="">ทุกแหล่ง</option><option value="INTERNAL">ภายใน</option><option value="GOOGLE">Google</option><option value="FACEBOOK">Facebook</option></select>
+            <select id="filterSource"><option value="">ทุกแหล่ง</option></select>
             <select id="filterSentiment"><option value="">ทุกความรู้สึก</option><option value="POSITIVE">เชิงบวก</option><option value="NEGATIVE">เชิงลบ</option><option value="NEUTRAL">กลาง</option><option value="MIXED">ผสม</option></select>
             <select id="filterMinRating"><option value="">คะแนนต่ำสุด</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select>
             <select id="filterMaxRating"><option value="">คะแนนสูงสุด</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select>
@@ -1140,10 +1140,29 @@
         }).catch(function (err) { hideLoading(); showToast('เกิดข้อผิดพลาด: ' + err.message, 'error'); });
     }
 
+    // ===== Source filter (dynamic: only sources that actually have reviews) =====
+    function loadSourceFilter() {
+        apiCall('getPlatforms').then(function (res) {
+            if (!res.success || !res.data) return;
+            var sel = document.getElementById('filterSource');
+            var cur = sel.value;
+            var html = '<option value="">ทุกแหล่ง</option>';
+            res.data.forEach(function (p) {
+                var code = String(p.code || '').replace(/[^A-Za-z0-9_.\-]/g, '');
+                if (!code) return;
+                var name = String(p.name || code).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; });
+                html += '<option value="' + code + '">' + name + ' (' + (p.count || 0) + ')</option>';
+            });
+            sel.innerHTML = html;
+            sel.value = cur;
+        }).catch(function () { /* keep "ทุกแหล่ง" */ });
+    }
+
     // ===== Init =====
     document.addEventListener('DOMContentLoaded', function () {
         loadDashboard();
         loadSources();
+        loadSourceFilter();
     });
 </script>
 </asp:Content>

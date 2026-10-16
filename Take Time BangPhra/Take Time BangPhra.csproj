@@ -518,6 +518,7 @@
     <Content Include="Admin\Settings\ProductAccounting.aspx" />
     <Content Include="Admin\CRM\MemberVouchers.aspx" />
     <Content Include="Admin\CRM\MemberHub.aspx" />
+    <Content Include="Admin\CRM\ReviewAnalytics.aspx" />
     <Content Include="Member\Login.aspx" />
     <Content Include="Member\Card.aspx" />
     <Content Include="Admin\Settings\SystemSettings.aspx" />
@@ -1425,6 +1426,13 @@
     <Compile Include="Admin\CRM\MemberVouchers.aspx.designer.cs">
       <DependentUpon>MemberVouchers.aspx</DependentUpon>
     </Compile>
+    <Compile Include="Admin\CRM\ReviewAnalytics.aspx.cs">
+      <DependentUpon>ReviewAnalytics.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\CRM\ReviewAnalytics.aspx.designer.cs">
+      <DependentUpon>ReviewAnalytics.aspx</DependentUpon>
+    </Compile>
     <Compile Include="Member\Login.aspx.cs">
       <DependentUpon>Login.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>
@@ -1470,6 +1478,7 @@
     </Compile>
     <Compile Include="Class\AppCfg.cs" />
     <Compile Include="Class\ReservationBalance.cs" />
+    <Compile Include="Class\Reviews\ReviewQuery.cs" />
     <Compile Include="Class\BookingPolicy.cs" />
     <Compile Include="Class\PetStay.cs" />
     <Compile Include="Admin\LineLinkCallback.aspx.cs">

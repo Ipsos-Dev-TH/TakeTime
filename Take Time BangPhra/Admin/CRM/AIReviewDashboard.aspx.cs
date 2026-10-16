@@ -113,6 +113,9 @@ namespace Take_Time_BangPhra.Admin.CRM
                 case "getSources":
                     result = HandleGetSources();
                     break;
+                case "getPlatforms":
+                    result = HandleGetPlatforms();
+                    break;
                 case "updateSource":
                     result = HandleUpdateSource(data);
                     break;
@@ -430,6 +433,19 @@ namespace Take_Time_BangPhra.Admin.CRM
             catch (Exception ex)
             {
                 return new Dictionary<string, object> { { "success", false }, { "message", "โหลดแหล่งที่มาไม่สำเร็จ: " + ex.Message } };
+            }
+        }
+
+        /// <summary>แหล่งรีวิวที่มีข้อมูลจริง (แทน dropdown ที่ hard-code ไว้ 3 แหล่ง)</summary>
+        private Dictionary<string, object> HandleGetPlatforms()
+        {
+            try
+            {
+                return new Dictionary<string, object> { { "success", true }, { "data", Reviews.ReviewQuery.GetSourceCodeList(ConnStr) } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", "โหลดรายชื่อแหล่งรีวิวไม่สำเร็จ: " + ex.Message } };
             }
         }
 
