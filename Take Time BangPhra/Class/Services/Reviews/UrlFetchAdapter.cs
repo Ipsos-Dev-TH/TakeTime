@@ -33,7 +33,7 @@ namespace Take_Time_BangPhra.Services.Reviews
             string reason;
             if (!ReviewAiBudget.CanSpend(_conn, out reason)) throw new ReviewSourceSkippedException(reason);
 
-            var resp = ReviewHttp.Send("GET", url, null, null, new Dictionary<string, string>
+            var resp = ReviewHttp.GetPublic(url, new Dictionary<string, string>
             {
                 { "User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36" },
                 { "Accept", "text/html,application/xhtml+xml" },

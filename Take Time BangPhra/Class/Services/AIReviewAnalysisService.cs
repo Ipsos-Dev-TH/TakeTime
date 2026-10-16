@@ -386,8 +386,9 @@ END", null);
                     {
                         ExternalReviewId = realId ? platformReviewId : null,
                         ReviewerName = reviewerName,
-                        RatingRaw = rating > 0 && rating <= 5 ? (decimal?)Convert.ToDecimal(rating) : null,
-                        RatingScale = rating > 0 && rating <= 5 ? (decimal?)5m : null,
+                        // ≤ 5 = ดาว /5, 5–10 = คะแนน OTA /10 (เดิมเก็บดิบใน Rating) — 0/ผิดรูป = NULL
+                        RatingRaw = rating > 0 && rating <= 10 ? (decimal?)Convert.ToDecimal(rating) : null,
+                        RatingScale = rating > 0 && rating <= 5 ? (decimal?)5m : (rating > 5 && rating <= 10 ? (decimal?)10m : null),
                         Title = reviewTitle,
                         Text = reviewText,
                         ReviewDate = reviewDate

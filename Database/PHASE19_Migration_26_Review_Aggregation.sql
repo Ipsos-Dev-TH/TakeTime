@@ -254,7 +254,8 @@ BEGIN
     IF OBJECT_ID('dbo.vw_AI_Review_AllSources', 'V') IS NOT NULL
         DROP VIEW dbo.vw_AI_Review_AllSources;
 
-    EXEC('CREATE VIEW dbo.vw_AI_Review_AllSources AS
+    -- N'...' : ข้อความไทย (ข้อดี/ข้อเสีย) ในนิยาม view ต้องเป็น Unicode — literal ธรรมดาจะกลายเป็น ??? บน collation ที่ไม่ใช่ Thai
+    EXEC(N'CREATE VIEW dbo.vw_AI_Review_AllSources AS
     SELECT
         ''INTERNAL'' AS SourceCode,
         gr.ID,

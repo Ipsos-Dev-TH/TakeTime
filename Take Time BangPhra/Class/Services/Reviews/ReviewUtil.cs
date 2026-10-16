@@ -192,15 +192,19 @@ namespace Take_Time_BangPhra.Services.Reviews
         {
             public int Status;
             public string Body;
+            /// <summary>Location header (เมื่อ allowRedirect = false และได้ 3xx)</summary>
+            public string Location;
             public bool Ok { get { return Status >= 200 && Status < 300; } }
+            public bool IsRedirect { get { return Status >= 300 && Status < 400 && !string.IsNullOrEmpty(Location); } }
         }
 
         public static Response Send(string method, string url, string body = null, string contentType = null,
-            IDictionary<string, string> headers = null, int timeoutMs = 30000)
+            IDictionary<string, string> headers = null, int timeoutMs = 30000, bool allowRedirect = true)
         {
             try { ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12; } catch { }
             var req = (HttpWebRequest)WebRequest.Create(url);
             req.Method = method;
+            req.AllowAutoRedirect = allowRedirect;
             req.Timeout = timeoutMs;
             req.ReadWriteTimeout = timeoutMs;
             req.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
@@ -225,7 +229,7 @@ namespace Take_Time_BangPhra.Services.Reviews
             {
                 using (var resp = (HttpWebResponse)req.GetResponse())
                 using (var rd = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
-                    return new Response { Status = (int)resp.StatusCode, Body = rd.ReadToEnd() };
+                    return new Response { Status = (int)resp.StatusCode, Location = resp.Headers["Location"], Body = rd.ReadToEnd() };
             }
             catch (WebException wex)
             {
@@ -233,8 +237,68 @@ namespace Take_Time_BangPhra.Services.Reviews
                 if (r == null) throw;
                 using (r)
                 using (var rd = new StreamReader(r.GetResponseStream(), Encoding.UTF8))
-                    return new Response { Status = (int)r.StatusCode, Body = rd.ReadToEnd() };
+                    return new Response { Status = (int)r.StatusCode, Location = r.Headers["Location"], Body = rd.ReadToEnd() };
             }
+        }
+
+        /// <summary>
+        /// GET URL ที่ผู้ใช้กรอก (URL_FETCH) แบบกัน SSRF: ทุก hop (รวม redirect) ต้องผ่าน allow-list โดเมน
+        /// และ resolve ได้เฉพาะ IP สาธารณะ (ห้าม loopback / private / link-local / metadata) — ไม่ตาม redirect อัตโนมัติ
+        /// </summary>
+        public static Response GetPublic(string url, IDictionary<string, string> headers = null, int timeoutMs = 30000, int maxRedirects = 4)
+        {
+            string current = url;
+            for (int hop = 0; ; hop++)
+            {
+                Uri uri;
+                if (!IsAllowedPublicUrl(current) || !Uri.TryCreate(current, UriKind.Absolute, out uri) || !ResolvesToPublicAddresses(uri.DnsSafeHost))
+                    throw new ReviewSourceSkippedException("URL ไม่อยู่ในรายชื่อโดเมนที่อนุญาต หรือชี้ไป IP ภายใน (กัน SSRF): " + current);
+                var resp = Send("GET", current, null, null, headers, timeoutMs, false);
+                if (!resp.IsRedirect) return resp;
+                if (hop >= maxRedirects) throw new Exception("redirect มากเกินไป");
+                Uri next;
+                if (!Uri.TryCreate(uri, resp.Location, out next)) throw new Exception("redirect ไม่ถูกต้อง");
+                current = next.AbsoluteUri;
+            }
+        }
+
+        /// <summary>true เมื่อ host resolve ได้และทุก IP เป็นที่อยู่สาธารณะ</summary>
+        public static bool ResolvesToPublicAddresses(string host)
+        {
+            IPAddress[] addrs;
+            try { addrs = Dns.GetHostAddresses(host); }
+            catch { return false; }
+            if (addrs == null || addrs.Length == 0) return false;
+            foreach (var a in addrs)
+                if (!IsPublicAddress(a)) return false;
+            return true;
+        }
+
+        private static bool IsPublicAddress(IPAddress ip)
+        {
+            if (ip.IsIPv4MappedToIPv6) ip = ip.MapToIPv4();
+            if (IPAddress.IsLoopback(ip)) return false;
+            if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+            {
+                byte[] b = ip.GetAddressBytes();
+                if (b[0] == 0 || b[0] == 10 || b[0] == 127) return false;            // this-net / private / loopback
+                if (b[0] == 169 && b[1] == 254) return false;                         // link-local (cloud metadata)
+                if (b[0] == 172 && b[1] >= 16 && b[1] <= 31) return false;            // private
+                if (b[0] == 192 && b[1] == 168) return false;                         // private
+                if (b[0] == 100 && b[1] >= 64 && b[1] <= 127) return false;           // CGNAT
+                if (b[0] == 192 && b[1] == 0 && (b[2] == 0 || b[2] == 2)) return false;
+                if (b[0] == 198 && (b[1] == 18 || b[1] == 19)) return false;
+                if (b[0] >= 224) return false;                                        // multicast / reserved / broadcast
+                return true;
+            }
+            if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
+            {
+                if (ip.IsIPv6LinkLocal || ip.IsIPv6SiteLocal || ip.IsIPv6Multicast || ip.Equals(IPAddress.IPv6Any)) return false;
+                byte[] b = ip.GetAddressBytes();
+                if ((b[0] & 0xFE) == 0xFC) return false;                              // unique local fc00::/7
+                return true;
+            }
+            return false;
         }
 
         public static string FormEncode(IDictionary<string, string> fields)

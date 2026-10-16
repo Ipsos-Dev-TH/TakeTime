@@ -514,6 +514,12 @@
     // ===== State =====
     var dashboardData = null;
     var currentReview = null;
+    var _reviewRows = [];
+    // ข้อความรีวิว/ชื่อผู้รีวิว/หัวข้อ มาจากภายนอก (Google/OTA/อีเมล/AI) — ต้อง escape ก่อนใส่ innerHTML
+    function escH(s) {
+        if (s === null || s === undefined) return '';
+        return String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; });
+    }
 
     // ===== Helpers =====
     function apiCall(action, data) {
@@ -550,13 +556,13 @@
 
     function sentimentBadge(sentiment) {
         if (!sentiment) return '<span class="badge badge-pending">รอวิเคราะห์</span>';
-        var cls = 'badge-' + sentiment;
+        var cls = 'badge-' + escH(sentiment);
         var labels = { 'POSITIVE': 'เชิงบวก', 'NEGATIVE': 'เชิงลบ', 'NEUTRAL': 'กลาง', 'MIXED': 'ผสม' };
-        return '<span class="badge ' + cls + '">' + (labels[sentiment] || sentiment) + '</span>';
+        return '<span class="badge ' + cls + '">' + (labels[sentiment] || escH(sentiment)) + '</span>';
     }
 
     function sourceBadge(src) {
-        return '<span class="source-badge ' + (src || '') + '">' + (src || '-') + '</span>';
+        return '<span class="source-badge ' + escH(src || '') + '">' + escH(src || '-') + '</span>';
     }
 
     function formatDate(d) {
@@ -697,7 +703,7 @@
         if (!topics || topics.length === 0) { el.innerHTML = '<p style="color:#999">ไม่มีข้อมูล</p>'; return; }
         var html = '';
         topics.forEach(function (t) {
-            html += '<div class="topic-pill">' + (t.topic || '-') + ' <span class="cnt">' + (t.count || 0) + '</span></div>';
+            html += '<div class="topic-pill">' + escH(t.topic || '-') + ' <span class="cnt">' + (t.count || 0) + '</span></div>';
         });
         el.innerHTML = html;
     }
@@ -728,17 +734,18 @@
         var el = document.getElementById('reviewList');
         if (!reviews || reviews.length === 0) { el.innerHTML = '<p style="text-align:center;color:#999;">ไม่มีรีวิว</p>'; return; }
         var html = '';
-        reviews.forEach(function (r) {
-            html += '<div class="review-item" onclick=\'openReviewDetail(' + JSON.stringify(r).replace(/'/g, "\\'") + ')\'>';
+        _reviewRows = reviews;
+        reviews.forEach(function (r, i) {
+            html += '<div class="review-item" onclick="openReviewDetail(_reviewRows[' + i + '])">';
             html += '<div class="review-top">';
             html += '<div class="review-meta">';
             html += sourceBadge(r.source);
-            html += '<span class="review-name">' + (r.reviewerName || 'ไม่ระบุชื่อ') + '</span>';
+            html += '<span class="review-name">' + escH(r.reviewerName || 'ไม่ระบุชื่อ') + '</span>';
             html += '<span class="review-stars">' + renderStars(r.rating || 0) + '</span>';
             html += '</div>';
             html += '<div>' + sentimentBadge(r.sentiment) + ' <span class="review-date">' + formatDate(r.reviewDate) + '</span></div>';
             html += '</div>';
-            html += '<div class="review-text">' + truncate(r.reviewText || '', 200) + '</div>';
+            html += '<div class="review-text">' + escH(truncate(r.reviewText || '', 200)) + '</div>';
             html += '</div>';
         });
         el.innerHTML = html;

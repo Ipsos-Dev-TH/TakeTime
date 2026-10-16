@@ -55,6 +55,7 @@ namespace Take_Time_BangPhra.Reviews
 
         public static readonly string[] SortKeys = { "date_desc", "date_asc", "rating_desc", "rating_asc", "platform", "unanswered" };
         private static readonly Regex CodeRx = new Regex("^[A-Za-z0-9_\\-\\.]{1,40}$", RegexOptions.Compiled);
+        private static readonly Regex PlatformRx = new Regex("^[\\p{L}\\p{N}_\\-\\. ()&']{1,50}$", RegexOptions.Compiled);
 
         public static bool IsSafeCode(string s) { return !string.IsNullOrEmpty(s) && CodeRx.IsMatch(s); }
 
@@ -72,8 +73,9 @@ namespace Take_Time_BangPhra.Reviews
             if (d == null) return f;
             foreach (var p in ToStringList(Get(d, "platforms")))
             {
+                // platform key = UPPER(Origin_Platform) e.g. "BOOKING.COM", "X (TWITTER)" — value is always a SQL parameter
                 string code = p.Trim().ToUpperInvariant();
-                if (IsSafeCode(code) && !f.Platforms.Contains(code)) f.Platforms.Add(code);
+                if (PlatformRx.IsMatch(code) && !f.Platforms.Contains(code)) f.Platforms.Add(code);
             }
             f.From = ParseDate(Get(d, "from"));
             f.To = ParseDate(Get(d, "to"));
@@ -127,8 +129,8 @@ namespace Take_Time_BangPhra.Reviews
         {
             var sb = new StringBuilder();
             sb.Append("p=").Append(string.Join(",", Platforms.OrderBy(x => x, StringComparer.Ordinal)));
-            sb.Append("|f=").Append(From.HasValue ? From.Value.ToString("yyyy-MM-dd") : "");
-            sb.Append("|t=").Append(To.HasValue ? To.Value.ToString("yyyy-MM-dd") : "");
+            sb.Append("|f=").Append(From.HasValue ? From.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : "");
+            sb.Append("|t=").Append(To.HasValue ? To.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : "");
             sb.Append("|b=").Append(string.Join(",", RatingBands.OrderBy(x => x)));
             sb.Append("|l=").Append(Language).Append("|r=").Append(HasResponse).Append("|i=").Append(IngestMethod);
             sb.Append("|s=").Append(Sentiment).Append("|pv=").Append(IncludeProvisional ? 1 : 0);
@@ -908,8 +910,8 @@ DROP TABLE #f;";
             var inv = CultureInfo.InvariantCulture;
             var kpi = (Dictionary<string, object>)stats["kpi"];
             var sb = new StringBuilder();
-            sb.AppendLine("ช่วงข้อมูล: " + (f.From.HasValue ? f.From.Value.ToString("yyyy-MM-dd") : Convert.ToString(kpi["firstDate"])) + " ถึง "
-                + (f.To.HasValue ? f.To.Value.ToString("yyyy-MM-dd") : Convert.ToString(kpi["lastDate"])));
+            sb.AppendLine("ช่วงข้อมูล: " + (f.From.HasValue ? f.From.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : Convert.ToString(kpi["firstDate"])) + " ถึง "
+                + (f.To.HasValue ? f.To.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : Convert.ToString(kpi["lastDate"])));
             sb.AppendLine(string.Format(inv, "รีวิวทั้งหมด {0} (มีคะแนน {1}) | เฉลี่ย {2}/5 ({3}/10) | บวก(≥4) {4}% | ลบ(≤2) {5}% | ตอบกลับ {6}% | เวลาตอบเฉลี่ย {7} ชม.",
                 kpi["total"], kpi["rated"], Fmt(kpi["avg5"]), Fmt(kpi["avg10"]), Fmt(kpi["pctPositive"]), Fmt(kpi["pctNegative"]), Fmt(kpi["responseRate"]), Fmt(kpi["avgResponseHours"])));
             sb.AppendLine("\nรายแพลตฟอร์ม:");
@@ -977,7 +979,17 @@ DROP TABLE #f;";
                 {
                     var d = new Dictionary<string, object>();
                     foreach (DataColumn c in dt.Columns) d[c.ColumnName] = r[c] == DBNull.Value ? null : r[c];
-                    map[Convert.ToString(r["SourceCode"])] = d;
+                    string sc = Convert.ToString(r["SourceCode"]);
+                    map[sc] = d;
+                }
+                // Platform key is UPPER(Origin_Platform) ("BOOKING.COM", "TRIP.COM", "X (TWITTER)") — also index each
+                // source under its origin name (same mapping the ingest side writes) so registry data lines up.
+                foreach (var kv in map.ToList())
+                {
+                    object nm;
+                    kv.Value.TryGetValue("SourceName", out nm);
+                    string origin = Take_Time_BangPhra.Services.Reviews.ReviewPlatforms.OriginFor(kv.Key, nm as string);
+                    if (!string.IsNullOrEmpty(origin) && !map.ContainsKey(origin.Trim())) map[origin.Trim()] = kv.Value;
                 }
             }
             catch { }
@@ -998,7 +1010,8 @@ DROP TABLE #f;";
                 case "INTERNAL": return "#5D4037";
                 case "GOOGLE": return "#4285F4";
                 case "FACEBOOK": return "#1877F2";
-                case "BOOKING": return "#003580";
+                case "BOOKING":
+                case "BOOKING.COM": return "#003580";
                 case "AGODA": return "#5E2590";
                 case "TRIPADVISOR": return "#00AF87";
                 case "EXPEDIA": return "#FFC72C";
