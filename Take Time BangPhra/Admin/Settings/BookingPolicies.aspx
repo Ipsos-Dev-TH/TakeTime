@@ -69,10 +69,19 @@
                 </ul>
             </details>
             <div class="bp-toc">
-                <a href="#bp-terms">📜 เงื่อนไข</a><a href="#bp-privacy">🔒 ความเป็นส่วนตัว</a>
+                <a href="#bp-public">🌐 ลิงก์หน้าสาธารณะ</a><a href="#bp-terms">📜 เงื่อนไข</a><a href="#bp-privacy">🔒 ความเป็นส่วนตัว</a>
                 <a href="#bp-refund">💸 คืนเงิน</a><a href="#bp-cancel">📅 ยกเลิก</a>
                 <a href="<%= ResolveUrl("~/Admin/Settings/PetStay") %>">🐾 สัตว์เลี้ยง →</a>
             </div>
+        </div>
+
+        <div class="bp-card" id="bp-public">
+            <h3>🌐 หน้าสาธารณะของแต่ละนโยบาย</h3>
+            <div class="sub" style="margin-bottom:6px;">
+                เปิดอ่านได้โดยไม่ต้องล็อกอิน แสดง<b>ฉบับที่บันทึกแล้ว</b> · ใช้ลิงก์นี้กรอกในระบบรับชำระเงิน (เช่น PaySo) / Google
+                ช่อง Terms &amp; Conditions · Privacy Policy · Refund Policy ได้เลย · ลิงก์อยู่ที่ส่วนท้ายทุกหน้าของเว็บด้วย
+            </div>
+            <%= Take_Time_BangPhra.PolicyPages.PolicyPage.AdminLinksHtml(this, Take_Time_BangPhra.BookingPolicy.PublicKeys) %>
         </div>
 
         <div class="bp-card" id="bp-terms">

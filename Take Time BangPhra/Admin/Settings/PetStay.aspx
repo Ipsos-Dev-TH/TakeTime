@@ -127,6 +127,9 @@
                 พิมพ์ข้อความธรรมดา ขึ้นบรรทัดได้ · ตัวหนาด้วย <code>**ข้อความ**</code> ·
                 บันทึกแล้วข้อความเปลี่ยน = ขึ้นฉบับใหม่ (แยกเลขฉบับจากนโยบายการจองหลัก)
             </div>
+            <div style="margin-bottom:10px;">
+                <%= Take_Time_BangPhra.PolicyPages.PolicyPage.AdminLinksHtml(this, Take_Time_BangPhra.BookingPolicy.KeyPet) %>
+            </div>
             <div class="as-editor">
                 <div>
                     <asp:TextBox ID="txtPetPolicy" runat="server" TextMode="MultiLine" ValidateRequestMode="Disabled"

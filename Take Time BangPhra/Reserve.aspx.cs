@@ -6411,6 +6411,16 @@ namespace Take_Time_BangPhra
             return u;   // path สัมพัทธ์ เช่น ./Images/qr.png หรือ /Images/qr.png
         }
 
+        /// <summary>ลิงก์ "เปิดอ่านหน้าเต็ม" ไปหน้าสาธารณะของนโยบาย (/Policy/…) แท็บใหม่ — ไม่กระทบฟอร์มจองที่กรอกอยู่</summary>
+        private string FullPolicyLinkHtml(string key)
+        {
+            string path = BookingPolicy.PublicPath(key);
+            if (path == null) return "";
+            return "<div style=\"margin-top:8px; font-size:0.88em;\"><a href=\""
+                + System.Web.HttpUtility.HtmlAttributeEncode(ResolveUrl(path))
+                + "\" target=\"_blank\" rel=\"noopener\">เปิดอ่านหน้าเต็ม ↗</a></div>";
+        }
+
         /// <summary>กล่องนโยบาย + modal (ทุกคนเห็นในโหมดจองใหม่) และช่องติ๊กยอมรับ (เฉพาะลูกค้า)</summary>
         private void SetupPolicySection()
         {
@@ -6434,6 +6444,7 @@ namespace Take_Time_BangPhra
                       .Append(Server.HtmlEncode(BookingPolicy.TitleEn(key)))
                       .Append(")</span></h4>")
                       .Append(BookingPolicy.ToHtml(BookingPolicy.Get(key)))
+                      .Append(FullPolicyLinkHtml(key))
                       .Append("</div>");
                 }
                 sb.Append("<div style=\"margin-top:12px; color:#A1887F; font-size:0.85em;\">นโยบายฉบับที่ ")
@@ -10580,7 +10591,8 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
                     litPetPolicy.Text = "<b>📋 " + Server.HtmlEncode(BookingPolicy.Title(BookingPolicy.KeyPet))
                         + "</b> <span style=\"color:#A1887F; font-size:0.85em;\">(" + Server.HtmlEncode(BookingPolicy.TitleEn(BookingPolicy.KeyPet))
                         + " · ฉบับที่ " + BookingPolicy.PetVersion + ")</span><br/>"
-                        + BookingPolicy.ToHtml(BookingPolicy.Get(BookingPolicy.KeyPet));
+                        + BookingPolicy.ToHtml(BookingPolicy.Get(BookingPolicy.KeyPet))
+                        + FullPolicyLinkHtml(BookingPolicy.KeyPet);
                 }
 
                 string extra = "";

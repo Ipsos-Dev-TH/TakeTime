@@ -536,6 +536,12 @@
     <Content Include="Admin\WebAnalytics.aspx" />
     <Content Include="Affiliate\Register.aspx" />
     <Content Include="Contact.aspx" />
+    <Content Include="Policy\Cancellation.aspx" />
+    <Content Include="Policy\Pet.aspx" />
+    <Content Include="Policy\PolicyView.ascx" />
+    <Content Include="Policy\Privacy.aspx" />
+    <Content Include="Policy\Refund.aspx" />
+    <Content Include="Policy\Terms.aspx" />
     <Content Include="Content\bootstrap-theme.css" />
     <Content Include="Content\bootstrap-theme.min.css" />
     <Content Include="Content\bootstrap.css" />
@@ -1582,6 +1588,49 @@
     <Compile Include="Class\DocumentHelper.cs" />
     <Compile Include="Class\AddressHelper.cs" />
     <Compile Include="Class\CustomerHelper.cs" />
+    <Compile Include="Policy\Cancellation.aspx.cs">
+      <DependentUpon>Cancellation.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Policy\Cancellation.aspx.designer.cs">
+      <DependentUpon>Cancellation.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Policy\Pet.aspx.cs">
+      <DependentUpon>Pet.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Policy\Pet.aspx.designer.cs">
+      <DependentUpon>Pet.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Policy\PolicyPage.cs" />
+    <Compile Include="Policy\PolicyView.ascx.cs">
+      <DependentUpon>PolicyView.ascx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Policy\PolicyView.ascx.designer.cs">
+      <DependentUpon>PolicyView.ascx</DependentUpon>
+    </Compile>
+    <Compile Include="Policy\Privacy.aspx.cs">
+      <DependentUpon>Privacy.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Policy\Privacy.aspx.designer.cs">
+      <DependentUpon>Privacy.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Policy\Refund.aspx.cs">
+      <DependentUpon>Refund.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Policy\Refund.aspx.designer.cs">
+      <DependentUpon>Refund.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Policy\Terms.aspx.cs">
+      <DependentUpon>Terms.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Policy\Terms.aspx.designer.cs">
+      <DependentUpon>Terms.aspx</DependentUpon>
+    </Compile>
     <Compile Include="Contact.aspx.cs">
       <DependentUpon>Contact.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>

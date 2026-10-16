@@ -533,6 +533,7 @@ namespace Take_Time_BangPhra
                       .Append(" · ฉบับปัจจุบัน ").Append(BookingPolicy.PetVersion)
                       .Append(")</span></summary><div style=\"margin-top:4px; color:#555;\">")
                       .Append(BookingPolicy.ToHtml(policy))
+                      .Append(FullPolicyLinkHtml(BookingPolicy.KeyPet))
                       .Append("</div></details>");
                 }
                 sb.Append("</div>");
@@ -545,6 +546,16 @@ namespace Take_Time_BangPhra
                 pnlPetInfo.Visible = false;
                 try { code2.Logs(conn, "Reservation_Confirmed Pet Info Error", ex.Message, "SYSTEM"); } catch { }
             }
+        }
+
+        /// <summary>ลิงก์ "เปิดอ่านหน้าเต็ม" ไปหน้าสาธารณะของนโยบาย (/Policy/…) แท็บใหม่</summary>
+        private string FullPolicyLinkHtml(string key)
+        {
+            string path = BookingPolicy.PublicPath(key);
+            if (path == null) return "";
+            return "<div style=\"margin-top:4px; font-size:0.9em;\"><a href=\""
+                + System.Web.HttpUtility.HtmlAttributeEncode(ResolveUrl(path))
+                + "\" target=\"_blank\" rel=\"noopener\">เปิดอ่านหน้าเต็ม ↗</a></div>";
         }
 
         /// <summary>
@@ -591,6 +602,7 @@ namespace Take_Time_BangPhra
                       .Append(Server.HtmlEncode(BookingPolicy.TitleEn(key)))
                       .Append(")</span></summary><div style=\"margin-top:4px; color:#555;\">")
                       .Append(BookingPolicy.ToHtml(text))
+                      .Append(FullPolicyLinkHtml(key))
                       .Append("</div></details>");
                 }
 

@@ -40,6 +40,7 @@ namespace Take_Time_BangPhra
         private static readonly object _lock = new object();
         private static Dictionary<string, string> _cache;
         private static DateTime? _updatedAt;
+        private static Dictionary<string, DateTime> _updatedByKey;
         private static DateTime _loadedAt = DateTime.MinValue;
         private static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(60);
 
@@ -126,6 +127,51 @@ namespace Take_Time_BangPhra
             {
                 try { GetCache(); } catch { }
                 return _updatedAt;
+            }
+        }
+
+        /// <summary>
+        /// วันที่ปรับปรุงล่าสุดของนโยบายข้อนั้น — ใช้วันที่ของแถวเลขฉบับ (ขึ้นพร้อมกันทุกครั้งที่ข้อความเปลี่ยน)
+        /// ไม่มีจึงใช้วันที่ของแถวข้อความ · null = ยังใช้ข้อความสำรองในโค้ด (อ่านจาก cache เดียวกับ <see cref="Get"/>)
+        /// </summary>
+        public static DateTime? UpdatedAtFor(string key)
+        {
+            try
+            {
+                GetCache();
+                var byKey = _updatedByKey;
+                if (byKey == null) return null;
+                DateTime d;
+                if (byKey.TryGetValue(key == KeyPet ? KeyPetVersion : KeyVersion, out d)) return d;
+                if (byKey.TryGetValue(key, out d)) return d;
+            }
+            catch { }
+            return null;
+        }
+
+        /// <summary>เลขฉบับของนโยบายข้อนั้น (สัตว์เลี้ยงมีเลขฉบับของตัวเอง)</summary>
+        public static int VersionFor(string key)
+        {
+            return key == KeyPet ? PetVersion : Version;
+        }
+
+        /// <summary>นโยบายที่มีหน้าสาธารณะของตัวเอง (/Policy/…) ตามลำดับเมนู — 4 ข้อหลัก + สัตว์เลี้ยง</summary>
+        public static readonly string[] PublicKeys = { KeyTerms, KeyPrivacy, KeyRefund, KeyCancellation, KeyPet };
+
+        /// <summary>
+        /// ที่อยู่หน้าสาธารณะของนโยบาย (app-relative, ใช้กับ ResolveUrl) — ลิงก์ที่ส่งให้ payment gateway / Google ได้
+        /// คีย์ที่ไม่รู้จัก = null
+        /// </summary>
+        public static string PublicPath(string key)
+        {
+            switch (key)
+            {
+                case KeyTerms: return "~/Policy/Terms";
+                case KeyPrivacy: return "~/Policy/Privacy";
+                case KeyRefund: return "~/Policy/Refund";
+                case KeyCancellation: return "~/Policy/Cancellation";
+                case KeyPet: return "~/Policy/Pet";
+                default: return null;
             }
         }
 
@@ -411,6 +457,7 @@ namespace Take_Time_BangPhra
                 if (_cache != null && (DateTime.UtcNow - _loadedAt) < CacheTtl) return _cache;
 
                 var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                var byKey = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
                 DateTime? updated = null;
                 string cs = ConnStr;
                 if (!string.IsNullOrEmpty(cs))
@@ -432,6 +479,7 @@ namespace Take_Time_BangPhra
                                     if (rd[2] != DBNull.Value)
                                     {
                                         DateTime d = Convert.ToDateTime(rd[2]);
+                                        byKey[k] = d;
                                         if (!updated.HasValue || d > updated.Value) updated = d;
                                     }
                                 }
@@ -446,6 +494,7 @@ namespace Take_Time_BangPhra
 
                 _cache = map;
                 _updatedAt = updated;
+                _updatedByKey = byKey;
                 _loadedAt = DateTime.UtcNow;
                 return map;
             }

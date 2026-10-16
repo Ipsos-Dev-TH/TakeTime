@@ -536,6 +536,16 @@
         footer {
             margin-top: 20px;
         }
+        .footer-policies {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 4px 16px;
+            margin: 6px 0 4px;
+            font-size: 0.86em;
+        }
+        .footer-policies a { color: #8D6E63; text-decoration: none; }
+        .footer-policies a:hover, .footer-policies a:focus { color: #5D4037; text-decoration: underline; }
     </style>
 
     <%-- ═══════════════════════════════════════════════════════════════════════
@@ -1169,6 +1179,14 @@
                         </td>
                     </tr>
                 </table>
+                <%-- ลิงก์นโยบาย (หน้าสาธารณะ /Policy/… — ใช้กรอกใน payment gateway / Google ได้) --%>
+                <nav class="footer-policies" aria-label="นโยบาย (Policies)">
+                    <a runat="server" href="~/Policy/Terms">ข้อกำหนดและเงื่อนไข</a>
+                    <a runat="server" href="~/Policy/Privacy">นโยบายความเป็นส่วนตัว</a>
+                    <a runat="server" href="~/Policy/Refund">นโยบายการคืนเงิน</a>
+                    <a runat="server" href="~/Policy/Cancellation">นโยบายการยกเลิก</a>
+                    <a runat="server" href="~/Policy/Pet">นโยบายสัตว์เลี้ยง</a>
+                </nav>
             </footer>
         </div>
         </div>

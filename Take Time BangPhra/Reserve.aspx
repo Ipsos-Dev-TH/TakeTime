@@ -1295,6 +1295,13 @@
                             <a href="#" onclick="rvPolicyOpen('cancel');return false;">นโยบายการยกเลิกการจอง</a><span class="required-field">*</span>
                             <span class="rv-muted">(I accept the Terms &amp; Conditions, Privacy, Refund and Cancellation policies)</span></span>
                     </label>
+                    <div class="rv-muted" style="font-size:0.88em; padding:0 0 6px 2px;">
+                        เปิดอ่านหน้าเต็ม (แท็บใหม่):
+                        <a href="<%= ResolveUrl("~/Policy/Terms") %>" target="_blank" rel="noopener">ข้อกำหนดฯ</a> ·
+                        <a href="<%= ResolveUrl("~/Policy/Privacy") %>" target="_blank" rel="noopener">ความเป็นส่วนตัว</a> ·
+                        <a href="<%= ResolveUrl("~/Policy/Refund") %>" target="_blank" rel="noopener">คืนเงิน</a> ·
+                        <a href="<%= ResolveUrl("~/Policy/Cancellation") %>" target="_blank" rel="noopener">ยกเลิก</a>
+                    </div>
                 </asp:Panel>
 
                 <label class="rv-check">
