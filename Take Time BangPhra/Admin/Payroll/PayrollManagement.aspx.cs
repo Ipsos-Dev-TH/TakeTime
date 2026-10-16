@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Linq;
@@ -15,6 +15,8 @@ namespace Take_Time_BangPhra.Admin.Payroll
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.HrPayroll)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
+            if (!Feature.Guard(this, "HR", "~/Default")) return;   // ฟีเจอร์ถูกปิด (ตั้งค่าระบบ → หมวดฟีเจอร์)
             payrollService = new PayrollService();
 
             if (!IsPostBack)
@@ -290,7 +292,39 @@ namespace Take_Time_BangPhra.Admin.Payroll
 
                     if (success)
                     {
-                        ShowMessage("อนุมัติเงินเดือนสำเร็จ", "success");
+                        // อนุมัติงวด = ส่งเงินเดือนทั้งงวดไปออกเอกสารบน NextAcc (ตามโหมด)
+                        //   DOCUMENT_IMPORT → import ยอดที่เราคำนวณ → NextAcc ออก GL+ภงด.1+สปส+50ทวิ+payslip จากยอดเรา
+                        //   DOCUMENT → NextAcc คำนวณเอง  |  JOURNAL_ONLY → GL โพสต์ต่อพนักงานตอนทำจ่ายแล้ว (ไม่ต้องทำซ้ำ)
+                        string naMsg = "";
+                        try
+                        {
+                            string cs = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                            var acctConfig = new Take_Time_BangPhra.Integration.AccountingConfig(cs);
+                            if (acctConfig.IsConfigured && acctConfig.Enabled)
+                            {
+                                var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(cs);
+                                if (acctConfig.IsPayrollImportMode)
+                                {
+                                    long qid = sync.EnqueuePayrollRunImport(currentPayrollPeriodId);
+                                    naMsg = qid > 0 ? " + ส่งออกเอกสารเงินเดือนบน NextAcc (DOCUMENT_IMPORT) เข้าคิวแล้ว" : " (แต่ส่ง NextAcc ไม่สำเร็จ)";
+                                }
+                                else if (acctConfig.IsPayrollDocumentMode)
+                                {
+                                    long qid = sync.EnqueuePayrollRunSync(currentPayrollPeriodId);
+                                    naMsg = qid > 0 ? " + ส่งระบบเงินเดือน NextAcc (DOCUMENT) เข้าคิวแล้ว" : " (แต่ส่ง NextAcc ไม่สำเร็จ)";
+                                }
+                                else
+                                {
+                                    naMsg = " (โหมด JOURNAL_ONLY: GL ลง NextAcc ตอนทำจ่ายรายคน)";
+                                }
+                            }
+                        }
+                        catch (Exception ax)
+                        {
+                            naMsg = " (ส่ง NextAcc ไม่สำเร็จ: " + ax.Message + ")";
+                        }
+
+                        ShowMessage("อนุมัติเงินเดือนสำเร็จ" + naMsg, "success");
                         LoadPayrollData();
                     }
                     else
@@ -328,10 +362,24 @@ namespace Take_Time_BangPhra.Admin.Payroll
                 int updatedCount = 0;
                 int salaryUpdatedCount = 0;
 
+                int skippedPaid = 0;
+
                 foreach (DataRow row in dt.Rows)
                 {
                     long recordId = Convert.ToInt64(row["ID"]);
                     short adminId = Convert.ToInt16(row["Admin_ID"]);
+
+                    // ⚠ ห้ามคำนวณทับแถวที่ "ทำจ่ายแล้ว"
+                    //
+                    // เดิมวนทับทุกแถวไม่สนสถานะ ⇒ กดคำนวณใหม่ทีเดียว ยอดที่แก้มือไว้
+                    // (โบนัส/หักอื่น ๆ/OT ที่ปรับเอง) ถูกเขียนทับด้วยค่าที่คำนวณสด
+                    // และยอดที่ "จ่ายเงินออกไปแล้วจริง" ก็เปลี่ยนไม่ตรงกับใบสำคัญจ่าย
+                    // + ไม่ตรงกับที่ส่งขึ้น NextAcc แล้ว
+                    // ⇒ จ่ายแล้ว = ล็อก ต้องแก้ผ่านปุ่มแก้ไขรายคนเท่านั้น (มี audit + sync)
+                    bool alreadyPaid = row.Table.Columns.Contains("VoucherGenerated")
+                        && row["VoucherGenerated"] != DBNull.Value
+                        && Convert.ToBoolean(row["VoucherGenerated"]);
+                    if (alreadyPaid) { skippedPaid++; continue; }
 
                     // Always get latest salary from Employee_Salary
                     decimal baseSalary = GetEmployeeCurrentSalary(adminId);
@@ -412,7 +460,14 @@ namespace Take_Time_BangPhra.Admin.Payroll
                 {
                     msg += $" - ดึงเงินเดือนจากการตั้งค่า {salaryUpdatedCount} คน";
                 }
-                ShowMessage(msg, "success");
+                if (skippedPaid > 0)
+                {
+                    // บอกให้ชัดว่าข้ามใครไป ไม่ใช่คำนวณไม่สำเร็จ
+                    msg += $"<br/><b>ข้ามคนที่ทำจ่ายแล้ว {skippedPaid} คน</b> — "
+                         + "ยอดที่จ่ายออกไปแล้วจะไม่ถูกเขียนทับ "
+                         + "ถ้าต้องแก้จริง ๆ ใช้ปุ่มแก้ไข ✏ รายคน (ระบบจะส่งยอดใหม่ไป NextAcc ให้)";
+                }
+                ShowMessage(msg, skippedPaid > 0 ? "warning" : "success");
                 LoadPayrollData();
             }
             catch (Exception ex)
@@ -448,7 +503,35 @@ namespace Take_Time_BangPhra.Admin.Payroll
                     }
                 }
 
-                ShowMessage($"ทำจ่ายสำเร็จ ({processedCount} คน)", "success");
+                // ส่งเงินเดือนทั้งงวดไปออกเอกสารบน NextAcc (ตามโหมดที่ตั้งไว้)
+                //   DOCUMENT_IMPORT → import ยอดที่เราคำนวณ → NextAcc ออก GL+ภงด.1+สปส+50ทวิ+payslip จากยอดเรา
+                //   DOCUMENT (native) → NextAcc คำนวณเอง   |   JOURNAL_ONLY → โพสต์ต่อพนักงานตอน GeneratePayrollVoucher แล้ว
+                string nextAccMsg = "";
+                try
+                {
+                    string cs = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                    var acctConfig = new Take_Time_BangPhra.Integration.AccountingConfig(cs);
+                    if (acctConfig.IsConfigured && acctConfig.Enabled)
+                    {
+                        var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(cs);
+                        if (acctConfig.IsPayrollImportMode)
+                        {
+                            sync.EnqueuePayrollRunImport(currentPayrollPeriodId);
+                            nextAccMsg = " + ส่งออกเอกสารบน NextAcc (DOCUMENT_IMPORT) เข้าคิวแล้ว";
+                        }
+                        else if (acctConfig.IsPayrollDocumentMode)
+                        {
+                            sync.EnqueuePayrollRunSync(currentPayrollPeriodId);
+                            nextAccMsg = " + ส่งระบบเงินเดือน NextAcc (DOCUMENT) เข้าคิวแล้ว";
+                        }
+                    }
+                }
+                catch (Exception accEx)
+                {
+                    nextAccMsg = " (แต่ส่ง NextAcc ไม่สำเร็จ: " + accEx.Message + ")";
+                }
+
+                ShowMessage($"ทำจ่ายสำเร็จ ({processedCount} คน){nextAccMsg}", "success");
                 LoadPayrollData();
             }
             catch (Exception ex)
@@ -705,7 +788,10 @@ namespace Take_Time_BangPhra.Admin.Payroll
                 var result = ProcessSinglePayment(payrollRecordId, "โอน", "ค่าจ้าง", 0);
                 if (result.Success)
                 {
-                    ShowMessage($"ทำจ่ายสำเร็จ: {result.VoucherNumber}", "success");
+                    // doc-mode (NextAcc ออกเอกสาร) ไม่มีเลขใบสำคัญจ่ายในระบบ → แสดงข้อความผลลัพธ์แทน
+                    ShowMessage(string.IsNullOrEmpty(result.VoucherNumber)
+                        ? (result.Message ?? "ทำจ่ายสำเร็จ")
+                        : $"ทำจ่ายสำเร็จ: {result.VoucherNumber}", "success");
                     LoadPayrollData();
                 }
                 else
@@ -737,7 +823,9 @@ namespace Take_Time_BangPhra.Admin.Payroll
 
                 if (result.Success)
                 {
-                    ShowMessage($"ทำจ่ายสำเร็จ: {result.VoucherNumber}", "success");
+                    ShowMessage(string.IsNullOrEmpty(result.VoucherNumber)
+                        ? (result.Message ?? "ทำจ่ายสำเร็จ")
+                        : $"ทำจ่ายสำเร็จ: {result.VoucherNumber}", "success");
                     LoadPayrollData();
                 }
                 else
@@ -833,7 +921,14 @@ namespace Take_Time_BangPhra.Admin.Payroll
                         payrollService.UpdatePeriodTotals(currentPayrollPeriodId);
                     }
 
-                    ShowMessage("บันทึกข้อมูลสำเร็จ", "success");
+                    // แถวที่ทำจ่ายแล้ว = เคยส่งขึ้น NextAcc ไปแล้ว ⇒ แก้ยอดต้องส่งตามไปด้วย
+                    // ไม่งั้น TakeTime กับ NextAcc ถือยอดคนละชุด (เงียบ ๆ ไม่มีใครรู้)
+                    string syncNote = payrollService.ResyncPayrollRecordToAccounting(payrollRecordId);
+
+                    ShowMessage(string.IsNullOrEmpty(syncNote)
+                            ? "บันทึกข้อมูลสำเร็จ"
+                            : "บันทึกข้อมูลสำเร็จ<br/>" + syncNote,
+                        syncNote != null && syncNote.StartsWith("⚠") ? "warning" : "success");
                     LoadPayrollData();
                 }
                 else
@@ -917,6 +1012,11 @@ namespace Take_Time_BangPhra.Admin.Payroll
             if (type == "success")
             {
                 pnlMessage.CssClass = "alert alert-success";
+            }
+            else if (type == "warning")
+            {
+                // สำเร็จแต่มีเรื่องต้องรู้ — ไม่ใช่ error จึงไม่ควรขึ้นแดง
+                pnlMessage.CssClass = "alert alert-warning";
             }
             else
             {

@@ -16,6 +16,12 @@ namespace Take_Time_BangPhra
         private readonly string connectionString = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
         private const int PageSize = 50;
 
+        /// <summary>มัดจำที่ใบเลื่อนในตัวกรองนี้ถือไว้ (คำนวณใน GetReservationsData — แสดงแยกจากยอดค้างชำระ)</summary>
+        private decimal totalPostponedHeld;
+
+        /// <summary>ยอดของแถวในหน้าปัจจุบัน (ApplyBalances) — ใช้ทำป้ายวิธีเก็บเงินใน RowDataBound</summary>
+        private Dictionary<int, ReservationBalance> _rowBalances;
+
         protected void Page_Load(object sender, EventArgs e)
         {
             if (!IsPostBack)
@@ -27,10 +33,12 @@ namespace Take_Time_BangPhra
                     return;
                 }
 
-                // Don't set default date filter initially - let data show to match stats
-                // User can filter by date if needed
+                // เปิดหน้าครั้งแรก: กรองตาม "วันเข้าพัก" ย้อนหลัง 7 วัน → ล่วงหน้า 30 วัน (งานหน้างานใช้ช่วงนี้)
+                // และยอดรวมด้านบนคำนวณจากช่วงนี้ — วันที่จองเว้นว่างไว้ (กรองเพิ่มได้)
                 txtDateFrom.Text = "";
                 txtDateTo.Text = "";
+                txtStayFrom.Text = DateTime.Today.AddDays(-7).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+                txtStayTo.Text = DateTime.Today.AddDays(30).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
 
                 // Initialize
                 ViewState["CurrentPage"] = 1;
@@ -103,11 +111,14 @@ namespace Take_Time_BangPhra
             }
         }
 
+        /// <summary>ตัวกรอง "ยกเลิก (ทั้งหมด)" — ทุกสถานะที่ขึ้นต้น ยกเลิก/ลบ (ตรงข้ามกับ RescheduleService.SqlNotCancelled)</summary>
+        private const string CancelledFilterSql = "(R.Status LIKE N'ยกเลิก%' OR R.Status LIKE N'ลบ%')";
+
         private int GetCancelCount(SqlConnection conn)
         {
-            string query = @"SELECT COUNT(*) FROM Reservation
-                            WHERE Created_Date >= DATEADD(DAY, -90, GETDATE())
-                            AND Status IN (N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน', N'ลบจากการเลื่อนวันเข้าพัก', N'ยกเลิกการเลื่อนวันเข้าพัก')";
+            string query = @"SELECT COUNT(*) FROM Reservation R
+                            WHERE R.Created_Date >= DATEADD(DAY, -90, GETDATE())
+                            AND " + CancelledFilterSql;
 
             using (SqlCommand cmd = new SqlCommand(query, conn))
             {
@@ -126,17 +137,22 @@ namespace Take_Time_BangPhra
                 int currentPage = ViewState["CurrentPage"] != null ? (int)ViewState["CurrentPage"] : 1;
                 string filterStatus = ViewState["FilterStatus"]?.ToString() ?? "";
 
-                DataTable dt = GetReservationsData(currentPage, out int totalRecords, out decimal totalAmount, out decimal totalDeposit);
+                DataTable dt = GetReservationsData(currentPage, out int totalRecords, out decimal totalAmount, out decimal totalDeposit, out decimal totalDue);
 
                 // Bind data
                 gvReservations.DataSource = dt;
                 gvReservations.DataBind();
 
-                // Update summary
+                // Update summary — ยอดรวมแสดงเฉพาะเมื่อมีช่วงวันที่ (ไม่งั้นแสดงคำแนะนำแทน)
+                bool showTotals = HasDateRange();
                 lblResultCount.Text = totalRecords.ToString("N0");
                 lblTotalAmount.Text = totalAmount.ToString("N0");
                 lblTotalDeposit.Text = totalDeposit.ToString("N0");
-                lblTotalRemain.Text = (totalAmount - totalDeposit).ToString("N0");
+                lblTotalRemain.Text = totalDue.ToString("N0");
+                lblTotalPostponedHeld.Text = totalPostponedHeld.ToString("N0");
+                phPostponedHeld.Visible = showTotals && totalPostponedHeld > 0m;
+                phTotals.Visible = showTotals;
+                phTotalsHint.Visible = !showTotals;
 
                 // Update pagination
                 int totalPages = (int)Math.Ceiling((double)totalRecords / PageSize);
@@ -152,11 +168,12 @@ namespace Take_Time_BangPhra
             }
         }
 
-        private DataTable GetReservationsData(int page, out int totalRecords, out decimal totalAmount, out decimal totalDeposit)
+        private DataTable GetReservationsData(int page, out int totalRecords, out decimal totalAmount, out decimal totalDeposit, out decimal totalDue)
         {
             totalRecords = 0;
             totalAmount = 0;
             totalDeposit = 0;
+            totalDue = 0;
 
             DataTable dt = new DataTable();
 
@@ -192,7 +209,12 @@ namespace Take_Time_BangPhra
                 {
                     if (status == "ยกเลิก")
                     {
-                        whereClause.Append(" AND R.Status IN (N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน', N'ลบจากการเลื่อนวันเข้าพัก', N'ยกเลิกการเลื่อนวันเข้าพัก')");
+                        whereClause.Append(" AND " + CancelledFilterSql);
+                    }
+                    else if (status == "postponed")
+                    {
+                        // ใบเลื่อนวันเข้าพัก (ยังไม่มีวัน) — เกณฑ์เดียวกับหน้ารายการเลื่อน
+                        whereClause.Append(" AND " + PostponedRowSql());
                     }
                     else if (status == "today")
                     {
@@ -219,6 +241,9 @@ namespace Take_Time_BangPhra
                     parameters.Add(new SqlParameter("@DateTo", SqlDbType.DateTime) { Value = dateTo.AddDays(1).AddSeconds(-1) });
                 }
 
+                // ช่วงวันเข้าพัก (วันพักทับช่วงที่เลือก)
+                AppendStayFilter(whereClause, parameters);
+
                 // Get ORDER BY clause
                 string orderBy = GetOrderByClause();
 
@@ -242,6 +267,38 @@ namespace Take_Time_BangPhra
                         }
                     }
                 }
+                totalDue = totalAmount - totalDeposit;   // ค่าเดิม (ใช้เมื่อคำนวณด้วยสูตรกลางไม่สำเร็จ)
+
+                // ยอดสรุปด้วยสูตรกลาง ReservationBalance (รวมค่าใช้จ่ายในห้อง, Payment_History, Channel Collect)
+                // ยอดรวม = Σ Total, รับแล้ว = Σ Received, ค้างชำระ = Σ Due (ไม่เอายอดจ่ายเกินของใบอื่นมาหักกลบ)
+                // คำนวณเฉพาะเมื่อมีช่วงวันที่ — ไม่มีช่วง = ทุกใบในประวัติ (ช้า และตัวเลขไม่มีความหมาย) หน้าจอแสดงคำแนะนำแทน
+                // ใบเลื่อน (ยังไม่มีวันเข้าพัก) ไม่นับในยอดค้างชำระ — มัดจำที่ถือไว้รวมแยกเป็น "มัดจำของใบเลื่อน"
+                totalPostponedHeld = 0m;
+                if (HasDateRange())
+                {
+                    try
+                    {
+                        Dictionary<int, ReservationBalance> sumBalances = LoadBalancesForFilter(whereClause.ToString(), parameters);
+                        HashSet<int> postponedIds = GetPostponedIdsForFilter(whereClause.ToString(), parameters);
+                        decimal sAmount = 0, sReceived = 0, sDue = 0;
+                        foreach (ReservationBalance b in sumBalances.Values)
+                        {
+                            sAmount += b.Total;
+                            sReceived += b.Received;
+                            if (postponedIds.Contains(b.ReservationId))
+                                totalPostponedHeld += HeldByGuest(b);
+                            else
+                                sDue += b.Due;
+                        }
+                        totalAmount = sAmount;
+                        totalDeposit = sReceived;
+                        totalDue = sDue;
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine("ReservationList balance summary Error: " + ex.Message);
+                    }
+                }
 
                 // Get paginated data
                 int offset = (page - 1) * PageSize;
@@ -251,7 +308,8 @@ namespace Take_Time_BangPhra
                            ISNULL(C.Name, R.Customer_MobilePhone) as Name,
                            ISNULL(C.NickName, '') as NickName,
                            R.CheckinDate, R.CheckoutDate, R.StayDays, R.TotalPrice,
-                           ISNULL(R.Deposit, 0) as Deposit, R.Status, R.Reserve_By, R.Remark
+                           ISNULL(R.Deposit, 0) as Deposit, R.Status, R.Reserve_By, R.Remark,
+                           {ExtraRowColumnsSql()}
                     FROM Reservation R
                     LEFT JOIN Customer C ON C.MobilePhone = R.Customer_MobilePhone
                     {whereClause}
@@ -264,7 +322,7 @@ namespace Take_Time_BangPhra
                 {
                     dataParams.Add(new SqlParameter("@Search", "%" + search + "%"));
                 }
-                if (!string.IsNullOrEmpty(status) && status != "ยกเลิก" && status != "today")
+                if (!string.IsNullOrEmpty(status) && status != "ยกเลิก" && status != "today" && status != "postponed")
                 {
                     dataParams.Add(new SqlParameter("@Status", status));
                 }
@@ -276,6 +334,7 @@ namespace Take_Time_BangPhra
                 {
                     dataParams.Add(new SqlParameter("@DateTo", SqlDbType.DateTime) { Value = dateTo.AddDays(1).AddSeconds(-1) });
                 }
+                AppendStayFilter(null, dataParams);   // พารามิเตอร์ชุดเดียวกับ whereClause ด้านบน
                 dataParams.Add(new SqlParameter("@Offset", offset));
                 dataParams.Add(new SqlParameter("@PageSize", PageSize));
 
@@ -290,7 +349,206 @@ namespace Take_Time_BangPhra
                 }
             }
 
+            ApplyBalances(dt, null, null);
             return dt;
+        }
+
+        /// <summary>
+        /// โหลดยอดเงิน (สูตรกลาง) ของทุกการจองที่ตรงกับตัวกรองของหน้านี้ — whereClause เป็นข้อความที่หน้านี้
+        /// ประกอบเอง (ค่าจากผู้ใช้อยู่ใน parameters เท่านั้น) ใช้ alias R / C แบบเดียวกับ query หลัก
+        /// </summary>
+        private Dictionary<int, ReservationBalance> LoadBalancesForFilter(string whereClause, List<SqlParameter> parameters)
+        {
+            var p = new Dictionary<string, object>();
+            if (parameters != null)
+            {
+                foreach (SqlParameter sp in parameters)
+                    p[sp.ParameterName] = sp.Value;
+            }
+            string predicate = "r.ID IN (SELECT R.ID FROM Reservation R " +
+                               "LEFT JOIN Customer C ON C.MobilePhone = R.Customer_MobilePhone " +
+                               whereClause + ")";
+            return ReservationBalance.LoadMany(connectionString, predicate, p);
+        }
+
+        /// <summary>
+        /// ใส่ยอดจากสูตรกลางลงในแถว: TotalPrice = ยอดรวม (ค่าห้อง+ค่าใช้จ่ายในห้อง), Deposit = ยอดรับแล้ว,
+        /// BalDue = คงเหลือ — ถ้าไม่ส่ง whereClause จะโหลดตาม ID ของแถวที่มีใน dt (หน้าละไม่เกิน PageSize)
+        /// คำนวณไม่สำเร็จ → BalDue = TotalPrice − Deposit แบบเดิม
+        /// </summary>
+        private void ApplyBalances(DataTable dt, string whereClause, List<SqlParameter> parameters)
+        {
+            if (dt == null) return;
+            if (!dt.Columns.Contains("BalDue")) dt.Columns.Add("BalDue", typeof(decimal));
+
+            Dictionary<int, ReservationBalance> balances = null;
+            try
+            {
+                if (whereClause != null)
+                {
+                    balances = LoadBalancesForFilter(whereClause, parameters);
+                }
+                else if (dt.Rows.Count > 0)
+                {
+                    var ids = new List<string>();
+                    foreach (DataRow row in dt.Rows)
+                    {
+                        if (row["ID"] != DBNull.Value)
+                            ids.Add(Convert.ToInt32(row["ID"]).ToString(System.Globalization.CultureInfo.InvariantCulture));
+                    }
+                    if (ids.Count > 0)
+                        balances = ReservationBalance.LoadMany(connectionString, "r.ID IN (" + string.Join(",", ids) + ")", null);
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("ReservationList ApplyBalances Error: " + ex.Message);
+                balances = null;
+            }
+            if (whereClause == null) _rowBalances = balances;
+
+            bool hasPostponedCol = dt.Columns.Contains("IsPostponedRow");
+            foreach (DataRow row in dt.Rows)
+            {
+                ReservationBalance b = null;
+                if (balances != null && row["ID"] != DBNull.Value)
+                    balances.TryGetValue(Convert.ToInt32(row["ID"]), out b);
+
+                // ใบเลื่อน: ยังไม่มีวันเข้าพัก → ไม่มียอด "ค้างชำระ" (มัดจำที่ถือไว้แสดงแยก)
+                bool postponed = hasPostponedCol && row["IsPostponedRow"] != DBNull.Value && Convert.ToBoolean(row["IsPostponedRow"]);
+
+                if (b != null)
+                {
+                    row["TotalPrice"] = b.Total;
+                    row["Deposit"] = b.Received;
+                    row["BalDue"] = postponed ? 0m : b.Due;
+                }
+                else
+                {
+                    decimal total = row["TotalPrice"] != DBNull.Value ? Convert.ToDecimal(row["TotalPrice"]) : 0m;
+                    decimal deposit = row["Deposit"] != DBNull.Value ? Convert.ToDecimal(row["Deposit"]) : 0m;
+                    row["BalDue"] = postponed ? 0m : total - deposit;
+                }
+            }
+        }
+
+        /// <summary>เงินที่ลูกค้าจ่ายโรงแรมจริง (ไม่รวมเงินที่ OTA ถือ) — ใช้เป็น "มัดจำของใบเลื่อน"</summary>
+        private static decimal HeldByGuest(ReservationBalance b)
+        {
+            if (b == null) return 0m;
+            if (b.LedgerRows > 0) return b.PaidLedger;
+            return (b.IsChannelCollect || b.IsCollectUnknown) ? 0m : b.Deposit;
+        }
+
+        /// <summary>ID ของใบเลื่อนในตัวกรองเดียวกับหน้านี้ (whereClause ประกอบในโค้ด ค่าจากผู้ใช้อยู่ใน parameters)</summary>
+        private HashSet<int> GetPostponedIdsForFilter(string whereClause, List<SqlParameter> parameters)
+        {
+            var ids = new HashSet<int>();
+            var p = new Dictionary<string, object>();
+            if (parameters != null)
+            {
+                foreach (SqlParameter sp in parameters)
+                    p[sp.ParameterName] = sp.Value;
+            }
+            string sql = "SELECT R.ID FROM Reservation R " +
+                         "LEFT JOIN Customer C ON C.MobilePhone = R.Customer_MobilePhone " +
+                         whereClause + " AND " + PostponedRowSql();
+            DataTable dt = new code().DatabaseQuerySafe(connectionString, sql, p);
+            if (dt != null)
+            {
+                foreach (DataRow r in dt.Rows)
+                    if (r["ID"] != DBNull.Value) ids.Add(Convert.ToInt32(r["ID"]));
+            }
+            return ids;
+        }
+
+        /// <summary>เงื่อนไข "ใบเลื่อนที่ยังมีผล" (alias R) — สถานะก่อนเช็คอิน + ไม่มีวันเข้าพัก/ธง IsPostponed</summary>
+        private string PostponedRowSql()
+        {
+            return "(R.Status IN (N'มัดจำแล้ว', N'รอชำระเงิน') AND "
+                 + RescheduleService.SqlIsPostponed("R", RescheduleService.HasIsPostponedColumn(connectionString)) + ")";
+        }
+
+        private static readonly object _petColLock = new object();
+        private static bool? _hasPetCol;
+        private static DateTime _petColCheckedAt = DateTime.MinValue;
+
+        /// <summary>มีคอลัมน์ Reservation.Pet_Count (PHASE19 migration 23) — cache, ไม่มีตรวจใหม่ทุก 5 นาที</summary>
+        private bool HasPetColumn()
+        {
+            lock (_petColLock)
+            {
+                if (_hasPetCol.HasValue && (_hasPetCol.Value || (DateTime.Now - _petColCheckedAt).TotalMinutes < 5))
+                    return _hasPetCol.Value;
+            }
+            bool has = false;
+            try
+            {
+                DataTable dt = new code().DatabaseQuerySafe(connectionString,
+                    "SELECT COL_LENGTH('Reservation', 'Pet_Count') AS C");
+                has = dt != null && dt.Rows.Count > 0 && dt.Rows[0]["C"] != DBNull.Value;
+            }
+            catch { has = false; }
+            lock (_petColLock)
+            {
+                _hasPetCol = has;
+                _petColCheckedAt = DateTime.Now;
+            }
+            return has;
+        }
+
+        /// <summary>คอลัมน์เสริมของแถว: ธงใบเลื่อน + จำนวนสัตว์เลี้ยง (ไม่มีคอลัมน์ = 0) — ชุดคอลัมน์เดียวกันเสมอ</summary>
+        private string ExtraRowColumnsSql()
+        {
+            return "CAST(CASE WHEN " + PostponedRowSql() + " THEN 1 ELSE 0 END AS bit) AS IsPostponedRow, "
+                 + (HasPetColumn() ? "ISNULL(R.Pet_Count, 0) AS PetCount" : "0 AS PetCount");
+        }
+
+        /// <summary>บรรทัด "ค้าง" ใต้ราคา — ใบเลื่อนแสดงเป็นมัดจำที่ถือไว้แทน (ไม่ใช่ยอดค้าง)</summary>
+        protected string RemainHtml(object balDue, object isPostponed)
+        {
+            bool postponed = isPostponed != null && isPostponed != DBNull.Value && Convert.ToBoolean(isPostponed);
+            if (postponed) return "<span class='price-postponed'>ใบเลื่อน · ไม่นับค้าง</span>";
+            decimal due = balDue != null && balDue != DBNull.Value ? Convert.ToDecimal(balDue) : 0m;
+            return "ค้าง: " + due.ToString("N0");
+        }
+
+        private static bool TryParseFilterDate(string text, out DateTime value)
+        {
+            return DateTime.TryParseExact((text ?? "").Trim(), "yyyy-MM-dd",
+                System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out value);
+        }
+
+        /// <summary>มีช่วงวันที่ (วันเข้าพัก หรือ วันที่จอง ด้านใดด้านหนึ่ง) — ใช้ตัดสินว่าจะคำนวณยอดรวมหรือไม่</summary>
+        private bool HasDateRange()
+        {
+            DateTime d;
+            return TryParseFilterDate(txtStayFrom.Text, out d) || TryParseFilterDate(txtStayTo.Text, out d)
+                || TryParseFilterDate(txtDateFrom.Text, out d) || TryParseFilterDate(txtDateTo.Text, out d);
+        }
+
+        /// <summary>
+        /// ตัวกรองช่วงวันเข้าพัก: การจองที่ "วันพักทับช่วงที่เลือก" (เช็คอินไม่หลังวันสุดท้าย และเช็คเอาท์ไม่ก่อนวันแรก
+        /// — รวมใบที่ออกในวันแรกของช่วง) where = null → เติมเฉพาะพารามิเตอร์ (สำหรับ query ที่ต้องสร้างพารามิเตอร์ชุดใหม่)
+        /// </summary>
+        private void AppendStayFilter(StringBuilder where, List<SqlParameter> ps)
+        {
+            // ใบเลื่อนไม่มีวันเข้าพัก (ค่าแทน 1990) — กรองช่วงวันเข้าพักแล้วจะไม่เจอเลย → ข้ามตัวกรองนี้
+            string effStatus = ViewState["FilterStatus"]?.ToString() ?? "";
+            if (string.IsNullOrEmpty(effStatus)) effStatus = ddlStatus.SelectedValue;
+            if (effStatus == "postponed") return;
+
+            DateTime from, to;
+            if (TryParseFilterDate(txtStayFrom.Text, out from))
+            {
+                if (where != null) where.Append(" AND R.CheckoutDate >= @StayFrom");
+                ps.Add(new SqlParameter("@StayFrom", SqlDbType.DateTime) { Value = from.Date });
+            }
+            if (TryParseFilterDate(txtStayTo.Text, out to))
+            {
+                if (where != null) where.Append(" AND R.CheckinDate < @StayToExcl");
+                ps.Add(new SqlParameter("@StayToExcl", SqlDbType.DateTime) { Value = to.Date.AddDays(1) });
+            }
         }
 
         private string GetOrderByClause()
@@ -375,6 +633,8 @@ namespace Take_Time_BangPhra
             ddlStatus.SelectedIndex = 0;
             txtDateFrom.Text = "";
             txtDateTo.Text = "";
+            txtStayFrom.Text = "";
+            txtStayTo.Text = "";
             ddlSortBy.SelectedIndex = 0;
 
             ViewState["CurrentPage"] = 1;
@@ -397,13 +657,18 @@ namespace Take_Time_BangPhra
                 case "all":
                     ViewState["FilterStatus"] = "";
                     ddlStatus.SelectedIndex = 0;
+                    // "ทั้งหมด" = ไม่จำกัดวันเข้าพัก (ช่วงเริ่มต้น 7 วันก่อน–30 วันหน้า ถูกตั้งตอนเปิดหน้า)
+                    txtStayFrom.Text = "";
+                    txtStayTo.Text = "";
                     break;
                 case "today":
                     ViewState["FilterStatus"] = "today";
                     ddlStatus.SelectedIndex = 0;
-                    // Clear date range for today
+                    // "จองวันนี้" = การจองที่สร้างวันนี้ ไม่ว่าจะเข้าพักวันไหน → ล้างช่วงวันที่ทั้งสองแบบ
                     txtDateFrom.Text = "";
                     txtDateTo.Text = "";
+                    txtStayFrom.Text = "";
+                    txtStayTo.Text = "";
                     break;
                 case "deposit":
                     ViewState["FilterStatus"] = "มัดจำแล้ว";
@@ -470,9 +735,10 @@ namespace Take_Time_BangPhra
 
                 foreach (DataRow row in dt.Rows)
                 {
-                    decimal total = Convert.ToDecimal(row["TotalPrice"]);
-                    decimal deposit = Convert.ToDecimal(row["Deposit"]);
-                    decimal remain = total - deposit;
+                    // ยอดจากสูตรกลาง (ใส่ไว้ใน GetAllReservationsForExport → ApplyBalances)
+                    decimal total = row["TotalPrice"] != DBNull.Value ? Convert.ToDecimal(row["TotalPrice"]) : 0m;
+                    decimal deposit = row["Deposit"] != DBNull.Value ? Convert.ToDecimal(row["Deposit"]) : 0m;
+                    decimal remain = row["BalDue"] != DBNull.Value ? Convert.ToDecimal(row["BalDue"]) : total - deposit;
 
                     sb.AppendLine(string.Format("{0},{1},{2},{3},{4},{5},{6},{7},{8},{9},{10},{11},{12}",
                         row["ID"],
@@ -529,12 +795,24 @@ namespace Take_Time_BangPhra
                     parameters.Add(new SqlParameter("@Search", "%" + search + "%"));
                 }
 
+                // ตัวกรองสถานะชุดเดียวกับตาราง (รวมการ์ดสถิติที่กดไว้) — เดิมส่งออกตาม dropdown อย่างเดียว
+                // และ "ยกเลิก" ส่งออกแค่ 2 สถานะ ไม่ตรงกับที่ตารางแสดง
                 string status = ddlStatus.SelectedValue;
+                string filterStatus = ViewState["FilterStatus"]?.ToString() ?? "";
+                if (!string.IsNullOrEmpty(filterStatus)) status = filterStatus;
                 if (!string.IsNullOrEmpty(status))
                 {
                     if (status == "ยกเลิก")
                     {
-                        whereClause.Append(" AND R.Status IN (N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน')");
+                        whereClause.Append(" AND " + CancelledFilterSql);
+                    }
+                    else if (status == "postponed")
+                    {
+                        whereClause.Append(" AND " + PostponedRowSql());
+                    }
+                    else if (status == "today")
+                    {
+                        whereClause.Append(" AND CAST(R.Created_Date AS DATE) = CAST(GETDATE() AS DATE)");
                     }
                     else
                     {
@@ -556,11 +834,14 @@ namespace Take_Time_BangPhra
                     parameters.Add(new SqlParameter("@DateTo", SqlDbType.DateTime) { Value = dateTo.AddDays(1).AddSeconds(-1) });
                 }
 
+                AppendStayFilter(whereClause, parameters);
+
                 string query = $@"
                     SELECT R.ID, R.Created_Date, R.Customer_MobilePhone,
                            ISNULL(C.Name, R.Customer_MobilePhone) as Name,
                            R.CheckinDate, R.CheckoutDate, R.StayDays, R.TotalPrice,
-                           ISNULL(R.Deposit, 0) as Deposit, R.Status, R.Reserve_By, R.Remark
+                           ISNULL(R.Deposit, 0) as Deposit, R.Status, R.Reserve_By, R.Remark,
+                           {ExtraRowColumnsSql()}
                     FROM Reservation R
                     LEFT JOIN Customer C ON C.MobilePhone = R.Customer_MobilePhone
                     {whereClause}
@@ -574,6 +855,9 @@ namespace Take_Time_BangPhra
                         adapter.Fill(dt);
                     }
                 }
+
+                // ยอดเงินสูตรกลาง — query เดียวด้วยตัวกรองเดียวกับการส่งออก
+                ApplyBalances(dt, whereClause.ToString(), parameters);
             }
 
             return dt;
@@ -622,6 +906,37 @@ namespace Take_Time_BangPhra
                     }
                 }
 
+                // ป้ายเสริม: ใบเลื่อน / วิธีเก็บเงินของใบ OTA / สัตว์เลี้ยง (ชุดสี-ข้อความเดียวกับตารางรายวัน)
+                Literal litBadges = (Literal)e.Row.FindControl("litBadges");
+                if (litBadges != null)
+                {
+                    var badges = new StringBuilder();
+                    bool postponed = drv.Row.Table.Columns.Contains("IsPostponedRow")
+                        && drv["IsPostponedRow"] != DBNull.Value && Convert.ToBoolean(drv["IsPostponedRow"]);
+                    if (postponed)
+                        badges.Append("<span class='mini-badge mb-postpone' title='ยังไม่กำหนดวันเข้าพัก — ไม่นับในยอดค้างชำระ'>⏸ เลื่อน</span>");
+
+                    ReservationBalance rb = null;
+                    if (_rowBalances != null && drv["ID"] != DBNull.Value)
+                        _rowBalances.TryGetValue(Convert.ToInt32(drv["ID"]), out rb);
+                    if (rb != null && rb.IsOta)
+                    {
+                        if (rb.IsChannelCollect)
+                            badges.Append("<span class='mini-badge mb-channel' title='OTA เก็บเงินค่าห้องแล้ว (Channel Collect)'>● OTA เก็บแล้ว</span>");
+                        else if (rb.CollectMode == ReservationBalance.ModeHotel)
+                            badges.Append("<span class='mini-badge mb-hotel' title='โรงแรมเก็บเงินเอง (Hotel Collect)'>● เก็บหน้างาน</span>");
+                        else if (rb.IsCollectUnknown)
+                            badges.Append("<span class='mini-badge mb-unknown' title='ยังไม่ชัดว่าใครเก็บเงิน — ตรวจก่อนเก็บเงิน'>○ ยังไม่ชัดใครเก็บ</span>");
+                    }
+
+                    int pets = drv.Row.Table.Columns.Contains("PetCount") && drv["PetCount"] != DBNull.Value
+                        ? Convert.ToInt32(drv["PetCount"]) : 0;
+                    if (pets > 0)
+                        badges.Append("<span class='mini-badge mb-pet' title='สัตว์เลี้ยงเข้าพัก'>🐾 " + pets + "</span>");
+
+                    litBadges.Text = badges.Length > 0 ? "<div class='mini-badges'>" + badges + "</div>" : "";
+                }
+
                 // Load accommodations
                 Literal litAccom = (Literal)e.Row.FindControl("litAccom");
                 if (litAccom != null)
@@ -639,8 +954,8 @@ namespace Take_Time_BangPhra
                 }
 
                 // Highlight today's check-in
-                DateTime checkinDate = Convert.ToDateTime(drv["CheckinDate"]);
-                if (checkinDate.Date == DateTime.Today)
+                // (ใบเลื่อนบางใบ CheckinDate เป็น NULL — Convert.ToDateTime(DBNull) โยน exception ทั้งตาราง)
+                if (drv["CheckinDate"] != DBNull.Value && Convert.ToDateTime(drv["CheckinDate"]).Date == DateTime.Today)
                 {
                     e.Row.CssClass = "today-row";
                 }

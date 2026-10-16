@@ -17,6 +17,7 @@ namespace Take_Time_BangPhra.Affiliate
         string conn = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Feature.Guard(this, "Affiliate", "~/Default")) return;   // ฟีเจอร์ถูกปิด (ตั้งค่าระบบ → หมวดฟีเจอร์)
             if (!IsPostBack)
             {
                 string id = Request.QueryString["id"];

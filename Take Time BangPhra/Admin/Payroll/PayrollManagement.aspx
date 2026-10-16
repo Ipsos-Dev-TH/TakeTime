@@ -179,6 +179,16 @@
         }
         .alert-error::before { content: "⚠ "; font-weight: bold; }
 
+        /* ทำสำเร็จแต่มีเรื่องต้องรู้ — เดิมมีแค่เขียว/แดง ข้อความเตือนเลยขึ้นเป็นสีแดง
+           ดูเหมือน "ทำไม่สำเร็จ" ทั้งที่สำเร็จ (เช่น "ข้ามคนที่ทำจ่ายแล้ว N คน") */
+        .alert-warning {
+            background: linear-gradient(135deg, #fff3cd 0%, #ffeeba 100%);
+            color: #856404;
+            border: 1px solid #ffe08a;
+            box-shadow: 0 2px 8px rgba(255, 193, 7, 0.18);
+        }
+        .alert-warning::before { content: "❗ "; font-weight: bold; }
+
         @keyframes fadeIn {
             from { opacity: 0; transform: translateY(-10px); }
             to { opacity: 1; transform: translateY(0); }

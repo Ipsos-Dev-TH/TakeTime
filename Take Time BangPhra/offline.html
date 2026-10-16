@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#5D4037" />
+    <meta name="robots" content="noindex" />
+    <title>ออฟไลน์ - Take Time Admin</title>
+    <link rel="icon" href="/Images/App/icon-192.png" />
+    <style>
+        * { box-sizing: border-box; }
+        html, body { margin: 0; height: 100%; }
+        body {
+            font-family: 'Prompt', 'Sarabun', 'Leelawadee UI', Tahoma, sans-serif;
+            background: #EFEBE9; color: #3E2723;
+            display: flex; align-items: center; justify-content: center; padding: 16px;
+        }
+        .card {
+            width: 100%; max-width: 420px; background: #fff; border-radius: 16px;
+            box-shadow: 0 10px 30px rgba(62, 39, 35, .15); overflow: hidden; text-align: center;
+        }
+        .card-head { background: linear-gradient(135deg, #5D4037 0%, #4E342E 100%); padding: 22px 16px 18px; }
+        .card-head img { width: 96px; height: 96px; border-radius: 20px; background: #EFEBE9; display: block; margin: 0 auto; }
+        .card-body { padding: 22px 22px 26px; }
+        h1 { font-size: 1.3rem; margin: 0 0 8px; color: #5D4037; }
+        p { margin: 0 0 18px; line-height: 1.6; color: #6D4C41; font-size: .95rem; }
+        button {
+            font: inherit; border: 0; border-radius: 10px; padding: 12px 22px; cursor: pointer;
+            background: #5D4037; color: #fff; font-weight: 600; width: 100%;
+        }
+        button:hover { background: #4E342E; }
+        .hint { margin-top: 14px; font-size: .8rem; color: #8D6E63; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="card-head">
+            <img src="/Images/App/icon-192.png" alt="Take Time" />
+        </div>
+        <div class="card-body">
+            <h1>ไม่มีการเชื่อมต่ออินเทอร์เน็ต</h1>
+            <p>ระบบ Take Time ต้องเชื่อมต่ออินเทอร์เน็ตเพื่อแสดงข้อมูลล่าสุด<br />กรุณาตรวจสอบ Wi-Fi หรืออินเทอร์เน็ตมือถือ แล้วลองใหม่อีกครั้ง</p>
+            <button type="button" onclick="location.reload()">ลองใหม่อีกครั้ง</button>
+            <div class="hint">หน้านี้จะโหลดใหม่ให้อัตโนมัติเมื่อกลับมาออนไลน์</div>
+        </div>
+    </div>
+    <script>
+        window.addEventListener('online', function () { location.reload(); });
+    </script>
+</body>
+</html>

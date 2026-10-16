@@ -574,6 +574,79 @@ public class PayrollService
     /// <summary>
     /// Update payroll record
     /// </summary>
+    /// <summary>
+    /// แก้ยอดของแถวที่ "ทำจ่ายแล้ว" → ส่งยอดใหม่ขึ้น NextAcc ให้ตรงกัน
+    ///
+    /// ปัญหาเดิม: การแก้ยอดหลังทำจ่ายไม่เคยถูกส่งขึ้น NextAcc เลย — ตัวรับเงินเดือนขึ้น
+    /// ตอน "ทำจ่าย" ครั้งเดียว แก้ทีหลังเท่ากับ TakeTime กับ NextAcc ถือยอดคนละชุด
+    /// (และต่อให้เรียกซ้ำ ตัวกันซ้ำ 24 ชม. ก็จะกลืนไปเงียบ ๆ ⇒ ต้องส่ง force)
+    ///
+    /// คืนข้อความสรุปให้เอาไปแสดงต่อผู้ใช้ (null = ไม่ต้องทำอะไร/ปิดการเชื่อมต่อไว้)
+    /// </summary>
+    public string ResyncPayrollRecordToAccounting(long payrollRecordId)
+    {
+        try
+        {
+            var cfg = new Take_Time_BangPhra.Integration.AccountingConfig(connectionString);
+            if (!cfg.IsConfigured || !cfg.Enabled) return null;
+
+            DataTable dt;
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            using (SqlCommand cmd = new SqlCommand(
+                "SELECT TOP 1 PayrollPeriod_ID, VoucherGenerated, VoucherNumber " +
+                "FROM Payroll_Records WHERE ID = @id", conn))
+            {
+                cmd.Parameters.AddWithValue("@id", payrollRecordId);
+                conn.Open();
+                using (var da = new SqlDataAdapter(cmd)) { dt = new DataTable(); da.Fill(dt); }
+            }
+            if (dt.Rows.Count == 0) return null;
+            DataRow r = dt.Rows[0];
+
+            bool paid = r["VoucherGenerated"] != DBNull.Value && Convert.ToBoolean(r["VoucherGenerated"]);
+            // ยังไม่ทำจ่าย = ยังไม่เคยส่งขึ้น NextAcc ⇒ ไม่มีอะไรให้แก้ที่ปลายทาง
+            if (!paid) return null;
+            if (r["PayrollPeriod_ID"] == DBNull.Value) return null;
+
+            int periodId = Convert.ToInt32(r["PayrollPeriod_ID"]);
+            var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(connectionString);
+
+            if (cfg.IsPayrollImportMode)
+            {
+                long qid = sync.EnqueuePayrollRunImport(periodId, true);
+                return qid > 0
+                    ? "ส่งยอดใหม่ทั้งงวดขึ้น NextAcc แล้ว (คิว #" + qid + ")"
+                    : "ส่งยอดขึ้น NextAcc ไม่สำเร็จ — ตรวจที่หน้าคิวการเชื่อมต่อบัญชี";
+            }
+
+            if (cfg.IsPayrollDocumentMode)
+            {
+                long qid = sync.EnqueuePayrollRunSync(periodId, true);
+                return qid > 0
+                    ? "ส่งงวดเงินเดือนขึ้น NextAcc ใหม่แล้ว (คิว #" + qid + ")"
+                    : "ส่งยอดขึ้น NextAcc ไม่สำเร็จ — ตรวจที่หน้าคิวการเชื่อมต่อบัญชี";
+            }
+
+            // JOURNAL_ONLY: GL ถูกโพสต์ไปแล้วตอนทำจ่าย ต่อพนักงานหนึ่งใบ
+            // ส่งซ้ำ = ลงบัญชีซ้ำซ้อน (ไม่ใช่การแก้) ⇒ บอกให้คนไปจัดการเองดีกว่าเดาแทน
+            string voucher = r["VoucherNumber"] == DBNull.Value ? "" : Convert.ToString(r["VoucherNumber"]);
+            return "⚠ โหมด JOURNAL_ONLY: GL ถูกโพสต์ขึ้น NextAcc ไปแล้ว"
+                 + (string.IsNullOrEmpty(voucher) ? "" : " (ใบสำคัญจ่าย " + voucher + ")")
+                 + " — ระบบไม่ส่งซ้ำให้อัตโนมัติเพราะจะกลายเป็นลงบัญชีซ้ำ "
+                 + "กรุณาแก้ JE ที่ NextAcc ให้ตรงกับยอดใหม่";
+        }
+        catch (Exception ex)
+        {
+            try
+            {
+                new Take_Time_BangPhra.code().Logs(connectionString, "Accounting Sync",
+                    "Payroll edit resync error: record=" + payrollRecordId + " " + ex.Message, "SYSTEM");
+            }
+            catch { }
+            return "ส่งยอดขึ้น NextAcc ไม่สำเร็จ: " + ex.Message;
+        }
+    }
+
     public bool UpdatePayrollRecord(long payrollRecordId, Dictionary<string, object> updateFields)
     {
         // These columns are computed in the database and cannot be updated directly
@@ -705,7 +778,74 @@ public class PayrollService
                     if (alreadyGenerated)
                     {
                         string existingVoucher = payrollRecord["VoucherNumber"]?.ToString() ?? "";
-                        return (true, existingVoucher, "ใบสำคัญจ่ายถูกสร้างแล้ว");
+                        // Backfill: คนที่กดทำจ่ายไปก่อนหน้านี้ (ก่อนมีโค้ด sync) แล้วยังไม่ได้ขึ้น NextAcc
+                        // → กดทำจ่ายซ้ำให้ re-trigger period run อีกครั้ง (idempotent — ถ้า run มีแล้วคืนของเดิม).
+                        // โหมด run-based (DOCUMENT_IMPORT/DOCUMENT) sync ทั้งงวด อ่านยอดทุกแถวของงวด.
+                        bool reSynced = false;
+                        try
+                        {
+                            var cfg = new Take_Time_BangPhra.Integration.AccountingConfig(connectionString);
+                            if (cfg.IsConfigured && cfg.Enabled
+                                && (cfg.IsPayrollImportMode || cfg.IsPayrollDocumentMode)
+                                && payrollRecord["PayrollPeriod_ID"] != DBNull.Value)
+                            {
+                                int pid = Convert.ToInt32(payrollRecord["PayrollPeriod_ID"]);
+                                var s = new Take_Time_BangPhra.Integration.AccountingSyncService(connectionString);
+                                if (cfg.IsPayrollImportMode) reSynced = s.EnqueuePayrollRunImport(pid) > 0;
+                                else reSynced = s.EnqueuePayrollRunSync(pid) > 0;
+                            }
+                        }
+                        catch (Exception reEx)
+                        {
+                            try { new Take_Time_BangPhra.code().Logs(connectionString, "Accounting Sync", $"Payroll re-sync (already generated) error: voucher={existingVoucher} {reEx.Message}", "SYSTEM"); } catch { }
+                        }
+                        return (true, existingVoucher, reSynced
+                            ? "ใบสำคัญจ่ายถูกสร้างแล้ว (ส่ง sync NextAcc ซ้ำให้แล้ว)"
+                            : "ใบสำคัญจ่ายถูกสร้างแล้ว");
+                    }
+
+                    // ── โหมดที่ NextAcc เป็นผู้ออกเอกสารเงินเดือน (DOCUMENT / DOCUMENT_IMPORT) ──
+                    // NextAcc payroll run ออก payslip / ภ.ง.ด.1 / สปส.1-10 / 50ทวิ / GL ให้ครบแล้ว →
+                    // **ห้ามออกใบสำคัญจ่ายภายในระบบ TakeTime** (กันเอกสารซ้ำ). แค่ mark ว่าทำจ่ายแล้ว
+                    // (ไม่สร้าง Account_Payment, ไม่ออกเลขใบ, ไม่ทำ PDF) แล้ว enqueue NextAcc run ทั้งงวด.
+                    // JOURNAL_ONLY = ไม่เข้าเงื่อนไขนี้ (NextAcc โพสต์แค่ GL ไม่ออกเอกสาร → ระบบยังออกใบสำคัญจ่ายเอง).
+                    var docModeCfg = new Take_Time_BangPhra.Integration.AccountingConfig(connectionString);
+                    if (docModeCfg.IsConfigured && docModeCfg.Enabled
+                        && (docModeCfg.IsPayrollDocumentMode || docModeCfg.IsPayrollImportMode))
+                    {
+                        using (SqlCommand markCmd = new SqlCommand(@"
+                            UPDATE Payroll_Records
+                            SET VoucherGenerated = 1,
+                                VoucherNumber = NULL,
+                                VoucherGeneratedDate = GETDATE(),
+                                VoucherGeneratedBy = @CreatedBy
+                            WHERE ID = @RecordID", conn, transaction))
+                        {
+                            markCmd.Parameters.AddWithValue("@RecordID", payrollRecordId);
+                            markCmd.Parameters.AddWithValue("@CreatedBy", createdByAdminId);
+                            markCmd.ExecuteNonQuery();
+                        }
+
+                        transaction.Commit();
+
+                        try
+                        {
+                            if (payrollRecord["PayrollPeriod_ID"] != DBNull.Value)
+                            {
+                                int periodId = Convert.ToInt32(payrollRecord["PayrollPeriod_ID"]);
+                                var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(connectionString);
+                                if (docModeCfg.IsPayrollImportMode)
+                                    sync.EnqueuePayrollRunImport(periodId);
+                                else
+                                    sync.EnqueuePayrollRunSync(periodId);
+                            }
+                        }
+                        catch (Exception accEx)
+                        {
+                            try { new Take_Time_BangPhra.code().Logs(connectionString, "Accounting Sync", $"Payroll run enqueue (doc-mode) error: record={payrollRecordId} {accEx.Message}", "SYSTEM"); } catch { }
+                        }
+
+                        return (true, "", "ทำจ่ายสำเร็จ — NextAcc เป็นผู้ออกเอกสารเงินเดือน (payslip/ภ.ง.ด.1/สปส) ไม่ออกใบสำคัญจ่ายในระบบ");
                     }
 
                     // Generate voucher number using DocumentHelper - same running number as Account_Payment
@@ -880,7 +1020,10 @@ public class PayrollService
                     try
                     {
                         var acctConfig = new Take_Time_BangPhra.Integration.AccountingConfig(connectionString);
-                        if (acctConfig.IsConfigured && acctConfig.Enabled && !acctConfig.IsPayrollDocumentMode)
+                        // โพสต์ journal per employee เฉพาะ JOURNAL_ONLY mode — DOCUMENT (native run) และ
+                        // DOCUMENT_IMPORT (import ยอดทั้งงวด) จัดการ GL ทั้งงวดใน GenerateAllVouchersForPeriod
+                        if (acctConfig.IsConfigured && acctConfig.Enabled
+                            && !acctConfig.IsPayrollDocumentMode && !acctConfig.IsPayrollImportMode)
                         {
                             if (!string.IsNullOrEmpty(voucherNumber) && voucherNumber != "0")
                             {
@@ -897,6 +1040,21 @@ public class PayrollService
                                     employeeName: employeeName,
                                     citizenId: idCard);
                             }
+                        }
+                        // DOCUMENT_IMPORT / DOCUMENT modes are RUN-based (NextAcc payroll run for the
+                        // whole period → ภ.ง.ด.1 / สปส.1-10 / 50ทวิ / payslip). กดทำจ่ายรายคนก็ให้ sync
+                        // ทั้งงวดไปด้วย (idempotent: import refKey = PAYROLL-IMPORT-{periodId} → ถ้ามี run
+                        // อยู่แล้วจะคืน run เดิม ไม่สร้างซ้ำ). อ่านยอดต่อคนจาก Payroll_Records ทุกแถวของงวด.
+                        else if (acctConfig.IsConfigured && acctConfig.Enabled
+                            && (acctConfig.IsPayrollImportMode || acctConfig.IsPayrollDocumentMode)
+                            && payrollRecord["PayrollPeriod_ID"] != DBNull.Value)
+                        {
+                            int periodId = Convert.ToInt32(payrollRecord["PayrollPeriod_ID"]);
+                            var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(connectionString);
+                            if (acctConfig.IsPayrollImportMode)
+                                sync.EnqueuePayrollRunImport(periodId);
+                            else
+                                sync.EnqueuePayrollRunSync(periodId);
                         }
                     }
                     catch (Exception accEx)
@@ -968,20 +1126,42 @@ public class PayrollService
             try
             {
                 var acctConfig = new Take_Time_BangPhra.Integration.AccountingConfig(connectionString);
-                if (acctConfig.IsConfigured && acctConfig.Enabled && acctConfig.IsPayrollDocumentMode)
+                if (acctConfig.IsConfigured && acctConfig.Enabled)
                 {
                     var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(connectionString);
-                    sync.EnqueuePayrollRunSync(payrollPeriodId);
+                    if (acctConfig.IsPayrollImportMode)
+                    {
+                        // DOCUMENT_IMPORT: ส่งยอดที่ TakeTime คำนวณเอง (ผันแปร) → NextAcc ออกเอกสารครบจากยอดเรา
+                        sync.EnqueuePayrollRunImport(payrollPeriodId);
+                    }
+                    else if (acctConfig.IsPayrollDocumentMode)
+                    {
+                        // DOCUMENT (native run): NextAcc คำนวณใหม่ server-side (ใช้กับเงินเดือนคงที่)
+                        sync.EnqueuePayrollRunSync(payrollPeriodId);
+                    }
                 }
             }
             catch (Exception accEx)
             {
-                try { new code().Logs(connectionString, "Accounting Sync",
+                try { new Take_Time_BangPhra.code().Logs(connectionString, "Accounting Sync",
                     $"PayrollRun sync error: periodId={payrollPeriodId} {accEx.Message}", "SYSTEM"); } catch { }
             }
         }
 
-        return (successCount, failCount, $"สร้างใบสำคัญจ่ายสำเร็จ {successCount} รายการ" +
+        // doc-mode (NextAcc ออกเอกสาร) ไม่ออกใบสำคัญจ่ายในระบบ → ข้อความสะท้อนความจริง
+        bool docMode = false;
+        try
+        {
+            var cfgMsg = new Take_Time_BangPhra.Integration.AccountingConfig(connectionString);
+            docMode = cfgMsg.IsConfigured && cfgMsg.Enabled
+                && (cfgMsg.IsPayrollDocumentMode || cfgMsg.IsPayrollImportMode);
+        }
+        catch { }
+
+        string okMsg = docMode
+            ? $"ทำจ่ายสำเร็จ {successCount} รายการ (NextAcc ออกเอกสารเงินเดือนให้)"
+            : $"สร้างใบสำคัญจ่ายสำเร็จ {successCount} รายการ";
+        return (successCount, failCount, okMsg +
             (failCount > 0 ? $", ล้มเหลว {failCount} รายการ" : ""));
     }
 

@@ -260,7 +260,7 @@
     <div class="card">
         <h3>&#x1F4DD; รีวิวล่าสุด</h3>
         <div class="filter-bar">
-            <select id="filterSource"><option value="">ทุกแหล่ง</option><option value="INTERNAL">ภายใน</option><option value="GOOGLE">Google</option><option value="FACEBOOK">Facebook</option></select>
+            <select id="filterSource"><option value="">ทุกแหล่ง</option></select>
             <select id="filterSentiment"><option value="">ทุกความรู้สึก</option><option value="POSITIVE">เชิงบวก</option><option value="NEGATIVE">เชิงลบ</option><option value="NEUTRAL">กลาง</option><option value="MIXED">ผสม</option></select>
             <select id="filterMinRating"><option value="">คะแนนต่ำสุด</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select>
             <select id="filterMaxRating"><option value="">คะแนนสูงสุด</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select>
@@ -514,12 +514,19 @@
     // ===== State =====
     var dashboardData = null;
     var currentReview = null;
+    var _reviewRows = [];
+    // ข้อความรีวิว/ชื่อผู้รีวิว/หัวข้อ มาจากภายนอก (Google/OTA/อีเมล/AI) — ต้อง escape ก่อนใส่ innerHTML
+    function escH(s) {
+        if (s === null || s === undefined) return '';
+        return String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; });
+    }
 
     // ===== Helpers =====
+    var CSRF = '<%= CsrfToken %>';
     function apiCall(action, data) {
         return fetch('?action=' + action, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF },
             body: JSON.stringify(data || {})
         }).then(function (r) { return r.json(); });
     }
@@ -550,13 +557,13 @@
 
     function sentimentBadge(sentiment) {
         if (!sentiment) return '<span class="badge badge-pending">รอวิเคราะห์</span>';
-        var cls = 'badge-' + sentiment;
+        var cls = 'badge-' + escH(sentiment);
         var labels = { 'POSITIVE': 'เชิงบวก', 'NEGATIVE': 'เชิงลบ', 'NEUTRAL': 'กลาง', 'MIXED': 'ผสม' };
-        return '<span class="badge ' + cls + '">' + (labels[sentiment] || sentiment) + '</span>';
+        return '<span class="badge ' + cls + '">' + (labels[sentiment] || escH(sentiment)) + '</span>';
     }
 
     function sourceBadge(src) {
-        return '<span class="source-badge ' + (src || '') + '">' + (src || '-') + '</span>';
+        return '<span class="source-badge ' + escH(src || '') + '">' + escH(src || '-') + '</span>';
     }
 
     function formatDate(d) {
@@ -697,7 +704,7 @@
         if (!topics || topics.length === 0) { el.innerHTML = '<p style="color:#999">ไม่มีข้อมูล</p>'; return; }
         var html = '';
         topics.forEach(function (t) {
-            html += '<div class="topic-pill">' + (t.topic || '-') + ' <span class="cnt">' + (t.count || 0) + '</span></div>';
+            html += '<div class="topic-pill">' + escH(t.topic || '-') + ' <span class="cnt">' + (t.count || 0) + '</span></div>';
         });
         el.innerHTML = html;
     }
@@ -728,17 +735,18 @@
         var el = document.getElementById('reviewList');
         if (!reviews || reviews.length === 0) { el.innerHTML = '<p style="text-align:center;color:#999;">ไม่มีรีวิว</p>'; return; }
         var html = '';
-        reviews.forEach(function (r) {
-            html += '<div class="review-item" onclick=\'openReviewDetail(' + JSON.stringify(r).replace(/'/g, "\\'") + ')\'>';
+        _reviewRows = reviews;
+        reviews.forEach(function (r, i) {
+            html += '<div class="review-item" onclick="openReviewDetail(_reviewRows[' + i + '])">';
             html += '<div class="review-top">';
             html += '<div class="review-meta">';
             html += sourceBadge(r.source);
-            html += '<span class="review-name">' + (r.reviewerName || 'ไม่ระบุชื่อ') + '</span>';
+            html += '<span class="review-name">' + escH(r.reviewerName || 'ไม่ระบุชื่อ') + '</span>';
             html += '<span class="review-stars">' + renderStars(r.rating || 0) + '</span>';
             html += '</div>';
             html += '<div>' + sentimentBadge(r.sentiment) + ' <span class="review-date">' + formatDate(r.reviewDate) + '</span></div>';
             html += '</div>';
-            html += '<div class="review-text">' + truncate(r.reviewText || '', 200) + '</div>';
+            html += '<div class="review-text">' + escH(truncate(r.reviewText || '', 200)) + '</div>';
             html += '</div>';
         });
         el.innerHTML = html;
@@ -1107,7 +1115,7 @@
             html += '<div class="info">';
             html += '<h4>' + sourceBadge(s.SourceCode) + ' ' + (s.SourceName || s.SourceCode) + '</h4>';
             html += '<p style="font-size:12px;color:#888;margin:4px 0;">รหัส: ' + s.SourceCode + (s.LastFetchDate ? ' | ดึงล่าสุด: ' + formatDate(s.LastFetchDate) : '') + (s.TotalReviews ? ' | รีวิว: ' + s.TotalReviews : '') + '</p>';
-            html += '<textarea class="config-area" id="srcConfig_' + idx + '" placeholder=\'{"apiKey":"...","placeId":"..."}\'>' + (s.ApiConfig || '') + '</textarea>';
+            html += '<textarea class="config-area" id="srcConfig_' + idx + '" placeholder=\'{"apiKey":"...","placeId":"..."}\'>' + escH(s.ApiConfig || '') + '</textarea>';
             html += '<button class="btn btn-brown" style="margin-top:8px;" onclick="saveSourceConfig(\'' + s.SourceCode + '\', ' + idx + ')">&#x1F4BE; บันทึกการตั้งค่า</button>';
             html += '</div></div>';
         });
@@ -1140,10 +1148,29 @@
         }).catch(function (err) { hideLoading(); showToast('เกิดข้อผิดพลาด: ' + err.message, 'error'); });
     }
 
+    // ===== Source filter (dynamic: only sources that actually have reviews) =====
+    function loadSourceFilter() {
+        apiCall('getPlatforms').then(function (res) {
+            if (!res.success || !res.data) return;
+            var sel = document.getElementById('filterSource');
+            var cur = sel.value;
+            var html = '<option value="">ทุกแหล่ง</option>';
+            res.data.forEach(function (p) {
+                var code = String(p.code || '').replace(/[^A-Za-z0-9_.\-]/g, '');
+                if (!code) return;
+                var name = String(p.name || code).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; });
+                html += '<option value="' + code + '">' + name + ' (' + (p.count || 0) + ')</option>';
+            });
+            sel.innerHTML = html;
+            sel.value = cur;
+        }).catch(function () { /* keep "ทุกแหล่ง" */ });
+    }
+
     // ===== Init =====
     document.addEventListener('DOMContentLoaded', function () {
         loadDashboard();
         loadSources();
+        loadSourceFilter();
     });
 </script>
 </asp:Content>

@@ -400,6 +400,8 @@
                     </span>
                     <asp:HyperLink ID="lnkNextAccDoc" runat="server" Text="เปิดใน NextAcc" Target="_blank"
                         Style="margin-left: 15px; color: #1565c0; text-decoration: underline; font-size: 13px;" Visible="false" />
+                    <asp:LinkButton ID="lnkNextAccPdf" runat="server" Text="ดู PDF (NextAcc)" OnClick="lnkNextAccPdf_Click"
+                        CausesValidation="false" Style="margin-left: 15px; color: #1565c0; text-decoration: underline; font-size: 13px;" Visible="false" />
                     <asp:Label ID="lblNextAccSyncStatus" runat="server" Text=""
                         Style="margin-left: 15px; font-size: 12px; color: #666;" />
                     <asp:Label ID="lblNextAccPaymentStatus" runat="server" Text=""
@@ -455,6 +457,12 @@
                     &nbsp;
                     <asp:CheckBox ID="chkIsCredit" runat="server" Text=" เครดิต (ยังไม่จ่ายเงิน)" Font-Bold="true" />
                     <span style="color: #888; font-size: 12px; margin-left: 5px;">ติ๊กถ้าเป็นเครดิต — NextAcc จะไม่บันทึกชำระเงินอัตโนมัติ</span>
+                    <br />
+                    <div style="margin-top:6px;">
+                        <span style="font-size:12px; color:#2b6cb0;">บังคับแหล่งจ่ายเงิน (ผังบัญชี NextAcc):</span>
+                        <asp:DropDownList ID="ddlPaidHowNexaacc" runat="server" Width="55%" CssClass="form-control" />
+                        <span style="color:#888; font-size:11px;">ดึงจากผังบัญชีจริงของ NextAcc (เงินสด/ธนาคาร/เจ้าหนี้กรรมการ) → เลือกแล้วบังคับ Cr บัญชีนั้นตรง ๆ. เว้นว่าง = ใช้ mapping ตามวิธีจ่ายเงิน</span>
+                    </div>
                  </td>
 
             </tr>
@@ -484,8 +492,47 @@
                             <asp:Parameter DefaultValue="True" Name="Status" Type="Boolean" />
                         </SelectParameters>
                     </asp:SqlDataSource>
+                    <br />
+                    <div style="margin-top:6px;">
+                        <span style="font-size:12px; color:#2b6cb0;">ภาษีซื้อ (VAT):</span>
+                        <asp:DropDownList ID="ddlVatClaim" runat="server" Width="40%" CssClass="form-control">
+                            <asp:ListItem Value="1" Text="เคลมภาษีซื้อ (แยก Dr ภาษีซื้อ)" Selected="True" />
+                            <asp:ListItem Value="0" Text="ไม่เคลม — รวม VAT เข้าค่าใช้จ่าย (§82/5)" />
+                        </asp:DropDownList>
+                        <span style="color:#888; font-size:11px;">ไม่เคลม → NextAcc รวม VAT เข้าบัญชีค่าใช้จ่าย ไม่แยกภาษีซื้อ (ใช้กับใบเสร็จที่เครดิตภาษีซื้อไม่ได้)</span>
+                    </div>
                  </td>
-            
+
+            </tr>
+
+            <tr style="background-color:#fff8e1;">
+                 <td class="modal-sm" style="width: 20%; text-align: right; vertical-align: top;">ไม่มีใบเสร็จ:</td>
+                <td>
+                    &nbsp;<asp:CheckBox ID="chkCertInLieu" runat="server" AutoPostBack="True" OnCheckedChanged="chkCertInLieu_CheckedChanged"
+                        Text=" ผู้รับเงินออกใบเสร็จไม่ได้ — ออก &quot;ใบรับรองแทนใบเสร็จรับเงิน&quot;" Font-Bold="true" />
+                    <span style="color:#888; font-size:11px; margin-left:5px;">เช่น ค่าแท็กซี่ / แผงลอย / ลูกจ้างรายวัน — NextAcc ออกเอกสารใบรับรองแทนใบสำคัญจ่าย (จ่ายเงินสด ไม่มีภาษีซื้อ)</span>
+                    <asp:Panel ID="pnlCertInLieu" runat="server" Visible="false" Style="margin-top:6px; padding:8px; border:1px dashed #f0b429;">
+                        <div style="margin-bottom:4px;">
+                            <span style="font-size:12px; color:#b7791f;">เหตุผลที่ไม่ได้รับใบเสร็จ *</span><br />
+                            <asp:TextBox ID="txtCilReason" runat="server" Width="90%" MaxLength="500" placeholder="เช่น ผู้รับเงินเป็นผู้ขายรายย่อย ไม่มีใบเสร็จรับเงิน" />
+                        </div>
+                        <div style="margin-bottom:4px;">
+                            <span style="font-size:12px; color:#b7791f;">ผู้รับเงิน (ถ้าไม่ตรงกับผู้ขายที่เลือก)</span><br />
+                            <asp:TextBox ID="txtCilPayeeName" runat="server" Width="44%" MaxLength="200" placeholder="ชื่อผู้รับเงิน" />
+                            <asp:TextBox ID="txtCilPayeeAddress" runat="server" Width="44%" MaxLength="500" placeholder="ที่อยู่ (ถ้ามี)" />
+                        </div>
+                        <div style="margin-bottom:4px;">
+                            <span style="font-size:12px; color:#b7791f;">ผู้รับรอง *</span><br />
+                            <asp:TextBox ID="txtCilCertifierName" runat="server" Width="44%" MaxLength="200" placeholder="ชื่อผู้รับรอง" />
+                            <asp:TextBox ID="txtCilCertifierPosition" runat="server" Width="44%" MaxLength="200" placeholder="ตำแหน่ง" />
+                        </div>
+                        <div>
+                            <span style="font-size:12px; color:#b7791f;">พยาน / ผู้อนุมัติ</span><br />
+                            <asp:TextBox ID="txtCilWitnessName" runat="server" Width="44%" MaxLength="200" placeholder="ชื่อพยาน/ผู้อนุมัติ" />
+                            <asp:TextBox ID="txtCilWitnessPosition" runat="server" Width="44%" MaxLength="200" placeholder="ตำแหน่ง" />
+                        </div>
+                    </asp:Panel>
+                 </td>
             </tr>
 
            
@@ -496,6 +543,12 @@
                     &nbsp;<asp:DropDownList ID="ddlLineCategory" runat="server" Width="60%" AppendDataBoundItems="true">
                     <asp:ListItem Value="">---เลือกหมวดค่าใช้จ่าย---</asp:ListItem>
                     </asp:DropDownList>
+                    <br />
+                    <div style="margin-top:6px;">
+                        <span style="font-size:12px; color:#2b6cb0;">หรือเลือกผังบัญชีค่าใช้จ่ายจาก NextAcc โดยตรง:</span>
+                        <asp:DropDownList ID="ddlLineChargeNexaacc" runat="server" Width="55%" CssClass="form-control" />
+                        <span style="color:#888; font-size:11px;">ดึงจากผังบัญชีค่าใช้จ่ายจริงของ NextAcc (5x/12x + เจ้าหนี้/เงินทดรองกรรมการ สำหรับเคส "คืนเงินทดรองกรรมการ") → เลี่ยงปัญหา mapping ผิด. เลือกแล้วใช้บัญชีนี้กับรายการที่กำลังเพิ่ม</span>
+                    </div>
                  </td>
             </tr>
 

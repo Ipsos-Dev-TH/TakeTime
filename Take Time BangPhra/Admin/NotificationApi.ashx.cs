@@ -5,7 +5,12 @@ using System.Web.SessionState;
 
 namespace Take_Time_BangPhra.Admin
 {
-    public class NotificationApi : IHttpHandler, IRequiresSessionState
+    // IReadOnlySessionState (not IRequiresSessionState): this handler is polled from
+    // Site.Master on EVERY page every 5s. A read-write session lock here serializes all
+    // requests sharing the same SessionID, which is the root cause of pages "ค้าง" while
+    // a slow request holds the exclusive lock. Read-only access still resets the session
+    // sliding timeout (keepalive keeps working) but takes only a shared lock.
+    public class NotificationApi : IHttpHandler, IReadOnlySessionState
     {
         public void ProcessRequest(HttpContext context)
         {

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Web;
@@ -19,6 +19,7 @@ namespace Take_Time_BangPhra.Account
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.FinReceipt)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             this.MaintainScrollPositionOnPostBack = true;
             try
             {
@@ -26,6 +27,8 @@ namespace Take_Time_BangPhra.Account
                 {
                     if (!IsPostBack)
                     {
+                        if (Request.QueryString["deleted"] == "1")
+                            ClientScript.RegisterStartupScript(this.GetType(), "delok", "alert('✅ ลบเอกสารเรียบร้อยแล้ว');", true);
                         TextBox1.Text = DateTime.Now.ToString("yyyy-MM-dd");
                         TextBox2.Text = DateTime.Now.ToString("yyyy-MM-dd");
 
@@ -336,7 +339,7 @@ namespace Take_Time_BangPhra.Account
                 }
                 if (docType == "REC")
                 {
-                    string path = System.Configuration.ConfigurationManager.AppSettings["ReceiptFolderPath"].ToString() + "\\" + docYear + "\\" + docMonth;
+                    string path = AppCfg.Get("ReceiptFolderPath").ToString() + "\\" + docYear + "\\" + docMonth;
 
                     // 🔧 FIX: Update Reservation.Deposit before deleting Payment_History
                     try
@@ -426,7 +429,7 @@ namespace Take_Time_BangPhra.Account
                 }
                 else if (docType == "PAY")
                 {
-                    string path = System.Configuration.ConfigurationManager.AppSettings["PaymentFolderPath"].ToString() + "\\" + docYear + "\\" + docMonth;
+                    string path = AppCfg.Get("PaymentFolderPath").ToString() + "\\" + docYear + "\\" + docMonth;
 
                     // SECURE: Delete payment record
                     var deletePaymentParams = new Dictionary<string, object>
@@ -462,9 +465,10 @@ namespace Take_Time_BangPhra.Account
                     }
                 }
 
-                // Show success message then redirect
-                ClientScript.RegisterStartupScript(this.GetType(), "success",
-                    "alert('✅ ลบเอกสารเรียบร้อยแล้ว'); window.location.href='/Account/CheckDocument';", true);
+                // Server-side redirect — เชื่อถือได้กว่า ClientScript (ไม่ขึ้นกับ JS) → row หายจริง + แจ้งสำเร็จ
+                Response.Redirect("~/Account/CheckDocument?deleted=1", false);
+                Context.ApplicationInstance.CompleteRequest();
+                return;
             }
         }
 
@@ -524,7 +528,7 @@ namespace Take_Time_BangPhra.Account
 
                 if (docStatus == "Cancel")
                 {
-                    string path = System.Configuration.ConfigurationManager.AppSettings["ReceiptFolderPath"].ToString();
+                    string path = AppCfg.Get("ReceiptFolderPath").ToString();
                     if (!string.IsNullOrEmpty(receiptUid) && File.Exists(path + "\\" + docYear + "\\" + docMonth + "" + docNum + "_" + receiptUid + "_Cancel.pdf"))
                     {
                         Response.Redirect("/Documents/Receipt/" + docYear + "/" + docMonth + "/" + docNum + "_" + receiptUid + "_Cancel.pdf");
@@ -537,7 +541,7 @@ namespace Take_Time_BangPhra.Account
                 }
                 else
                 {
-                    string path = System.Configuration.ConfigurationManager.AppSettings["ReceiptFolderPath"].ToString();
+                    string path = AppCfg.Get("ReceiptFolderPath").ToString();
                     if (!string.IsNullOrEmpty(receiptUid) && File.Exists(path + "\\" + docYear + "\\" + docMonth + "\\" + docNum + "_" + receiptUid + ".pdf"))
                     {
                         Response.Redirect("/Documents/Receipt/" + docYear + "/" + docMonth + "/" + docNum + "_" + receiptUid + ".pdf");
@@ -565,7 +569,7 @@ namespace Take_Time_BangPhra.Account
 
                 if (docStatus == "Cancel")
                 {
-                    string path = System.Configuration.ConfigurationManager.AppSettings["PaymentFolderPath"].ToString();
+                    string path = AppCfg.Get("PaymentFolderPath").ToString();
                     if (!string.IsNullOrEmpty(paymentUid) && File.Exists(path + "\\" + docYear + "\\" + docMonth + "\\" + docNum + "_" + paymentUid + "_Cancel.pdf"))
                     {
                         Response.Redirect("/Documents/Payment/" + docYear + "/" + docMonth + "/" + docNum + "_" + paymentUid + "_Cancel.pdf");
@@ -578,7 +582,7 @@ namespace Take_Time_BangPhra.Account
                 }
                 else
                 {
-                    string path = System.Configuration.ConfigurationManager.AppSettings["PaymentFolderPath"].ToString();
+                    string path = AppCfg.Get("PaymentFolderPath").ToString();
                     if (!string.IsNullOrEmpty(paymentUid) && File.Exists(path + "\\" + docYear + "\\" + docMonth + "\\" + docNum + "_" + paymentUid + ".pdf"))
                     {
                         Response.Redirect("/Documents/Payment/" + docYear + "/" + docMonth + "/" + docNum + "_" + paymentUid + ".pdf");
