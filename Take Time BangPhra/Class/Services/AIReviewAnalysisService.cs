@@ -726,8 +726,27 @@ END", null);
                     return result;
                 }
 
-                // Fetch the page HTML
-                string html = MakeHttpGetRequest(scrapeUrl);
+                // Fetch the page HTML — scrapeUrl มาจากผู้ใช้ ⇒ ผ่าน ReviewHttp.GetPublic (allow-list + IP สาธารณะ
+                // ทุก hop + ตาม redirect เอง) เหมือน UrlFetchAdapter เพื่อกัน SSRF
+                string html = null;
+                try
+                {
+                    var page = ReviewHttp.GetPublic(scrapeUrl, new Dictionary<string, string>
+                    {
+                        { "User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36" },
+                        { "Accept", "text/html,application/xhtml+xml" },
+                        { "Accept-Language", "th,en;q=0.8" }
+                    });
+                    if (page.Ok) html = page.Body;
+                }
+                catch (ReviewSourceSkippedException sx)
+                {
+                    _code.Logs(_connectionString, "AIReview", "Blocked SSRF attempt: " + sx.Message, "SYSTEM");
+                    result["success"] = false;
+                    result["message"] = sx.Message;
+                    return result;
+                }
+                catch { html = null; }
                 if (string.IsNullOrEmpty(html) || html.Length < 100)
                 {
                     result["success"] = false;
@@ -1842,25 +1861,27 @@ HTML:
         {
             try
             {
-                if (!IsAllowedUrl(url))
-                    return null;
-                // TLS 1.2 — many sites reject the .NET default (SSL3/TLS1.0)
-                try { ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12; } catch { }
-
-                var request = (HttpWebRequest)WebRequest.Create(url);
-                request.Method = "GET";
-                request.Timeout = 30000;
-                request.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
-                request.Accept = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
-                request.Headers.Add("Accept-Language", "th,en-US;q=0.9,en;q=0.8");
-                request.AllowAutoRedirect = true;
-                request.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
-
-                using (var response = (HttpWebResponse)request.GetResponse())
-                using (var reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
+                // กัน SSRF: ทุก hop (รวม redirect) ต้องผ่าน allow-list และ resolve ได้เฉพาะ IP สาธารณะ — ไม่ตาม redirect อัตโนมัติ
+                var headers = new Dictionary<string, string>
                 {
-                    return reader.ReadToEnd();
+                    { "User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" },
+                    { "Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" },
+                    { "Accept-Language", "th,en-US;q=0.9,en;q=0.8" }
+                };
+                string current = url;
+                for (int hop = 0; hop <= 4; hop++)
+                {
+                    Uri uri;
+                    if (!IsAllowedUrl(current) || !Uri.TryCreate(current, UriKind.Absolute, out uri)
+                        || !ReviewHttp.ResolvesToPublicAddresses(uri.DnsSafeHost))
+                        return null;
+                    var resp = ReviewHttp.Send("GET", current, null, null, headers, 30000, false);
+                    if (!resp.IsRedirect) return resp.Ok ? resp.Body : null;
+                    Uri next;
+                    if (!Uri.TryCreate(uri, resp.Location, out next)) return null;
+                    current = next.AbsoluteUri;
                 }
+                return null;   // redirect มากเกินไป
             }
             catch (WebException)
             {

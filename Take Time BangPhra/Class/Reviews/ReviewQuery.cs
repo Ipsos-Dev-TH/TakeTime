@@ -855,7 +855,12 @@ DROP TABLE #f;";
 
             new AIReportService(conn);   // ensures AI_Report_Summaries exists (same cache table as AI reports)
 
-            if (!force)
+            // งบ token รีวิวต่อวัน (Review_AI_Daily_Token_Budget) — ตัวเดียวกับงาน AI batch ของตัวตั้งเวลา;
+            // งบหมดยังแสดงสรุปที่ cache ไว้ได้ (แม้กด "สร้างใหม่")
+            string budgetReason;
+            bool canSpend = Services.Reviews.ReviewAiBudget.CanSpend(conn, out budgetReason);
+
+            if (!force || !canSpend)
             {
                 try
                 {
@@ -867,16 +872,23 @@ DROP TABLE #f;";
                         hit["summary"] = Convert.ToString(c.Rows[0]["AISummary"]);
                         hit["cached"] = true;
                         hit["createdAt"] = ToIso(c.Rows[0]["Created_Date"]);
+                        if (!canSpend) hit["note"] = "งบ AI รีวิววันนี้หมดแล้ว — แสดงสรุปที่บันทึกไว้แทน";
                         return hit;
                     }
                 }
                 catch { }
             }
 
+            if (!canSpend)
+                return Result(false, "ยังสร้างสรุปด้วย AI ไม่ได้: " + budgetReason
+                    + " — ลองใหม่พรุ่งนี้ หรือให้ Owner/Admin เพิ่มงบที่หน้าแหล่งรีวิว (Review_AI_Daily_Token_Budget)");
+
             string prompt = "สรุปรีวิวของโรงแรมจากสถิติต่อไปนี้ (คำนวณจากฐานข้อมูลแล้ว):\n\n" + digest +
                 "\n\nให้ตอบเป็นหัวข้อ:\n1. ภาพรวม (2-3 ประโยค อ้างอิงคะแนนเฉลี่ยและจำนวน)\n2. จุดแข็งที่ลูกค้าชม\n3. ปัญหาที่พบบ่อย (เรียงตามความสำคัญ)\n" +
                 "4. เปรียบเทียบแต่ละแพลตฟอร์ม (รวมคะแนนที่แพลตฟอร์มประกาศถ้ามี)\n5. การตอบกลับรีวิว (อัตราและความเร็ว)\n6. ข้อเสนอแนะที่ทำได้ทันที 3-5 ข้อ\nไม่ต้องใส่ emoji";
-            var resp = ai.SendMessage(prompt, "review_summary_" + reportType, null, AiSystemPrompt);
+            // SessionPrefix "review_" ⇒ usage ลง AI_Usage_Log นับรวมในงบรีวิว (ReviewAiBudget.UsedToday) แบบเดียวกับ batch;
+            // ไม่เก็บ prompt ลง AI_Chat_History เหมือน batch
+            var resp = ai.SendMessage(prompt, Services.Reviews.ReviewAiBudget.SessionPrefix + "summary_" + reportType, null, AiSystemPrompt, null, false);
             if (!resp.Success || string.IsNullOrWhiteSpace(resp.Message))
                 return Result(false, "AI ตอบไม่สำเร็จ: " + resp.Message);
 

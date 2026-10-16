@@ -522,10 +522,11 @@
     }
 
     // ===== Helpers =====
+    var CSRF = '<%= CsrfToken %>';
     function apiCall(action, data) {
         return fetch('?action=' + action, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF },
             body: JSON.stringify(data || {})
         }).then(function (r) { return r.json(); });
     }
@@ -1114,7 +1115,7 @@
             html += '<div class="info">';
             html += '<h4>' + sourceBadge(s.SourceCode) + ' ' + (s.SourceName || s.SourceCode) + '</h4>';
             html += '<p style="font-size:12px;color:#888;margin:4px 0;">รหัส: ' + s.SourceCode + (s.LastFetchDate ? ' | ดึงล่าสุด: ' + formatDate(s.LastFetchDate) : '') + (s.TotalReviews ? ' | รีวิว: ' + s.TotalReviews : '') + '</p>';
-            html += '<textarea class="config-area" id="srcConfig_' + idx + '" placeholder=\'{"apiKey":"...","placeId":"..."}\'>' + (s.ApiConfig || '') + '</textarea>';
+            html += '<textarea class="config-area" id="srcConfig_' + idx + '" placeholder=\'{"apiKey":"...","placeId":"..."}\'>' + escH(s.ApiConfig || '') + '</textarea>';
             html += '<button class="btn btn-brown" style="margin-top:8px;" onclick="saveSourceConfig(\'' + s.SourceCode + '\', ' + idx + ')">&#x1F4BE; บันทึกการตั้งค่า</button>';
             html += '</div></div>';
         });

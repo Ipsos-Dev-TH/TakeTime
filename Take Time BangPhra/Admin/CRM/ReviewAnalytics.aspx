@@ -517,7 +517,7 @@
         $('raAiMeta').textContent = '';
         api('aiSummary', { filter: filter(), force: !!force }).then(function (res) {
             box.textContent = res.success ? res.summary : (res.message || 'สรุปไม่สำเร็จ');
-            if (res.success) $('raAiMeta').textContent = (res.cached ? 'จากแคช · ' : 'สร้างใหม่ · ') + fmtDate(res.createdAt) + (res.tokens ? ' · ' + res.tokens + ' tokens' : '');
+            if (res.success) $('raAiMeta').textContent = (res.cached ? 'จากแคช · ' : 'สร้างใหม่ · ') + fmtDate(res.createdAt) + (res.tokens ? ' · ' + res.tokens + ' tokens' : '') + (res.note ? ' · ' + res.note : '');
         }).catch(function (e) { box.textContent = 'เกิดข้อผิดพลาด: ' + e.message; });
     }
 
