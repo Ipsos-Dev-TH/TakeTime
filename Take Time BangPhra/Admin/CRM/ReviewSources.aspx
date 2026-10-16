@@ -261,7 +261,13 @@
             { k: 'apiEnabled', l: 'เรียก endpoint รีวิวเมื่อหน้าไม่มีรีวิวฝังมา (true/false)', h: 'ค่าเริ่ม true — false = อ่านเฉพาะหน้าที่พัก (1 คำขอ/รอบ)' },
             { k: 'apiUrl', l: 'endpoint รีวิว (ขั้นสูง)', h: '⚠ ค่าเริ่มยังไม่ยืนยัน: https://www.agoda.com/api/cronos/property/review/ReviewComments — ใช้ {hotelId} ได้' },
             { k: 'apiMethod', l: 'HTTP method ของ endpoint', h: 'POST (ค่าเริ่ม) หรือ GET' },
-            { k: 'apiBody', l: 'body ของ POST (JSON, ใช้ {hotelId})', h: 'เว้นว่าง = ค่าเริ่ม (หน้าแรก 20 รายการ ล่าสุดก่อน — ยังไม่ยืนยัน)' },
+            { k: 'apiBody', l: 'body ของ POST (JSON, ใช้ {hotelId} {languageId} {locale})', h: 'เว้นว่าง = ค่าเริ่ม (หน้าแรก 20 รายการ ล่าสุดก่อน + languageId — ยังไม่ยืนยัน)' },
+            { k: 'languageId', l: 'languageId ของ Agoda', h: '⚠ ยังไม่ยืนยัน: ค่าเริ่ม 22 (ไทย) — "off" = ไม่ใส่ languageId ใน body (กลับเป็น body เดิมที่ทดสอบผ่าน)' },
+            { k: 'locale', l: 'locale', h: 'ค่าเริ่ม th-th (ใช้กับ Accept-Language และ {locale})' },
+            { k: 'sendLocaleHeaders', l: 'ส่ง header ag-language-locale / ag-language-id (true/false)', h: 'ค่าเริ่ม false — ลองเปิดถ้ารีวิวยังมาเป็นคำแปลอังกฤษ' },
+            { k: 'summaryUrl', l: 'endpoint สรุปคะแนน (ไม่บังคับ)', h: 'เว้นว่าง = ปิด; ตั้งแล้วเรียกเฉพาะเมื่อหาคะแนนรวมจาก JSON-LD/endpoint รีวิว/หน้าเว็บไม่ได้ (งบคำขอ +1)' },
+            { k: 'summaryMethod', l: 'method ของ endpoint สรุป', h: 'GET (ค่าเริ่ม) หรือ POST' },
+            { k: 'summaryBody', l: 'body ของ endpoint สรุป (POST)', h: 'ค่าเริ่ม {"hotelId":{hotelId}}' },
             { k: 'apiHeaders', l: 'header เพิ่มเติม', h: 'รูปแบบ Name: value | Name2: value' },
             { k: 'forwardCookies', l: 'ส่งคุกกี้จากหน้าที่พักต่อให้ endpoint (true/false)', h: 'ค่าเริ่ม true' },
             { k: 'providerMap', l: 'providerId → แพลตฟอร์ม', h: 'ค่าเริ่ม 332:Agoda (อื่น ๆ ยังไม่ยืนยัน เช่น 3038:Booking.com)' },
@@ -427,9 +433,16 @@
         });
         h += '</tbody></table>';
         h += '<ul style="margin:12px 0;line-height:1.8">'
-            + '<li>JSON-LD: ' + (d.rating !== null && d.rating !== undefined
+            + '<li>JSON-LD: ' + (d.jsonLdFound ? 'พบ ' + esc(d.jsonLdBlocks) + ' บล็อก' : 'ไม่พบ') + '</li>'
+            + '<li>คะแนนรวม: ' + (d.rating !== null && d.rating !== undefined
                 ? '<b>' + esc(d.rating) + '/' + esc(d.ratingBest || 10) + '</b>' + (d.ratingCount ? ' (' + esc(d.ratingCount) + ' รีวิว)' : '')
-                : (d.jsonLdFound ? 'พบ ' + esc(d.jsonLdBlocks) + ' บล็อก แต่ไม่มี aggregateRating' : 'ไม่พบ')) + '</li>'
+                  + ' <span class="rs-muted">จาก <code>' + esc(d.ratingSource) + '</code></span>'
+                : '<span class="rs-err">ไม่พบอย่างมั่นใจ (ไม่ตั้งค่าเดา)</span>') + '</li>'
+            + ((d.ratingCandidates || []).length ? '<li>ค่าที่พบ (คีย์=ค่า, p=ความน่าเชื่อถือ): <div class="rs-muted" style="word-break:break-all">'
+                + d.ratingCandidates.map(esc).join(' · ') + '</div></li>' : '')
+            + (d.apiTopKeys ? '<li>คีย์ชั้นบนของคำตอบ endpoint: <div class="rs-muted" style="word-break:break-all"><code>' + esc(d.apiTopKeys) + '</code></div></li>' : '')
+            + (d.commentFields ? '<li>ฟิลด์ของ comment แรก: <div class="rs-muted" style="word-break:break-all"><code>' + esc(d.commentFields) + '</code></div>'
+                + (d.commentShortValues ? '<div class="rs-muted" style="word-break:break-all">ค่าสั้น: <code>' + esc(d.commentShortValues) + '</code></div>' : '') + '</li>' : '')
             + '<li>รหัสที่พัก: ' + (d.propertyId ? '<b>' + esc(d.propertyId) + '</b> <span class="rs-muted">(' + esc(d.propertyIdPattern) + ')</span>' : '<span class="rs-err">ไม่พบ</span>')
             + (d.propertyIdCandidates ? ' <span class="rs-muted">อื่น ๆ: ' + esc(d.propertyIdCandidates) + '</span>' : '') + '</li>'
             + '<li>เส้นทาง HTML (DOM รายการรีวิว): ' + (d.htmlDomReviews > 0 ? '<b>พบ ' + esc(d.htmlDomReviews) + ' รีวิว</b>'
@@ -443,7 +456,11 @@
                 h += '<div class="rs-help">⭐ <b>' + esc(p.rating === null || p.rating === undefined ? '?' : p.rating) + '/' + esc(p.scale || 10) + '</b> · '
                     + esc(p.origin) + ' · ' + esc(p.name || '(ไม่มีชื่อ)') + ' · ' + esc(p.date || 'ไม่มีวันที่')
                     + (p.extId ? ' <span class="rs-muted">' + esc(p.extId) + '</span>' : '')
-                    + (p.title ? '<div><b>' + esc(p.title) + '</b></div>' : '') + '<div>' + esc(p.text) + '</div></div>';
+                    + ' · ภาษา ' + esc(p.language || '?') + (p.machineTranslated ? ' <span class="rs-badge PARTIAL">แปลโดย Agoda</span>' : '')
+                    + (p.title ? '<div><b>' + esc(p.title) + '</b></div>' : '') + '<div style="white-space:pre-line">' + esc(p.text) + '</div>'
+                    + (p.translatedText || p.translatedTitle ? '<div class="rs-muted" style="margin-top:4px;white-space:pre-line">คำแปลที่ Agoda แสดง (ไม่บันทึก): '
+                        + (p.translatedTitle ? '<b>' + esc(p.translatedTitle) + '</b> ' : '') + esc(p.translatedText || '') + '</div>' : '')
+                    + '</div>';
             });
         }
         if ((d.warnings || []).length) h += '<div class="rs-alert warn">' + d.warnings.map(esc).join('<br/>') + '</div>';

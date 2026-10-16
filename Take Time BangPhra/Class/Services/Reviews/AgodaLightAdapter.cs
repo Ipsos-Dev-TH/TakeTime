@@ -14,7 +14,11 @@
 //   • ไม่อิง Review_UrlFetch_Allowed — opt-in ด้วย Is_Enabled ของแหล่ง ซึ่งเปิดได้เฉพาะ Owner/Admin
 //   • เพิ่มเฉพาะรีวิวที่ยังไม่มี (ReviewItem.InsertOnly) — ไม่เขียนข้อความเดิมทับ
 // ApiConfig (ไม่บังคับ): propertyId, apiEnabled (true), apiUrl, apiMethod (POST|GET), apiBody (ใช้ {hotelId}),
-//   apiHeaders ("Name: value | Name2: value"), forwardCookies (true), providerMap ("332:Agoda,…"), maxItems (20), ratingScale (10)
+//   apiHeaders ("Name: value | Name2: value"), forwardCookies (true), providerMap ("332:Agoda,…"), maxItems (20), ratingScale (10),
+//   languageId (22 = ไทย — ยังไม่ยืนยัน; "off" = ไม่ใส่ใน body), locale (th-th), sendLocaleHeaders (false → ag-language-locale/ag-language-id),
+//   summaryUrl / summaryMethod (GET) / summaryBody — endpoint สรุปคะแนน (ปิดเป็นค่าเริ่ม; ตั้งแล้วงบคำขอ +1 = 3 และเรียกเฉพาะเมื่อหาคะแนนรวมไม่ได้)
+// placeholder ใน apiUrl/apiBody/summaryUrl/summaryBody: {hotelId} {languageId} {locale}
+// ข้อความรีวิว: เก็บ "ต้นฉบับ" (originalComment/originalTitle …) แทนคำแปลของ Agoda เมื่อมี, Language จากภาษาต้นฉบับ
 // ===========================================================================
 
 using System;
@@ -39,11 +43,14 @@ namespace Take_Time_BangPhra.Services.Reviews
         public const string DefaultApiUrl = "https://www.agoda.com/api/cronos/property/review/ReviewComments";
         public const string DefaultApiMethod = "POST";
         public const string DefaultApiBody =
-            "{\"hotelId\":{hotelId},\"providerId\":332,\"demographicId\":0,\"page\":1,\"pageSize\":20,\"sorting\":1," +
+            "{\"hotelId\":{hotelId},\"providerId\":332,\"demographicId\":0,\"languageId\":{languageId},\"page\":1,\"pageSize\":20,\"sorting\":1," +
             "\"providerIds\":[332],\"isReviewPage\":false,\"isCrawlablePage\":true,\"filters\":{\"language\":[],\"room\":[]}}";
 
         private const string BrowserUa = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
         private const string AcceptLanguage = "th-TH,th;q=0.9,en-US;q=0.6,en;q=0.5";
+        /// <summary>⚠ ยังไม่ยืนยัน: languageId ไทยของ Agoda (ตั้งได้ที่ ApiConfig languageId)</summary>
+        public const string DefaultLanguageId = "22";
+        public const string DefaultLocale = "th-th";
         private const int TimeoutMs = 25000;
 
         public string Key { get { return IngestMethods.AgodaLight; } }
@@ -100,7 +107,10 @@ namespace Take_Time_BangPhra.Services.Reviews
             decimal scale = ReviewRating.Parse(src.Cfg("ratingScale")) ?? 10m;
             string providerMap = src.Cfg("providerMap", AgodaPageParser.DefaultProviderMap);
             int maxItems = Math.Max(1, Math.Min(50, src.CfgInt("maxItems", 20)));
-            int budget = MaxRequestsPerRun;
+            bool summaryConfigured = !string.IsNullOrWhiteSpace(src.Cfg("summaryUrl"));
+            int budget = MaxRequestsPerRun + (summaryConfigured ? 1 : 0);   // endpoint สรุปคะแนน = opt-in ชัดเจน (+1)
+            string locale = src.Cfg("locale", DefaultLocale);
+            string acceptLanguage = AcceptLanguageFor(locale);
             var result = new ReviewFetchResult();
 
             // 1) หน้าที่พัก
@@ -108,7 +118,7 @@ namespace Take_Time_BangPhra.Services.Reviews
             {
                 { "User-Agent", BrowserUa },
                 { "Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" },
-                { "Accept-Language", AcceptLanguage },
+                { "Accept-Language", acceptLanguage },
                 { "Cache-Control", "no-cache" }
             };
             var page = Call(diag, "page", "GET", pageUrl, null, pageHeaders, budget - 1);
@@ -164,17 +174,26 @@ namespace Take_Time_BangPhra.Services.Reviews
             diag.ParsePath = path;
 
             // 2) endpoint รีวิว (หน้าแรก ล่าสุดก่อน) — เฉพาะเมื่อหน้าไม่มีรีวิวฝังมา
+            object apiRoot = null;
+            int reviewBudget = budget - (summaryConfigured ? 1 : 0);
             if (items.Count == 0)
             {
                 if (!src.CfgBool("apiEnabled", true))
                     result.Warnings.Add("หน้าไม่มีรีวิวฝังมา และปิด endpoint ไว้ (apiEnabled = false)");
                 else if (diag.PropertyId == null)
                     result.Warnings.Add("หน้าไม่มีรีวิวฝังมา และหารหัสที่พักไม่เจอ — ตั้ง propertyId ใน ApiConfig");
-                else if (budget <= 0)
+                else if (reviewBudget <= 0)
                     result.Warnings.Add("ใช้คำขอครบ " + MaxRequestsPerRun + " ครั้งแล้ว (หน้าที่พัก redirect) — ไม่เรียก endpoint รีวิว");
                 else
-                    items = CallReviewApi(src, diag, result, pageUrl, page, scale, providerMap);
+                {
+                    items = CallReviewApi(src, diag, result, pageUrl, page, scale, providerMap, acceptLanguage, out apiRoot);
+                    budget--;
+                }
             }
+
+            // 3) คะแนนรวมสำรอง เมื่อ JSON-LD ไม่มี: (ก) ฟิลด์สรุปในคำตอบ endpoint → (ข) state ในหน้า → (ค) endpoint สรุป (ถ้าตั้ง)
+            if (!result.PlatformRating.HasValue)
+                ResolveSummaryRating(src, diag, result, html, apiRoot, pageUrl, page, acceptLanguage, budget);
 
             // ล่าสุดก่อน + หน้าแรกเท่านั้น
             items = items.OrderByDescending(i => i.ReviewDate ?? DateTime.MinValue).Take(maxItems).ToList();
@@ -185,8 +204,14 @@ namespace Take_Time_BangPhra.Services.Reviews
                     Name = it.ReviewerName, Origin = it.OriginPlatform, ExtId = it.ExternalReviewId,
                     Date = it.ReviewDate.HasValue ? it.ReviewDate.Value.ToString("yyyy-MM-dd") : null,
                     Rating = it.RatingRaw, Scale = it.RatingScale,
-                    Title = AgodaPageParser.ClipPreview(it.Title, 120), Text = AgodaPageParser.ClipPreview(it.Text, 220)
+                    Title = AgodaPageParser.ClipPreview(it.Title, 120), Text = AgodaPageParser.ClipPreview(it.Text, 220),
+                    Language = it.Language, MachineTranslated = it.MachineTranslated == true,
+                    TranslatedTitle = AgodaPageParser.ClipPreview(it.TranslatedTitle, 120),
+                    TranslatedText = AgodaPageParser.ClipPreview(it.TranslatedText, 220)
                 });
+            int mt = items.Count(i => i.MachineTranslated == true);
+            if (mt > 0)
+                result.Warnings.Add(mt + " รีวิวได้มาเฉพาะคำแปลของ Agoda (ไม่มีต้นฉบับในคำตอบ) — เก็บพร้อมธงแปลเครื่อง; ลองตั้ง languageId/locale/sendLocaleHeaders");
             if (items.Count == 0) result.Warnings.Add("ไม่พบรีวิวในหน้า/endpoint (ได้เฉพาะคะแนนรวม)");
             if (diag.UnknownProviders.Count > 0)
                 result.Warnings.Add("providerId ไม่รู้จัก " + string.Join(",", diag.UnknownProviders.Take(5)) + " (ถือเป็น Agoda — ตั้ง providerMap)");
@@ -198,10 +223,11 @@ namespace Take_Time_BangPhra.Services.Reviews
         }
 
         private List<ReviewItem> CallReviewApi(ReviewSourceRow src, AgodaLightDiagnostics diag, ReviewFetchResult result,
-            string pageUrl, CallResult page, decimal scale, string providerMap)
+            string pageUrl, CallResult page, decimal scale, string providerMap, string acceptLanguage, out object apiRoot)
         {
+            apiRoot = null;
             string hotelId = diag.PropertyId;
-            string apiUrl = (src.Cfg("apiUrl", DefaultApiUrl) ?? "").Replace("{hotelId}", Uri.EscapeDataString(hotelId));
+            string apiUrl = Fill(src, src.Cfg("apiUrl", DefaultApiUrl) ?? "", hotelId, true);
             string method = (src.Cfg("apiMethod", DefaultApiMethod) ?? "POST").Trim().ToUpperInvariant();
             if (method != "GET" && method != "POST") method = "POST";
             if (!IsAgodaUrl(apiUrl))
@@ -214,7 +240,7 @@ namespace Take_Time_BangPhra.Services.Reviews
             {
                 { "User-Agent", BrowserUa },
                 { "Accept", "application/json, text/plain, */*" },
-                { "Accept-Language", AcceptLanguage },
+                { "Accept-Language", acceptLanguage },
                 { "Referer", pageUrl },
                 { "Origin", "https://www.agoda.com" }
             };
@@ -223,11 +249,12 @@ namespace Take_Time_BangPhra.Services.Reviews
                 string cookie = CookieHeader(page.SetCookies);
                 if (!string.IsNullOrEmpty(cookie)) headers["Cookie"] = cookie;
             }
+            AddLocaleHeaders(src, headers);
             foreach (var kv in ParseHeaders(src.Cfg("apiHeaders"))) headers[kv.Key] = kv.Value;
 
             string body = null;
             if (method == "POST")
-                body = (src.Cfg("apiBody", DefaultApiBody) ?? DefaultApiBody).Replace("{hotelId}", hotelId);
+                body = Fill(src, src.Cfg("apiBody", DefaultApiBody) ?? DefaultApiBody, hotelId, false);
 
             var resp = Call(diag, "api", method, apiUrl, body, headers, 0);
             var info = diag.Requests.Last();
@@ -257,9 +284,116 @@ namespace Take_Time_BangPhra.Services.Reviews
                 diag.ParsePath = "endpoint:html";
                 return new List<ReviewItem>();
             }
-            var items = AgodaPageParser.ExtractReviewsFromJson(resp.Body, pageUrl, scale, providerMap, diag);
+            var items = AgodaPageParser.ExtractReviewsFromJson(resp.Body, pageUrl, scale, providerMap, diag, out apiRoot);
             diag.ParsePath = items.Count > 0 ? "endpoint" : "endpoint:no-reviews";
             return items;
+        }
+
+        // ── คะแนนรวมสำรอง ─────────────────────────────────────────────────────
+
+        private void ResolveSummaryRating(ReviewSourceRow src, AgodaLightDiagnostics diag, ReviewFetchResult result, string html,
+            object apiRoot, string pageUrl, CallResult page, string acceptLanguage, int budget)
+        {
+            decimal? r; int? c; string path;
+            // (ก) คำตอบ endpoint รีวิว — เฉพาะ object ที่ไม่ใช่รีวิว (ไม่เฉลี่ยรีวิวรายตัว)
+            if (apiRoot != null)
+            {
+                var cands = new List<AgodaPageParser.SummaryCandidate>();
+                AgodaPageParser.CollectSummary(apiRoot, "", 0, cands, false);
+                diag.RatingCandidates.AddRange(cands.Take(30).Select(x => "api:" + x));
+                if (AgodaPageParser.PickSummary(cands, out r, out c, out path)) { SetRating(diag, result, r, c, "api-summary:" + path); return; }
+            }
+            // (ข) state/สคริปต์ในหน้า — นับเฉพาะค่าใกล้รหัสที่พักของเรา (priority ≥ 3)
+            var hc = AgodaPageParser.CollectSummaryFromHtml(html, diag.PropertyId);
+            diag.RatingCandidates.AddRange(hc.OrderByDescending(x => x.Priority).Take(20).Select(x => x.ToString()));
+            if (AgodaPageParser.PickSummary(hc.Where(x => x.Priority >= 3).ToList(), out r, out c, out path))
+            { SetRating(diag, result, r, c, "page-state:" + path); return; }
+
+            // (ค) endpoint สรุปคะแนน (ปิดเป็นค่าเริ่ม)
+            string sumUrlT = src.Cfg("summaryUrl");
+            if (string.IsNullOrWhiteSpace(sumUrlT)) { result.Warnings.Add("หาคะแนนรวมไม่ได้อย่างมั่นใจ — ดูค่าที่พบในผลทดสอบ (ไม่ตั้งค่าเดา)"); return; }
+            if (budget <= 0 || diag.PropertyId == null) { result.Warnings.Add("ไม่เรียก endpoint สรุปคะแนน (งบคำขอหมด / ไม่มีรหัสที่พัก)"); return; }
+            string url = Fill(src, sumUrlT, diag.PropertyId, true);
+            if (!IsAgodaUrl(url)) { result.Warnings.Add("summaryUrl ต้องอยู่บน agoda.com"); return; }
+            string method = (src.Cfg("summaryMethod", "GET") ?? "GET").Trim().ToUpperInvariant() == "POST" ? "POST" : "GET";
+            var headers = new Dictionary<string, string>
+            {
+                { "User-Agent", BrowserUa }, { "Accept", "application/json, text/plain, */*" },
+                { "Accept-Language", acceptLanguage }, { "Referer", pageUrl }, { "Origin", "https://www.agoda.com" }
+            };
+            if (src.CfgBool("forwardCookies", true))
+            {
+                string cookie = CookieHeader(page.SetCookies);
+                if (!string.IsNullOrEmpty(cookie)) headers["Cookie"] = cookie;
+            }
+            AddLocaleHeaders(src, headers);
+            foreach (var kv in ParseHeaders(src.Cfg("apiHeaders"))) headers[kv.Key] = kv.Value;
+            string body = method == "POST" ? Fill(src, src.Cfg("summaryBody", "{\"hotelId\":{hotelId}}"), diag.PropertyId, false) : null;
+            var resp = Call(diag, "summary", method, url, body, headers, 0);
+            string block = resp.Error == null ? AgodaPageParser.DetectBlock(resp.Status, resp.Body, true) : null;
+            if (block != null) diag.Requests.Last().Block = block;
+            // endpoint เสริม: ล้มเหลว/โดนกัน = คำเตือนเท่านั้น (ไม่นับลำดับปิดอัตโนมัติ — อาจเป็นค่าที่ตั้งผิด)
+            if (resp.Error != null || block != null || resp.Status < 200 || resp.Status >= 300)
+            {
+                result.Warnings.Add("endpoint สรุปคะแนนใช้ไม่ได้: " + (resp.Error ?? block ?? ("HTTP " + resp.Status)));
+                return;
+            }
+            object root;
+            AgodaPageParser.ExtractReviewsFromJson(resp.Body, pageUrl, 10m, null, null, out root);
+            if (root == null) { result.Warnings.Add("endpoint สรุปคะแนนไม่ได้ตอบ JSON"); return; }
+            var sc = new List<AgodaPageParser.SummaryCandidate>();
+            AgodaPageParser.CollectSummary(root, "", 0, sc, false);
+            diag.RatingCandidates.AddRange(sc.Take(30).Select(x => "summary:" + x));
+            if (AgodaPageParser.PickSummary(sc, out r, out c, out path)) SetRating(diag, result, r, c, "summary-endpoint:" + path);
+            else result.Warnings.Add("endpoint สรุปคะแนน: ไม่พบค่าที่มั่นใจ — ดูรายการค่าที่พบ");
+        }
+
+        private static void SetRating(AgodaLightDiagnostics diag, ReviewFetchResult result, decimal? r, int? c, string source)
+        {
+            result.PlatformRating = r;
+            result.PlatformRatingScale = 10m;
+            result.PlatformReviewCount = c;
+            diag.Rating = r; diag.RatingBest = 10m; diag.RatingCount = c; diag.RatingSource = source;
+            result.Warnings.RemoveAll(w => w.StartsWith("JSON-LD ไม่มี aggregateRating", StringComparison.Ordinal)
+                                         || w.StartsWith("ไม่พบ JSON-LD", StringComparison.Ordinal));
+        }
+
+        // ── ภาษา/locale ───────────────────────────────────────────────────────
+
+        /// <summary>แทน {hotelId} {languageId} {locale}; languageId = "off" ⇒ ตัดฟิลด์ "languageId":{languageId} ออกจาก body</summary>
+        internal static string Fill(ReviewSourceRow src, string template, string hotelId, bool isUrl)
+        {
+            string t = template ?? "";
+            string langId = src.Cfg("languageId", DefaultLanguageId);
+            string locale = src.Cfg("locale", DefaultLocale);
+            bool off = string.Equals(langId, "off", StringComparison.OrdinalIgnoreCase) || !Regex.IsMatch(langId ?? "", @"^\d{1,4}$");
+            if (off)
+            {
+                t = Regex.Replace(t, @"""languageId""\s*:\s*\{languageId\}\s*,?", "");
+                langId = "";
+            }
+            if (!Regex.IsMatch(locale ?? "", @"^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,4})?$")) locale = DefaultLocale;
+            Func<string, string> enc = v => isUrl ? Uri.EscapeDataString(v ?? "") : (v ?? "");
+            return t.Replace("{hotelId}", enc(hotelId)).Replace("{languageId}", enc(langId)).Replace("{locale}", enc(locale));
+        }
+
+        private static void AddLocaleHeaders(ReviewSourceRow src, Dictionary<string, string> headers)
+        {
+            if (!src.CfgBool("sendLocaleHeaders", false)) return;
+            string locale = src.Cfg("locale", DefaultLocale);
+            string langId = src.Cfg("languageId", DefaultLanguageId);
+            if (Regex.IsMatch(locale ?? "", @"^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,4})?$")) headers["ag-language-locale"] = locale.ToLowerInvariant();
+            if (Regex.IsMatch(langId ?? "", @"^\d{1,4}$")) headers["ag-language-id"] = langId;
+        }
+
+        /// <summary>"th-th" → "th-TH,th;q=0.9,en-US;q=0.6,en;q=0.5"</summary>
+        public static string AcceptLanguageFor(string locale)
+        {
+            var m = Regex.Match(locale ?? "", @"^([A-Za-z]{2,3})(?:-([A-Za-z0-9]{2,4}))?$");
+            if (!m.Success) return AcceptLanguage;
+            string lang = m.Groups[1].Value.ToLowerInvariant();
+            string full = m.Groups[2].Success ? lang + "-" + m.Groups[2].Value.ToUpperInvariant() : lang;
+            return lang == "en" ? full + ",en;q=0.9" : full + "," + lang + ";q=0.9,en-US;q=0.6,en;q=0.5";
         }
 
         // ── HTTP + บันทึกผลต่อคำขอ ────────────────────────────────────────────

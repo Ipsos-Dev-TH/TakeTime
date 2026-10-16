@@ -11,6 +11,8 @@
 --   ถ้าต้องการเปลี่ยนแถว EMAIL ที่ยังไม่เคยใช้งานเลย (ปิดอยู่ ไม่เคยดึงสำเร็จ ไม่มี log) ให้ตั้ง @ConvertUnusedEmail = 1
 --   หรือเลือกวิธี "Agoda: อ่านหน้าที่พักวันละครั้ง (light)" เองที่หน้า แหล่งรีวิว
 --
+--   • เพิ่มคอลัมน์ AI_Online_Reviews.Is_Machine_Translated (รีวิวที่ได้มาแต่คำแปลของแพลตฟอร์ม) — รันซ้ำได้ ถ้าเคยรันไฟล์นี้แล้วให้รันอีกครั้ง
+--
 -- ต้องรัน PHASE19_Migration_26_Review_Aggregation.sql มาก่อน · idempotent — รันซ้ำได้ ไม่ลบข้อมูล
 -- ════════════════════════════════════════════════════════════════════════════
 SET NOCOUNT ON;
@@ -60,6 +62,17 @@ BEGIN
     UPDATE dbo.AI_Review_Sources
        SET Fetch_Interval_Min = 1440, Updated_Date = GETDATE()
      WHERE Ingest_Method = 'AGODA_LIGHT' AND Fetch_Interval_Min < 720;
+END
+GO
+
+-- ── รีวิวที่แพลตฟอร์มให้มาแต่คำแปลเครื่อง (ไม่มีต้นฉบับ) — ธงแยก ไม่เขียนหมายเหตุลงในข้อความ ──────────
+--   NULL = ไม่ทราบ (แถวเก่า/แหล่งอื่น), 0 = ต้นฉบับ, 1 = คำแปลของแพลตฟอร์ม (เช่น Agoda)
+--   ภาษาเก็บใน Language เดิม; ได้ต้นฉบับภายหลัง (External_Review_Id เดิม) ระบบแทนข้อความ/ภาษาให้ครั้งเดียว
+IF OBJECT_ID('dbo.AI_Online_Reviews', 'U') IS NOT NULL
+   AND COL_LENGTH('dbo.AI_Online_Reviews', 'Is_Machine_Translated') IS NULL
+BEGIN
+    ALTER TABLE dbo.AI_Online_Reviews ADD Is_Machine_Translated BIT NULL;
+    PRINT N'AI_Online_Reviews: เพิ่ม Is_Machine_Translated';
 END
 GO
 

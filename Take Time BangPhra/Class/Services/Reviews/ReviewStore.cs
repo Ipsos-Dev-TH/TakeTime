@@ -101,7 +101,7 @@ namespace Take_Time_BangPhra.Services.Reviews
                     try
                     {
                         long id = Insert(con, src, ingestMethod, origin, extId, name, raw, scale, r10, r5, title, text,
-                            date ?? DateTime.Now, lang, url, resp, respDate, stay, room, trav, hash, it.IsProvisional);
+                            date ?? DateTime.Now, lang, url, resp, respDate, stay, room, trav, hash, it.IsProvisional, it.MachineTranslated);
                         return new UpsertResult { Outcome = UpsertOutcome.Inserted, ReviewId = id, Rating5 = r5 };
                     }
                     catch (SqlException sx) when (sx.Number == 2601 || sx.Number == 2627)
@@ -112,8 +112,27 @@ namespace Take_Time_BangPhra.Services.Reviews
                 }
 
                 // เพิ่มอย่างเดียว (AGODA_LIGHT): แถวเดิมที่ไม่ใช่ชั่วคราวคงไว้ตามเดิม
+                // ข้อยกเว้นครั้งเดียว: แถวเดิมเก็บคำแปล (เช่น en) แล้วรอบนี้ได้ต้นฉบับ (เช่น th) ของรีวิวรหัสเดียวกัน ⇒ แทนข้อความ/หัวข้อ/ภาษา
                 if (it.InsertOnly && !ex.Provisional)
-                    return new UpsertResult { Outcome = UpsertOutcome.Unchanged, ReviewId = ex.Id };
+                {
+                    string exLang = !string.IsNullOrWhiteSpace(ex.Language) ? ex.Language.Trim().ToLowerInvariant() : AgodaPageParser.DetectLang(ex.Text);
+                    bool upgrade = it.IsOriginalText && it.MachineTranslated != true && lang != null && text != null
+                                && extId != null && string.Equals(ex.ExternalId, extId, StringComparison.Ordinal)
+                                && !string.Equals(exLang, lang, StringComparison.OrdinalIgnoreCase)
+                                && !string.Equals(text, ex.Text, StringComparison.Ordinal);
+                    if (!upgrade) return new UpsertResult { Outcome = UpsertOutcome.Unchanged, ReviewId = ex.Id };
+                    using (var cmd = new SqlCommand(@"
+UPDATE AI_Online_Reviews SET
+    ReviewTitle = COALESCE(@t, ReviewTitle), ReviewText = @x, Language = @lang, IsAnalyzed = 0,
+    Content_Hash = @h, Fetched_At = GETDATE(), Updated_At = GETDATE()" + (HasMachineTranslatedColumn() ? ", Is_Machine_Translated = 0" : "") + @"
+WHERE ID = @id", con))
+                    {
+                        cmd.CommandTimeout = 30;
+                        Add(cmd, "@t", title); Add(cmd, "@x", text); Add(cmd, "@lang", lang); Add(cmd, "@h", hash); Add(cmd, "@id", ex.Id);
+                        cmd.ExecuteNonQuery();
+                    }
+                    return new UpsertResult { Outcome = UpsertOutcome.Updated, ReviewId = ex.Id, Rating5 = r5 };
+                }
 
                 // ── อัปเดตเฉพาะเมื่อมีอะไรใหม่จริง ──
                 bool adoptExt = extId != null && (ex.ExternalId == null || (ex.Provisional && ex.ExternalId != extId));
@@ -182,24 +201,26 @@ WHERE ID = @id", con))
         private long Insert(SqlConnection con, ReviewSourceRow src, string method, string origin, string extId, string name,
             decimal? raw, decimal? scale, decimal? r10, decimal? r5, string title, string text, DateTime reviewDate,
             string lang, string url, string resp, DateTime? respDate, DateTime? stay, string room, string trav,
-            string hash, bool provisional)
+            string hash, bool provisional, bool? machineTranslated = null)
         {
+            bool mtCol = machineTranslated.HasValue && HasMachineTranslatedColumn();
             using (var cmd = new SqlCommand(@"
 INSERT INTO AI_Online_Reviews
     (SourceCode, PlatformReviewId, ReviewerName, ReviewerAvatar, Rating, ReviewTitle, ReviewText, ReviewDate, Language,
      ResponseStatus, ActualResponse, RespondedDate, IsAnalyzed, IsFlagged, Created_Date,
      Origin_Platform, External_Review_Id, Rating_Raw, Rating_Scale, Rating_10, Rating_5, Review_Url,
      Owner_Response, Owner_Response_Date, Stay_Date, Room_Type, Traveller_Type, Ingest_Method, Content_Hash,
-     Is_Provisional, Is_Excluded, Fetched_At, Updated_At)
+     Is_Provisional, Is_Excluded, Fetched_At, Updated_At" + (mtCol ? ", Is_Machine_Translated" : "") + @")
 VALUES
     (@src, @e, @n, NULL, @rating, @t, @x, @d, @lang,
      CASE WHEN @resp IS NULL THEN 'PENDING' ELSE 'RESPONDED' END, @resp,
      CASE WHEN @resp IS NULL THEN NULL ELSE COALESCE(@respDate, GETDATE()) END, 0, 0, GETDATE(),
      @o, @e, @raw, @scale, @r10, @r5, @u,
      @resp, @respDate, @stay, @room, @trav, @m, @h,
-     @prov, 0, GETDATE(), GETDATE());
+     @prov, 0, GETDATE(), GETDATE()" + (mtCol ? ", @mt" : "") + @");
 SELECT CAST(SCOPE_IDENTITY() AS BIGINT);", con))
             {
+                if (mtCol) Add(cmd, "@mt", machineTranslated.Value ? 1 : 0);
                 cmd.CommandTimeout = 30;
                 Add(cmd, "@src", src.SourceCode); Add(cmd, "@e", extId); Add(cmd, "@n", name);
                 Add(cmd, "@rating", r5.HasValue ? (object)(double)r5.Value : null);
@@ -211,6 +232,25 @@ SELECT CAST(SCOPE_IDENTITY() AS BIGINT);", con))
                 object o = cmd.ExecuteScalar();
                 return o == null || o == DBNull.Value ? 0 : Convert.ToInt64(o);
             }
+        }
+
+        // ── คอลัมน์เสริม Is_Machine_Translated (PHASE19_27 — ยังไม่รัน = ข้าม) cache 5 นาที ──
+        private static bool? _hasMt;
+        private static DateTime _hasMtAt = DateTime.MinValue;
+
+        private bool HasMachineTranslatedColumn()
+        {
+            if (_hasMt.HasValue && (DateTime.Now - _hasMtAt).TotalMinutes < 5) return _hasMt.Value;
+            bool ok = false;
+            try
+            {
+                var dt = new code().DatabaseQuerySafe(_conn,
+                    "SELECT CASE WHEN COL_LENGTH('dbo.AI_Online_Reviews','Is_Machine_Translated') IS NULL THEN 0 ELSE 1 END", null);
+                ok = dt.Rows.Count > 0 && Convert.ToInt32(dt.Rows[0][0]) == 1;
+            }
+            catch { ok = false; }
+            _hasMt = ok; _hasMtAt = DateTime.Now;
+            return ok;
         }
 
         private static Existing FindOne(SqlConnection con, string sql, params SqlParameter[] ps)

@@ -52,6 +52,10 @@ namespace Take_Time_BangPhra.Services.Reviews
         {
             public string Name, Origin, ExtId, Date, Title, Text;
             public decimal? Rating, Scale;
+            public string Language;
+            public bool MachineTranslated;
+            /// <summary>คำแปลที่ Agoda แสดง (เมื่อเก็บต้นฉบับแทน)</summary>
+            public string TranslatedTitle, TranslatedText;
         }
 
         public bool DryRun;
@@ -60,6 +64,15 @@ namespace Take_Time_BangPhra.Services.Reviews
         public int JsonLdBlocks;
         public decimal? Rating, RatingBest;
         public int? RatingCount;
+        /// <summary>แหล่งของคะแนนรวม: json-ld | api-summary:&lt;path&gt; | page-state:&lt;key&gt; | summary-endpoint:&lt;path&gt; | none</summary>
+        public string RatingSource = "none";
+        /// <summary>ค่าที่พบทั้งหมด (path=value (pN)) — ใช้จูนคีย์</summary>
+        public List<string> RatingCandidates = new List<string>();
+        /// <summary>คีย์ชั้นบนของคำตอบ endpoint (+ คีย์ชั้นถัดไปของ object)</summary>
+        public string ApiTopKeys;
+        /// <summary>ชื่อฟิลด์ของ comment แรก (ไม่มีค่า ยกเว้นค่าสั้น เช่น languageId / isTranslated / translateSource)</summary>
+        public string CommentFields;
+        public string CommentShortValues;
         public string PropertyId;
         public string PropertyIdPattern;
         public string PropertyIdCandidates;
@@ -87,11 +100,11 @@ namespace Take_Time_BangPhra.Services.Reviews
                     + (r.Hops > 1 ? " hops=" + r.Hops : "")
                     + (r.Block != null ? " block=" + r.Block : ""))));
             }
-            sb.Append(" · JSON-LD ");
+            sb.Append(" · คะแนนรวม ");
             sb.Append(Rating.HasValue
                 ? Rating.Value.ToString("0.##", CultureInfo.InvariantCulture) + "/" + (RatingBest ?? 10m).ToString("0", CultureInfo.InvariantCulture)
-                  + (RatingCount.HasValue ? " (" + RatingCount.Value + ")" : "")
-                : (JsonLdFound ? "ไม่มีคะแนน" : "ไม่พบ"));
+                  + (RatingCount.HasValue ? " (" + RatingCount.Value + ")" : "") + " [" + RatingSource + "]"
+                : "ไม่พบ (JSON-LD " + (JsonLdFound ? "ไม่มี aggregateRating" : "ไม่พบ") + ", ผู้สมัคร " + RatingCandidates.Count + ")");
             sb.Append(" · id=").Append(PropertyId ?? "?");
             if (PropertyIdPattern != null) sb.Append(" (").Append(PropertyIdPattern).Append(")");
             sb.Append(" · html-dom ").Append(HtmlDomReviews > 0 ? "พบ " + HtmlDomReviews : (HtmlDomBlocks > 0 ? "บล็อก " + HtmlDomBlocks + " แต่แกะไม่ได้" : "ไม่พบ"));
@@ -112,6 +125,8 @@ namespace Take_Time_BangPhra.Services.Reviews
                     }).ToList() },
                 { "jsonLdFound", JsonLdFound }, { "jsonLdBlocks", JsonLdBlocks },
                 { "rating", Rating }, { "ratingBest", RatingBest }, { "ratingCount", RatingCount },
+                { "ratingSource", RatingSource }, { "ratingCandidates", RatingCandidates },
+                { "apiTopKeys", ApiTopKeys }, { "commentFields", CommentFields }, { "commentShortValues", CommentShortValues },
                 { "propertyId", PropertyId }, { "propertyIdPattern", PropertyIdPattern },
                 { "propertyIdCandidates", PropertyIdCandidates },
                 { "parsePath", ParsePath }, { "reviewsParsed", ReviewsParsed },
@@ -119,7 +134,9 @@ namespace Take_Time_BangPhra.Services.Reviews
                 { "previews", Previews.Select(p => (object)new Dictionary<string, object>
                     {
                         { "name", p.Name }, { "origin", p.Origin }, { "extId", p.ExtId }, { "date", p.Date },
-                        { "rating", p.Rating }, { "scale", p.Scale }, { "title", p.Title }, { "text", p.Text }
+                        { "rating", p.Rating }, { "scale", p.Scale }, { "title", p.Title }, { "text", p.Text },
+                        { "language", p.Language }, { "machineTranslated", p.MachineTranslated },
+                        { "translatedTitle", p.TranslatedTitle }, { "translatedText", p.TranslatedText }
                     }).ToList() },
                 { "warnings", Warnings }, { "unknownProviders", UnknownProviders },
                 { "blocked", Blocked }, { "error", Error }, { "compact", Compact() }
@@ -217,7 +234,7 @@ namespace Take_Time_BangPhra.Services.Reviews
                 rating = rv; best = bv;
                 decimal? c = ReviewRating.Parse(Get(agg, "reviewCount")) ?? ReviewRating.Parse(Get(agg, "ratingCount"));
                 if (c.HasValue && c.Value < int.MaxValue) count = (int)c.Value;
-                if (diag != null) { diag.Rating = rating; diag.RatingBest = best; diag.RatingCount = count; }
+                if (diag != null) { diag.Rating = rating; diag.RatingBest = best; diag.RatingCount = count; diag.RatingSource = "json-ld"; }
                 return true;
             }
             return false;
@@ -371,14 +388,244 @@ namespace Take_Time_BangPhra.Services.Reviews
         public static List<ReviewItem> ExtractReviewsFromJson(string json, string pageUrl, decimal defaultScale, string providerMap,
             AgodaLightDiagnostics diag)
         {
+            object root;
+            return ExtractReviewsFromJson(json, pageUrl, defaultScale, providerMap, diag, out root);
+        }
+
+        /// <param name="root">ต้นไม้ JSON ที่แปลงแล้ว (null = แปลงไม่ได้) — ใช้หาคะแนนรวมต่อ</param>
+        public static List<ReviewItem> ExtractReviewsFromJson(string json, string pageUrl, decimal defaultScale, string providerMap,
+            AgodaLightDiagnostics diag, out object root)
+        {
+            root = null;
             var found = new List<Dictionary<string, object>>();
             if (string.IsNullOrWhiteSpace(json)) return new List<ReviewItem>();
             string t = json.Trim();
             if (t.StartsWith(")]}'", StringComparison.Ordinal)) t = t.Substring(t.IndexOf('\n') + 1);   // XSSI prefix
-            var root = TryDeserialize(t);
+            root = TryDeserialize(t);
             if (root != null) CollectReviews(root, found, 0);
             else AnchorScan(t, found);   // JSON ไม่สมบูรณ์ — ลองสแกนรอบคีย์ยึด
+            if (diag != null)
+            {
+                if (root != null) diag.ApiTopKeys = DescribeKeys(root);
+                if (found.Count > 0) DescribeComment(found[0], diag);
+            }
             return MapAll(found, pageUrl, defaultScale, providerMap, diag);
+        }
+
+        // ── schema dump (ชื่อฟิลด์ ไม่มีค่า) — ให้เห็นโครงสร้างจริงของ Agoda เพื่อจูนตัวแกะ ──
+
+        public static string DescribeKeys(object root)
+        {
+            var d = root as Dictionary<string, object>;
+            if (d == null)
+            {
+                var l = AsList(root);
+                return l == null ? "(scalar)" : "[array " + l.Count + "]" + (l.Count > 0 && l[0] is Dictionary<string, object> ? " of {" + string.Join(",", ((Dictionary<string, object>)l[0]).Keys.Take(40)) + "}" : "");
+            }
+            var parts = new List<string>();
+            foreach (var kv in d.Take(40))
+            {
+                var cd = kv.Value as Dictionary<string, object>;
+                var cl = AsList(kv.Value);
+                if (cd != null) parts.Add(kv.Key + "{" + string.Join(",", cd.Keys.Take(25)) + (cd.Count > 25 ? ",…" : "") + "}");
+                else if (cl != null) parts.Add(kv.Key + "[" + cl.Count + "]");
+                else parts.Add(kv.Key);
+            }
+            return string.Join(", ", parts);
+        }
+
+        private static readonly Regex ShortValueKey = new Regex(@"lang|translat|original.*(id|code)|isTranslated|providerId|provider$|source$|target$", RegexOptions.IgnoreCase);
+
+        public static void DescribeComment(Dictionary<string, object> c, AgodaLightDiagnostics diag)
+        {
+            var names = new List<string>();
+            var vals = new List<string>();
+            foreach (var kv in c)
+            {
+                var nd = kv.Value as Dictionary<string, object>;
+                if (nd != null) { names.Add(kv.Key + "{" + string.Join(",", nd.Keys.Take(20)) + "}"); continue; }
+                var nl = AsList(kv.Value);
+                names.Add(nl != null ? kv.Key + "[" + nl.Count + "]" : kv.Key);
+                if (nl == null && kv.Value != null && ShortValueKey.IsMatch(kv.Key))
+                {
+                    string v = Convert.ToString(kv.Value, CultureInfo.InvariantCulture);
+                    if (v != null && v.Length <= 20) vals.Add(kv.Key + "=" + v);
+                }
+                // บอกว่ามีค่าหรือว่าง สำหรับฟิลด์ต้นฉบับ (ไม่โชว์ข้อความ)
+                if (kv.Key.IndexOf("original", StringComparison.OrdinalIgnoreCase) >= 0 && kv.Value is string)
+                    vals.Add(kv.Key + (string.IsNullOrWhiteSpace((string)kv.Value) ? "=(ว่าง)" : "=(มีข้อความ)"));
+            }
+            diag.CommentFields = string.Join(", ", names);
+            diag.CommentShortValues = string.Join(", ", vals);
+        }
+
+        // ── คะแนนรวมสำรอง (เมื่อ JSON-LD ไม่มี aggregateRating) ─────────────────
+        //   ไม่เฉลี่ยจากรีวิวรายตัวเด็ดขาด — อ่านเฉพาะฟิลด์สรุปใน object ที่ "ไม่ใช่" รีวิว
+        //   ตั้งค่าเฉพาะเมื่อมั่นใจ: ผู้สมัครอันดับสูงสุด priority ≥ 2 และไม่มีค่าอื่นที่ priority เท่ากัน หรือทุกค่าตรงกัน
+
+        public class SummaryCandidate
+        {
+            public string Path;
+            public decimal Value;
+            public int Priority;
+            public bool IsCount;
+            public string Parent;
+            public override string ToString()
+            {
+                return Path + "=" + Value.ToString("0.##", CultureInfo.InvariantCulture) + " (p" + Priority + ")";
+            }
+        }
+
+        private static readonly HashSet<string> ScoreKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "score", "reviewScore", "overallScore", "averageScore", "cumulativeScore", "combinedScore", "overallRating",
+            "averageRating", "ratingValue", "hotelScore", "propertyScore", "hotelReviewScore", "totalScore"
+        };
+        private static readonly HashSet<string> CountKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "reviewCount", "totalReviews", "countOfReviews", "numberOfReviews", "reviewsCount", "totalReviewCount",
+            "reviewCounts", "totalCount", "count", "ratingCount"
+        };
+
+        private static int PathPriority(string path, bool allGuests)
+        {
+            string p = path.ToLowerInvariant();
+            int pri = 1;
+            if (p.Contains("combined")) pri = Math.Max(pri, 5);
+            if (p.Contains("cumulative")) pri = Math.Max(pri, 4);
+            if (allGuests || p.Contains("allguest")) pri = Math.Max(pri, 4);
+            if (p.Contains("overall") || p.Contains("summary") || p.Contains("aggregate")) pri = Math.Max(pri, 3);
+            if (p.Contains("hotel") || p.Contains("property")) pri = Math.Max(pri, 2);
+            if (!allGuests && (p.Contains("similar") || p.Contains("nearby") || p.Contains("recommend"))) pri = 0;
+            return pri;
+        }
+
+        private static bool IsAllGuests(Dictionary<string, object> d)
+        {
+            foreach (var k in new[] { "name", "title", "label", "id", "demographicName", "groupName" })
+            {
+                string v = Str(Get(d, k));
+                if (v == null) continue;
+                string l = v.ToLowerInvariant().Replace(" ", "");
+                if (l == "allguests" || l == "allguest" || l == "all" || l.Contains("ผู้เข้าพักทั้งหมด") || l == "ทั้งหมด") return true;
+            }
+            return false;
+        }
+
+        /// <summary>เดินต้นไม้ JSON เก็บผู้สมัครคะแนน/จำนวนรีวิวจาก object ที่ไม่ใช่รีวิว</summary>
+        public static void CollectSummary(object node, string path, int depth, List<SummaryCandidate> list, bool allGuests)
+        {
+            if (node == null || depth > 25 || list.Count > 200) return;
+            var d = node as Dictionary<string, object>;
+            if (d != null)
+            {
+                if (IsReviewLike(d)) return;
+                bool ag = allGuests || IsAllGuests(d);
+                foreach (var kv in d)
+                {
+                    string p = path.Length == 0 ? kv.Key : path + "." + kv.Key;
+                    if (kv.Value is Dictionary<string, object> || (AsList(kv.Value) != null))
+                    {
+                        CollectSummary(kv.Value, p, depth + 1, list, ag);
+                        continue;
+                    }
+                    if (kv.Value == null || kv.Value is bool) continue;
+                    bool isScore = ScoreKeys.Contains(kv.Key)
+                                || (kv.Key.Equals("rating", StringComparison.OrdinalIgnoreCase) && PathPriority(p, ag) >= 3);
+                    bool isCount = CountKeys.Contains(kv.Key);
+                    if (!isScore && !isCount) continue;
+                    decimal? v = ReviewRating.Parse(kv.Value);
+                    if (!v.HasValue) continue;
+                    if (isScore && v.Value > 0 && v.Value <= 10)
+                        list.Add(new SummaryCandidate { Path = p, Value = v.Value, Priority = PathPriority(p, ag), Parent = path });
+                    else if (isCount && v.Value >= 1 && v.Value == Math.Floor(v.Value) && v.Value < 10000000)
+                    {
+                        int pri = PathPriority(p, ag);
+                        // count/totalCount ลอย ๆ อาจเป็นจำนวนรีวิวในหน้าผลลัพธ์ — ลดน้ำหนัก
+                        if ((kv.Key.Equals("count", StringComparison.OrdinalIgnoreCase) || kv.Key.Equals("totalCount", StringComparison.OrdinalIgnoreCase)) && pri < 3) pri = Math.Min(pri, 1);
+                        list.Add(new SummaryCandidate { Path = p, Value = v.Value, Priority = pri, Parent = path, IsCount = true });
+                    }
+                }
+                return;
+            }
+            var arr = AsList(node);
+            if (arr == null) return;
+            int reviewish = 0;
+            for (int i = 0; i < arr.Count && i < 5; i++) if (arr[i] is Dictionary<string, object> && IsReviewLike((Dictionary<string, object>)arr[i])) reviewish++;
+            if (reviewish > 0) return;   // รายการรีวิว — ข้ามทั้งก้อน
+            for (int i = 0; i < arr.Count && i < 50; i++) CollectSummary(arr[i], path + "[" + i + "]", depth + 1, list, allGuests);
+        }
+
+        /// <summary>เลือกคะแนน/จำนวนที่มั่นใจจากผู้สมัคร — คืน false ถ้าไม่มั่นใจ (ไม่ตั้งค่า)</summary>
+        public static bool PickSummary(List<SummaryCandidate> list, out decimal? rating, out int? count, out string source)
+        {
+            rating = null; count = null; source = null;
+            var scores = list.Where(c => !c.IsCount && c.Priority > 0).OrderByDescending(c => c.Priority).ToList();
+            if (scores.Count == 0) return false;
+            var best = scores[0];
+            bool unanimous = scores.Select(c => c.Value).Distinct().Count() == 1;
+            bool clearTop = best.Priority >= 2 && !scores.Any(c => c.Priority == best.Priority && c.Value != best.Value);
+            if (!(unanimous || clearTop)) return false;
+            rating = best.Value;
+            source = best.Path;
+            var counts = list.Where(c => c.IsCount && c.Priority > 0).ToList();
+            // จำนวนรีวิว: อยู่ object เดียวกัน/object แม่ของคะแนนก่อน ไม่งั้นต้องมั่นใจแบบเดียวกัน
+            var sib = counts.Where(c => c.Parent == best.Parent || (c.Parent.Length > 0 && best.Path.StartsWith(c.Parent + ".", StringComparison.Ordinal)))
+                            .OrderByDescending(c => c.Parent.Length).ThenByDescending(c => c.Priority).FirstOrDefault();
+            if (sib != null) count = (int)sib.Value;
+            else if (counts.Count > 0)
+            {
+                var top = counts.OrderByDescending(c => c.Priority).First();
+                bool cu = counts.Select(c => c.Value).Distinct().Count() == 1;
+                bool ct = top.Priority >= 2 && !counts.Any(c => c.Priority == top.Priority && c.Value != top.Value);
+                if (cu || ct) count = (int)top.Value;
+            }
+            return true;
+        }
+
+        private static readonly Regex HtmlScoreRx = new Regex(
+            @"[""'](reviewScore|overallScore|cumulativeScore|combinedScore|averageScore|hotelReviewScore|score)[""']\s*:\s*[""']?(\d{1,2}(?:\.\d{1,2})?)\b",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex HtmlCountRx = new Regex(
+            @"[""'](reviewCount|totalReviews|countOfReviews|numberOfReviews|reviewsCount|totalReviewCount)[""']\s*:\s*[""']?(\d{1,7})\b",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        /// <summary>
+        /// หา คะแนน/จำนวนรีวิว ในสคริปต์/state ของหน้า: นับเฉพาะค่าที่ใกล้รหัสที่พักของเรา (ตัดของ "ที่พักใกล้เคียง")
+        /// "score" ทั่วไปนับเฉพาะเมื่อบริบทมีคำว่า review/combined/cumulative
+        /// </summary>
+        public static List<SummaryCandidate> CollectSummaryFromHtml(string html, string propertyId)
+        {
+            var list = new List<SummaryCandidate>();
+            if (string.IsNullOrEmpty(html)) return list;
+            Action<Regex, bool> scan = (rx, isCount) =>
+            {
+                foreach (Match m in rx.Matches(html))
+                {
+                    if (list.Count > 200) break;
+                    string key = m.Groups[1].Value;
+                    decimal v;
+                    if (!decimal.TryParse(m.Groups[2].Value, NumberStyles.Number, CultureInfo.InvariantCulture, out v)) continue;
+                    if (isCount ? v < 1 : (v <= 0 || v > 10)) continue;
+                    int from = Math.Max(0, m.Index - 600);
+                    string ctx = html.Substring(from, m.Index - from).ToLowerInvariant();
+                    if (!isCount && key.Equals("score", StringComparison.OrdinalIgnoreCase)
+                        && !(ctx.Contains("review") || ctx.Contains("combined") || ctx.Contains("cumulative"))) continue;
+                    int pri = 1;
+                    if (!key.Equals("score", StringComparison.OrdinalIgnoreCase)) pri++;
+                    if (ctx.Contains("combined") || ctx.Contains("cumulative") || ctx.Contains("overall")) pri += 1;
+                    if (!string.IsNullOrEmpty(propertyId))
+                    {
+                        int to = Math.Min(html.Length, m.Index + 300);
+                        if (html.IndexOf(propertyId, from, to - from, StringComparison.Ordinal) >= 0) pri += 2;
+                    }
+                    if (ctx.Contains("similar") || ctx.Contains("nearby") || ctx.Contains("recommend")) pri = 0;
+                    list.Add(new SummaryCandidate { Path = "page:" + key + "@" + m.Index, Value = v, Priority = pri, IsCount = isCount, Parent = "page@" + (m.Index / 2000) });
+                }
+            };
+            scan(HtmlScoreRx, false);
+            scan(HtmlCountRx, true);
+            return list;
         }
 
         private static bool HasAnchor(string s)
@@ -770,13 +1017,43 @@ namespace Take_Time_BangPhra.Services.Reviews
         public static ReviewItem MapReview(Dictionary<string, object> d, string pageUrl, decimal defaultScale,
             Dictionary<string, string> providerMap, AgodaLightDiagnostics diag)
         {
-            string text = TextOf(d), title = TitleOf(d);
-            string pos = Str(Get(d, "reviewPositives")), neg = Str(Get(d, "reviewNegatives"));
-            var sb = new StringBuilder(text ?? "");
-            if (!string.IsNullOrWhiteSpace(pos)) sb.Append(sb.Length > 0 ? "\n" : "").Append("ข้อดี: ").Append(pos.Trim());
-            if (!string.IsNullOrWhiteSpace(neg)) sb.Append(sb.Length > 0 ? "\n" : "").Append("ข้อเสีย: ").Append(neg.Trim());
-            string body = sb.ToString().Trim();
+            // ข้อความที่แสดง (อาจเป็นคำแปลของ Agoda) vs ต้นฉบับ (originalComment / originalTitle / original*Positives …)
+            string shownText = TextOf(d), shownTitle = TitleOf(d);
+            string shownPos = Str(Get(d, "reviewPositives")), shownNeg = Str(Get(d, "reviewNegatives"));
+            string oText = OriginalOf(d, "comment", "text", "body", "review", "content");
+            string oTitle = OriginalOf(d, "title", "headline");
+            string oPos = OriginalOf(d, "positive");
+            string oNeg = OriginalOf(d, "negative");
+            bool useOText = !string.IsNullOrWhiteSpace(oText) && !SameText(oText, shownText);
+            bool useOTitle = !string.IsNullOrWhiteSpace(oTitle) && !SameText(oTitle, shownTitle);
+
+            string srcLang = LangOf(d, "translateSource", "originalLanguage", "originalLanguageCode", "sourceLanguage",
+                                       "originalLanguageId", "reviewLanguage", "languageCode", "language", "languageId");
+            string tgtLang = LangOf(d, "translateTarget", "targetLanguage", "translatedLanguage", "translateTargetLanguage");
+            bool? flag = BoolOf(d, "isTranslated", "translated", "isMachineTranslated", "isAutoTranslated", "machineTranslated");
+
+            string text = useOText ? oText : shownText;
+            string title = useOTitle ? oTitle : shownTitle;
+            string pos = !string.IsNullOrWhiteSpace(oPos) ? oPos : (useOText ? null : shownPos);   // ไม่ปนภาษา
+            string neg = !string.IsNullOrWhiteSpace(oNeg) ? oNeg : (useOText ? null : shownNeg);
+            string body = JoinBody(text, pos, neg);
             if (body.Length == 0 && string.IsNullOrWhiteSpace(title)) return null;
+
+            // แปลโดย Agoda? — มีต้นฉบับแยก = ใช้ต้นฉบับ (ไม่ใช่คำแปล); ไม่มีต้นฉบับ: ดูธง/ภาษาต้นทาง≠ปลายทาง + ตรวจอักษรจริง
+            bool machine = false;
+            string lang;
+            string detected = DetectLang(body.Length > 0 ? body : title);
+            if (useOText || useOTitle)
+                lang = srcLang ?? detected;
+            else
+            {
+                if (flag == true) machine = true;
+                else if (srcLang != null && tgtLang != null && srcLang != tgtLang)
+                    machine = detected != null ? detected == tgtLang && detected != srcLang : flag != false;
+                lang = machine ? (tgtLang ?? detected) : (srcLang ?? detected);
+                if (!machine && detected != null && srcLang != null && detected != srcLang && (detected == "th" || srcLang == "th"))
+                    lang = detected;   // ภาษาที่ประกาศไม่ตรงกับอักษรจริง (ไทย/ไม่ไทย) — เชื่ออักษร
+            }
 
             decimal? scale;
             decimal? rating = RatingOf(d, out scale);
@@ -786,6 +1063,7 @@ namespace Take_Time_BangPhra.Services.Reviews
             if (string.IsNullOrWhiteSpace(id) || id == "0") id = null;
 
             string origin = OriginOf(d, providerMap, diag);
+            string shownBody = JoinBody(shownText, shownPos, shownNeg);
 
             var item = new ReviewItem
             {
@@ -796,6 +1074,11 @@ namespace Take_Time_BangPhra.Services.Reviews
                 RatingScale = rating.HasValue ? scale : null,
                 Title = string.IsNullOrWhiteSpace(title) ? null : WebUtility.HtmlDecode(title.Trim()),
                 Text = body.Length == 0 ? null : WebUtility.HtmlDecode(body),
+                Language = lang,
+                IsOriginalText = !machine,
+                MachineTranslated = machine,
+                TranslatedText = useOText && shownBody.Length > 0 ? WebUtility.HtmlDecode(shownBody) : null,
+                TranslatedTitle = useOTitle && !string.IsNullOrWhiteSpace(shownTitle) ? WebUtility.HtmlDecode(shownTitle.Trim()) : null,
                 ReviewDate = DateOf(d),
                 ReviewUrl = pageUrl,
                 RoomType = Str(Get(Info(d), "roomTypeName")) ?? Str(Get(d, "roomTypeName")),
@@ -805,6 +1088,108 @@ namespace Take_Time_BangPhra.Services.Reviews
                 InsertOnly = true
             };
             return item;
+        }
+
+        private static string JoinBody(string text, string pos, string neg)
+        {
+            var sb = new StringBuilder(text ?? "");
+            if (!string.IsNullOrWhiteSpace(pos)) sb.Append(sb.Length > 0 ? "\n" : "").Append("ข้อดี: ").Append(pos.Trim());
+            if (!string.IsNullOrWhiteSpace(neg)) sb.Append(sb.Length > 0 ? "\n" : "").Append("ข้อเสีย: ").Append(neg.Trim());
+            return sb.ToString().Trim();
+        }
+
+        private static bool SameText(string a, string b)
+        {
+            return string.Equals(ReviewText.NormalizeForHash(a), ReviewText.NormalizeForHash(b), StringComparison.Ordinal);
+        }
+
+        /// <summary>ค่าข้อความของคีย์ต้นฉบับ: ชื่อคีย์ขึ้นต้น/มีคำว่า original และมีคำใดคำหนึ่งใน parts (เช่น originalComment, reviewOriginalTitle)</summary>
+        private static string OriginalOf(Dictionary<string, object> d, params string[] parts)
+        {
+            foreach (var kv in d)
+            {
+                string k = kv.Key.ToLowerInvariant();
+                if (!k.Contains("original")) continue;
+                if (k.Contains("language") || k.Contains("lang")) continue;
+                bool hit = false;
+                foreach (var p in parts) if (k.Contains(p)) { hit = true; break; }
+                if (!hit) continue;
+                // originalComment ไม่ควรจับ "originalTitle" ผ่านคำว่า review — ตัดคีย์ที่เป็นของส่วนอื่นออก
+                if (!parts.Contains("title") && k.Contains("title")) continue;
+                if (!parts.Contains("positive") && k.Contains("positive")) continue;
+                if (!parts.Contains("negative") && k.Contains("negative")) continue;
+                string s = kv.Value as string;
+                if (!string.IsNullOrWhiteSpace(s)) return s;
+            }
+            return null;
+        }
+
+        private static readonly Dictionary<string, string> LangIdMap = new Dictionary<string, string>
+        {
+            // ⚠ ยังไม่ยืนยันกับ Agoda — ใช้เฉพาะเมื่อคำตอบให้ languageId เป็นตัวเลข
+            { "1", "en" }, { "22", "th" }
+        };
+
+        private static string LangOf(Dictionary<string, object> d, params string[] keys)
+        {
+            foreach (var k in keys)
+            {
+                object v = Get(d, k);
+                string s = Str(v);
+                if (string.IsNullOrEmpty(s) || s.Length > 20) continue;
+                string n = NormLang(s);
+                if (n != null) return n;
+            }
+            return null;
+        }
+
+        public static string NormLang(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return null;
+            s = s.Trim().ToLowerInvariant();
+            string m;
+            if (Regex.IsMatch(s, @"^\d+$")) return LangIdMap.TryGetValue(s, out m) ? m : null;
+            if (s == "thai") return "th";
+            if (s == "english") return "en";
+            var mm = Regex.Match(s, @"^([a-z]{2,3})(?:[-_][a-z0-9]{2,4})?$");
+            return mm.Success ? mm.Groups[1].Value : null;
+        }
+
+        private static bool? BoolOf(Dictionary<string, object> d, params string[] keys)
+        {
+            foreach (var k in keys)
+            {
+                object v = Get(d, k);
+                if (v is bool) return (bool)v;
+                string s = Str(v);
+                if (s == null) continue;
+                if (s == "1" || s.Equals("true", StringComparison.OrdinalIgnoreCase)) return true;
+                if (s == "0" || s.Equals("false", StringComparison.OrdinalIgnoreCase)) return false;
+            }
+            return null;
+        }
+
+        /// <summary>เดาภาษาจากอักษร (ไทย/เกาหลี/ญี่ปุ่น/จีน/ละติน→en) — ไม่แน่ใจคืน null</summary>
+        public static string DetectLang(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return null;
+            int thai = 0, latin = 0, hangul = 0, kana = 0, han = 0;
+            foreach (char c in s)
+            {
+                if (c >= '฀' && c <= '๿') thai++;
+                else if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) latin++;
+                else if (c >= '가' && c <= '힯') hangul++;
+                else if (c >= '぀' && c <= 'ヿ') kana++;
+                else if (c >= '一' && c <= '鿿') han++;
+            }
+            int total = thai + latin + hangul + kana + han;
+            if (total < 3) return null;
+            if (thai * 3 >= total) return "th";
+            if (hangul * 3 >= total) return "ko";
+            if (kana > 0 && (kana + han) * 3 >= total) return "ja";
+            if (han * 3 >= total) return "zh";
+            if (latin * 10 >= total * 9) return "en";   // ละตินล้วน — ส่วนใหญ่เป็นอังกฤษ (ภาษายุโรปอื่นอาจผิด)
+            return null;
         }
 
         private static Dictionary<string, object> Info(Dictionary<string, object> d)

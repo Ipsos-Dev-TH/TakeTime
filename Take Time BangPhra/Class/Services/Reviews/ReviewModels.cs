@@ -149,6 +149,16 @@ namespace Take_Time_BangPhra.Services.Reviews
         /// แถวชั่วคราวจากอีเมลยังถูกเลื่อนขั้นตามปกติ
         /// </summary>
         public bool InsertOnly;
+        /// <summary>
+        /// true = ข้อความเป็นภาษาต้นฉบับ (ไม่ใช่คำแปลของแพลตฟอร์ม) — ใช้กับกฎ "แทนคำแปลที่เก็บไว้ด้วยต้นฉบับครั้งเดียว"
+        /// แม้แถวเดิมจะเป็น InsertOnly (เมื่อภาษาเปลี่ยน เช่น en → th ด้วย External_Review_Id เดิม)
+        /// </summary>
+        public bool IsOriginalText;
+        /// <summary>true = แพลตฟอร์มให้มาแต่คำแปลเครื่อง (เก็บใน Is_Machine_Translated ถ้ามีคอลัมน์ — ไม่เขียนลงข้อความ)</summary>
+        public bool? MachineTranslated;
+        /// <summary>คำแปลที่แพลตฟอร์มแสดง (เฉพาะ diagnostics — ไม่บันทึก)</summary>
+        public string TranslatedText;
+        public string TranslatedTitle;
     }
 
     public class ReviewFetchResult
