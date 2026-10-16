@@ -180,7 +180,7 @@ namespace Take_Time_BangPhra.Admin.CRM
             {
                 var cells = new List<string>
                 {
-                    Convert.ToString(r["Kind"]) == "I" ? "ภายใน" : "ออนไลน์",
+                    KindLabel(Convert.ToString(r["Kind"])),
                     Convert.ToString(r["ID"]),
                     Convert.ToString(r["Platform"]),
                     Convert.ToString(r["SourceCode"]),
@@ -215,6 +215,16 @@ namespace Take_Time_BangPhra.Admin.CRM
             Response.BinaryWrite(new UTF8Encoding(true).GetPreamble());
             Response.Write(sb.ToString());
             Response.End();
+        }
+
+        private static string KindLabel(string kind)
+        {
+            switch (kind)
+            {
+                case "I": return "ภายใน";
+                case "C": return "เช็คเอาท์ (พนักงานบันทึก)";
+                default: return "ออนไลน์";
+            }
         }
 
         private static string Csv(string v)

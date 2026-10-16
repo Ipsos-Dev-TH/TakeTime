@@ -40,6 +40,11 @@ namespace Take_Time_BangPhra.Admin.GuestExperience
                 var kpi = Reviews.ReviewQuery.GetHeadline(_connectionString, 365);
                 lblOverallScore.Text = kpi["avg5"] == null ? "-" : Convert.ToDouble(kpi["avg5"]).ToString("0.0");
                 lblReviewCount.Text = string.Format("{0:N0} รีวิว (มีคะแนน {1:N0})", kpi["total"], kpi["rated"]);
+                // คะแนนตอนเช็คเอาท์ (พนักงานบันทึก) นับรวมในคะแนนเฉลี่ยข้างบนแล้ว — แสดงแยกให้เห็นที่มา
+                int coCount = kpi.ContainsKey("checkoutCount") ? Convert.ToInt32(kpi["checkoutCount"]) : 0;
+                if (coCount > 0)
+                    lblReviewCount.Text += string.Format(" · ประเมินตอนเช็คเอาท์ {0:N0} ครั้ง เฉลี่ย {1}/5", coCount,
+                        kpi["checkoutAvg5"] == null ? "-" : Convert.ToDouble(kpi["checkoutAvg5"]).ToString("0.0"));
                 lblResponseRate.Text = kpi["responseRate"] == null ? "-" : Convert.ToDouble(kpi["responseRate"]).ToString("0.#") + "%";
                 lblAvgResponse.Text = FormatHours(kpi["avgResponseHours"]);
                 double rate = kpi["responseRate"] == null ? 0 : Convert.ToDouble(kpi["responseRate"]);

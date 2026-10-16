@@ -14,6 +14,11 @@
 //   * Guest/Review.aspx "screenshot reward" rows (Source GOOGLE + title
 //     'Google Review') are not real reviews → never included.
 //   * Only whitelisted identifiers reach the SQL text; every value is a parameter.
+//   * Platform "CHECKOUT" = the 1-5 guest satisfaction staff enter on the checkout
+//     page (Checkout_History.GuestSatisfaction). Rating only - no text (staff Notes
+//     are never exposed), never "answerable": counted in averages / counts /
+//     distribution / trend / per-platform, excluded from response KPIs, sentiment,
+//     topics and text search.
 // ===========================================================================
 
 using System;
@@ -47,6 +52,8 @@ namespace Take_Time_BangPhra.Reviews
         public string Sentiment = "";
         public bool IncludeProvisional = true;
         public bool IncludeInternal = true;
+        /// <summary>Include staff-entered checkout satisfaction ratings (platform CHECKOUT).</summary>
+        public bool IncludeCheckout = true;
         public bool ShowExcluded = false;
         public string Search = "";
         public string Sort = "date_desc";
@@ -101,6 +108,7 @@ namespace Take_Time_BangPhra.Reviews
             f.Sentiment = (sen == "POSITIVE" || sen == "NEGATIVE" || sen == "NEUTRAL" || sen == "MIXED" || sen == "NONE") ? sen : "";
             f.IncludeProvisional = Bool(Get(d, "includeProvisional"), true);
             f.IncludeInternal = Bool(Get(d, "includeInternal"), true);
+            f.IncludeCheckout = Bool(Get(d, "includeCheckout"), true);
             f.ShowExcluded = Bool(Get(d, "showExcluded"), false);
             string q = Str(Get(d, "search")).Trim();
             f.Search = q.Length > 200 ? q.Substring(0, 200) : q;
@@ -134,7 +142,7 @@ namespace Take_Time_BangPhra.Reviews
             sb.Append("|b=").Append(string.Join(",", RatingBands.OrderBy(x => x)));
             sb.Append("|l=").Append(Language).Append("|r=").Append(HasResponse).Append("|i=").Append(IngestMethod);
             sb.Append("|s=").Append(Sentiment).Append("|pv=").Append(IncludeProvisional ? 1 : 0);
-            sb.Append("|in=").Append(IncludeInternal ? 1 : 0).Append("|q=").Append(Search.ToLowerInvariant());
+            sb.Append("|in=").Append(IncludeInternal ? 1 : 0).Append("|co=").Append(IncludeCheckout ? 1 : 0).Append("|q=").Append(Search.ToLowerInvariant());
             return sb.ToString();
         }
 
@@ -188,6 +196,11 @@ namespace Take_Time_BangPhra.Reviews
         public bool HasOnline { get { return HasTable("AI_Online_Reviews"); } }
         public bool HasInternal { get { return HasTable("Guest_Reviews"); } }
         public bool HasSources { get { return HasTable("AI_Review_Sources"); } }
+        /// <summary>Checkout_History with the staff-entered GuestSatisfaction (PHASE1 migration 10).</summary>
+        public bool HasCheckoutRatings
+        {
+            get { return Has("Checkout_History", "ID") && Has("Checkout_History", "GuestSatisfaction") && Has("Checkout_History", "CheckoutDate"); }
+        }
         /// <summary>true once PHASE19_26 columns are present (used for UI hints).</summary>
         public bool AggregationMigrated { get { return Has("AI_Online_Reviews", "Is_Excluded") && Has("AI_Online_Reviews", "Rating_5"); } }
     }
@@ -213,7 +226,8 @@ namespace Take_Time_BangPhra.Reviews
                 {
                     var dt = Query(conn, @"SELECT t.name AS T, c.name AS C
                         FROM sys.tables t JOIN sys.columns c ON c.object_id = t.object_id
-                        WHERE t.name IN ('AI_Online_Reviews','AI_Review_Sources','Guest_Reviews','Customer','Review_Fetch_Log','AI_Report_Summaries')", null);
+                        WHERE t.name IN ('AI_Online_Reviews','AI_Review_Sources','Guest_Reviews','Customer','Review_Fetch_Log','AI_Report_Summaries',
+                                         'Checkout_History','Reservation','Reservation_Accommodation','Accommodation')", null);
                     foreach (DataRow r in dt.Rows) ns.Add(Convert.ToString(r["T"]), Convert.ToString(r["C"]));
                 }
                 catch { /* empty schema → empty results, page still renders */ }
@@ -227,7 +241,10 @@ namespace Take_Time_BangPhra.Reviews
         // ------------------------------------------------------------------
         private const string BandExpr = "(CASE WHEN b.R5 IS NULL THEN 0 WHEN b.R5 < 1.5 THEN 1 WHEN b.R5 < 2.5 THEN 2 WHEN b.R5 < 3.5 THEN 3 WHEN b.R5 < 4.5 THEN 4 ELSE 5 END)";
 
-        private static string BuildBaseSql(ReviewSchema s)
+        /// <summary>Platform key of the staff-entered checkout satisfaction rows (Kind 'C').</summary>
+        public const string CheckoutPlatform = "CHECKOUT";
+
+        private static string BuildBaseSql(ReviewSchema s, bool withCheckout = true)
         {
             var parts = new List<string>();
             const string O = "AI_Online_Reviews";
@@ -330,6 +347,9 @@ FROM Guest_Reviews gr
 " + where);
             }
 
+            if (withCheckout && s.HasCheckoutRatings)
+                parts.Add(BuildCheckoutSql(s));
+
             if (parts.Count == 0)
             {
                 // No review tables at all → typed empty set so the page renders.
@@ -343,6 +363,57 @@ FROM Guest_Reviews gr
     CAST(NULL AS NVARCHAR(50)) AS Traveller, CAST(NULL AS DATETIME) AS StayDate, 0 AS IsFlagged WHERE 1 = 0";
             }
             return string.Join("\nUNION ALL\n", parts);
+        }
+
+        /// <summary>
+        /// Staff-entered checkout satisfaction (Checkout_History.GuestSatisfaction 1-5) as review rows (Kind 'C').
+        /// Rating only: ReviewText/Resp stay NULL and the staff Notes column is never selected.
+        /// </summary>
+        private static string BuildCheckoutSql(ReviewSchema s)
+        {
+            const string C = "Checkout_History";
+            bool hasResId = s.Has(C, "Reservation_ID");
+            bool joinRes = hasResId && s.Has("Reservation", "ID");
+            string name = joinRes && s.Has("Reservation", "Customer_MobilePhone") && s.Has("Customer", "MobilePhone") && s.Has("Customer", "Name")
+                ? "(SELECT TOP 1 " + (s.Has("Customer", "FullName") ? "COALESCE(NULLIF(LTRIM(RTRIM(c.Name)), N''), c.FullName)" : "c.Name")
+                  + " FROM Customer c WHERE c.MobilePhone = rs.Customer_MobilePhone)"
+                : "NULL";
+            string room = hasResId && s.Has("Reservation_Accommodation", "Reservation_ID") && s.Has("Reservation_Accommodation", "Accommodation_ID")
+                    && s.Has("Accommodation", "ID") && s.Has("Accommodation", "AccomName")
+                ? "(SELECT TOP 1 acc.AccomName FROM Reservation_Accommodation ra JOIN Accommodation acc ON acc.ID = ra.Accommodation_ID WHERE ra.Reservation_ID = ch.Reservation_ID)"
+                : "NULL";
+            string title = hasResId ? "N'การจอง #' + CAST(ch.Reservation_ID AS NVARCHAR(20))" : "NULL";
+            string stay = joinRes && s.Has("Reservation", "CheckinDate") ? "rs.[CheckinDate]" : "NULL";
+            const string r5 = "CASE WHEN ch.[GuestSatisfaction] BETWEEN 1 AND 5 THEN CAST(ch.[GuestSatisfaction] AS FLOAT) END";
+
+            return @"SELECT 'C' AS Kind, CAST(ch.ID AS BIGINT) AS ID, CAST(N'" + CheckoutPlatform + @"' AS NVARCHAR(50)) AS Platform,
+    CAST(N'" + CheckoutPlatform + @"' AS NVARCHAR(50)) AS SourceCode,
+    CAST(" + name + @" AS NVARCHAR(200)) AS ReviewerName,
+    CAST(" + title + @" AS NVARCHAR(500)) AS Title,
+    CAST(NULL AS NVARCHAR(MAX)) AS ReviewText,
+    CAST(ch.[CheckoutDate] AS DATETIME) AS ReviewDate,
+    " + r5 + @" AS R5,
+    " + r5 + @" * 2 AS R10,
+    " + r5 + @" AS RatingRaw,
+    CAST(5 AS FLOAT) AS RatingScale,
+    CAST(NULL AS NVARCHAR(MAX)) AS Resp,
+    CAST(NULL AS DATETIME) AS RespDate,
+    CAST(NULL AS NVARCHAR(20)) AS Lang,
+    CAST(N'" + CheckoutPlatform + @"' AS NVARCHAR(30)) AS Ingest,
+    CAST(NULL AS NVARCHAR(1000)) AS Url,
+    0 AS IsProv,
+    0 AS IsExcl,
+    CAST(NULL AS NVARCHAR(20)) AS Sentiment,
+    CAST(NULL AS FLOAT) AS SentScore,
+    CAST(NULL AS NVARCHAR(MAX)) AS Topics,
+    CAST(NULL AS NVARCHAR(MAX)) AS TopicScores,
+    CAST(NULL AS NVARCHAR(MAX)) AS AISummary,
+    CAST(" + room + @" AS NVARCHAR(200)) AS RoomType,
+    CAST(NULL AS NVARCHAR(50)) AS Traveller,
+    CAST(" + stay + @" AS DATETIME) AS StayDate,
+    0 AS IsFlagged
+FROM Checkout_History ch
+" + (joinRes ? "LEFT JOIN Reservation rs ON rs.ID = ch.Reservation_ID\n" : "") + "WHERE ch.[GuestSatisfaction] IS NOT NULL";
         }
 
         /// <summary>WHERE clause on alias b (everything except the excluded toggle).</summary>
@@ -360,21 +431,24 @@ FROM Guest_Reviews gr
                 }
                 w.Append(" AND b.Platform IN (").Append(string.Join(",", names)).Append(")");
             }
-            if (!f.IncludeInternal) w.Append(" AND b.Kind = 'O'");
+            if (!f.IncludeInternal) w.Append(" AND b.Kind <> 'I'");
+            if (!f.IncludeCheckout) w.Append(" AND b.Kind <> 'C'");
             if (f.From.HasValue) { w.Append(" AND b.ReviewDate >= @dFrom"); p["@dFrom"] = f.From.Value.Date; }
             if (f.To.HasValue) { w.Append(" AND b.ReviewDate < @dTo"); p["@dTo"] = f.To.Value.Date.AddDays(1); }
             if (f.RatingBands.Count > 0 && f.RatingBands.Count < 6)
                 w.Append(" AND ").Append(BandExpr).Append(" IN (").Append(string.Join(",", f.RatingBands.Select(x => x.ToString(CultureInfo.InvariantCulture)))).Append(")");
             if (f.Language.Length > 0) { w.Append(" AND b.Lang = @lang"); p["@lang"] = f.Language; }
+            // checkout ratings (Kind 'C') are not answerable reviews -> neither "answered" nor "unanswered"
             if (f.HasResponse == "yes") w.Append(" AND b.Resp IS NOT NULL");
-            else if (f.HasResponse == "no") w.Append(" AND b.Resp IS NULL");
+            else if (f.HasResponse == "no") w.Append(" AND b.Resp IS NULL AND b.Kind <> 'C'");
             if (f.IngestMethod.Length > 0) { w.Append(" AND b.Ingest = @ing"); p["@ing"] = f.IngestMethod; }
-            if (f.Sentiment == "NONE") w.Append(" AND b.Sentiment IS NULL");
+            if (f.Sentiment == "NONE") w.Append(" AND b.Sentiment IS NULL AND b.Kind <> 'C'");
             else if (f.Sentiment.Length > 0) { w.Append(" AND b.Sentiment = @sen"); p["@sen"] = f.Sentiment; }
             if (!f.IncludeProvisional) w.Append(" AND b.IsProv = 0");
             if (f.Search.Length > 0)
             {
-                w.Append(" AND (b.ReviewText LIKE @q OR b.Title LIKE @q OR b.ReviewerName LIKE @q OR b.Resp LIKE @q)");
+                // text search = review text only -> checkout ratings (no text) never match
+                w.Append(" AND b.Kind <> 'C' AND (b.ReviewText LIKE @q OR b.Title LIKE @q OR b.ReviewerName LIKE @q OR b.Resp LIKE @q)");
                 p["@q"] = "%" + f.Search.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]") + "%";
             }
             return w.ToString();
@@ -388,7 +462,7 @@ FROM Guest_Reviews gr
                 case "rating_desc": return "ORDER BY CASE WHEN b.R5 IS NULL THEN 1 ELSE 0 END, b.R5 DESC, b.ReviewDate DESC, b.ID DESC";
                 case "rating_asc": return "ORDER BY CASE WHEN b.R5 IS NULL THEN 1 ELSE 0 END, b.R5 ASC, b.ReviewDate DESC, b.ID DESC";
                 case "platform": return "ORDER BY b.Platform ASC, b.ReviewDate DESC, b.ID DESC";
-                case "unanswered": return "ORDER BY CASE WHEN b.Resp IS NULL THEN 0 ELSE 1 END, b.ReviewDate DESC, b.ID DESC";
+                case "unanswered": return "ORDER BY CASE WHEN b.Resp IS NULL AND b.Kind <> 'C' THEN 0 ELSE 1 END, b.ReviewDate DESC, b.ID DESC";
                 default: return "ORDER BY b.ReviewDate DESC, b.ID DESC";
             }
         }
@@ -438,7 +512,8 @@ DROP TABLE #o;", null);
         public static List<Dictionary<string, object>> GetSourceCodeList(string conn)
         {
             var s = GetSchema(conn);
-            var dt = Query(conn, "SELECT b.SourceCode, COUNT(*) AS Cnt FROM (" + BuildBaseSql(s) + ") b WHERE b.SourceCode IS NOT NULL GROUP BY b.SourceCode ORDER BY COUNT(*) DESC", null);
+            // without checkout ratings: callers filter vw_AI_Review_AllSources, which has no CHECKOUT rows
+            var dt = Query(conn, "SELECT b.SourceCode, COUNT(*) AS Cnt FROM (" + BuildBaseSql(s, false) + ") b WHERE b.SourceCode IS NOT NULL GROUP BY b.SourceCode ORDER BY COUNT(*) DESC", null);
             var sources = LoadSources(conn, s);
             var list = new List<Dictionary<string, object>>();
             foreach (DataRow r in dt.Rows)
@@ -466,13 +541,14 @@ INTO #f FROM (" + BuildBaseSql(s) + @") b
 " + where + @";
 SELECT COUNT(*) AS Total, COUNT(R5) AS Rated, AVG(R5) AS Avg5, AVG(R10) AS Avg10,
        SUM(CASE WHEN R5 >= 4 THEN 1 ELSE 0 END) AS Pos, SUM(CASE WHEN R5 <= 2 THEN 1 ELSE 0 END) AS Neg,
-       SUM(HasResp) AS Responded,
+       SUM(HasResp) AS Responded, SUM(CASE WHEN Kind <> 'C' THEN 1 ELSE 0 END) AS RespBase,
        AVG(CASE WHEN HasResp = 1 AND RespDate >= ReviewDate THEN DATEDIFF(MINUTE, ReviewDate, RespDate) / 60.0 END) AS AvgRespHours,
-       MIN(ReviewDate) AS FirstDate, MAX(ReviewDate) AS LastDate
+       MIN(ReviewDate) AS FirstDate, MAX(ReviewDate) AS LastDate,
+       SUM(CASE WHEN Kind = 'C' THEN 1 ELSE 0 END) AS CoTotal, AVG(CASE WHEN Kind = 'C' THEN R5 END) AS CoAvg5
 FROM #f WHERE IsExcl = 0;
 SELECT Platform, COUNT(*) AS Total, COUNT(R5) AS Rated, AVG(R5) AS Avg5, AVG(R10) AS Avg10,
        SUM(CASE WHEN R5 >= 4 THEN 1 ELSE 0 END) AS Pos, SUM(CASE WHEN R5 <= 2 THEN 1 ELSE 0 END) AS Neg,
-       SUM(HasResp) AS Responded,
+       SUM(HasResp) AS Responded, SUM(CASE WHEN Kind <> 'C' THEN 1 ELSE 0 END) AS RespBase,
        AVG(CASE WHEN HasResp = 1 AND RespDate >= ReviewDate THEN DATEDIFF(MINUTE, ReviewDate, RespDate) / 60.0 END) AS AvgRespHours,
        MAX(ReviewDate) AS LastDate
 FROM #f WHERE IsExcl = 0 GROUP BY Platform ORDER BY COUNT(*) DESC;
@@ -480,9 +556,9 @@ SELECT Platform, CONVERT(CHAR(7), ReviewDate, 120) AS Ym, COUNT(*) AS Cnt, AVG(R
 FROM #f WHERE IsExcl = 0 AND ReviewDate IS NOT NULL GROUP BY Platform, CONVERT(CHAR(7), ReviewDate, 120);
 SELECT b.Platform, " + BandExpr + @" AS Band, COUNT(*) AS Cnt
 FROM #f b WHERE b.IsExcl = 0 GROUP BY b.Platform, " + BandExpr + @";
-SELECT ISNULL(Sentiment, '') AS Sentiment, COUNT(*) AS Cnt FROM #f WHERE IsExcl = 0 GROUP BY ISNULL(Sentiment, '');
+SELECT ISNULL(Sentiment, '') AS Sentiment, COUNT(*) AS Cnt FROM #f WHERE IsExcl = 0 AND Kind <> 'C' GROUP BY ISNULL(Sentiment, '');
 SELECT TOP 5000 Topics, TopicScores, Sentiment, R5 FROM #f
-WHERE IsExcl = 0 AND Topics IS NOT NULL AND LEN(Topics) > 2 ORDER BY ReviewDate DESC;
+WHERE IsExcl = 0 AND Kind <> 'C' AND Topics IS NOT NULL AND LEN(Topics) > 2 ORDER BY ReviewDate DESC;
 SELECT COUNT(*) AS Excluded FROM #f WHERE IsExcl = 1;
 DROP TABLE #f;";
             var ds = QuerySet(conn, sql, p);
@@ -492,6 +568,7 @@ DROP TABLE #f;";
             int total = ToInt(k["Total"]);
             int rated = ToInt(k["Rated"]);
             int responded = ToInt(k["Responded"]);
+            int respBase = ToInt(k["RespBase"]);   // answerable reviews only (checkout ratings excluded)
             var kpi = new Dictionary<string, object>
             {
                 { "total", total },
@@ -503,11 +580,14 @@ DROP TABLE #f;";
                 { "pctPositive", rated > 0 ? Math.Round(ToInt(k["Pos"]) * 100.0 / rated, 1) : (double?)null },
                 { "pctNegative", rated > 0 ? Math.Round(ToInt(k["Neg"]) * 100.0 / rated, 1) : (double?)null },
                 { "responded", responded },
-                { "responseRate", total > 0 ? Math.Round(responded * 100.0 / total, 1) : (double?)null },
+                { "respondable", respBase },
+                { "responseRate", respBase > 0 ? Math.Round(responded * 100.0 / respBase, 1) : (double?)null },
                 { "avgResponseHours", ToNullDouble(k["AvgRespHours"], 1) },
                 { "firstDate", ToIso(k["FirstDate"]) },
                 { "lastDate", ToIso(k["LastDate"]) },
-                { "excluded", ToInt(ds.Tables[6].Rows[0]["Excluded"]) }
+                { "excluded", ToInt(ds.Tables[6].Rows[0]["Excluded"]) },
+                { "checkoutCount", ToInt(k["CoTotal"]) },
+                { "checkoutAvg5", ToNullDouble(k["CoAvg5"], 2) }
             };
 
             // Per platform (+ platform-published rating + fetch status from AI_Review_Sources)
@@ -520,6 +600,7 @@ DROP TABLE #f;";
                 sources.TryGetValue(code, out src);
                 int pt = ToInt(r["Total"]);
                 int pr = ToInt(r["Rated"]);
+                int prb = ToInt(r["RespBase"]);
                 double? avg5 = ToNullDouble(r["Avg5"], 2);
                 double? pubRating = src != null ? ToNullDouble(src["Platform_Rating"], 2) : null;
                 double? pubScale = src != null ? ToNullDouble(src["Platform_Rating_Scale"], 2) : null;
@@ -536,7 +617,7 @@ DROP TABLE #f;";
                     { "avg10", ToNullDouble(r["Avg10"], 2) },
                     { "pctPositive", pr > 0 ? Math.Round(ToInt(r["Pos"]) * 100.0 / pr, 1) : (double?)null },
                     { "pctNegative", pr > 0 ? Math.Round(ToInt(r["Neg"]) * 100.0 / pr, 1) : (double?)null },
-                    { "responseRate", pt > 0 ? Math.Round(ToInt(r["Responded"]) * 100.0 / pt, 1) : (double?)null },
+                    { "responseRate", prb > 0 ? Math.Round(ToInt(r["Responded"]) * 100.0 / prb, 1) : (double?)null },
                     { "avgResponseHours", ToNullDouble(r["AvgRespHours"], 1) },
                     { "lastReview", ToIso(r["LastDate"]) },
                     { "publishedRating", pubRating },
@@ -744,7 +825,8 @@ DROP TABLE #f;";
 
         public static List<Dictionary<string, object>> GetLatest(string conn, int n)
         {
-            var f = new ReviewFilter { PageSize = Math.Max(1, Math.Min(n, 20)), Sort = "date_desc" };
+            // latest = text reviews; checkout ratings have no text
+            var f = new ReviewFilter { PageSize = Math.Max(1, Math.Min(n, 20)), Sort = "date_desc", IncludeCheckout = false };
             return (List<Dictionary<string, object>>)GetReviewPage(conn, f)["rows"];
         }
 
@@ -773,6 +855,11 @@ DROP TABLE #f;";
         public static bool SetExcluded(string conn, string kind, long id, bool excluded, out string message)
         {
             var s = GetSchema(conn, true);
+            if (kind == "C")
+            {
+                message = "คะแนนตอนเช็คเอาท์บันทึกโดยพนักงาน — ซ่อนจากสถิติได้ด้วยตัวกรอง \"รวมคะแนนตอนเช็คเอาท์\"";
+                return false;
+            }
             if (kind != "O")
             {
                 message = "รีวิวภายในใช้การอนุมัติ/ปฏิเสธที่หน้า \"จัดการรีวิว\" แทน";
@@ -824,6 +911,7 @@ DROP TABLE #f;";
                 if (s.Has(G, "ResponseBy_AdminID") && adminId > 0) sets.Add("ResponseBy_AdminID = @a");
                 n = Execute(conn, "UPDATE Guest_Reviews SET " + string.Join(", ", sets) + " WHERE ID = @id", p);
             }
+            else if (kind == "C") { message = "คะแนนตอนเช็คเอาท์บันทึกโดยพนักงาน ไม่มีการตอบกลับ"; return false; }
             else { message = "ชนิดรีวิวไม่ถูกต้อง"; return false; }
             message = n > 0 ? "บันทึกคำตอบแล้ว" : "ไม่พบรีวิว";
             return n > 0;
@@ -926,9 +1014,18 @@ DROP TABLE #f;";
                 + (f.To.HasValue ? f.To.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : Convert.ToString(kpi["lastDate"])));
             sb.AppendLine(string.Format(inv, "รีวิวทั้งหมด {0} (มีคะแนน {1}) | เฉลี่ย {2}/5 ({3}/10) | บวก(≥4) {4}% | ลบ(≤2) {5}% | ตอบกลับ {6}% | เวลาตอบเฉลี่ย {7} ชม.",
                 kpi["total"], kpi["rated"], Fmt(kpi["avg5"]), Fmt(kpi["avg10"]), Fmt(kpi["pctPositive"]), Fmt(kpi["pctNegative"]), Fmt(kpi["responseRate"]), Fmt(kpi["avgResponseHours"])));
+            int coCount = Convert.ToInt32(kpi["checkoutCount"]);
+            if (coCount > 0)
+                sb.AppendLine(string.Format(inv, "คะแนนประเมินตอนเช็คเอาท์ (พนักงานบันทึกคะแนน 1-5 ไม่มีข้อความรีวิว): {0} ครั้ง เฉลี่ย {1}/5 — นับรวมในจำนวน/คะแนนเฉลี่ยข้างต้น แต่ไม่นับในอัตราตอบกลับ; รีวิวที่มาจากลูกค้า/แพลตฟอร์ม {2} รายการ",
+                    coCount, Fmt(kpi["checkoutAvg5"]), Convert.ToInt32(kpi["total"]) - coCount));
             sb.AppendLine("\nรายแพลตฟอร์ม:");
             foreach (var pr in (List<Dictionary<string, object>>)stats["platforms"])
             {
+                if ((string)pr["code"] == CheckoutPlatform)
+                {
+                    sb.AppendLine(string.Format(inv, "- {0}: {1} ครั้ง เฉลี่ย {2}/5 (พนักงานบันทึกตอนเช็คเอาท์ ไม่มีข้อความ ไม่ต้องตอบกลับ)", pr["name"], pr["total"], Fmt(pr["avg5"])));
+                    continue;
+                }
                 sb.AppendLine(string.Format(inv, "- {0}: {1} รีวิว เฉลี่ย {2}/5, ตอบกลับ {3}%{4}",
                     pr["name"], pr["total"], Fmt(pr["avg5"]), Fmt(pr["responseRate"]),
                     pr["publishedRating"] != null ? string.Format(inv, " | แพลตฟอร์มประกาศ {0}/{1} ({2} รีวิว)", Fmt(pr["publishedRating"]), Fmt(pr["publishedScale"]), pr["publishedCount"] ?? "-") : ""));
@@ -956,7 +1053,7 @@ DROP TABLE #f;";
             // short excerpts: worst + best (text only, no reviewer names)
             Action<string, int, string> excerpts = (sort, n, head) =>
             {
-                var ef = f.Clone(); ef.Sort = sort; ef.Page = 1; ef.PageSize = n; ef.ShowExcluded = false;
+                var ef = f.Clone(); ef.Sort = sort; ef.Page = 1; ef.PageSize = n; ef.ShowExcluded = false; ef.IncludeCheckout = false;
                 var rows = (List<Dictionary<string, object>>)GetReviewPage(conn, ef)["rows"];
                 var lines = rows.Where(r => r["r5"] != null && !string.IsNullOrWhiteSpace((string)r["text"])).ToList();
                 if (lines.Count == 0) return;
@@ -1011,6 +1108,7 @@ DROP TABLE #f;";
         private static string PlatformName(string code, Dictionary<string, object> src)
         {
             if (code == "INTERNAL") return "รีวิวภายใน (ลูกค้าเข้าพัก)";
+            if (code == CheckoutPlatform) return "ประเมินตอนเช็คเอาท์";
             if (src != null && src["SourceName"] != null && Convert.ToString(src["SourceName"]).Trim().Length > 0) return Convert.ToString(src["SourceName"]);
             return code;
         }
@@ -1020,6 +1118,7 @@ DROP TABLE #f;";
             switch (code)
             {
                 case "INTERNAL": return "#5D4037";
+                case CheckoutPlatform: return "#A1887F";
                 case "GOOGLE": return "#4285F4";
                 case "FACEBOOK": return "#1877F2";
                 case "BOOKING":
@@ -1039,6 +1138,7 @@ DROP TABLE #f;";
         private static string FetchStatus(string code, Dictionary<string, object> src)
         {
             if (code == "INTERNAL") return "ระบบภายใน";
+            if (code == CheckoutPlatform) return "พนักงานบันทึกตอนเช็คเอาท์";
             if (src == null) return "ไม่มีในทะเบียนแหล่งรีวิว";
             int fails = ToNullInt(src["Consecutive_Failures"]) ?? 0;
             string err = Convert.ToString(src["Last_Error"] ?? "");
@@ -1050,7 +1150,7 @@ DROP TABLE #f;";
 
         private static bool? FetchOk(string code, Dictionary<string, object> src)
         {
-            if (code == "INTERNAL" || src == null) return null;
+            if (code == "INTERNAL" || code == CheckoutPlatform || src == null) return null;
             int fails = ToNullInt(src["Consecutive_Failures"]) ?? 0;
             if (fails > 0) return false;
             if (src["Last_Success_At"] != null || src["LastFetchDate"] != null) return true;

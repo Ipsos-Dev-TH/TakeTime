@@ -58,6 +58,7 @@
     .ra-tag.prov { background:#E3F2FD; color:#0D47A1; }
     .ra-tag.excl { background:#FFEBEE; color:#B71C1C; }
     .ra-tag.flag { background:#FFF3E0; color:#8a4b00; }
+    .ra-tag.staff { background:var(--br-100); color:var(--br-900); }
     .ra-ok { color:var(--good); } .ra-bad { color:var(--bad); } .ra-muted { color:var(--ink-3); }
 
     /* charts */
@@ -106,7 +107,7 @@
 <div class="ra" id="ra">
     <div class="ra-head">
         <h1><i class="fas fa-chart-pie"></i> วิเคราะห์รีวิวทุกแพลตฟอร์ม</h1>
-        <p>รวมรีวิวภายใน + Google / OTA / โซเชียล — คะแนนที่ไม่ทราบไม่นำมาเฉลี่ย และรายการที่ "ตัดออก" ไม่นับในสถิติ</p>
+        <p>รวมรีวิวภายใน + คะแนนตอนเช็คเอาท์ (พนักงานบันทึก) + Google / OTA / โซเชียล — คะแนนที่ไม่ทราบไม่นำมาเฉลี่ย และรายการที่ "ตัดออก" ไม่นับในสถิติ</p>
         <div class="ra-links">
             <a href="<%= ResolveUrl("~/Admin/CRM/ReviewSources") %>"><i class="fas fa-plug"></i> ตั้งค่าแหล่งรีวิว / นำเข้า</a>
             <a href="<%= ResolveUrl("~/Admin/CRM/ReviewManagement") %>"><i class="fas fa-star"></i> จัดการรีวิวภายใน</a>
@@ -164,6 +165,7 @@
             <div class="ra-f" style="flex:1 1 260px"><label for="raSearch">ค้นหาข้อความ</label><input type="text" id="raSearch" placeholder="ข้อความรีวิว / ชื่อผู้รีวิว / คำตอบ" maxlength="200" /></div>
             <div class="ra-checks">
                 <label><input type="checkbox" id="raInternal" checked /> รวมรีวิวภายใน</label>
+                <label title="คะแนน 1-5 ที่พนักงานบันทึกตอนเช็คเอาท์ (ไม่มีข้อความ ไม่นับในอัตราตอบกลับ)"><input type="checkbox" id="raCheckout" checked /> รวมคะแนนตอนเช็คเอาท์</label>
                 <label><input type="checkbox" id="raProv" checked /> รวมรายการชั่วคราว</label>
                 <label><input type="checkbox" id="raShowExcl" /> แสดงรายการที่ตัดออก <span class="ra-muted">(เฉพาะรายการ ไม่นับสถิติ)</span></label>
             </div>
@@ -297,7 +299,7 @@
             platforms: state.platforms.slice(), bands: state.bands.slice(),
             from: $('raFrom').value, to: $('raTo').value,
             language: $('raLang').value, hasResponse: $('raResp').value, ingest: $('raIngest').value, sentiment: $('raSent').value,
-            includeInternal: $('raInternal').checked, includeProvisional: $('raProv').checked, showExcluded: $('raShowExcl').checked,
+            includeInternal: $('raInternal').checked, includeCheckout: $('raCheckout').checked, includeProvisional: $('raProv').checked, showExcluded: $('raShowExcl').checked,
             search: $('raSearch').value.trim(), sort: $('raSort').value, page: state.page, pageSize: state.pageSize
         };
     }
@@ -346,8 +348,10 @@
             kpi('จำนวนรีวิว', (k.total || 0).toLocaleString(), k.excluded ? ('ตัดออก ' + k.excluded + ' รายการ (ไม่นับ)') : (k.lastDate ? 'ล่าสุด ' + fmtDate(k.lastDate) : '')) +
             kpi('เชิงบวก', pct(k.pctPositive), 'คะแนน ≥ 4 · ' + (k.positive || 0) + ' รีวิว') +
             kpi('เชิงลบ', pct(k.pctNegative), 'คะแนน ≤ 2 · ' + (k.negative || 0) + ' รีวิว') +
-            kpi('อัตราการตอบกลับ', pct(k.responseRate), (k.responded || 0) + ' จาก ' + (k.total || 0)) +
-            kpi('เวลาตอบเฉลี่ย', fmtHours(k.avgResponseHours), 'นับจากวันที่รีวิวถึงวันที่ตอบ');
+            kpi('อัตราการตอบกลับ', pct(k.responseRate), (k.responded || 0) + ' จาก ' + (k.respondable || 0) + (k.checkoutCount ? ' (ไม่นับคะแนนเช็คเอาท์)' : '')) +
+            kpi('เวลาตอบเฉลี่ย', fmtHours(k.avgResponseHours), 'นับจากวันที่รีวิวถึงวันที่ตอบ') +
+            (k.checkoutCount ? kpi('ประเมินตอนเช็คเอาท์', num(k.checkoutAvg5, 2) + '<span style="font-size:14px;color:#9a8f88"> /5</span>',
+                'บันทึกโดยพนักงาน · ' + k.checkoutCount.toLocaleString() + ' ครั้ง (รวมในคะแนนเฉลี่ย)') : '');
     }
     function renderPlatforms(rows) {
         if (!rows || !rows.length) { $('raPlatTable').innerHTML = '<tr><td colspan="12" class="ra-loading">ไม่มีข้อมูลตามตัวกรอง</td></tr>'; return; }
@@ -470,7 +474,7 @@
                (orig && r.scale !== 5 ? 'ต้นฉบับ ' + orig + ' · ' : '') + num(r.r10, 1) + '/10</div></div>';
     }
     function renderReview(r) {
-        var key = r.kind + r.id, text = r.text || '', long = text.length > 280;
+        var key = r.kind + r.id, text = r.text || '', long = text.length > 280, staff = r.kind === 'C';
         var meta = [];
         meta.push('<i class="far fa-calendar"></i> ' + fmtDate(r.date));
         if (r.reviewer) meta.push('<i class="far fa-user"></i> ' + esc(r.reviewer));
@@ -485,11 +489,13 @@
             (r.provisional ? '<span class="ra-tag prov" title="ข้อมูลจากอีเมล/นำเข้ามือ รอข้อมูลจริง">ชั่วคราว</span>' : '') +
             (r.excluded ? '<span class="ra-tag excl">ตัดออก</span>' : '') +
             (r.flagged ? '<span class="ra-tag flag">ติดธง</span>' : '') +
+            (staff ? '<span class="ra-tag staff" title="คะแนนที่พนักงานบันทึกตอนเช็คเอาท์ ไม่ใช่ข้อความรีวิวจากลูกค้า">บันทึกโดยพนักงาน</span>' : '') +
             (r.title ? '<div style="font-weight:600;margin-top:6px">' + esc(r.title) + '</div>' : '') +
             '<div class="ra-rev-meta">' + meta.join('<span>·</span>') + '</div></div>' + scoreHtml(r) + '</div>';
         if (text) h += '<p class="ra-text' + (long ? ' clamp' : '') + '" id="txt-' + key + '">' + esc(text) + '</p>' +
                        (long ? '<button type="button" class="ra-more" data-act="more" data-key="' + key + '">แสดงทั้งหมด</button>' : '');
-        else h += '<p class="ra-text ra-muted">(ไม่มีข้อความ)</p>';
+        else if (!staff) h += '<p class="ra-text ra-muted">(ไม่มีข้อความ)</p>';
+        if (staff) return h + '</div>';   // checkout rating: score only — no text, no reply/exclude actions
         if (r.response) h += '<div class="ra-resp"><b><i class="fas fa-reply"></i> คำตอบเจ้าของ</b>' + (r.responseDate ? ' <span class="ra-muted">' + fmtDate(r.responseDate) + '</span>' : '') + '\n' + esc(r.response) + '</div>';
         h += '<div class="ra-rev-actions">';
         if (r.url) h += '<a class="ra-btn ghost sm" href="' + esc(r.url) + '" target="_blank" rel="noopener noreferrer"><i class="fas fa-external-link-alt"></i> เปิดที่แพลตฟอร์ม</a>';
@@ -542,7 +548,7 @@
         var on = document.querySelectorAll('#raPlatforms .ra-chip.on, #raBands .ra-chip.on');
         for (var i = 0; i < on.length; i++) on[i].classList.remove('on');
         ['raLang', 'raResp', 'raIngest', 'raSent'].forEach(function (id) { $(id).value = ''; });
-        $('raSearch').value = ''; $('raInternal').checked = true; $('raProv').checked = true; $('raShowExcl').checked = false; $('raSort').value = 'date_desc';
+        $('raSearch').value = ''; $('raInternal').checked = true; $('raCheckout').checked = true; $('raProv').checked = true; $('raShowExcl').checked = false; $('raSort').value = 'date_desc';
         setPreset('365'); refreshAll();
     });
     $('raExport').addEventListener('click', function () {
