@@ -51,6 +51,9 @@ public static class Notify
         public const string PaymentHold = "PAYMENT_HOLD";
         public const string EtaxRd = "ETAX_RD";
 
+        public const string ReviewNegative = "REVIEW_NEGATIVE";
+        public const string ReviewFetchFailing = "REVIEW_FETCH_FAILING";
+
         public const string AccQueueAlert = "ACC_QUEUE_ALERT";
         public const string SystemError = "SYSTEM_ERROR";
     }
@@ -112,6 +115,11 @@ public static class Notify
             "กันวงเงิน / ตัดค่าเสียหาย / คืนวงเงิน / ใกล้หมดอายุ (7 วัน) — ควรเปิดไว้เสมอ", "ระบบชำระเงิน", true),
         new EventInfo(Ev.EtaxRd,          "เงินและเอกสาร", "ผลตอบกลับ e-Tax จากสรรพากร",
             "กรมสรรพากรตอบรับ/ปฏิเสธใบกำกับอิเล็กทรอนิกส์", "e-Tax"),
+
+        new EventInfo(Ev.ReviewNegative,  "รีวิวออนไลน์", "รีวิวใหม่คะแนนต่ำ",
+            "รีวิวจาก Google/OTA ที่ได้คะแนนไม่เกินเกณฑ์ (Review_Negative_Threshold, /5) — ควรตอบกลับเร็ว", "แหล่งรีวิว"),
+        new EventInfo(Ev.ReviewFetchFailing, "รีวิวออนไลน์", "ดึงรีวิวล้มเหลวติดกัน",
+            "แหล่งรีวิวดึงไม่สำเร็จติดกันครบจำนวนครั้งที่ตั้ง (Review_FetchFail_Alert_After)", "แหล่งรีวิว"),
 
         new EventInfo(Ev.AccQueueAlert,   "ระบบ", "คิวส่งบัญชีมีปัญหา",
             "รายการค้างคิว/ล้มเหลวสะสม — ควรเปิดไว้เสมอ", "NextAcc", true),

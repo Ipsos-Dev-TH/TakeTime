@@ -961,6 +961,9 @@
                                                     <li><a runat="server" href="~/Admin/CRM/AIReviewDashboard">
                                                         <i class="fas fa-chart-line"></i> วิเคราะห์รีวิวด้วย AI
                                                     </a></li>
+                                                    <li><a runat="server" href="~/Admin/CRM/ReviewSources">
+                                                        <i class="fas fa-plug"></i> แหล่งรีวิว (ดึง/นำเข้า)
+                                                    </a></li>
                                                     </asp:PlaceHolder>
                                                     <asp:PlaceHolder ID="phNavAffiliateAdmin" runat="server">
                                                     <li role="separator" style="border-top: 1px solid rgba(255,255,255,0.1); margin: 8px 0;"></li>

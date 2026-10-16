@@ -458,6 +458,7 @@
     <Content Include="Admin\CRM\LoyaltyDashboard.aspx" />
     <Content Include="Admin\CRM\MembershipManagement.aspx" />
     <Content Include="Admin\CRM\RedemptionTerminal.aspx" />
+    <Content Include="Admin\CRM\ReviewSources.aspx" />
     <Content Include="Admin\CRM\ReviewManagement.aspx" />
     <Content Include="Admin\CRM\AIReviewDashboard.aspx" />
     <Content Include="Admin\HR\EmployeeManagement.aspx" />
@@ -995,6 +996,18 @@
     <Compile Include="Class\Services\ReviewService.cs" />
     <Compile Include="Class\Services\AIReviewAnalysisService.cs" />
     <Compile Include="Class\Services\AIReportService.cs" />
+    <Compile Include="Class\Services\Reviews\ReviewModels.cs" />
+    <Compile Include="Class\Services\Reviews\ReviewUtil.cs" />
+    <Compile Include="Class\Services\Reviews\ReviewSourceConfig.cs" />
+    <Compile Include="Class\Services\Reviews\ReviewStore.cs" />
+    <Compile Include="Class\Services\Reviews\PlacesApiAdapter.cs" />
+    <Compile Include="Class\Services\Reviews\GoogleBusinessProfileAdapter.cs" />
+    <Compile Include="Class\Services\Reviews\TripAdvisorContentApiAdapter.cs" />
+    <Compile Include="Class\Services\Reviews\EmailReviewAdapter.cs" />
+    <Compile Include="Class\Services\Reviews\UrlFetchAdapter.cs" />
+    <Compile Include="Class\Services\Reviews\ReviewAiAnalyzer.cs" />
+    <Compile Include="Class\Services\Reviews\ReviewImportService.cs" />
+    <Compile Include="Class\Services\Reviews\ReviewAggregationService.cs" />
     <Compile Include="Class\Services\TierBenefitsService.cs" />
     <Compile Include="Account\TierBenefitsManagement.aspx.cs">
       <DependentUpon>TierBenefitsManagement.aspx</DependentUpon>
@@ -1124,6 +1137,13 @@
     </Compile>
     <Compile Include="Admin\CRM\RedemptionTerminal.aspx.designer.cs">
       <DependentUpon>RedemptionTerminal.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\CRM\ReviewSources.aspx.cs">
+      <DependentUpon>ReviewSources.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\CRM\ReviewSources.aspx.designer.cs">
+      <DependentUpon>ReviewSources.aspx</DependentUpon>
     </Compile>
     <Compile Include="Admin\CRM\ReviewManagement.aspx.cs">
       <DependentUpon>ReviewManagement.aspx</DependentUpon>

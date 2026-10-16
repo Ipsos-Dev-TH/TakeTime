@@ -231,12 +231,27 @@ namespace Take_Time_BangPhra
 
         private async Task<string> FetchGoogleReviews()
         {
-            // Key + place id อ่านจาก Web.config appSettings ก่อน (แก้/หมุนคีย์ได้โดยไม่ต้อง rebuild)
-            // ถ้าไม่ตั้งใน config จะ fallback เป็นค่าเดิม
+            // Key อ่านจาก System_Config/Web.config (GooglePlacesApiKey) ก่อน แล้วค่อยใช้คีย์ของแหล่งรีวิว GOOGLE
+            // (Admin → แหล่งรีวิว) — ไม่มี key ฝังในโค้ดแล้ว (key เดิมหลุดอยู่ใน git ควรหมุนใหม่ที่ Google Cloud Console)
+            // ไม่มี key เลย = คืน error JSON → Page_Load ใช้ cache เดิมต่อ/แสดง "ไม่มีรีวิว" (หน้าแรกไม่พัง)
             string apiKey = AppCfg.Get("GooglePlacesApiKey");
-            if (string.IsNullOrWhiteSpace(apiKey)) apiKey = "AIzaSyDKULLtZZUAqQmgbW9kaTy_SPt4o-Jcp8U";
-            string placeId = ConfigurationManager.AppSettings["GooglePlaceId"];
-            if (string.IsNullOrWhiteSpace(placeId)) placeId = "ChIJvUgTD9nLAjERMgFSAIuRHJw";
+            string placeId = AppCfg.Get("GooglePlaceId");
+            if (string.IsNullOrWhiteSpace(apiKey) || string.IsNullOrWhiteSpace(placeId))
+            {
+                try
+                {
+                    var g = Take_Time_BangPhra.Services.Reviews.ReviewSourceConfig.Load(conn, "GOOGLE");
+                    if (g != null)
+                    {
+                        if (string.IsNullOrWhiteSpace(apiKey)) apiKey = g.Cfg("apiKey");
+                        if (string.IsNullOrWhiteSpace(placeId)) placeId = g.Cfg("placeId");
+                    }
+                }
+                catch { /* ตารางแหล่งรีวิวยังไม่มี */ }
+            }
+            if (string.IsNullOrWhiteSpace(placeId)) placeId = "ChIJvUgTD9nLAjERMgFSAIuRHJw";   // place id ไม่ใช่ความลับ
+            if (string.IsNullOrWhiteSpace(apiKey))
+                return "{\"error\": \"GooglePlacesApiKey not configured\"}";
 
             // legacy Place Details ต้องระบุ fields (ไม่ระบุ = Google เตือน/คิดเงินเต็ม) — ขอเฉพาะที่ใช้
             string apiUrl = "https://maps.googleapis.com/maps/api/place/details/json"

@@ -66,7 +66,8 @@ namespace Take_Time_BangPhra
                 {
                     string conn = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
                     bgFeaturesOn = EmailReservationService.IsEnabled(conn) || DailyReportLineService.IsEnabled(conn)
-                                   || EmailChatService.IsEnabled(conn);
+                                   || EmailChatService.IsEnabled(conn)
+                                   || Take_Time_BangPhra.Services.Reviews.ReviewAggregationService.IsEnabled(conn);
                 }
                 catch { }
                 if (!config.IsReadyToSync && !bgFeaturesOn) return;
@@ -211,6 +212,15 @@ namespace Take_Time_BangPhra
                     new Take_Time_BangPhra.Payments.SecurityHoldService(holdConn).SweepIfDue();
                 }
                 catch (Exception hx) { System.Diagnostics.Trace.TraceError($"SecurityHold sweep error: {(hx.InnerException ?? hx).Message}"); }
+
+                // รวมรีวิวหลายแพลตฟอร์ม (Google/OTA/อีเมลแจ้งรีวิว): ดึงแหล่งที่ถึงรอบ + AI วิเคราะห์ภายใต้งบ token
+                // — no-op ถ้า Review_Aggregation_Enabled = 0 / ยังไม่รัน PHASE19_26; รันใน background task ไม่บล็อก tick นี้
+                try
+                {
+                    string revConn = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                    Take_Time_BangPhra.Services.Reviews.ReviewAggregationService.RunIfDue(revConn);
+                }
+                catch (Exception rvx) { System.Diagnostics.Trace.TraceError($"ReviewAggregation timer error: {(rvx.InnerException ?? rvx).Message}"); }
 
                 _consecutiveTimerErrors = 0;
             }
