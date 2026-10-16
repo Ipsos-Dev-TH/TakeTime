@@ -33,11 +33,11 @@ namespace Take_Time_BangPhra.Services.Reviews
     public class AgodaLightAdapter : IReviewSourceAdapter
     {
         /// <summary>รอบดึงขั้นต่ำของวิธีนี้ (นาที)</summary>
-        public const int MinIntervalMin = 720;
+        public const int MinIntervalMin = LightFetch.MinIntervalMin;
         /// <summary>คำขอ HTTP สูงสุดต่อรอบ (รวม redirect)</summary>
         public const int MaxRequestsPerRun = 2;
         /// <summary>โดนกันบอทติดกันกี่ครั้งจึงปิดดึงอัตโนมัติ</summary>
-        public const int BlockDisableAfter = 3;
+        public const int BlockDisableAfter = LightFetch.BlockDisableAfter;
 
         // ⚠ UNVERIFIED DEFAULTS — ยืนยันบนเซิร์ฟเวอร์จริงด้วยปุ่มทดสอบ (ดู DevTools → Network ของหน้าที่พักว่าหน้าเรียกอะไร)
         public const string DefaultApiUrl = "https://www.agoda.com/api/cronos/property/review/ReviewComments";
@@ -60,43 +60,22 @@ namespace Take_Time_BangPhra.Services.Reviews
 
         public ReviewFetchResult Fetch(ReviewSourceRow src)
         {
-            return Run(src, new AgodaLightDiagnostics());
+            return Run(src, new LightFetchDiagnostics());
         }
 
         /// <summary>ปุ่ม "ทดสอบดึง (ไม่บันทึก)" — รันเหมือนจริงแต่ไม่บันทึก/ไม่นับล้มเหลว/ไม่แจ้งเตือน</summary>
-        public AgodaLightDiagnostics DryRun(ReviewSourceRow src)
+        public LightFetchDiagnostics DryRun(ReviewSourceRow src)
         {
-            var diag = new AgodaLightDiagnostics { DryRun = true };
+            var diag = new LightFetchDiagnostics { DryRun = true };
             try { Run(src, diag); }
             catch (ReviewSourceBlockedException bx) { diag.Blocked = true; diag.Error = bx.Message; }
             catch (Exception ex) { diag.Error = ex.Message; }
             return diag;
         }
 
-        // ── กันกดถี่ (ปุ่มทดสอบ/ดึงตอนนี้) — ในหน่วยความจำต่อ process ──────────────
-        private static readonly Dictionary<string, DateTime> _manualGate = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
-        private static readonly object _gateLock = new object();
-
-        /// <summary>จองสิทธิ์เรียก Agoda แบบกดเอง: ห่างกันอย่างน้อย minutes ต่อ key — false = ต้องรอ waitSec วินาที</summary>
-        public static bool TryReserveManual(string key, int minutes, out int waitSec)
-        {
-            waitSec = 0;
-            lock (_gateLock)
-            {
-                DateTime last;
-                if (_manualGate.TryGetValue(key ?? "", out last))
-                {
-                    double left = minutes * 60 - (DateTime.Now - last).TotalSeconds;
-                    if (left > 0) { waitSec = (int)Math.Ceiling(left); return false; }
-                }
-                _manualGate[key ?? ""] = DateTime.Now;
-                return true;
-            }
-        }
-
         // ── งานหลัก ───────────────────────────────────────────────────────────
 
-        internal ReviewFetchResult Run(ReviewSourceRow src, AgodaLightDiagnostics diag)
+        internal ReviewFetchResult Run(ReviewSourceRow src, LightFetchDiagnostics diag)
         {
             string pageUrl = !string.IsNullOrWhiteSpace(src.SourceUrl) ? src.SourceUrl.Trim() : src.Cfg("pageUrl");
             if (string.IsNullOrEmpty(pageUrl))
@@ -199,7 +178,7 @@ namespace Take_Time_BangPhra.Services.Reviews
             items = items.OrderByDescending(i => i.ReviewDate ?? DateTime.MinValue).Take(maxItems).ToList();
             diag.ReviewsParsed = items.Count;
             foreach (var it in items.Take(3))
-                diag.Previews.Add(new AgodaLightDiagnostics.Preview
+                diag.Previews.Add(new LightFetchDiagnostics.Preview
                 {
                     Name = it.ReviewerName, Origin = it.OriginPlatform, ExtId = it.ExternalReviewId,
                     Date = it.ReviewDate.HasValue ? it.ReviewDate.Value.ToString("yyyy-MM-dd") : null,
@@ -222,7 +201,7 @@ namespace Take_Time_BangPhra.Services.Reviews
             return result;
         }
 
-        private List<ReviewItem> CallReviewApi(ReviewSourceRow src, AgodaLightDiagnostics diag, ReviewFetchResult result,
+        private List<ReviewItem> CallReviewApi(ReviewSourceRow src, LightFetchDiagnostics diag, ReviewFetchResult result,
             string pageUrl, CallResult page, decimal scale, string providerMap, string acceptLanguage, out object apiRoot)
         {
             apiRoot = null;
@@ -291,7 +270,7 @@ namespace Take_Time_BangPhra.Services.Reviews
 
         // ── คะแนนรวมสำรอง ─────────────────────────────────────────────────────
 
-        private void ResolveSummaryRating(ReviewSourceRow src, AgodaLightDiagnostics diag, ReviewFetchResult result, string html,
+        private void ResolveSummaryRating(ReviewSourceRow src, LightFetchDiagnostics diag, ReviewFetchResult result, string html,
             object apiRoot, string pageUrl, CallResult page, string acceptLanguage, int budget)
         {
             decimal? r; int? c; string path;
@@ -348,7 +327,7 @@ namespace Take_Time_BangPhra.Services.Reviews
             else result.Warnings.Add("endpoint สรุปคะแนน: ไม่พบค่าที่มั่นใจ — ดูรายการค่าที่พบ");
         }
 
-        private static void SetRating(AgodaLightDiagnostics diag, ReviewFetchResult result, decimal? r, int? c, string source)
+        private static void SetRating(LightFetchDiagnostics diag, ReviewFetchResult result, decimal? r, int? c, string source)
         {
             result.PlatformRating = r;
             result.PlatformRatingScale = 10m;
@@ -408,10 +387,10 @@ namespace Take_Time_BangPhra.Services.Reviews
             public string Error;
         }
 
-        private static CallResult Call(AgodaLightDiagnostics diag, string label, string method, string url, string body,
+        private static CallResult Call(LightFetchDiagnostics diag, string label, string method, string url, string body,
             Dictionary<string, string> headers, int maxRedirects)
         {
-            var info = new AgodaLightDiagnostics.RequestInfo { Label = label, Method = method, Url = StripQuery(url) };
+            var info = new LightFetchDiagnostics.RequestInfo { Label = label, Method = method, Url = StripQuery(url) };
             diag.Requests.Add(info);
             var sw = Stopwatch.StartNew();
             var cr = new CallResult();

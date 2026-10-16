@@ -7,8 +7,8 @@
 //   • แหล่งที่ถึงรอบ (Next_Fetch_At ≤ ตอนนี้) — lease ต่อแหล่งใน DB (UPDATE…WHERE Lease_Until หมดอายุ + @@ROWCOUNT)
 //     กันสอง worker/สอง app pool ดึงแหล่งเดียวกันพร้อมกัน
 //   • ล้มเหลว → exponential backoff (15 นาที × 2^(n-1)) + แจ้งเตือน REVIEW_FETCH_FAILING เมื่อครบ N ครั้งติด
-//   • โดนกันบอท (ReviewSourceBlockedException — AGODA_LIGHT) → เลื่อนรอบเต็ม (ไม่ retry ถี่), log ขึ้นต้น [BLOCKED],
-//     ครบ AgodaLightAdapter.BlockDisableAfter ครั้งติด ⇒ ปิด Is_Enabled + แจ้งเตือน REVIEW_FETCH_FAILING ครั้งเดียว
+//   • โดนกันบอท (ReviewSourceBlockedException — AGODA_LIGHT / GOOGLE_TRAVEL_LIGHT) → เลื่อนรอบเต็ม (ไม่ retry ถี่),
+//     log ขึ้นต้น [BLOCKED], ครบ LightFetch.BlockDisableAfter ครั้งติด ⇒ ปิด Is_Enabled + แจ้งเตือน REVIEW_FETCH_FAILING ครั้งเดียว
 //   • รีวิวใหม่คะแนนต่ำ (Rating_5 ≤ Review_Negative_Threshold) → แจ้งเตือน REVIEW_NEGATIVE
 //   • หลังดึง: ให้ AI วิเคราะห์รีวิวใหม่ทีละชุดภายใต้งบ token ต่อวัน (Review_AI_AutoAnalyze)
 // RunSourceNow(...) = ปุ่ม "ดึงตอนนี้" (ไม่สนรอบ/สวิตช์ใหญ่ แต่ยังใช้ lease)
@@ -32,7 +32,7 @@ namespace Take_Time_BangPhra.Services.Reviews
 
         private const int LeaseMinutes = 20;
         private const int MaxSourcesPerRun = 5;
-        private const int ManualAgodaCooldownMin = 30;
+        private const int ManualAgodaCooldownMin = LightFetch.ManualCooldownMin;
         private static readonly TimeSpan RunBudget = TimeSpan.FromMinutes(8);
 
         private static int _running;                       // 0/1 — กันรันซ้อนใน process เดียว
@@ -58,6 +58,7 @@ namespace Take_Time_BangPhra.Services.Reviews
                 case IngestMethods.Email: return new EmailReviewAdapter(_conn);
                 case IngestMethods.UrlFetch: return new UrlFetchAdapter(_conn);
                 case IngestMethods.AgodaLight: return new AgodaLightAdapter();
+                case IngestMethods.GoogleTravelLight: return new GoogleTravelLightAdapter(_conn);
                 default: return null;
             }
         }
@@ -99,7 +100,7 @@ namespace Take_Time_BangPhra.Services.Reviews
             var dt = new code().DatabaseQuerySafe(_conn,
                 @"SELECT TOP (@n) SourceCode FROM AI_Review_Sources
                    WHERE Is_Enabled = 1 AND SourceCode <> 'INTERNAL'
-                     AND Ingest_Method IN ('GBP_API','PLACES_API','TRIPADVISOR_API','EMAIL','URL_FETCH','AGODA_LIGHT')
+                     AND Ingest_Method IN ('GBP_API','PLACES_API','TRIPADVISOR_API','EMAIL','URL_FETCH','AGODA_LIGHT','GOOGLE_TRAVEL_LIGHT')
                      AND (Next_Fetch_At IS NULL OR Next_Fetch_At <= GETDATE())
                      AND (Lease_Until IS NULL OR Lease_Until < GETDATE())
                    ORDER BY ISNULL(Next_Fetch_At, '2000-01-01')",
@@ -157,12 +158,12 @@ namespace Take_Time_BangPhra.Services.Reviews
                 res.Message = "วิธี " + (method ?? "(ไม่ได้ตั้ง)") + " ไม่มีการดึงอัตโนมัติ — ใช้นำเข้า CSV / ป้อนเอง";
                 return res;
             }
-            // AGODA_LIGHT: กดดึงเองได้ไม่ถี่กว่า 30 นาที (กันกดซ้ำจนโดนกันบอท) — ไม่นับเป็นล้มเหลว
-            if (adapter.Key == IngestMethods.AgodaLight && src.LastFetchDate.HasValue
+            // วิธี light (Agoda / Google Travel): กดดึงเองได้ไม่ถี่กว่า 30 นาที (กันกดซ้ำจนโดนกันบอท) — ไม่นับเป็นล้มเหลว
+            if (LightFetch.IsLightMethod(adapter.Key) && src.LastFetchDate.HasValue
                 && (DateTime.Now - src.LastFetchDate.Value).TotalMinutes < ManualAgodaCooldownMin)
             {
                 res.Status = "SKIPPED";
-                res.Message = "AGODA_LIGHT เพิ่งดึงไปเมื่อ " + src.LastFetchDate.Value.ToString("HH:mm")
+                res.Message = adapter.Key + " เพิ่งดึงไปเมื่อ " + src.LastFetchDate.Value.ToString("HH:mm")
                     + " — กดดึงเองได้อีกครั้งหลัง " + src.LastFetchDate.Value.AddMinutes(ManualAgodaCooldownMin).ToString("HH:mm")
                     + " (ใช้ปุ่ม 'ทดสอบดึง' เพื่อดูผลโดยไม่บันทึก)";
                 return res;
@@ -245,7 +246,7 @@ namespace Take_Time_BangPhra.Services.Reviews
                 // ปลายทางกันบอท: ไม่ retry ถี่ — เลื่อนเต็มรอบ (≥ 720 นาที) และนับลำดับติดกันจาก Review_Fetch_Log
                 res.Status = "FAILED";
                 res.Message = ReviewHttp.Brief(ReviewStore.BlockedPrefix + " " + bx.Message, 900);
-                try { store.MarkFailure(src, res.Message, Math.Max(src.FetchIntervalMin, AgodaLightAdapter.MinIntervalMin)); } catch { }
+                try { store.MarkFailure(src, res.Message, Math.Max(src.FetchIntervalMin, LightFetch.MinIntervalMin)); } catch { }
                 store.FinishLog(logId, src.Id, res);
                 HandleBlocked(src, store, bx);
             }
@@ -254,8 +255,8 @@ namespace Take_Time_BangPhra.Services.Reviews
                 res.Status = "FAILED";
                 res.Message = ReviewHttp.Brief(ex.Message, 900);
                 int failures = 0;
-                // AGODA_LIGHT: ล้มเหลวแบบอื่นก็ไม่ retry ถี่ (รอบถัดไปไม่เร็วกว่า 720 นาที)
-                int minDelay = adapter.Key == IngestMethods.AgodaLight ? AgodaLightAdapter.MinIntervalMin : 0;
+                // วิธี light: ล้มเหลวแบบอื่นก็ไม่ retry ถี่ (รอบถัดไปไม่เร็วกว่า 720 นาที)
+                int minDelay = LightFetch.IsLightMethod(adapter.Key) ? LightFetch.MinIntervalMin : 0;
                 try { failures = store.MarkFailure(src, res.Message, minDelay); } catch { }
                 store.FinishLog(logId, src.Id, res);
                 AlertFailing(src, failures, res.Message);
@@ -270,8 +271,8 @@ namespace Take_Time_BangPhra.Services.Reviews
         {
             try
             {
-                int n = store.CountConsecutiveBlocked(src.Id, AgodaLightAdapter.BlockDisableAfter);
-                if (n < AgodaLightAdapter.BlockDisableAfter) return;
+                int n = store.CountConsecutiveBlocked(src.Id, LightFetch.BlockDisableAfter);
+                if (n < LightFetch.BlockDisableAfter) return;
                 string reason = "ปิดดึงอัตโนมัติแล้ว: " + src.SourceCode + " โดนกันบอท " + n + " ครั้งติดกัน (ล่าสุด " + bx.Marker
                     + ") — ตรวจด้วยปุ่ม 'ทดสอบดึง' แล้วเปิดใหม่เอง (Owner/Admin)";
                 if (!store.DisableAuto(src.Id, reason)) return;   // ปิดอยู่แล้ว — ไม่แจ้งซ้ำ

@@ -86,7 +86,7 @@
 
     <!-- ผลทดสอบดึง AGODA_LIGHT (ไม่บันทึก) -->
     <div class="rs-card" id="rsTestCard" style="display:none">
-        <h3><i class="fas fa-vial"></i> ผลทดสอบดึง Agoda (ไม่บันทึก) <span class="rs-muted" id="rsTestWhen"></span></h3>
+        <h3><i class="fas fa-vial"></i> <span id="rsTestTitle">ผลทดสอบดึง (ไม่บันทึก)</span> <span class="rs-muted" id="rsTestWhen"></span></h3>
         <div id="rsTestBody"></div>
     </div>
 
@@ -178,7 +178,7 @@
             <li><b>หมุน Google API key เดิม</b> ที่เคยฝังในโค้ด/Web.config (หลุดอยู่ในประวัติ git) แล้วใส่คีย์ใหม่ที่ ศูนย์ตั้งค่า (GooglePlacesApiKey) หรือที่แหล่ง GOOGLE</li>
         </ol>
         <div class="rs-help legal"><b>ข้อกฎหมาย/ข้อกำหนด:</b> Booking.com, Google Maps, Tripadvisor, Airbnb ห้ามดึงหน้าเว็บอัตโนมัติ (scraping) —
-            วิธี URL_FETCH จึงปิดสำหรับตัวตั้งเวลาเป็นค่าเริ่มต้น; AGODA_LIGHT (อ่านหน้าที่พัก Agoda วันละครั้ง ไม่ crawl) เป็นการเลือกของเจ้าของ — เปิดได้เฉพาะ Owner/Admin และปิดตัวเองเมื่อโดนกันบอท; Google Places API ห้ามเก็บเนื้อหารีวิวถาวร (ได้แค่ 5 รายการ);
+            วิธี URL_FETCH จึงปิดสำหรับตัวตั้งเวลาเป็นค่าเริ่มต้น; AGODA_LIGHT / GOOGLE_TRAVEL_LIGHT (อ่านหน้าสาธารณะวันละครั้ง ไม่ crawl) เป็นการเลือกของเจ้าของ — เปิดได้เฉพาะ Owner/Admin และปิดตัวเองเมื่อโดนกันบอท (Google: ทางที่แนะนำคือ GBP_API); Google Places API ห้ามเก็บเนื้อหารีวิวถาวร (ได้แค่ 5 รายการ);
             รีวิวจาก Booking.com Review API (ผ่าน channel manager) ใช้ภายในเท่านั้น ห้ามนำไปแสดงบนเว็บโรงแรม</div>
     </div>
 </div>
@@ -190,7 +190,7 @@
         <div class="rs-grid">
             <div class="rs-field"><label>วิธีรับรีวิว</label><select id="mdMethod" onchange="rsRenderFields()"></select></div>
             <div class="rs-field"><label>รอบดึง (นาที)</label><input type="number" id="mdInterval" min="15" max="10080" />
-                <div class="hint">ขั้นต่ำ 15 นาที (AGODA_LIGHT ขั้นต่ำ 720) — แนะนำ: อีเมล 60, GBP 180, Tripadvisor/Places/Agoda 1440</div></div>
+                <div class="hint">ขั้นต่ำ 15 นาที (AGODA_LIGHT / GOOGLE_TRAVEL_LIGHT ขั้นต่ำ 720) — แนะนำ: อีเมล 60, GBP 180, Tripadvisor/Places/Agoda/Google Travel 1440</div></div>
             <div class="rs-field"><label>&nbsp;</label><label style="font-weight:400"><input type="checkbox" id="mdAuto" /> เปิดดึงอัตโนมัติ</label></div>
             <div class="rs-field" id="mdUrlWrap"><label>URL หน้ารีวิว / หน้าที่พัก</label><input type="text" id="mdUrl" maxlength="1000" /></div>
         </div>
@@ -215,9 +215,15 @@
         'GBP_API': 'Google Business Profile API', 'PLACES_API': 'Google Places API (5 รีวิว)',
         'TRIPADVISOR_API': 'Tripadvisor Content API', 'EMAIL': 'อีเมลแจ้งรีวิวใหม่',
         'CSV': 'นำเข้า CSV (มือ)', 'MANUAL': 'ป้อนเอง', 'URL_FETCH': 'ดึงหน้าเว็บ + AI (⚠ ToS)',
-        'AGODA_LIGHT': 'Agoda: อ่านหน้าที่พักวันละครั้ง (light)', 'AI_SEARCH': 'ค้นหาด้วย AI (มือ)'
+        'AGODA_LIGHT': 'Agoda: อ่านหน้าที่พักวันละครั้ง (light)', 'GOOGLE_TRAVEL_LIGHT': 'Google Travel: อ่านหน้ารีวิววันละครั้ง (light)',
+        'AI_SEARCH': 'ค้นหาด้วย AI (มือ)'
     };
-    var AUTO_METHODS = ['GBP_API', 'PLACES_API', 'TRIPADVISOR_API', 'EMAIL', 'URL_FETCH', 'AGODA_LIGHT'];
+    var AUTO_METHODS = ['GBP_API', 'PLACES_API', 'TRIPADVISOR_API', 'EMAIL', 'URL_FETCH', 'AGODA_LIGHT', 'GOOGLE_TRAVEL_LIGHT'];
+    var LIGHT_METHODS = ['AGODA_LIGHT', 'GOOGLE_TRAVEL_LIGHT'];
+    var DEFAULT_URLS = {
+        'AGODA': { m: 'AGODA_LIGHT', u: 'https://www.agoda.com/th-th/take-time-mirror-room/hotel/chonburi-th.html' },
+        'GOOGLE': { m: 'GOOGLE_TRAVEL_LIGHT', u: 'https://www.google.com/travel/hotels/entity/CgsIsoLIgrCxpI6cARAB/reviews?hl=th-TH&gl=th' }
+    };
     var AGODA_MIN_INTERVAL = 720;
 
     // ช่องตั้งค่าต่อวิธี — secret:true = เขียนได้อย่างเดียว (ค่าจริงไม่ถูกส่งมาที่เบราว์เซอร์)
@@ -273,6 +279,24 @@
             { k: 'providerMap', l: 'providerId → แพลตฟอร์ม', h: 'ค่าเริ่ม 332:Agoda (อื่น ๆ ยังไม่ยืนยัน เช่น 3038:Booking.com)' },
             { k: 'maxItems', l: 'จำนวนรีวิวสูงสุดต่อรอบ', h: 'ค่าเริ่ม 20 (หน้าแรกเท่านั้น)' }
         ],
+        'GOOGLE_TRAVEL_LIGHT': [
+            { k: 'extraQuery', l: 'พารามิเตอร์เพิ่มใน URL (ขั้นสูง)', h: '⚠ ยังไม่ยืนยัน — เช่นพารามิเตอร์เรียง "ล่าสุด" ถ้าพบ; ค่าเริ่มว่าง (Google เรียง "เกี่ยวข้องที่สุด")' },
+            { k: 'headers', l: 'header เพิ่มเติม', h: 'รูปแบบ Name: value | Name2: value' },
+            { k: 'maxItems', l: 'จำนวนรีวิวสูงสุดต่อรอบ', h: 'ค่าเริ่ม 50 (ได้เฉพาะชุดแรกที่หน้าส่งมา)' },
+            { k: 'selBlock', l: 'selector บล็อกรีวิว', h: 'ค่าเริ่ม div.Svr5cf — คลาสของ Google เปลี่ยนได้; แก้เมื่อทดสอบแล้ว "ไม่มีกล่องรีวิว"' },
+            { k: 'selName', l: 'selector ชื่อผู้รีวิว', h: 'ค่าเริ่ม a.DHIhE' },
+            { k: 'selDate', l: 'selector วันที่+ที่มา', h: 'ค่าเริ่ม span.iUtr1' },
+            { k: 'selRating', l: 'selector คะแนน', h: 'ค่าเริ่ม div.GDWaad ("5/5")' },
+            { k: 'selTrip', l: 'selector ประเภททริป', h: 'ค่าเริ่ม div.ThUm5b span' },
+            { k: 'selTextExpanded', l: 'selector ข้อความ (ขยาย)', h: 'ค่าเริ่ม div[jsname=NwoMSd] .K7oBsc span' },
+            { k: 'selTextCollapsed', l: 'selector ข้อความ (ย่อ)', h: 'ค่าเริ่ม div[jsname=kmPxT] .K7oBsc span' },
+            { k: 'selText', l: 'selector ข้อความ (ทั่วไป)', h: 'ค่าเริ่ม .K7oBsc span' },
+            { k: 'selMore', l: 'selector ปุ่มอ่านเพิ่มเติม (ตัดทิ้ง)', h: 'ค่าเริ่ม span[role=button]' },
+            { k: 'selSubRating', l: 'selector คะแนนย่อย', h: 'ค่าเริ่ม div.dA5Vzb (หัวข้อ span.uTU5Ac = selSubLabel)' },
+            { k: 'selHighlightLabel', l: 'selector หัวข้อไฮไลต์', h: 'ค่าเริ่ม span.iTppcd' },
+            { k: 'selTopic', l: 'selector หัวข้อย่อย', h: 'ค่าเริ่ม div.NkS78 (หัวข้อ span.Iw4tIc = selTopicLabel)' },
+            { k: 'selResponse', l: 'selector คำตอบเจ้าของ', h: 'ค่าเริ่ม div.lU7Ape (วันที่ span.a0th8b, ข้อความ p.JOzlvd)' }
+        ],
         'AI_SEARCH': [{ k: 'searchKeyword', l: 'คำค้น', h: 'ใช้กับปุ่มค้นหาด้วย AI ในหน้าวิเคราะห์รีวิว' }],
         'CSV': [], 'MANUAL': []
     };
@@ -289,6 +313,10 @@
             + 'รอบขั้นต่ำ 720 นาที (แนะนำ 1440), เพิ่มเฉพาะรีวิวใหม่, เก็บแค่ชื่อที่แสดง. โดนกันบอท 3 ครั้งติดระบบปิดดึงอัตโนมัติเองและแจ้งเตือน. '
             + 'เปิดดึงอัตโนมัติได้เฉพาะ Owner/Admin — กด <b>ทดสอบดึง (ไม่บันทึก)</b> ก่อนเปิด. '
             + '<br/><b style="color:#c62828">⚠ ข้อกำหนดการใช้งานของ Agoda ไม่อนุญาตการดึงข้อมูลอัตโนมัติ</b> — เจ้าของเลือกใช้เองโดยรับความเสี่ยง (ทางที่ถูกข้อกำหนดคือ อีเมลแจ้งรีวิว / CSV จาก YCS)',
+        'GOOGLE_TRAVEL_LIGHT': '<b>Google Travel แบบเบา</b> (เจ้าของขอ) — ต่อรอบ GET หน้ารีวิวโรงแรมบน Google Travel <b>1 ครั้ง</b> (ไม่เลื่อนโหลดเพิ่ม ได้เฉพาะชุดแรก เรียง "เกี่ยวข้องที่สุด"). '
+            + 'ได้ชื่อที่แสดง คะแนน x/5 ข้อความ ประเภททริป คะแนนย่อย ไฮไลต์ คำตอบเจ้าของ; วันที่เป็นแบบประมาณจาก "4 เดือนที่แล้ว" (ตั้งตอนเพิ่มครั้งแรก). '
+            + 'รอบขั้นต่ำ 720 นาที (แนะนำ 1440), เพิ่มเฉพาะรีวิวใหม่ (postId), โดนกัน/ไม่มีกล่องรีวิว 3 ครั้งติดระบบปิดเองและแจ้งเตือน. เปิดอัตโนมัติได้เฉพาะ Owner/Admin — กด <b>ทดสอบดึง</b> ก่อน. '
+            + '<br/><b>ทางที่แนะนำและถูกข้อกำหนดคือ GBP_API</b> · <b style="color:#c62828">⚠ ข้อกำหนดของ Google ไม่อนุญาตการดึงหน้าเว็บอัตโนมัติ — ใช้ตามความประสงค์ของเจ้าของโดยรับความเสี่ยง</b>',
         'AI_SEARCH': 'ค้นหาเว็บ/สังคมออนไลน์ด้วย AI จากหน้าวิเคราะห์รีวิวเดิม (กดเอง ไม่ตั้งเวลา) — ข้อมูลไม่แน่นอน ใช้เป็นสัญญาณเท่านั้น',
         '': 'ยังไม่ได้เลือกวิธี'
     };
@@ -381,7 +409,7 @@
                 + '<td style="white-space:nowrap">'
                 + '<button type="button" class="rs-btn sec" onclick="rsEdit(' + i + ')">ตั้งค่า</button>'
                 + (auto ? '<button type="button" class="rs-btn" onclick="rsFetch(' + i + ', this)">ดึงตอนนี้</button>' : '')
-                + (s.method === 'AGODA_LIGHT' ? '<button type="button" class="rs-btn sec" onclick="rsTestAgoda(' + i + ', this)">ทดสอบดึง (ไม่บันทึก)</button>' : '')
+                + (LIGHT_METHODS.indexOf(s.method) >= 0 ? '<button type="button" class="rs-btn sec" onclick="rsTestAgoda(' + i + ', this)">ทดสอบดึง (ไม่บันทึก)</button>' : '')
                 + '<button type="button" class="rs-btn sec" onclick="rsLoadLog(\'' + esc(s.code) + '\')">log</button>'
                 + '</td></tr>';
         });
@@ -443,8 +471,14 @@
             + (d.apiTopKeys ? '<li>คีย์ชั้นบนของคำตอบ endpoint: <div class="rs-muted" style="word-break:break-all"><code>' + esc(d.apiTopKeys) + '</code></div></li>' : '')
             + (d.commentFields ? '<li>ฟิลด์ของ comment แรก: <div class="rs-muted" style="word-break:break-all"><code>' + esc(d.commentFields) + '</code></div>'
                 + (d.commentShortValues ? '<div class="rs-muted" style="word-break:break-all">ค่าสั้น: <code>' + esc(d.commentShortValues) + '</code></div>' : '') + '</li>' : '')
-            + '<li>รหัสที่พัก: ' + (d.propertyId ? '<b>' + esc(d.propertyId) + '</b> <span class="rs-muted">(' + esc(d.propertyIdPattern) + ')</span>' : '<span class="rs-err">ไม่พบ</span>')
-            + (d.propertyIdCandidates ? ' <span class="rs-muted">อื่น ๆ: ' + esc(d.propertyIdCandidates) + '</span>' : '') + '</li>'
+            + (d.method === 'GOOGLE_TRAVEL_LIGHT'
+                ? '<li>รหัส Google: entity <code>' + esc(d.entityToken || '?') + '</code> · place id <code>' + esc(d.placeId || 'ไม่พบ') + '</code>'
+                    + (d.kgMid ? ' · Knowledge Graph <code>' + esc(d.kgMid) + '</code>' : '')
+                    + (d.placeId ? ' <span class="rs-muted">(ใช้ place id นี้กับ PLACES_API / GBP ได้)</span>' : '') + '</li>'
+                  + '<li>รีวิวที่มี postId: <b>' + esc(d.idsFound) + '</b>' + (d.newCount !== null && d.newCount !== undefined ? ' · ยังไม่มีในระบบ (ใหม่): <b>' + esc(d.newCount) + '</b>' : '') + '</li>'
+                : '')
+            + (d.method === 'GOOGLE_TRAVEL_LIGHT' ? '' : '<li>รหัสที่พัก: ' + (d.propertyId ? '<b>' + esc(d.propertyId) + '</b> <span class="rs-muted">(' + esc(d.propertyIdPattern) + ')</span>' : '<span class="rs-err">ไม่พบ</span>')
+            + (d.propertyIdCandidates ? ' <span class="rs-muted">อื่น ๆ: ' + esc(d.propertyIdCandidates) + '</span>' : '') + '</li>')
             + '<li>เส้นทาง HTML (DOM รายการรีวิว): ' + (d.htmlDomReviews > 0 ? '<b>พบ ' + esc(d.htmlDomReviews) + ' รีวิว</b>'
                 : (d.htmlDomBlocks > 0 ? '<span class="rs-err">เห็น ' + esc(d.htmlDomBlocks) + ' บล็อก แต่แกะไม่ได้</span>' : 'ไม่พบใน HTML ที่เซิร์ฟเวอร์ส่งมา')) + '</li>'
             + '<li>เส้นทางที่ใช้ได้: <code>' + esc(d.parsePath) + '</code> · แกะได้ <b>' + esc(d.reviewsParsed) + '</b> รีวิว</li>'
@@ -456,16 +490,23 @@
                 h += '<div class="rs-help">⭐ <b>' + esc(p.rating === null || p.rating === undefined ? '?' : p.rating) + '/' + esc(p.scale || 10) + '</b> · '
                     + esc(p.origin) + ' · ' + esc(p.name || '(ไม่มีชื่อ)') + ' · ' + esc(p.date || 'ไม่มีวันที่')
                     + (p.extId ? ' <span class="rs-muted">' + esc(p.extId) + '</span>' : '')
-                    + ' · ภาษา ' + esc(p.language || '?') + (p.machineTranslated ? ' <span class="rs-badge PARTIAL">แปลโดย Agoda</span>' : '')
+                    + (p.relativeDate ? ' <span class="rs-muted">(' + esc(p.relativeDate) + ')</span>' : '')
+                    + ' · ภาษา ' + esc(p.language || '?') + (p.machineTranslated ? ' <span class="rs-badge PARTIAL">แปลโดยแพลตฟอร์ม</span>' : '')
+                    + (p.tripType ? '<div class="rs-muted">ทริป: ' + esc(p.tripType) + '</div>' : '')
+                    + (p.subRatings ? '<div class="rs-muted">คะแนนย่อย: ' + esc(p.subRatings) + '</div>' : '')
+                    + (p.highlights ? '<div class="rs-muted">ไฮไลต์: ' + esc(p.highlights) + '</div>' : '')
                     + (p.title ? '<div><b>' + esc(p.title) + '</b></div>' : '') + '<div style="white-space:pre-line">' + esc(p.text) + '</div>'
                     + (p.translatedText || p.translatedTitle ? '<div class="rs-muted" style="margin-top:4px;white-space:pre-line">คำแปลที่ Agoda แสดง (ไม่บันทึก): '
                         + (p.translatedTitle ? '<b>' + esc(p.translatedTitle) + '</b> ' : '') + esc(p.translatedText || '') + '</div>' : '')
+                    + (p.ownerResponse ? '<div style="margin-top:4px;border-left:3px solid #8D6E63;padding-left:8px">💬 คำตอบเจ้าของ'
+                        + (p.ownerResponseDate ? ' <span class="rs-muted">(' + esc(p.ownerResponseDate) + ')</span>' : '') + ': ' + esc(p.ownerResponse) + '</div>' : '')
                     + '</div>';
             });
         }
         if ((d.warnings || []).length) h += '<div class="rs-alert warn">' + d.warnings.map(esc).join('<br/>') + '</div>';
         h += '<div class="rs-muted">บรรทัดสรุป (แบบเดียวกับที่บันทึกใน log ตอนดึงจริง): <code>' + esc(d.compact) + '</code></div>';
         $('rsTestBody').innerHTML = h;
+        $('rsTestTitle').textContent = 'ผลทดสอบดึง ' + (d.method === 'GOOGLE_TRAVEL_LIGHT' ? 'Google Travel' : 'Agoda') + ' (ไม่บันทึก)';
         $('rsTestWhen').textContent = '(' + s.name + ' · ' + new Date().toLocaleString('th-TH') + ')';
         $('rsTestCard').style.display = 'block';
         $('rsTestCard').scrollIntoView({ behavior: 'smooth' });
@@ -507,11 +548,13 @@
         var s = state.editing; if (!s) return;
         var m = $('mdMethod').value;
         $('mdHelp').innerHTML = HELP[m] || '';
-        $('mdHelp').className = 'rs-help' + (m === 'URL_FETCH' || m === 'PLACES_API' || m === 'AGODA_LIGHT' ? ' legal' : '');
-        $('mdUrlWrap').style.display = (m === 'URL_FETCH' || m === 'AGODA_LIGHT') ? '' : 'none';
-        $('mdInterval').min = m === 'AGODA_LIGHT' ? AGODA_MIN_INTERVAL : 15;
-        if (m === 'AGODA_LIGHT' && Number($('mdInterval').value) < AGODA_MIN_INTERVAL) $('mdInterval').value = 1440;
-        if (m === 'AGODA_LIGHT' && s.code === 'AGODA' && !$('mdUrl').value) $('mdUrl').value = 'https://www.agoda.com/th-th/take-time-mirror-room/hotel/chonburi-th.html';
+        var light = LIGHT_METHODS.indexOf(m) >= 0;
+        $('mdHelp').className = 'rs-help' + (m === 'URL_FETCH' || m === 'PLACES_API' || light ? ' legal' : '');
+        $('mdUrlWrap').style.display = (m === 'URL_FETCH' || light) ? '' : 'none';
+        $('mdInterval').min = light ? AGODA_MIN_INTERVAL : 15;
+        if (light && Number($('mdInterval').value) < AGODA_MIN_INTERVAL) $('mdInterval').value = 1440;
+        var du = DEFAULT_URLS[s.code];
+        if (du && du.m === m && !$('mdUrl').value) $('mdUrl').value = du.u;
         var cfg = s.config || {};
         var h = '';
         (FIELDS[m] || []).forEach(function (f) {

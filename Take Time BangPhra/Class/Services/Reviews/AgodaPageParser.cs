@@ -32,118 +32,6 @@ using System.Web.Script.Serialization;
 
 namespace Take_Time_BangPhra.Services.Reviews
 {
-    /// <summary>ผลวิเคราะห์หนึ่งรอบ (ใช้ทั้งปุ่ม "ทดสอบดึง" และบรรทัดสรุปใน Review_Fetch_Log)</summary>
-    public class AgodaLightDiagnostics
-    {
-        public class RequestInfo
-        {
-            public string Label;      // page | api
-            public string Method;
-            public string Url;
-            public int Status;
-            public int Bytes;
-            public long Ms;
-            public int Hops = 1;
-            public string Block;      // ตัวบ่งชี้ว่าโดนกันบอท (null = ไม่พบ)
-            public string Error;      // network error
-        }
-
-        public class Preview
-        {
-            public string Name, Origin, ExtId, Date, Title, Text;
-            public decimal? Rating, Scale;
-            public string Language;
-            public bool MachineTranslated;
-            /// <summary>คำแปลที่ Agoda แสดง (เมื่อเก็บต้นฉบับแทน)</summary>
-            public string TranslatedTitle, TranslatedText;
-        }
-
-        public bool DryRun;
-        public List<RequestInfo> Requests = new List<RequestInfo>();
-        public bool JsonLdFound;
-        public int JsonLdBlocks;
-        public decimal? Rating, RatingBest;
-        public int? RatingCount;
-        /// <summary>แหล่งของคะแนนรวม: json-ld | api-summary:&lt;path&gt; | page-state:&lt;key&gt; | summary-endpoint:&lt;path&gt; | none</summary>
-        public string RatingSource = "none";
-        /// <summary>ค่าที่พบทั้งหมด (path=value (pN)) — ใช้จูนคีย์</summary>
-        public List<string> RatingCandidates = new List<string>();
-        /// <summary>คีย์ชั้นบนของคำตอบ endpoint (+ คีย์ชั้นถัดไปของ object)</summary>
-        public string ApiTopKeys;
-        /// <summary>ชื่อฟิลด์ของ comment แรก (ไม่มีค่า ยกเว้นค่าสั้น เช่น languageId / isTranslated / translateSource)</summary>
-        public string CommentFields;
-        public string CommentShortValues;
-        public string PropertyId;
-        public string PropertyIdPattern;
-        public string PropertyIdCandidates;
-        public string ParsePath = "none";
-        /// <summary>เส้นทาง HTML (DOM รายการรีวิวที่ render แล้ว): จำนวนบล็อก data-element-name="review-comment" ที่เจอ / ที่แกะได้</summary>
-        public int HtmlDomBlocks;
-        public int HtmlDomReviews;
-        public int ReviewsParsed;
-        public List<Preview> Previews = new List<Preview>();
-        public List<string> Warnings = new List<string>();
-        public List<string> UnknownProviders = new List<string>();
-        public bool Blocked;
-        public string Error;
-
-        /// <summary>บรรทัดสรุปสั้น ๆ สำหรับ Review_Fetch_Log</summary>
-        public string Compact()
-        {
-            var sb = new StringBuilder("AGODA_LIGHT");
-            if (Requests.Count > 0)
-            {
-                sb.Append(" req: ");
-                sb.Append(string.Join("; ", Requests.Select(r =>
-                    r.Label + " " + (r.Error != null ? "ERR" : r.Status.ToString(CultureInfo.InvariantCulture))
-                    + " " + (r.Bytes / 1024).ToString(CultureInfo.InvariantCulture) + "KB"
-                    + (r.Hops > 1 ? " hops=" + r.Hops : "")
-                    + (r.Block != null ? " block=" + r.Block : ""))));
-            }
-            sb.Append(" · คะแนนรวม ");
-            sb.Append(Rating.HasValue
-                ? Rating.Value.ToString("0.##", CultureInfo.InvariantCulture) + "/" + (RatingBest ?? 10m).ToString("0", CultureInfo.InvariantCulture)
-                  + (RatingCount.HasValue ? " (" + RatingCount.Value + ")" : "") + " [" + RatingSource + "]"
-                : "ไม่พบ (JSON-LD " + (JsonLdFound ? "ไม่มี aggregateRating" : "ไม่พบ") + ", ผู้สมัคร " + RatingCandidates.Count + ")");
-            sb.Append(" · id=").Append(PropertyId ?? "?");
-            if (PropertyIdPattern != null) sb.Append(" (").Append(PropertyIdPattern).Append(")");
-            sb.Append(" · html-dom ").Append(HtmlDomReviews > 0 ? "พบ " + HtmlDomReviews : (HtmlDomBlocks > 0 ? "บล็อก " + HtmlDomBlocks + " แต่แกะไม่ได้" : "ไม่พบ"));
-            sb.Append(" · path=").Append(ParsePath).Append(" · parsed ").Append(ReviewsParsed);
-            if (UnknownProviders.Count > 0) sb.Append(" · providerId ไม่รู้จัก: ").Append(string.Join(",", UnknownProviders.Take(5)));
-            return sb.ToString();
-        }
-
-        public Dictionary<string, object> ToDictionary()
-        {
-            return new Dictionary<string, object>
-            {
-                { "dryRun", DryRun },
-                { "requests", Requests.Select(r => (object)new Dictionary<string, object>
-                    {
-                        { "label", r.Label }, { "method", r.Method }, { "url", r.Url }, { "status", r.Status },
-                        { "bytes", r.Bytes }, { "ms", r.Ms }, { "hops", r.Hops }, { "block", r.Block }, { "error", r.Error }
-                    }).ToList() },
-                { "jsonLdFound", JsonLdFound }, { "jsonLdBlocks", JsonLdBlocks },
-                { "rating", Rating }, { "ratingBest", RatingBest }, { "ratingCount", RatingCount },
-                { "ratingSource", RatingSource }, { "ratingCandidates", RatingCandidates },
-                { "apiTopKeys", ApiTopKeys }, { "commentFields", CommentFields }, { "commentShortValues", CommentShortValues },
-                { "propertyId", PropertyId }, { "propertyIdPattern", PropertyIdPattern },
-                { "propertyIdCandidates", PropertyIdCandidates },
-                { "parsePath", ParsePath }, { "reviewsParsed", ReviewsParsed },
-                { "htmlDomBlocks", HtmlDomBlocks }, { "htmlDomReviews", HtmlDomReviews },
-                { "previews", Previews.Select(p => (object)new Dictionary<string, object>
-                    {
-                        { "name", p.Name }, { "origin", p.Origin }, { "extId", p.ExtId }, { "date", p.Date },
-                        { "rating", p.Rating }, { "scale", p.Scale }, { "title", p.Title }, { "text", p.Text },
-                        { "language", p.Language }, { "machineTranslated", p.MachineTranslated },
-                        { "translatedTitle", p.TranslatedTitle }, { "translatedText", p.TranslatedText }
-                    }).ToList() },
-                { "warnings", Warnings }, { "unknownProviders", UnknownProviders },
-                { "blocked", Blocked }, { "error", Error }, { "compact", Compact() }
-            };
-        }
-    }
-
     public static class AgodaPageParser
     {
         /// <summary>ค่าเริ่ม: providerId 332 = Agoda (ยังไม่ยืนยัน — แก้ได้ที่ ApiConfig providerMap เช่น "332:Agoda,3038:Booking.com")</summary>
@@ -216,7 +104,8 @@ namespace Take_Time_BangPhra.Services.Reviews
         }
 
         /// <summary>อ่าน aggregateRating จาก JSON-LD — bestRating ไม่ระบุ = 10 (สเกล Agoda)</summary>
-        public static bool ParseJsonLdRating(string html, AgodaLightDiagnostics diag, out decimal? rating, out decimal? best, out int? count)
+        public static bool ParseJsonLdRating(string html, LightFetchDiagnostics diag, out decimal? rating, out decimal? best, out int? count,
+            decimal defaultBest = 10m)
         {
             rating = null; best = null; count = null;
             var blocks = JsonLdBlocks(html);
@@ -229,7 +118,7 @@ namespace Take_Time_BangPhra.Services.Reviews
                 var agg = FindAggregate(root, 0);
                 if (agg == null) continue;
                 decimal? rv = ReviewRating.Parse(Get(agg, "ratingValue"));
-                decimal? bv = ReviewRating.Parse(Get(agg, "bestRating")) ?? 10m;
+                decimal? bv = ReviewRating.Parse(Get(agg, "bestRating")) ?? defaultBest;
                 if (!ReviewRating.IsValid(rv, bv)) continue;
                 rating = rv; best = bv;
                 decimal? c = ReviewRating.Parse(Get(agg, "reviewCount")) ?? ReviewRating.Parse(Get(agg, "ratingCount"));
@@ -323,7 +212,7 @@ namespace Take_Time_BangPhra.Services.Reviews
         /// ลำดับ: script JSON (application/json, __NEXT_DATA__, window.X = {...}, JSON.parse("...")) → JSON-LD Review → anchor scan
         /// </summary>
         public static List<ReviewItem> ExtractReviews(string html, string pageUrl, decimal defaultScale, string providerMap,
-            AgodaLightDiagnostics diag, out string path)
+            LightFetchDiagnostics diag, out string path)
         {
             path = "none";
             var found = new List<Dictionary<string, object>>();
@@ -386,7 +275,7 @@ namespace Take_Time_BangPhra.Services.Reviews
 
         /// <summary>แกะคำตอบของ endpoint รีวิว (JSON) — เดินทั้งต้นไม้หา array ของ object ที่หน้าตาเป็นรีวิว</summary>
         public static List<ReviewItem> ExtractReviewsFromJson(string json, string pageUrl, decimal defaultScale, string providerMap,
-            AgodaLightDiagnostics diag)
+            LightFetchDiagnostics diag)
         {
             object root;
             return ExtractReviewsFromJson(json, pageUrl, defaultScale, providerMap, diag, out root);
@@ -394,7 +283,7 @@ namespace Take_Time_BangPhra.Services.Reviews
 
         /// <param name="root">ต้นไม้ JSON ที่แปลงแล้ว (null = แปลงไม่ได้) — ใช้หาคะแนนรวมต่อ</param>
         public static List<ReviewItem> ExtractReviewsFromJson(string json, string pageUrl, decimal defaultScale, string providerMap,
-            AgodaLightDiagnostics diag, out object root)
+            LightFetchDiagnostics diag, out object root)
         {
             root = null;
             var found = new List<Dictionary<string, object>>();
@@ -436,7 +325,7 @@ namespace Take_Time_BangPhra.Services.Reviews
 
         private static readonly Regex ShortValueKey = new Regex(@"lang|translat|original.*(id|code)|isTranslated|providerId|provider$|source$|target$", RegexOptions.IgnoreCase);
 
-        public static void DescribeComment(Dictionary<string, object> c, AgodaLightDiagnostics diag)
+        public static void DescribeComment(Dictionary<string, object> c, LightFetchDiagnostics diag)
         {
             var names = new List<string>();
             var vals = new List<string>();
@@ -984,7 +873,7 @@ namespace Take_Time_BangPhra.Services.Reviews
         // ── 6) map เป็น ReviewItem ────────────────────────────────────────────
 
         private static List<ReviewItem> MapAll(List<Dictionary<string, object>> found, string pageUrl, decimal defaultScale,
-            string providerMap, AgodaLightDiagnostics diag)
+            string providerMap, LightFetchDiagnostics diag)
         {
             var map = ParseProviderMap(providerMap);
             var items = new List<ReviewItem>();
@@ -1015,7 +904,7 @@ namespace Take_Time_BangPhra.Services.Reviews
         }
 
         public static ReviewItem MapReview(Dictionary<string, object> d, string pageUrl, decimal defaultScale,
-            Dictionary<string, string> providerMap, AgodaLightDiagnostics diag)
+            Dictionary<string, string> providerMap, LightFetchDiagnostics diag)
         {
             // ข้อความที่แสดง (อาจเป็นคำแปลของ Agoda) vs ต้นฉบับ (originalComment / originalTitle / original*Positives …)
             string shownText = TextOf(d), shownTitle = TitleOf(d);
@@ -1259,7 +1148,7 @@ namespace Take_Time_BangPhra.Services.Reviews
             return null;
         }
 
-        private static string OriginOf(Dictionary<string, object> d, Dictionary<string, string> providerMap, AgodaLightDiagnostics diag)
+        private static string OriginOf(Dictionary<string, object> d, Dictionary<string, string> providerMap, LightFetchDiagnostics diag)
         {
             string name = Str(Get(d, "providerName")) ?? Str(Get(d, "reviewProviderText")) ?? Str(Get(d, "provider") as string)
                        ?? Str(Get(d, "source") as string);

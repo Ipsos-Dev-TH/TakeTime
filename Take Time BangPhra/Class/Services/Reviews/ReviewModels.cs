@@ -24,14 +24,16 @@ namespace Take_Time_BangPhra.Services.Reviews
         public const string UrlFetch = "URL_FETCH";
         /// <summary>อ่านหน้าที่พัก Agoda วันละครั้ง (JSON-LD + รีวิวที่หน้าแสดง + endpoint รีวิวหน้าแรก) — ไม่ crawl</summary>
         public const string AgodaLight = "AGODA_LIGHT";
+        /// <summary>อ่านหน้ารีวิวโรงแรมบน Google Travel วันละครั้ง (1 คำขอ, ไม่เลื่อนโหลดเพิ่ม) — ทางที่ถูกข้อกำหนดคือ GBP_API</summary>
+        public const string GoogleTravelLight = "GOOGLE_TRAVEL_LIGHT";
         public const string AiSearch = "AI_SEARCH";
         public const string Legacy = "LEGACY";
 
         public static readonly string[] All =
-            { GbpApi, PlacesApi, TripAdvisorApi, Email, Csv, Manual, UrlFetch, AgodaLight, AiSearch };
+            { GbpApi, PlacesApi, TripAdvisorApi, Email, Csv, Manual, UrlFetch, AgodaLight, GoogleTravelLight, AiSearch };
 
         /// <summary>วิธีที่ตัวตั้งเวลาเรียกเองได้ (ต้องตรงกับ AdapterFor และ SQL ใน RunDueSources)</summary>
-        public static readonly string[] Automatic = { GbpApi, PlacesApi, TripAdvisorApi, Email, UrlFetch, AgodaLight };
+        public static readonly string[] Automatic = { GbpApi, PlacesApi, TripAdvisorApi, Email, UrlFetch, AgodaLight, GoogleTravelLight };
 
         public static bool IsValid(string m)
         {
@@ -159,6 +161,15 @@ namespace Take_Time_BangPhra.Services.Reviews
         /// <summary>คำแปลที่แพลตฟอร์มแสดง (เฉพาะ diagnostics — ไม่บันทึก)</summary>
         public string TranslatedText;
         public string TranslatedTitle;
+        /// <summary>
+        /// true = ReviewDate เป็นวันโดยประมาณ (จาก "4 เดือนที่แล้ว") — ไม่ใช้วันที่ในแฮชกันซ้ำ (ไม่งั้นแฮชเลื่อนทุกวัน)
+        /// และวันที่ถูกตั้งตอนเพิ่มครั้งแรกเท่านั้น
+        /// </summary>
+        public bool ApproxDate;
+        /// <summary>true = อนุญาตอัปเดตคำตอบของเจ้าของบนแพลตฟอร์ม แม้แถวเป็น InsertOnly (เมื่อมี/เปลี่ยน)</summary>
+        public bool AllowOwnerResponseUpdate;
+        /// <summary>ข้อมูลเสริมจากแพลตฟอร์ม (คะแนนย่อย/ไฮไลต์/หัวข้อ/วันที่โดยประมาณ) → Platform_Meta (JSON) ถ้ามีคอลัมน์</summary>
+        public Dictionary<string, object> Meta;
     }
 
     public class ReviewFetchResult

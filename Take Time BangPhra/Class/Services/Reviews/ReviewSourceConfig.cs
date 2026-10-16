@@ -213,10 +213,9 @@ namespace Take_Time_BangPhra.Services.Reviews
                 Config = Parse(Str(r, "ApiConfig"))
             };
             if (s.FetchIntervalMin < 15) s.FetchIntervalMin = 15;
-            // AGODA_LIGHT: อย่างเร็ววันละ 2 ครั้ง ไม่ว่าจะตั้งค่าไว้เท่าไร (บังคับซ้ำที่ตัวบันทึกในหน้าแอดมิน)
-            if (string.Equals(s.IngestMethod, IngestMethods.AgodaLight, StringComparison.OrdinalIgnoreCase)
-                && s.FetchIntervalMin < AgodaLightAdapter.MinIntervalMin)
-                s.FetchIntervalMin = AgodaLightAdapter.MinIntervalMin;
+            // วิธี light (AGODA_LIGHT / GOOGLE_TRAVEL_LIGHT): อย่างเร็ววันละ 2 ครั้ง ไม่ว่าจะตั้งค่าไว้เท่าไร (บังคับซ้ำที่หน้าแอดมิน)
+            if (LightFetch.IsLightMethod(s.IngestMethod) && s.FetchIntervalMin < LightFetch.MinIntervalMin)
+                s.FetchIntervalMin = LightFetch.MinIntervalMin;
             return s;
         }
 

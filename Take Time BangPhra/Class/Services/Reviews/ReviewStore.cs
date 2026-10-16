@@ -73,7 +73,8 @@ namespace Take_Time_BangPhra.Services.Reviews
             string lang = ReviewText.Clip(it.Language, 10);
             DateTime? stay = it.StayDate.HasValue ? (DateTime?)it.StayDate.Value.Date : null;
             DateTime? respDate = ReviewText.SaneDate(it.OwnerResponseDate);
-            string hash = ReviewText.ContentHash(origin, name, date, title, text, raw);
+            // วันที่โดยประมาณ ("4 เดือนที่แล้ว") เลื่อนทุกวัน ⇒ ไม่ใช้ในแฮชกันซ้ำ
+            string hash = ReviewText.ContentHash(origin, name, it.ApproxDate ? null : date, title, text, raw);
 
             using (var con = new SqlConnection(_conn))
             {
@@ -85,7 +86,12 @@ namespace Take_Time_BangPhra.Services.Reviews
                 if (ex == null)
                     ex = FindOne(con, "SELECT TOP 1 " + SelectCols + " FROM AI_Online_Reviews WHERE Content_Hash = @h AND Origin_Platform = @o ORDER BY ID",
                         P("@h", hash), P("@o", origin));
-                if (ex == null && !it.IsProvisional && date.HasValue && (r5.HasValue || name != null))
+                // วันที่โดยประมาณ: ลองจับแถวเดิมของรีวิวเดียวกันด้วยชื่อ + ข้อความตรงกัน (เช่นแถวจาก Places API ที่แฮชรวมวันที่จริง)
+                if (ex == null && it.ApproxDate && name != null && text != null && text.Length <= 4000)
+                    ex = FindOne(con, "SELECT TOP 1 " + SelectCols + @" FROM AI_Online_Reviews
+                          WHERE Origin_Platform = @o AND ReviewerName = @n AND ReviewText = @x ORDER BY ID",
+                        P("@o", origin), P("@n", name), P("@x", text));
+                if (ex == null && !it.IsProvisional && !it.ApproxDate && date.HasValue && (r5.HasValue || name != null))
                     ex = FindOne(con, "SELECT TOP 1 " + SelectCols + @" FROM AI_Online_Reviews
                           WHERE Origin_Platform = @o AND Is_Provisional = 1 AND Is_Excluded = 0
                             AND ReviewDate >= DATEADD(DAY, -2, @d) AND ReviewDate < DATEADD(DAY, 3, @d)
@@ -101,7 +107,7 @@ namespace Take_Time_BangPhra.Services.Reviews
                     try
                     {
                         long id = Insert(con, src, ingestMethod, origin, extId, name, raw, scale, r10, r5, title, text,
-                            date ?? DateTime.Now, lang, url, resp, respDate, stay, room, trav, hash, it.IsProvisional, it.MachineTranslated);
+                            date ?? DateTime.Now, lang, url, resp, respDate, stay, room, trav, hash, it.IsProvisional, it.MachineTranslated, it.Meta);
                         return new UpsertResult { Outcome = UpsertOutcome.Inserted, ReviewId = id, Rating5 = r5 };
                     }
                     catch (SqlException sx) when (sx.Number == 2601 || sx.Number == 2627)
@@ -120,7 +126,25 @@ namespace Take_Time_BangPhra.Services.Reviews
                                 && extId != null && string.Equals(ex.ExternalId, extId, StringComparison.Ordinal)
                                 && !string.Equals(exLang, lang, StringComparison.OrdinalIgnoreCase)
                                 && !string.Equals(text, ex.Text, StringComparison.Ordinal);
-                    if (!upgrade) return new UpsertResult { Outcome = UpsertOutcome.Unchanged, ReviewId = ex.Id };
+                    if (!upgrade)
+                    {
+                        // ข้อยกเว้น: คำตอบของเจ้าของบนแพลตฟอร์มเพิ่งมี/เปลี่ยน (GOOGLE_TRAVEL_LIGHT) — วันที่คำตอบตั้งเมื่อข้อความเปลี่ยนเท่านั้น
+                        bool respUpdate = it.AllowOwnerResponseUpdate && resp != null && !string.Equals(resp, ex.OwnerResponse, StringComparison.Ordinal);
+                        if (!respUpdate) return new UpsertResult { Outcome = UpsertOutcome.Unchanged, ReviewId = ex.Id };
+                        using (var cmd = new SqlCommand(@"
+UPDATE AI_Online_Reviews SET
+    Owner_Response = @resp, Owner_Response_Date = COALESCE(@respDate, GETDATE()), ResponseStatus = 'RESPONDED',
+    ActualResponse = CASE WHEN ActualResponse IS NULL THEN @resp ELSE ActualResponse END,
+    RespondedDate = CASE WHEN RespondedDate IS NULL THEN COALESCE(@respDate, GETDATE()) ELSE RespondedDate END,
+    Fetched_At = GETDATE(), Updated_At = GETDATE()
+WHERE ID = @id", con))
+                        {
+                            cmd.CommandTimeout = 30;
+                            Add(cmd, "@resp", resp); Add(cmd, "@respDate", respDate); Add(cmd, "@id", ex.Id);
+                            cmd.ExecuteNonQuery();
+                        }
+                        return new UpsertResult { Outcome = UpsertOutcome.Updated, ReviewId = ex.Id, Rating5 = r5 };
+                    }
                     using (var cmd = new SqlCommand(@"
 UPDATE AI_Online_Reviews SET
     ReviewTitle = COALESCE(@t, ReviewTitle), ReviewText = @x, Language = @lang, IsAnalyzed = 0,
@@ -201,26 +225,36 @@ WHERE ID = @id", con))
         private long Insert(SqlConnection con, ReviewSourceRow src, string method, string origin, string extId, string name,
             decimal? raw, decimal? scale, decimal? r10, decimal? r5, string title, string text, DateTime reviewDate,
             string lang, string url, string resp, DateTime? respDate, DateTime? stay, string room, string trav,
-            string hash, bool provisional, bool? machineTranslated = null)
+            string hash, bool provisional, bool? machineTranslated = null, Dictionary<string, object> meta = null)
         {
             bool mtCol = machineTranslated.HasValue && HasMachineTranslatedColumn();
+            bool metaCol = meta != null && meta.Count > 0 && HasColumn("Platform_Meta");
+            string metaJson = null;
+            if (metaCol)
+            {
+                try { metaJson = new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(meta); }
+                catch { metaCol = false; }
+                if (metaJson != null && metaJson.Length > 8000) metaJson = null;
+                if (metaJson == null) metaCol = false;
+            }
             using (var cmd = new SqlCommand(@"
 INSERT INTO AI_Online_Reviews
     (SourceCode, PlatformReviewId, ReviewerName, ReviewerAvatar, Rating, ReviewTitle, ReviewText, ReviewDate, Language,
      ResponseStatus, ActualResponse, RespondedDate, IsAnalyzed, IsFlagged, Created_Date,
      Origin_Platform, External_Review_Id, Rating_Raw, Rating_Scale, Rating_10, Rating_5, Review_Url,
      Owner_Response, Owner_Response_Date, Stay_Date, Room_Type, Traveller_Type, Ingest_Method, Content_Hash,
-     Is_Provisional, Is_Excluded, Fetched_At, Updated_At" + (mtCol ? ", Is_Machine_Translated" : "") + @")
+     Is_Provisional, Is_Excluded, Fetched_At, Updated_At" + (mtCol ? ", Is_Machine_Translated" : "") + (metaCol ? ", Platform_Meta" : "") + @")
 VALUES
     (@src, @e, @n, NULL, @rating, @t, @x, @d, @lang,
      CASE WHEN @resp IS NULL THEN 'PENDING' ELSE 'RESPONDED' END, @resp,
      CASE WHEN @resp IS NULL THEN NULL ELSE COALESCE(@respDate, GETDATE()) END, 0, 0, GETDATE(),
      @o, @e, @raw, @scale, @r10, @r5, @u,
      @resp, @respDate, @stay, @room, @trav, @m, @h,
-     @prov, 0, GETDATE(), GETDATE()" + (mtCol ? ", @mt" : "") + @");
+     @prov, 0, GETDATE(), GETDATE()" + (mtCol ? ", @mt" : "") + (metaCol ? ", @meta" : "") + @");
 SELECT CAST(SCOPE_IDENTITY() AS BIGINT);", con))
             {
                 if (mtCol) Add(cmd, "@mt", machineTranslated.Value ? 1 : 0);
+                if (metaCol) Add(cmd, "@meta", metaJson);
                 cmd.CommandTimeout = 30;
                 Add(cmd, "@src", src.SourceCode); Add(cmd, "@e", extId); Add(cmd, "@n", name);
                 Add(cmd, "@rating", r5.HasValue ? (object)(double)r5.Value : null);
@@ -234,22 +268,30 @@ SELECT CAST(SCOPE_IDENTITY() AS BIGINT);", con))
             }
         }
 
-        // ── คอลัมน์เสริม Is_Machine_Translated (PHASE19_27 — ยังไม่รัน = ข้าม) cache 5 นาที ──
-        private static bool? _hasMt;
-        private static DateTime _hasMtAt = DateTime.MinValue;
+        // ── คอลัมน์เสริมของ AI_Online_Reviews (ยังไม่รัน migration = ข้าม) cache 5 นาที ──
+        //   Is_Machine_Translated (PHASE19_27), Platform_Meta (PHASE19_28)
+        private static readonly Dictionary<string, KeyValuePair<bool, DateTime>> _cols = new Dictionary<string, KeyValuePair<bool, DateTime>>();
+        private static readonly object _colsLock = new object();
 
-        private bool HasMachineTranslatedColumn()
+        private bool HasMachineTranslatedColumn() { return HasColumn("Is_Machine_Translated"); }
+
+        private bool HasColumn(string column)
         {
-            if (_hasMt.HasValue && (DateTime.Now - _hasMtAt).TotalMinutes < 5) return _hasMt.Value;
+            lock (_colsLock)
+            {
+                KeyValuePair<bool, DateTime> c;
+                if (_cols.TryGetValue(column, out c) && (DateTime.Now - c.Value).TotalMinutes < 5) return c.Key;
+            }
             bool ok = false;
             try
             {
                 var dt = new code().DatabaseQuerySafe(_conn,
-                    "SELECT CASE WHEN COL_LENGTH('dbo.AI_Online_Reviews','Is_Machine_Translated') IS NULL THEN 0 ELSE 1 END", null);
+                    "SELECT CASE WHEN COL_LENGTH('dbo.AI_Online_Reviews', @c) IS NULL THEN 0 ELSE 1 END",
+                    new Dictionary<string, object> { { "@c", column } });
                 ok = dt.Rows.Count > 0 && Convert.ToInt32(dt.Rows[0][0]) == 1;
             }
             catch { ok = false; }
-            _hasMt = ok; _hasMtAt = DateTime.Now;
+            lock (_colsLock) { _cols[column] = new KeyValuePair<bool, DateTime>(ok, DateTime.Now); }
             return ok;
         }
 

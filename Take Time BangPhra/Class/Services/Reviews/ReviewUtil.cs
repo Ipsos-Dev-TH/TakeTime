@@ -348,6 +348,18 @@ namespace Take_Time_BangPhra.Services.Reviews
             "expedia.co.th", "traveloka.com", "trip.com", "airbnb.com", "pantip.com", "wongnai.com", "hotels.com"
         };
 
+        /// <summary>
+        /// GOOGLE_TRAVEL_LIGHT: เฉพาะ https://www.google.com/travel/… (ไม่เปิด google.com ทั้งโดเมนให้วิธีนี้)
+        /// </summary>
+        public static bool IsAllowedGoogleTravelUrl(string url)
+        {
+            Uri uri;
+            if (!IsAllowedPublicUrl(url) || !Uri.TryCreate(url, UriKind.Absolute, out uri)) return false;
+            return uri.Scheme == Uri.UriSchemeHttps
+                && string.Equals(uri.Host, "www.google.com", StringComparison.OrdinalIgnoreCase)
+                && uri.AbsolutePath.StartsWith("/travel/", StringComparison.Ordinal);
+        }
+
         public static bool IsAllowedPublicUrl(string url)
         {
             Uri uri;

@@ -181,17 +181,21 @@ namespace Take_Time_BangPhra.Admin.CRM
             if (interval < 15) interval = 15;
             if (interval > 10080) interval = 10080;
             bool isAgodaLight = method == IngestMethods.AgodaLight;
-            if (isAgodaLight && interval < AgodaLightAdapter.MinIntervalMin) interval = AgodaLightAdapter.MinIntervalMin;
+            bool isGoogleLight = method == IngestMethods.GoogleTravelLight;
+            bool isLight = LightFetch.IsLightMethod(method);
+            if (isLight && interval < LightFetch.MinIntervalMin) interval = LightFetch.MinIntervalMin;
             bool auto = Bool(d, "autoEnabled");
             string url = (Str(d, "sourceUrl") ?? "").Trim();
             if (url.Length > 1000) return Fail("URL ยาวเกิน 1000 ตัวอักษร");
             if (url.Length > 0 && !Uri.IsWellFormedUriString(url, UriKind.Absolute)) return Fail("URL ไม่ถูกต้อง");
             if (isAgodaLight && url.Length > 0 && !AgodaLightAdapter.IsAgodaUrl(url))
                 return Fail("AGODA_LIGHT ต้องใช้ URL หน้าที่พักบน https://www.agoda.com/…");
-            // AGODA_LIGHT เป็น opt-in ของเจ้าของ: เปิดดึงอัตโนมัติ (ใหม่ หรือเพิ่งเปลี่ยนมาเป็นวิธีนี้) ได้เฉพาะ Owner/Admin
-            if (isAgodaLight && auto && !IsSecretAdmin
-                && (!src.IsAutoEnabled || !string.Equals(src.IngestMethod, IngestMethods.AgodaLight, StringComparison.OrdinalIgnoreCase)))
-                return Fail("เปิดดึงอัตโนมัติวิธี AGODA_LIGHT ได้เฉพาะ Owner หรือ Admin");
+            if (isGoogleLight && url.Length > 0 && !GoogleTravelLightAdapter.IsGoogleTravelUrl(url))
+                return Fail("GOOGLE_TRAVEL_LIGHT ต้องใช้ URL หน้ารีวิวบน https://www.google.com/travel/…");
+            // วิธี light เป็น opt-in ของเจ้าของ: เปิดดึงอัตโนมัติ (ใหม่ หรือเพิ่งเปลี่ยนมาเป็นวิธีนี้) ได้เฉพาะ Owner/Admin
+            if (isLight && auto && !IsSecretAdmin
+                && (!src.IsAutoEnabled || !string.Equals(src.IngestMethod, method, StringComparison.OrdinalIgnoreCase)))
+                return Fail("เปิดดึงอัตโนมัติวิธี " + method + " ได้เฉพาะ Owner หรือ Admin");
 
             // config: คีย์ที่ไม่ใช่ความลับแก้ได้ทุกคนที่มีสิทธิ์หน้านี้ / ความลับเฉพาะ Owner/Admin (เว้นว่าง = คงเดิม)
             var incoming = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
@@ -236,9 +240,10 @@ WHERE ID = @id",
             string warn = null;
             if (auto && method == IngestMethods.UrlFetch && !AppCfg.GetBool("Review_UrlFetch_Allowed", false))
                 warn = "เปิดดึงอัตโนมัติแล้ว แต่วิธี URL_FETCH จะไม่ทำงานจนกว่า Owner เปิด 'อนุญาตดึงจากหน้าเว็บ OTA' (ขัดข้อกำหนดแพลตฟอร์ม)";
-            if (isAgodaLight && auto)
-                warn = (warn == null ? "" : warn + " · ") + "AGODA_LIGHT อ่านหน้าที่พักวันละ ≤ 1–2 ครั้ง (รอบขั้นต่ำ " + AgodaLightAdapter.MinIntervalMin
-                    + " นาที) — Agoda อาจถือว่าขัดข้อกำหนด; โดนกันบอท " + AgodaLightAdapter.BlockDisableAfter + " ครั้งติดระบบปิดให้เอง";
+            if (isLight && auto)
+                warn = (warn == null ? "" : warn + " · ") + method + " อ่านหน้าสาธารณะวันละ ≤ 1–2 ครั้ง (รอบขั้นต่ำ " + LightFetch.MinIntervalMin
+                    + " นาที) — แพลตฟอร์มอาจถือว่าขัดข้อกำหนด; โดนกันบอท " + LightFetch.BlockDisableAfter + " ครั้งติดระบบปิดให้เอง"
+                    + (isGoogleLight ? " · ทางที่แนะนำสำหรับ Google คือ GBP_API" : "");
             if (auto && !ReviewAggregationService.IsEnabled(ConnStr))
                 warn = (warn == null ? "" : warn + " · ") + "สวิตช์ใหญ่ 'เปิดดึงรีวิวอัตโนมัติ' ยังปิดอยู่";
             return new Dictionary<string, object> { { "success", true }, { "message", "บันทึกแล้ว" }, { "warning", warn } };
@@ -254,7 +259,7 @@ WHERE ID = @id",
         }
 
         /// <summary>
-        /// ปุ่ม "ทดสอบดึง (ไม่บันทึก)" — รัน AgodaLightAdapter แบบ dry-run กับค่าที่บันทึกไว้ของแหล่ง
+        /// ปุ่ม "ทดสอบดึง (ไม่บันทึก)" — รัน AgodaLightAdapter / GoogleTravelLightAdapter แบบ dry-run กับค่าที่บันทึกไว้ของแหล่ง
         /// ไม่เขียนรีวิว/สถานะแหล่ง/Review_Fetch_Log; กดได้ทุก 3 นาทีต่อแหล่ง (ยังเป็นคำขอจริงไป Agoda)
         /// </summary>
         private Dictionary<string, object> HandleTestAgoda(Dictionary<string, object> d)
@@ -263,13 +268,15 @@ WHERE ID = @id",
             if (string.IsNullOrEmpty(code)) return Fail("ไม่ระบุแหล่ง");
             var src = ReviewSourceConfig.Load(ConnStr, code);
             if (src == null) return Fail("ไม่พบแหล่ง " + code);
-            if (!string.Equals(src.IngestMethod, IngestMethods.AgodaLight, StringComparison.OrdinalIgnoreCase))
-                return Fail("ทดสอบได้เฉพาะแหล่งที่บันทึกวิธีเป็น AGODA_LIGHT แล้ว");
+            if (!LightFetch.IsLightMethod(src.IngestMethod))
+                return Fail("ทดสอบได้เฉพาะแหล่งที่บันทึกวิธีเป็น AGODA_LIGHT หรือ GOOGLE_TRAVEL_LIGHT แล้ว");
             int wait;
-            if (!AgodaLightAdapter.TryReserveManual("test:" + src.SourceCode, 3, out wait))
-                return Fail("เพิ่งทดสอบไป — รออีก " + wait + " วินาที (กันยิง Agoda ถี่)");
-            var diag = new AgodaLightAdapter().DryRun(src);
-            new code().Logs(ConnStr, "ReviewSources", "ทดสอบดึง AGODA_LIGHT " + src.SourceCode + ": " + diag.Compact()
+            if (!LightFetch.TryReserveManual("test:" + src.SourceCode, 3, out wait))
+                return Fail("เพิ่งทดสอบไป — รออีก " + wait + " วินาที (กันยิงปลายทางถี่)");
+            var diag = string.Equals(src.IngestMethod, IngestMethods.GoogleTravelLight, StringComparison.OrdinalIgnoreCase)
+                ? new GoogleTravelLightAdapter(ConnStr).DryRun(src)
+                : new AgodaLightAdapter().DryRun(src);
+            new code().Logs(ConnStr, "ReviewSources", "ทดสอบดึง " + src.IngestMethod + " " + src.SourceCode + ": " + diag.Compact()
                 + (diag.Error != null ? " · " + ReviewHttp.Brief(diag.Error, 300) : ""),
                 Session["UserName"] != null ? Session["UserName"].ToString() : "ADMIN");
             var outD = new Dictionary<string, object> { { "success", true }, { "diag", diag.ToDictionary() } };
