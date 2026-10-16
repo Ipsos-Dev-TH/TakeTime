@@ -268,9 +268,12 @@
             { k: 'apiUrl', l: 'endpoint รีวิว (ขั้นสูง)', h: '⚠ ค่าเริ่มยังไม่ยืนยัน: https://www.agoda.com/api/cronos/property/review/ReviewComments — ใช้ {hotelId} ได้' },
             { k: 'apiMethod', l: 'HTTP method ของ endpoint', h: 'POST (ค่าเริ่ม) หรือ GET' },
             { k: 'apiBody', l: 'body ของ POST (JSON, ใช้ {hotelId} {languageId} {locale})', h: 'เว้นว่าง = ค่าเริ่ม (หน้าแรก 20 รายการ ล่าสุดก่อน + languageId — ยังไม่ยืนยัน)' },
+            { k: 'langStrategy', l: 'นโยบายภาษา', opts: [['', 'PREFER_TH (ค่าเริ่ม) — ขอภาษาไทย languageId 22'], ['PREFER_TH', 'PREFER_TH'], ['AS_RETURNED', 'AS_RETURNED — ไม่ส่ง languageId']],
+              h: 'Agoda ส่งรีวิวแต่ละรายการในภาษาต้นฉบับเมื่อมี (เช่นรีวิวที่เขียนเป็นอังกฤษจะมาเป็นอังกฤษ) — ระบบเก็บต้นฉบับ ไม่แปลเอง; ถ้าคำตอบมีทั้งต้นฉบับและคำแปล ระบบเลือกต้นฉบับ' },
             { k: 'languageId', l: 'languageId ของ Agoda', h: '⚠ ยังไม่ยืนยัน: ค่าเริ่ม 22 (ไทย) — "off" = ไม่ใส่ languageId ใน body (กลับเป็น body เดิมที่ทดสอบผ่าน)' },
             { k: 'locale', l: 'locale', h: 'ค่าเริ่ม th-th (ใช้กับ Accept-Language และ {locale})' },
-            { k: 'sendLocaleHeaders', l: 'ส่ง header ag-language-locale / ag-language-id (true/false)', h: 'ค่าเริ่ม false — ลองเปิดถ้ารีวิวยังมาเป็นคำแปลอังกฤษ' },
+            { k: 'sendLocaleHeaders', l: 'ส่ง header ag-language-locale / ag-language-id', opts: [['', 'ไม่ส่ง (ค่าเริ่ม)'], ['true', 'ส่ง'], ['false', 'ไม่ส่ง']],
+              h: '⚠ ยังไม่ยืนยัน — ลองเปิดถ้ารีวิวไทยยังมาเป็นคำแปลอังกฤษ (ใช้ค่า locale / languageId ด้านบน)' },
             { k: 'summaryUrl', l: 'endpoint สรุปคะแนน (ไม่บังคับ)', h: 'เว้นว่าง = ปิด; ตั้งแล้วเรียกเฉพาะเมื่อหาคะแนนรวมจาก JSON-LD/endpoint รีวิว/หน้าเว็บไม่ได้ (งบคำขอ +1)' },
             { k: 'summaryMethod', l: 'method ของ endpoint สรุป', h: 'GET (ค่าเริ่ม) หรือ POST' },
             { k: 'summaryBody', l: 'body ของ endpoint สรุป (POST)', h: 'ค่าเริ่ม {"hotelId":{hotelId}}' },
@@ -479,6 +482,12 @@
                 : '')
             + (d.method === 'GOOGLE_TRAVEL_LIGHT' ? '' : '<li>รหัสที่พัก: ' + (d.propertyId ? '<b>' + esc(d.propertyId) + '</b> <span class="rs-muted">(' + esc(d.propertyIdPattern) + ')</span>' : '<span class="rs-err">ไม่พบ</span>')
             + (d.propertyIdCandidates ? ' <span class="rs-muted">อื่น ๆ: ' + esc(d.propertyIdCandidates) + '</span>' : '') + '</li>')
+            + (d.method === 'GOOGLE_TRAVEL_LIGHT'
+                ? '<li>ข้อมูลฝังในสคริปต์: AF_initDataCallback <b>' + esc(d.afBlockCount) + '</b> บล็อก · ลิงก์ /maps/contrib/ ' + esc(d.contribCount)
+                    + ' · โทเคน postId ' + esc(d.postIdTokens) + ' · สตริงไทยยาว ' + esc(d.thaiLongStrings)
+                    + (d.afBlocks ? '<div class="rs-muted" style="word-break:break-all"><code>' + esc(d.afBlocks) + '</code></div>' : '') + '</li>'
+                  + (d.parseMiss ? '<li><span class="rs-badge PARTIAL">PARSE_MISS</span> หน้าโหลดได้แต่แกะรีวิวไม่ได้ — ไม่นับเป็นการโดนกัน (คะแนนรวมยังบันทึก)</li>' : '')
+                : '')
             + '<li>เส้นทาง HTML (DOM รายการรีวิว): ' + (d.htmlDomReviews > 0 ? '<b>พบ ' + esc(d.htmlDomReviews) + ' รีวิว</b>'
                 : (d.htmlDomBlocks > 0 ? '<span class="rs-err">เห็น ' + esc(d.htmlDomBlocks) + ' บล็อก แต่แกะไม่ได้</span>' : 'ไม่พบใน HTML ที่เซิร์ฟเวอร์ส่งมา')) + '</li>'
             + '<li>เส้นทางที่ใช้ได้: <code>' + esc(d.parsePath) + '</code> · แกะได้ <b>' + esc(d.reviewsParsed) + '</b> รีวิว</li>'
@@ -505,6 +514,12 @@
         }
         if ((d.warnings || []).length) h += '<div class="rs-alert warn">' + d.warnings.map(esc).join('<br/>') + '</div>';
         h += '<div class="rs-muted">บรรทัดสรุป (แบบเดียวกับที่บันทึกใน log ตอนดึงจริง): <code>' + esc(d.compact) + '</code></div>';
+        if (d.rawSaved && d.rawCanDownload)
+            h += '<div style="margin-top:8px"><a class="rs-btn sec" href="?action=downloadRaw&code=' + encodeURIComponent(s.code) + '&t=' + encodeURIComponent(CSRF)
+                + '">ดาวน์โหลด HTML ที่ได้ (ทดสอบล่าสุด)</a> <span class="rs-muted">ไฟล์ .txt.gz (หน้า' + (d.method === 'AGODA_LIGHT' ? ' + JSON ของ endpoint' : '')
+                + ') เก็บ 24 ชม. — ส่งให้ผู้พัฒนาเมื่อแกะรีวิวไม่ได้</span></div>';
+        else if (d.rawSaved)
+            h += '<div class="rs-muted" style="margin-top:8px">บันทึกเนื้อหาดิบไว้แล้ว — Owner/Admin ดาวน์โหลดได้จากปุ่มทดสอบ</div>';
         $('rsTestBody').innerHTML = h;
         $('rsTestTitle').textContent = 'ผลทดสอบดึง ' + (d.method === 'GOOGLE_TRAVEL_LIGHT' ? 'Google Travel' : 'Agoda') + ' (ไม่บันทึก)';
         $('rsTestWhen').textContent = '(' + s.name + ' · ' + new Date().toLocaleString('th-TH') + ')';
@@ -565,6 +580,12 @@
                     + '<input type="password" autocomplete="new-password" data-cfg="' + f.k + '" data-secret="1" placeholder="' + (set ? 'ตั้งไว้แล้ว (' + esc(v) + ') — เว้นว่าง = คงเดิม' : 'ยังไม่ได้ตั้ง') + '"' + (state.isAdmin ? '' : ' disabled') + ' />'
                     + (set && state.isAdmin ? '<label style="font-weight:400;font-size:12px"><input type="checkbox" data-clear="' + f.k + '" /> ล้างค่านี้</label>' : '')
                     + (f.h ? '<div class="hint">' + esc(f.h) + '</div>' : '') + '</div>';
+            } else if (f.opts) {
+                // ตัวเลือกคงที่ (value '' = ค่าเริ่มของระบบ)
+                var cur = v === undefined || v === null ? '' : String(v);
+                h += '<div class="rs-field"><label>' + esc(f.l) + '</label><select data-cfg="' + f.k + '">'
+                    + f.opts.map(function (o) { return '<option value="' + esc(o[0]) + '"' + (cur === o[0] ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('')
+                    + '</select>' + (f.h ? '<div class="hint">' + esc(f.h) + '</div>' : '') + '</div>';
             } else {
                 var def = '';
                 if (m === 'EMAIL' && state.emailDefaults && state.emailDefaults[s.code]) {

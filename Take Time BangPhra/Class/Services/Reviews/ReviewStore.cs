@@ -431,13 +431,15 @@ WHERE ID = @id",
                     @"SELECT TOP (@n) Status, Message FROM Review_Fetch_Log
                        WHERE Source_ID = @s AND Status NOT IN ('SKIPPED','RUNNING')
                        ORDER BY ID DESC",
-                    new Dictionary<string, object> { { "@n", Math.Max(1, max) }, { "@s", sourceId } });
+                    new Dictionary<string, object> { { "@n", Math.Max(1, max) * 4 }, { "@s", sourceId } });
                 int n = 0;
                 foreach (DataRow r in dt.Rows)
                 {
                     string msg = r["Message"] == DBNull.Value ? "" : r["Message"].ToString();
+                    if (msg.StartsWith(ParseMissPrefix, StringComparison.Ordinal)) continue;   // แกะไม่ได้ ≠ โดนกัน: ไม่นับ และไม่ตัดลำดับ
                     if (!msg.StartsWith(BlockedPrefix, StringComparison.Ordinal)) break;
                     n++;
+                    if (n >= max) break;
                 }
                 return n;
             }
@@ -446,6 +448,8 @@ WHERE ID = @id",
 
         /// <summary>คำนำหน้าข้อความ log ของรอบที่โดนกันบอท (ใช้นับลำดับติดกัน)</summary>
         public const string BlockedPrefix = "[BLOCKED]";
+        /// <summary>คำนำหน้าข้อความ log ของรอบที่หน้าโหลดได้แต่แกะรีวิวไม่ได้ (ไม่นับเป็นการโดนกัน)</summary>
+        public const string ParseMissPrefix = LightFetch.ParseMissPrefix;
 
         /// <summary>ปิดดึงอัตโนมัติของแหล่ง — true เมื่อเพิ่งปิดจริงในครั้งนี้ (ใช้กันแจ้งเตือนซ้ำ)</summary>
         public bool DisableAuto(int sourceId, string reason)

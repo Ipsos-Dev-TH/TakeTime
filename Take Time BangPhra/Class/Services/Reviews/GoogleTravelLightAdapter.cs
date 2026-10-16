@@ -95,6 +95,7 @@ namespace Take_Time_BangPhra.Services.Reviews
             if (netErr != null) throw new Exception("เชื่อมต่อ Google ไม่ได้: " + netErr + " · " + diag.Compact());
             info.Status = resp.Status;
             info.Bytes = resp.Body == null ? 0 : Encoding.UTF8.GetByteCount(resp.Body);
+            diag.KeepRaw("page GET " + url + " → HTTP " + resp.Status + (resp.Location != null ? " Location: " + resp.Location : ""), resp.Body);
 
             string block = GoogleTravelParser.DetectBlock(resp.Status, resp.Body, resp.Location);
             if (block != null)
@@ -129,11 +130,23 @@ namespace Take_Time_BangPhra.Services.Reviews
 
             if (items.Count == 0)
             {
-                // หน้าโหลดได้แต่ไม่มีกล่องรีวิว = Google ส่งหน้าอื่น/หน้ากัน หรือ selector เปลี่ยน — นับเป็นการโดนกัน (กันวนดึงเปล่า)
+                // หน้าโหลดได้ปกติ (200 + หน้าใหญ่ / มีคะแนนหัวหน้า / มีรหัสโรงแรม) แต่แกะรีวิวไม่ได้ = PARSE_MISS:
+                // ไม่ใช่การโดนกัน — บันทึกคะแนนรวมต่อ, ไม่นับลำดับปิดอัตโนมัติ (LightFetch.ParseMissPrefix)
+                bool pageLooksReal = info.Bytes >= 200 * 1024 || result.PlatformRating.HasValue || diag.PlaceId != null;
+                if (pageLooksReal)
+                {
+                    diag.ParseMiss = true;
+                    result.LogPrefix = LightFetch.ParseMissPrefix;
+                    result.Warnings.Add("PARSE_MISS: หน้าโหลดได้ (HTTP 200) แต่ไม่พบรีวิวทั้งใน DOM และข้อมูลฝัง (AF_initDataCallback "
+                        + diag.AfBlockCount + " บล็อก) — ไม่ใช่การโดนกัน; ดาวน์โหลด HTML จากปุ่มทดสอบส่งให้ผู้พัฒนา");
+                    diag.Warnings.AddRange(result.Warnings);
+                    result.Note = diag.Compact();
+                    return result;
+                }
+                // หน้าเล็ก/ไม่มีร่องรอยของหน้าโรงแรม = น่าจะเป็นหน้ากัน — นับเป็นการโดนกัน (กันวนดึงเปล่า)
                 info.Block = "no-review-container";
                 throw new ReviewSourceBlockedException("no-review-container",
-                    "หน้า Google Travel ไม่มีกล่องรีวิวใน HTML ที่เซิร์ฟเวอร์ส่งมา (บล็อกที่เห็น " + diag.HtmlDomBlocks
-                    + ") — อาจถูกกัน หรือ selector เปลี่ยน (ตั้ง sel* ใน ApiConfig) · " + diag.Compact());
+                    "หน้า Google Travel ไม่มีกล่องรีวิวและไม่มีร่องรอยของหน้าโรงแรม (" + (info.Bytes / 1024) + "KB) — น่าจะถูกกัน · " + diag.Compact());
             }
 
             items = items.Take(Math.Max(1, Math.Min(100, src.CfgInt("maxItems", 50)))).ToList();

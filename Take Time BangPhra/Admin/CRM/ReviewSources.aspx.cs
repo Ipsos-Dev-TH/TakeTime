@@ -5,6 +5,7 @@
 // สิทธิ์: Perm.CrmReview + Feature "Reviews" — แก้ความลับ/ค่าตั้งกลางได้เฉพาะ Owner/Admin
 // API: POST ?action=… (JSON, ต้องมี header X-CSRF-Token) / POST multipart ?action=importCsv (field csrf)
 //      GET ?action=csvTemplate = ดาวน์โหลดแม่แบบ CSV
+//      GET ?action=downloadRaw&code=…&t=<csrf> = เนื้อหาดิบของ "ทดสอบดึง" ล่าสุด (Owner/Admin, เก็บใน App_Data 24 ชม.)
 // ===========================================================================
 
 using System;
@@ -12,6 +13,8 @@ using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
 using System.IO;
+using System.IO.Compression;
+using System.Text.RegularExpressions;
 using System.Linq;
 using System.Text;
 using System.Web;
@@ -77,6 +80,7 @@ namespace Take_Time_BangPhra.Admin.CRM
 
             string action = Request.QueryString["action"] ?? "";
             if (Request.HttpMethod == "GET" && action == "csvTemplate") { SendTemplate(); return; }
+            if (Request.HttpMethod == "GET" && action == "downloadRaw") { SendRaw(Request.QueryString["code"], Request.QueryString["t"]); return; }
             if (Request.HttpMethod != "POST" || action.Length == 0) return;
 
             Server.ScriptTimeout = 300;   // ดึงอีเมล/API อาจใช้เวลานาน
@@ -279,8 +283,94 @@ WHERE ID = @id",
             new code().Logs(ConnStr, "ReviewSources", "ทดสอบดึง " + src.IngestMethod + " " + src.SourceCode + ": " + diag.Compact()
                 + (diag.Error != null ? " · " + ReviewHttp.Brief(diag.Error, 300) : ""),
                 Session["UserName"] != null ? Session["UserName"].ToString() : "ADMIN");
-            var outD = new Dictionary<string, object> { { "success", true }, { "diag", diag.ToDictionary() } };
+            var dd = diag.ToDictionary();
+            dd["rawSaved"] = SaveRaw(src.SourceCode, diag);
+            dd["rawCanDownload"] = IsSecretAdmin;
+            var outD = new Dictionary<string, object> { { "success", true }, { "diag", dd } };
             return outD;
+        }
+
+        // ── เนื้อหาดิบของการทดสอบล่าสุด (gzip ใน App_Data — IIS ไม่เสิร์ฟ App_Data ตรง; ลบเองหลัง 24 ชม.) ──
+
+        private const int RawKeepHours = 24;
+
+        private string RawDir { get { return Server.MapPath("~/App_Data/ReviewDebug"); } }
+
+        private static string SafeCode(string code)
+        {
+            return Regex.Replace(code ?? "", @"[^A-Za-z0-9_]", "");
+        }
+
+        private void PurgeRaw()
+        {
+            try
+            {
+                if (!Directory.Exists(RawDir)) return;
+                foreach (var f in Directory.GetFiles(RawDir, "*.txt.gz"))
+                    if ((DateTime.Now - File.GetLastWriteTime(f)).TotalHours > RawKeepHours) File.Delete(f);
+            }
+            catch { }
+        }
+
+        private bool SaveRaw(string sourceCode, LightFetchDiagnostics diag)
+        {
+            try
+            {
+                PurgeRaw();
+                if (diag == null || diag.RawBodies.Count == 0) return false;
+                string code = SafeCode(sourceCode);
+                if (code.Length == 0) return false;
+                Directory.CreateDirectory(RawDir);
+                string path = Path.Combine(RawDir, code + ".txt.gz");
+                using (var fs = File.Create(path))
+                using (var gz = new GZipStream(fs, CompressionLevel.Optimal))
+                using (var w = new StreamWriter(gz, new UTF8Encoding(false)))
+                {
+                    w.WriteLine("# " + diag.Method + " dry-run " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " source=" + code);
+                    w.WriteLine("# " + diag.Compact());
+                    foreach (var kv in diag.RawBodies)
+                    {
+                        w.WriteLine();
+                        w.WriteLine("===== " + kv.Key + " (" + kv.Value.Length + " chars) =====");
+                        w.WriteLine(kv.Value);
+                    }
+                }
+                return true;
+            }
+            catch { return false; }
+        }
+
+        private void SendRaw(string sourceCode, string token)
+        {
+            if (!IsSecretAdmin || !CheckCsrf(token))
+            {
+                Response.StatusCode = 403;
+                Response.Write("forbidden");
+                Context.ApplicationInstance.CompleteRequest();
+                return;
+            }
+            PurgeRaw();
+            string code = SafeCode(sourceCode);
+            string path = code.Length == 0 ? null : Path.Combine(RawDir, code + ".txt.gz");
+            if (path == null || !File.Exists(path))
+            {
+                Response.StatusCode = 404;
+                Response.Write("ไม่พบไฟล์ (หมดอายุ 24 ชม. หรือยังไม่ได้กดทดสอบดึง)");
+                Context.ApplicationInstance.CompleteRequest();
+                return;
+            }
+            new code().Logs(ConnStr, "ReviewSources", "ดาวน์โหลดเนื้อหาดิบทดสอบดึง " + code,
+                Session["UserName"] != null ? Session["UserName"].ToString() : "ADMIN");
+            Response.Clear();
+            Response.ContentType = "application/gzip";
+            Response.AddHeader("Content-Disposition", "attachment; filename=review_raw_" + code + "_"
+                + File.GetLastWriteTime(path).ToString("yyyyMMdd_HHmm") + ".txt.gz");
+            Response.AddHeader("X-Content-Type-Options", "nosniff");
+            Response.Cache.SetCacheability(HttpCacheability.NoCache);
+            Response.TransmitFile(path);
+            Response.Flush();
+            Response.SuppressContent = true;
+            Context.ApplicationInstance.CompleteRequest();
         }
 
         private Dictionary<string, object> HandleGetLog(Dictionary<string, object> d)

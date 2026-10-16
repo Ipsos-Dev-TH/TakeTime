@@ -225,11 +225,17 @@ namespace Take_Time_BangPhra.Services.Reviews
                     if (items.Count > 0) path = "dom-structural";
                 }
             }
-            if (diag != null)
+            if (diag != null) diag.HtmlDomReviews = items.Count;
+
+            // ข้อมูลที่ฝังใน <script> (AF_initDataCallback) — เมื่อ DOM รีวิวไม่ได้ render มากับ HTML
+            var af = GoogleEmbeddedData.ExtractBlocks(html);
+            GoogleEmbeddedData.RawStats(html, af, diag);
+            if (items.Count == 0 && af.Count > 0)
             {
-                diag.HtmlDomReviews = items.Count;
-                diag.IdsFound = items.Count(i => i.ExternalReviewId != null);
+                items = GoogleEmbeddedData.ExtractReviews(af, pageUrl, now, diag);
+                if (items.Count > 0) path = "af-initdata";
             }
+            if (diag != null) diag.IdsFound = items.Count(i => i.ExternalReviewId != null);
             return items;
         }
 

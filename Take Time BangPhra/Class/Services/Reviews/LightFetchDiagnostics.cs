@@ -20,6 +20,8 @@ namespace Take_Time_BangPhra.Services.Reviews
         public const int BlockDisableAfter = 3;
         /// <summary>กด "ดึงตอนนี้" ซ้ำได้ไม่ถี่กว่า (นาที)</summary>
         public const int ManualCooldownMin = 30;
+        /// <summary>คำนำหน้า log ของรอบที่หน้าโหลดได้แต่แกะรีวิวไม่ได้ — ไม่นับ/ไม่ตัดลำดับ "โดนกันติดกัน"</summary>
+        public const string ParseMissPrefix = "[PARSE_MISS]";
 
         public static bool IsLightMethod(string method)
         {
@@ -85,6 +87,20 @@ namespace Take_Time_BangPhra.Services.Reviews
         public int IdsFound;
         /// <summary>dry-run: รีวิวที่แกะได้ซึ่งยังไม่มีในฐานข้อมูล (null = ไม่ได้ตรวจ)</summary>
         public int? NewCount;
+        /// <summary>GOOGLE_TRAVEL_LIGHT: AF_initDataCallback ที่พบ (key + ขนาด), จำนวนลิงก์ /maps/contrib/, โทเคน postId, สตริงไทยยาว</summary>
+        public string AfBlocks;
+        public int AfBlockCount, ContribCount, PostIdTokens, ThaiLongStrings;
+        /// <summary>หน้าโหลดได้ปกติแต่แกะรีวิวไม่ได้ (ไม่ใช่การโดนกัน — ไม่นับลำดับปิดอัตโนมัติ)</summary>
+        public bool ParseMiss;
+        /// <summary>dry-run: เนื้อหาดิบที่ได้ (label → body) สำหรับให้ Owner/Admin ดาวน์โหลด — ไม่ส่งไปเบราว์เซอร์ใน ToDictionary</summary>
+        public List<KeyValuePair<string, string>> RawBodies = new List<KeyValuePair<string, string>>();
+
+        /// <summary>เก็บ body ดิบ (เฉพาะ dry-run, ≤ 8 MB ต่อชิ้น)</summary>
+        public void KeepRaw(string label, string body)
+        {
+            if (!DryRun || body == null) return;
+            RawBodies.Add(new KeyValuePair<string, string>(label, body.Length > 8 * 1024 * 1024 ? body.Substring(0, 8 * 1024 * 1024) : body));
+        }
         public List<RequestInfo> Requests = new List<RequestInfo>();
         public bool JsonLdFound;
         public int JsonLdBlocks;
@@ -137,6 +153,9 @@ namespace Take_Time_BangPhra.Services.Reviews
                 if (KgMid != null) sb.Append(" kg=").Append(KgMid);
                 sb.Append(" · postId ").Append(IdsFound);
                 if (NewCount.HasValue) sb.Append(" · ใหม่ ").Append(NewCount.Value);
+                sb.Append(" · AF ").Append(AfBlockCount).Append(" บล็อก, contrib ").Append(ContribCount)
+                  .Append(", postId-token ").Append(PostIdTokens).Append(", ไทยยาว ").Append(ThaiLongStrings);
+                if (ParseMiss) sb.Append(" · PARSE_MISS");
             }
             else
             {
@@ -157,6 +176,9 @@ namespace Take_Time_BangPhra.Services.Reviews
                 { "dryRun", DryRun }, { "method", Method },
                 { "entityToken", EntityToken }, { "placeId", PlaceId }, { "kgToken", KgToken }, { "kgMid", KgMid },
                 { "idsFound", IdsFound }, { "newCount", NewCount },
+                { "afBlocks", AfBlocks }, { "afBlockCount", AfBlockCount }, { "contribCount", ContribCount },
+                { "postIdTokens", PostIdTokens }, { "thaiLongStrings", ThaiLongStrings }, { "parseMiss", ParseMiss },
+                { "rawSaved", false },
                 { "requests", Requests.Select(r => (object)new Dictionary<string, object>
                     {
                         { "label", r.Label }, { "method", r.Method }, { "url", r.Url }, { "status", r.Status },

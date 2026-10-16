@@ -227,7 +227,8 @@ namespace Take_Time_BangPhra.Services.Reviews
                 var warns = new List<string>(fr.Warnings);
                 if (itemErrors > 0) warns.Add("บันทึกไม่สำเร็จ " + itemErrors + " รายการ: " + firstErr);
                 res.Status = warns.Count > 0 ? "PARTIAL" : "OK";
-                res.Message = string.Format("ดึง {0} รายการ: ใหม่ {1}, อัปเดต {2}, ซ้ำ {3}", res.Fetched, res.Inserted, res.Updated, res.Unchanged)
+                res.Message = (string.IsNullOrEmpty(fr.LogPrefix) ? "" : fr.LogPrefix + " ")
+                    + string.Format("ดึง {0} รายการ: ใหม่ {1}, อัปเดต {2}, ซ้ำ {3}", res.Fetched, res.Inserted, res.Updated, res.Unchanged)
                     + (string.IsNullOrEmpty(fr.Note) ? "" : " · " + fr.Note.Trim())
                     + (warns.Count > 0 ? " · ⚠ " + string.Join("; ", warns) : "");
                 store.MarkSuccess(src, fr, owner, warns.Count > 0 ? string.Join("; ", warns) : null);

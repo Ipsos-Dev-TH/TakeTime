@@ -16,6 +16,7 @@
 // ApiConfig (ไม่บังคับ): propertyId, apiEnabled (true), apiUrl, apiMethod (POST|GET), apiBody (ใช้ {hotelId}),
 //   apiHeaders ("Name: value | Name2: value"), forwardCookies (true), providerMap ("332:Agoda,…"), maxItems (20), ratingScale (10),
 //   languageId (22 = ไทย — ยังไม่ยืนยัน; "off" = ไม่ใส่ใน body), locale (th-th), sendLocaleHeaders (false → ag-language-locale/ag-language-id),
+//   langStrategy (PREFER_TH = ส่ง languageId 22 | AS_RETURNED = ไม่ส่ง) — ทั้งสองแบบเก็บตามที่ Agoda ส่ง ระบบไม่แปลเอง,
 //   summaryUrl / summaryMethod (GET) / summaryBody — endpoint สรุปคะแนน (ปิดเป็นค่าเริ่ม; ตั้งแล้วงบคำขอ +1 = 3 และเรียกเฉพาะเมื่อหาคะแนนรวมไม่ได้)
 // placeholder ใน apiUrl/apiBody/summaryUrl/summaryBody: {hotelId} {languageId} {locale}
 // ข้อความรีวิว: เก็บ "ต้นฉบับ" (originalComment/originalTitle …) แทนคำแปลของ Agoda เมื่อมี, Language จากภาษาต้นฉบับ
@@ -102,6 +103,7 @@ namespace Take_Time_BangPhra.Services.Reviews
             };
             var page = Call(diag, "page", "GET", pageUrl, null, pageHeaders, budget - 1);
             budget -= page.Requests;
+            diag.KeepRaw("page GET " + pageUrl + " → HTTP " + page.Status, page.Body);
             if (page.Error != null)
                 throw new Exception("เชื่อมต่อ Agoda ไม่ได้: " + page.Error + " · " + diag.Compact());
             string block = AgodaPageParser.DetectBlock(page.Status, page.Body);
@@ -188,6 +190,19 @@ namespace Take_Time_BangPhra.Services.Reviews
                     TranslatedTitle = AgodaPageParser.ClipPreview(it.TranslatedTitle, 120),
                     TranslatedText = AgodaPageParser.ClipPreview(it.TranslatedText, 220)
                 });
+            // นโยบายภาษา: Agoda ส่งรีวิวแต่ละรายการในภาษาต้นฉบับเมื่อมี — ระบบไม่แปลเอง; สรุปให้เห็นในผลทดสอบ/log
+            if (items.Count > 0)
+            {
+                int nonThai = items.Count(i => i.Language != null && i.Language != "th");
+                int withOrig = items.Count(i => i.TranslatedText != null || i.TranslatedTitle != null);
+                bool anyOrigField = (diag.CommentShortValues ?? "").IndexOf("original", StringComparison.OrdinalIgnoreCase) >= 0;
+                string strat = (src.Cfg("langStrategy", "PREFER_TH") ?? "PREFER_TH").ToUpperInvariant();
+                if (nonThai * 5 >= items.Count * 4)
+                    result.Warnings.Add("ภาษา (" + strat + "): " + nonThai + "/" + items.Count + " รีวิวไม่ใช่ภาษาไทย"
+                        + (withOrig > 0 ? ", ใช้ต้นฉบับแทนคำแปล " + withOrig + " รายการ"
+                           : anyOrigField ? " (มีฟิลด์ต้นฉบับแต่ว่าง = เป็นต้นฉบับอยู่แล้ว)" : " (คำตอบไม่มีฟิลด์ต้นฉบับ)")
+                        + " — เก็บตามที่ Agoda ส่งมา (ระบบไม่แปลเอง)");
+            }
             int mt = items.Count(i => i.MachineTranslated == true);
             if (mt > 0)
                 result.Warnings.Add(mt + " รีวิวได้มาเฉพาะคำแปลของ Agoda (ไม่มีต้นฉบับในคำตอบ) — เก็บพร้อมธงแปลเครื่อง; ลองตั้ง languageId/locale/sendLocaleHeaders");
@@ -237,6 +252,7 @@ namespace Take_Time_BangPhra.Services.Reviews
 
             var resp = Call(diag, "api", method, apiUrl, body, headers, 0);
             var info = diag.Requests.Last();
+            diag.KeepRaw("api " + method + " " + apiUrl + " → HTTP " + resp.Status + (body != null ? "\nbody: " + body : ""), resp.Body);
             if (resp.Error != null)
             {
                 result.Warnings.Add("เรียก endpoint รีวิวไม่สำเร็จ: " + resp.Error);
@@ -345,7 +361,9 @@ namespace Take_Time_BangPhra.Services.Reviews
             string t = template ?? "";
             string langId = src.Cfg("languageId", DefaultLanguageId);
             string locale = src.Cfg("locale", DefaultLocale);
-            bool off = string.Equals(langId, "off", StringComparison.OrdinalIgnoreCase) || !Regex.IsMatch(langId ?? "", @"^\d{1,4}$");
+            // langStrategy: PREFER_TH (ค่าเริ่ม) = ส่ง languageId (ไทย 22) / AS_RETURNED = ไม่ส่ง languageId (ให้ Agoda เลือกเอง)
+            bool asReturned = string.Equals(src.Cfg("langStrategy", "PREFER_TH"), "AS_RETURNED", StringComparison.OrdinalIgnoreCase);
+            bool off = asReturned || string.Equals(langId, "off", StringComparison.OrdinalIgnoreCase) || !Regex.IsMatch(langId ?? "", @"^\d{1,4}$");
             if (off)
             {
                 t = Regex.Replace(t, @"""languageId""\s*:\s*\{languageId\}\s*,?", "");

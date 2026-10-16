@@ -183,6 +183,8 @@ namespace Take_Time_BangPhra.Services.Reviews
         public string Note;
         /// <summary>token AI ที่ใช้ในรอบนี้ (URL_FETCH)</summary>
         public int TokensUsed;
+        /// <summary>คำนำหน้าข้อความ log (เช่น [PARSE_MISS]) — ReviewAggregationService ใส่หน้าข้อความ</summary>
+        public string LogPrefix;
     }
 
     /// <summary>ผลบันทึกรีวิวหนึ่งรายการ</summary>

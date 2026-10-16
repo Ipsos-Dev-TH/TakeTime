@@ -1009,6 +1009,7 @@
     <Compile Include="Class\Services\Reviews\AgodaLightAdapter.cs" />
     <Compile Include="Class\Services\Reviews\LightFetchDiagnostics.cs" />
     <Compile Include="Class\Services\Reviews\GoogleTravelParser.cs" />
+    <Compile Include="Class\Services\Reviews\GoogleEmbeddedData.cs" />
     <Compile Include="Class\Services\Reviews\GoogleTravelLightAdapter.cs" />
     <Compile Include="Class\Services\Reviews\ReviewAiAnalyzer.cs" />
     <Compile Include="Class\Services\Reviews\ReviewImportService.cs" />
