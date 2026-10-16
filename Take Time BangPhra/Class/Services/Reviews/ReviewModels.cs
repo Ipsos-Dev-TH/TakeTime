@@ -1,7 +1,7 @@
 // ===========================================================================
 // ReviewModels.cs — โมเดลกลางของระบบรวมรีวิวหลายแพลตฟอร์ม (PHASE19_26)
 //
-//   IReviewSourceAdapter  : ตัวดึงรีวิวหนึ่งวิธี (GBP_API / PLACES_API / TRIPADVISOR_API / EMAIL / URL_FETCH)
+//   IReviewSourceAdapter  : ตัวดึงรีวิวหนึ่งวิธี (GBP_API / PLACES_API / TRIPADVISOR_API / EMAIL / URL_FETCH / AGODA_LIGHT)
 //   ReviewSourceRow       : แถวหนึ่งของ AI_Review_Sources (+ ApiConfig ที่ถอดรหัสแล้ว — ห้ามส่งไปเบราว์เซอร์)
 //   ReviewItem            : รีวิวหนึ่งรายการในรูปกลาง ก่อนบันทึกด้วย ReviewStore.Upsert
 //   ReviewFetchResult     : ผลการดึงหนึ่งรอบ + คะแนนรวมที่แพลตฟอร์มประกาศ (ถ้ามี)
@@ -22,11 +22,16 @@ namespace Take_Time_BangPhra.Services.Reviews
         public const string Csv = "CSV";
         public const string Manual = "MANUAL";
         public const string UrlFetch = "URL_FETCH";
+        /// <summary>อ่านหน้าที่พัก Agoda วันละครั้ง (JSON-LD + รีวิวที่หน้าแสดง + endpoint รีวิวหน้าแรก) — ไม่ crawl</summary>
+        public const string AgodaLight = "AGODA_LIGHT";
         public const string AiSearch = "AI_SEARCH";
         public const string Legacy = "LEGACY";
 
         public static readonly string[] All =
-            { GbpApi, PlacesApi, TripAdvisorApi, Email, Csv, Manual, UrlFetch, AiSearch };
+            { GbpApi, PlacesApi, TripAdvisorApi, Email, Csv, Manual, UrlFetch, AgodaLight, AiSearch };
+
+        /// <summary>วิธีที่ตัวตั้งเวลาเรียกเองได้ (ต้องตรงกับ AdapterFor และ SQL ใน RunDueSources)</summary>
+        public static readonly string[] Automatic = { GbpApi, PlacesApi, TripAdvisorApi, Email, UrlFetch, AgodaLight };
 
         public static bool IsValid(string m)
         {
@@ -53,6 +58,16 @@ namespace Take_Time_BangPhra.Services.Reviews
     public class ReviewSourceSkippedException : Exception
     {
         public ReviewSourceSkippedException(string message) : base(message) { }
+    }
+
+    /// <summary>
+    /// ปลายทางกันบอท (HTTP 403/429/503, captcha, Access Denied, body ว่าง) — นับเป็น FAILED แบบพิเศษ:
+    /// ไม่ retry ถี่ (เลื่อนรอบเต็ม) และครบ N ครั้งติดกันปิดดึงอัตโนมัติของแหล่งนั้น + แจ้งเตือนครั้งเดียว
+    /// </summary>
+    public class ReviewSourceBlockedException : Exception
+    {
+        public string Marker { get; private set; }
+        public ReviewSourceBlockedException(string marker, string message) : base(message) { Marker = marker; }
     }
 
     public class ReviewSourceRow
@@ -129,6 +144,11 @@ namespace Take_Time_BangPhra.Services.Reviews
         public string RoomType;
         public string TravellerType;
         public bool IsProvisional;
+        /// <summary>
+        /// true = เพิ่มเฉพาะรีวิวที่ยังไม่มี — แถวเดิมที่ไม่ใช่ชั่วคราวจะไม่ถูกแก้ (ไม่เขียนข้อความทับ/ไม่ส่ง AI วิเคราะห์ซ้ำ)
+        /// แถวชั่วคราวจากอีเมลยังถูกเลื่อนขั้นตามปกติ
+        /// </summary>
+        public bool InsertOnly;
     }
 
     public class ReviewFetchResult

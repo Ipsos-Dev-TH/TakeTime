@@ -194,6 +194,10 @@ namespace Take_Time_BangPhra.Services.Reviews
             public string Body;
             /// <summary>Location header (เมื่อ allowRedirect = false และได้ 3xx)</summary>
             public string Location;
+            /// <summary>Set-Cookie ของคำตอบ (ใช้ส่งต่อไปคำขอถัดไปที่โดเมนเดียวกัน — AGODA_LIGHT)</summary>
+            public string[] SetCookies;
+            /// <summary>จำนวนคำขอ HTTP ที่ใช้จริง (รวม redirect) — GetPublic นับให้</summary>
+            public int Requests = 1;
             public bool Ok { get { return Status >= 200 && Status < 300; } }
             public bool IsRedirect { get { return Status >= 300 && Status < 400 && !string.IsNullOrEmpty(Location); } }
         }
@@ -229,7 +233,8 @@ namespace Take_Time_BangPhra.Services.Reviews
             {
                 using (var resp = (HttpWebResponse)req.GetResponse())
                 using (var rd = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
-                    return new Response { Status = (int)resp.StatusCode, Location = resp.Headers["Location"], Body = rd.ReadToEnd() };
+                    return new Response { Status = (int)resp.StatusCode, Location = resp.Headers["Location"],
+                        SetCookies = resp.Headers.GetValues("Set-Cookie"), Body = rd.ReadToEnd() };
             }
             catch (WebException wex)
             {
@@ -237,7 +242,8 @@ namespace Take_Time_BangPhra.Services.Reviews
                 if (r == null) throw;
                 using (r)
                 using (var rd = new StreamReader(r.GetResponseStream(), Encoding.UTF8))
-                    return new Response { Status = (int)r.StatusCode, Location = r.Headers["Location"], Body = rd.ReadToEnd() };
+                    return new Response { Status = (int)r.StatusCode, Location = r.Headers["Location"],
+                        SetCookies = r.Headers.GetValues("Set-Cookie"), Body = rd.ReadToEnd() };
             }
         }
 
@@ -254,12 +260,26 @@ namespace Take_Time_BangPhra.Services.Reviews
                 if (!IsAllowedPublicUrl(current) || !Uri.TryCreate(current, UriKind.Absolute, out uri) || !ResolvesToPublicAddresses(uri.DnsSafeHost))
                     throw new ReviewSourceSkippedException("URL ไม่อยู่ในรายชื่อโดเมนที่อนุญาต หรือชี้ไป IP ภายใน (กัน SSRF): " + current);
                 var resp = Send("GET", current, null, null, headers, timeoutMs, false);
-                if (!resp.IsRedirect) return resp;
+                resp.Requests = hop + 1;
+                // maxRedirects = 0 ⇒ คืน 3xx ให้ผู้เรียกรายงานเอง (AGODA_LIGHT นับจำนวนคำขอเอง)
+                if (!resp.IsRedirect || maxRedirects == 0) return resp;
                 if (hop >= maxRedirects) throw new Exception("redirect มากเกินไป");
                 Uri next;
                 if (!Uri.TryCreate(uri, resp.Location, out next)) throw new Exception("redirect ไม่ถูกต้อง");
                 current = next.AbsoluteUri;
             }
+        }
+
+        /// <summary>
+        /// ส่งคำขอ (เช่น POST JSON) ไป URL ภายนอกแบบกัน SSRF เหมือน GetPublic — ไม่ตาม redirect (3xx คืนกลับให้ผู้เรียกตัดสิน)
+        /// </summary>
+        public static Response SendPublic(string method, string url, string body, string contentType,
+            IDictionary<string, string> headers = null, int timeoutMs = 30000)
+        {
+            Uri uri;
+            if (!IsAllowedPublicUrl(url) || !Uri.TryCreate(url, UriKind.Absolute, out uri) || !ResolvesToPublicAddresses(uri.DnsSafeHost))
+                throw new ReviewSourceSkippedException("URL ไม่อยู่ในรายชื่อโดเมนที่อนุญาต หรือชี้ไป IP ภายใน (กัน SSRF): " + url);
+            return Send(method, url, body, contentType, headers, timeoutMs, false);
         }
 
         /// <summary>true เมื่อ host resolve ได้และทุก IP เป็นที่อยู่สาธารณะ</summary>

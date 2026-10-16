@@ -111,6 +111,10 @@ namespace Take_Time_BangPhra.Services.Reviews
                     }
                 }
 
+                // เพิ่มอย่างเดียว (AGODA_LIGHT): แถวเดิมที่ไม่ใช่ชั่วคราวคงไว้ตามเดิม
+                if (it.InsertOnly && !ex.Provisional)
+                    return new UpsertResult { Outcome = UpsertOutcome.Unchanged, ReviewId = ex.Id };
+
                 // ── อัปเดตเฉพาะเมื่อมีอะไรใหม่จริง ──
                 bool adoptExt = extId != null && (ex.ExternalId == null || (ex.Provisional && ex.ExternalId != extId));
                 bool promote = ex.Provisional && !it.IsProvisional;
@@ -315,13 +319,14 @@ WHERE ID = @id",
         }
 
         /// <summary>บันทึกความล้มเหลว + เลื่อนรอบถัดไปแบบ exponential backoff (15 นาที × 2^(n-1))</summary>
+        /// <param name="minDelayMin">รอบถัดไปไม่เร็วกว่านี้ (นาที) — เช่น AGODA_LIGHT ห้าม retry ถี่</param>
         /// <returns>จำนวนครั้งที่ล้มเหลวติดกันหลังบันทึก</returns>
-        public int MarkFailure(ReviewSourceRow src, string error)
+        public int MarkFailure(ReviewSourceRow src, string error, int minDelayMin = 0)
         {
             int n = src.ConsecutiveFailures + 1;
             int cap = Math.Max(360, src.FetchIntervalMin);
             double backoff = 15 * Math.Pow(2, Math.Min(n - 1, 10));
-            int delay = (int)Math.Min(backoff, cap);
+            int delay = Math.Max((int)Math.Min(backoff, cap), minDelayMin);
             Exec(@"
 UPDATE AI_Review_Sources SET
     Last_Error = @err, Consecutive_Failures = Consecutive_Failures + 1, LastFetchDate = GETDATE(),
@@ -330,6 +335,57 @@ UPDATE AI_Review_Sources SET
 WHERE ID = @id",
                 new Dictionary<string, object> { { "@err", ReviewText.Clip(error, 1000) }, { "@delay", delay }, { "@id", src.Id } });
             return n;
+        }
+
+        /// <summary>
+        /// จำนวนรอบล่าสุดที่ "โดนกันบอท" ติดกัน (อ่านจาก Review_Fetch_Log — ไม่ต้องมีคอลัมน์ใหม่;
+        /// ข้ามแถว SKIPPED/RUNNING เพื่อไม่ให้การกดซ้ำที่ถูกพักไว้ตัดลำดับ)
+        /// </summary>
+        public int CountConsecutiveBlocked(int sourceId, int max)
+        {
+            try
+            {
+                var dt = new code().DatabaseQuerySafe(_conn,
+                    @"SELECT TOP (@n) Status, Message FROM Review_Fetch_Log
+                       WHERE Source_ID = @s AND Status NOT IN ('SKIPPED','RUNNING')
+                       ORDER BY ID DESC",
+                    new Dictionary<string, object> { { "@n", Math.Max(1, max) }, { "@s", sourceId } });
+                int n = 0;
+                foreach (DataRow r in dt.Rows)
+                {
+                    string msg = r["Message"] == DBNull.Value ? "" : r["Message"].ToString();
+                    if (!msg.StartsWith(BlockedPrefix, StringComparison.Ordinal)) break;
+                    n++;
+                }
+                return n;
+            }
+            catch { return 0; }
+        }
+
+        /// <summary>คำนำหน้าข้อความ log ของรอบที่โดนกันบอท (ใช้นับลำดับติดกัน)</summary>
+        public const string BlockedPrefix = "[BLOCKED]";
+
+        /// <summary>ปิดดึงอัตโนมัติของแหล่ง — true เมื่อเพิ่งปิดจริงในครั้งนี้ (ใช้กันแจ้งเตือนซ้ำ)</summary>
+        public bool DisableAuto(int sourceId, string reason)
+        {
+            using (var con = new SqlConnection(_conn))
+            {
+                con.Open();
+                using (var cmd = new SqlCommand(@"
+SET NOCOUNT ON;
+DECLARE @n INT = 0;
+UPDATE AI_Review_Sources SET Is_Enabled = 0, Last_Error = @r, Updated_Date = GETDATE()
+ WHERE ID = @id AND Is_Enabled = 1;
+SET @n = @@ROWCOUNT;
+IF @n = 0 UPDATE AI_Review_Sources SET Last_Error = @r WHERE ID = @id;
+SELECT @n;", con))
+                {
+                    cmd.CommandTimeout = 15;
+                    cmd.Parameters.AddWithValue("@r", ReviewText.Clip(reason ?? "", 1000));
+                    cmd.Parameters.AddWithValue("@id", sourceId);
+                    return Convert.ToInt32(cmd.ExecuteScalar()) == 1;
+                }
+            }
         }
 
         public void MarkSkipped(ReviewSourceRow src, string message)

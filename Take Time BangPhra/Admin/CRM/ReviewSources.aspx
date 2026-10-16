@@ -84,6 +84,12 @@
         </div>
     </div>
 
+    <!-- ผลทดสอบดึง AGODA_LIGHT (ไม่บันทึก) -->
+    <div class="rs-card" id="rsTestCard" style="display:none">
+        <h3><i class="fas fa-vial"></i> ผลทดสอบดึง Agoda (ไม่บันทึก) <span class="rs-muted" id="rsTestWhen"></span></h3>
+        <div id="rsTestBody"></div>
+    </div>
+
     <!-- log -->
     <div class="rs-card">
         <h3><i class="fas fa-history"></i> บันทึกการดึง <span class="rs-muted" id="rsLogFilter"></span></h3>
@@ -172,7 +178,7 @@
             <li><b>หมุน Google API key เดิม</b> ที่เคยฝังในโค้ด/Web.config (หลุดอยู่ในประวัติ git) แล้วใส่คีย์ใหม่ที่ ศูนย์ตั้งค่า (GooglePlacesApiKey) หรือที่แหล่ง GOOGLE</li>
         </ol>
         <div class="rs-help legal"><b>ข้อกฎหมาย/ข้อกำหนด:</b> Booking.com, Google Maps, Tripadvisor, Airbnb ห้ามดึงหน้าเว็บอัตโนมัติ (scraping) —
-            วิธี URL_FETCH จึงปิดสำหรับตัวตั้งเวลาเป็นค่าเริ่มต้น; Google Places API ห้ามเก็บเนื้อหารีวิวถาวร (ได้แค่ 5 รายการ);
+            วิธี URL_FETCH จึงปิดสำหรับตัวตั้งเวลาเป็นค่าเริ่มต้น; AGODA_LIGHT (อ่านหน้าที่พัก Agoda วันละครั้ง ไม่ crawl) เป็นการเลือกของเจ้าของ — เปิดได้เฉพาะ Owner/Admin และปิดตัวเองเมื่อโดนกันบอท; Google Places API ห้ามเก็บเนื้อหารีวิวถาวร (ได้แค่ 5 รายการ);
             รีวิวจาก Booking.com Review API (ผ่าน channel manager) ใช้ภายในเท่านั้น ห้ามนำไปแสดงบนเว็บโรงแรม</div>
     </div>
 </div>
@@ -184,7 +190,7 @@
         <div class="rs-grid">
             <div class="rs-field"><label>วิธีรับรีวิว</label><select id="mdMethod" onchange="rsRenderFields()"></select></div>
             <div class="rs-field"><label>รอบดึง (นาที)</label><input type="number" id="mdInterval" min="15" max="10080" />
-                <div class="hint">ขั้นต่ำ 15 นาที — แนะนำ: อีเมล 60, GBP 180, Tripadvisor/Places 1440</div></div>
+                <div class="hint">ขั้นต่ำ 15 นาที (AGODA_LIGHT ขั้นต่ำ 720) — แนะนำ: อีเมล 60, GBP 180, Tripadvisor/Places/Agoda 1440</div></div>
             <div class="rs-field"><label>&nbsp;</label><label style="font-weight:400"><input type="checkbox" id="mdAuto" /> เปิดดึงอัตโนมัติ</label></div>
             <div class="rs-field" id="mdUrlWrap"><label>URL หน้ารีวิว / หน้าที่พัก</label><input type="text" id="mdUrl" maxlength="1000" /></div>
         </div>
@@ -208,9 +214,11 @@
     var METHOD_LABEL = {
         'GBP_API': 'Google Business Profile API', 'PLACES_API': 'Google Places API (5 รีวิว)',
         'TRIPADVISOR_API': 'Tripadvisor Content API', 'EMAIL': 'อีเมลแจ้งรีวิวใหม่',
-        'CSV': 'นำเข้า CSV (มือ)', 'MANUAL': 'ป้อนเอง', 'URL_FETCH': 'ดึงหน้าเว็บ + AI (⚠ ToS)', 'AI_SEARCH': 'ค้นหาด้วย AI (มือ)'
+        'CSV': 'นำเข้า CSV (มือ)', 'MANUAL': 'ป้อนเอง', 'URL_FETCH': 'ดึงหน้าเว็บ + AI (⚠ ToS)',
+        'AGODA_LIGHT': 'Agoda: อ่านหน้าที่พักวันละครั้ง (light)', 'AI_SEARCH': 'ค้นหาด้วย AI (มือ)'
     };
-    var AUTO_METHODS = ['GBP_API', 'PLACES_API', 'TRIPADVISOR_API', 'EMAIL', 'URL_FETCH'];
+    var AUTO_METHODS = ['GBP_API', 'PLACES_API', 'TRIPADVISOR_API', 'EMAIL', 'URL_FETCH', 'AGODA_LIGHT'];
+    var AGODA_MIN_INTERVAL = 720;
 
     // ช่องตั้งค่าต่อวิธี — secret:true = เขียนได้อย่างเดียว (ค่าจริงไม่ถูกส่งมาที่เบราว์เซอร์)
     var FIELDS = {
@@ -248,6 +256,17 @@
             { k: 'scoreRegex', l: 'regex คะแนน (ขั้นสูง)', h: 'กลุ่ม 1 = คะแนน, กลุ่ม 2 = คะแนนเต็ม' }
         ],
         'URL_FETCH': [],
+        'AGODA_LIGHT': [
+            { k: 'propertyId', l: 'รหัสที่พัก (propertyId)', h: 'เว้นว่าง = หาเองจากหน้าเว็บ (ดูผลที่ปุ่ม ทดสอบดึง)' },
+            { k: 'apiEnabled', l: 'เรียก endpoint รีวิวเมื่อหน้าไม่มีรีวิวฝังมา (true/false)', h: 'ค่าเริ่ม true — false = อ่านเฉพาะหน้าที่พัก (1 คำขอ/รอบ)' },
+            { k: 'apiUrl', l: 'endpoint รีวิว (ขั้นสูง)', h: '⚠ ค่าเริ่มยังไม่ยืนยัน: https://www.agoda.com/api/cronos/property/review/ReviewComments — ใช้ {hotelId} ได้' },
+            { k: 'apiMethod', l: 'HTTP method ของ endpoint', h: 'POST (ค่าเริ่ม) หรือ GET' },
+            { k: 'apiBody', l: 'body ของ POST (JSON, ใช้ {hotelId})', h: 'เว้นว่าง = ค่าเริ่ม (หน้าแรก 20 รายการ ล่าสุดก่อน — ยังไม่ยืนยัน)' },
+            { k: 'apiHeaders', l: 'header เพิ่มเติม', h: 'รูปแบบ Name: value | Name2: value' },
+            { k: 'forwardCookies', l: 'ส่งคุกกี้จากหน้าที่พักต่อให้ endpoint (true/false)', h: 'ค่าเริ่ม true' },
+            { k: 'providerMap', l: 'providerId → แพลตฟอร์ม', h: 'ค่าเริ่ม 332:Agoda (อื่น ๆ ยังไม่ยืนยัน เช่น 3038:Booking.com)' },
+            { k: 'maxItems', l: 'จำนวนรีวิวสูงสุดต่อรอบ', h: 'ค่าเริ่ม 20 (หน้าแรกเท่านั้น)' }
+        ],
         'AI_SEARCH': [{ k: 'searchKeyword', l: 'คำค้น', h: 'ใช้กับปุ่มค้นหาด้วย AI ในหน้าวิเคราะห์รีวิว' }],
         'CSV': [], 'MANUAL': []
     };
@@ -260,6 +279,10 @@
         'CSV': 'ไม่มีการดึงอัตโนมัติ — export จาก extranet แล้วนำเข้าที่ส่วน "นำเข้า" ด้านล่าง (เดือนละครั้ง / ย้อนหลังครั้งแรก)',
         'MANUAL': 'ไม่มีการดึงอัตโนมัติ — ป้อนทีละรีวิวที่ส่วน "นำเข้า" (เช่น Facebook ที่ Meta เลิกให้ API แล้ว, Airbnb, Wongnai)',
         'URL_FETCH': '<b style="color:#c62828">⚠ ขัดข้อกำหนดการใช้งานของ Booking.com / Agoda / Tripadvisor / Google</b> และพังบ่อย (หน้า render ด้วย JavaScript / กันบอท). ตัวตั้งเวลาจะไม่ทำงานจนกว่า Owner เปิด "อนุญาตดึงจากหน้าเว็บ OTA" ในค่าตั้งกลาง — ใช้ token AI ทุกครั้ง',
+        'AGODA_LIGHT': '<b>Agoda แบบเบา</b> — ไม่ crawl: ต่อรอบอ่านหน้าที่พัก 1 ครั้ง (คะแนนรวมจาก JSON-LD + รีวิวที่หน้าแสดง) และถ้าหน้าไม่มีรีวิวจะเรียก endpoint รีวิวหน้าแรกอีก 1 ครั้ง (รวมไม่เกิน 2 คำขอ). '
+            + 'รอบขั้นต่ำ 720 นาที (แนะนำ 1440), เพิ่มเฉพาะรีวิวใหม่, เก็บแค่ชื่อที่แสดง. โดนกันบอท 3 ครั้งติดระบบปิดดึงอัตโนมัติเองและแจ้งเตือน. '
+            + 'เปิดดึงอัตโนมัติได้เฉพาะ Owner/Admin — กด <b>ทดสอบดึง (ไม่บันทึก)</b> ก่อนเปิด. '
+            + '<br/><b style="color:#c62828">⚠ ข้อกำหนดการใช้งานของ Agoda ไม่อนุญาตการดึงข้อมูลอัตโนมัติ</b> — เจ้าของเลือกใช้เองโดยรับความเสี่ยง (ทางที่ถูกข้อกำหนดคือ อีเมลแจ้งรีวิว / CSV จาก YCS)',
         'AI_SEARCH': 'ค้นหาเว็บ/สังคมออนไลน์ด้วย AI จากหน้าวิเคราะห์รีวิวเดิม (กดเอง ไม่ตั้งเวลา) — ข้อมูลไม่แน่นอน ใช้เป็นสัญญาณเท่านั้น',
         '': 'ยังไม่ได้เลือกวิธี'
     };
@@ -352,6 +375,7 @@
                 + '<td style="white-space:nowrap">'
                 + '<button type="button" class="rs-btn sec" onclick="rsEdit(' + i + ')">ตั้งค่า</button>'
                 + (auto ? '<button type="button" class="rs-btn" onclick="rsFetch(' + i + ', this)">ดึงตอนนี้</button>' : '')
+                + (s.method === 'AGODA_LIGHT' ? '<button type="button" class="rs-btn sec" onclick="rsTestAgoda(' + i + ', this)">ทดสอบดึง (ไม่บันทึก)</button>' : '')
                 + '<button type="button" class="rs-btn sec" onclick="rsLoadLog(\'' + esc(s.code) + '\')">log</button>'
                 + '</td></tr>';
         });
@@ -375,6 +399,60 @@
             load(); rsLoadLog(s.code);
         }).catch(function (e) { btn.disabled = false; btn.textContent = 'ดึงตอนนี้'; toast('ดึงไม่สำเร็จ: ' + e, 'err'); });
     };
+
+    // ── ทดสอบดึง AGODA_LIGHT (dry-run) — ทุกค่าที่มาจาก Agoda ผ่าน esc() ──
+    window.rsTestAgoda = function (i, btn) {
+        var s = state.sources[i];
+        btn.disabled = true; btn.textContent = 'กำลังทดสอบ…';
+        api('testAgoda', { code: s.code }).then(function (r) {
+            btn.disabled = false; btn.textContent = 'ทดสอบดึง (ไม่บันทึก)';
+            if (!r.success) { toast(r.message, 'warn'); return; }
+            renderAgodaDiag(s, r.diag);
+        }).catch(function (e) { btn.disabled = false; btn.textContent = 'ทดสอบดึง (ไม่บันทึก)'; toast('ทดสอบไม่สำเร็จ: ' + e, 'err'); });
+    };
+
+    function renderAgodaDiag(s, d) {
+        var h = '';
+        var kind = d.blocked ? 'err' : (d.error ? 'err' : (d.reviewsParsed > 0 ? 'ok' : 'warn'));
+        h += '<div class="rs-alert ' + kind + '">'
+            + (d.blocked ? '⛔ <b>โดนกันบอท</b> — ' : (d.error ? '❌ ' : (d.reviewsParsed > 0 ? '✅ ' : '⚠ ')))
+            + esc(d.error || ('แกะได้ ' + d.reviewsParsed + ' รีวิว · เส้นทาง: ' + d.parsePath)) + '</div>';
+        h += '<table class="rs-table"><thead><tr><th>คำขอ</th><th>method</th><th>URL</th><th>HTTP</th><th>ขนาด</th><th>เวลา</th><th>ตัวบ่งชี้กันบอท</th></tr></thead><tbody>';
+        (d.requests || []).forEach(function (q) {
+            h += '<tr><td>' + esc(q.label) + (q.hops > 1 ? ' <span class="rs-muted">(' + q.hops + ' hops)</span>' : '') + '</td><td>' + esc(q.method) + '</td>'
+                + '<td style="word-break:break-all;max-width:360px">' + esc(q.url) + '</td>'
+                + '<td>' + (q.error ? '<span class="rs-err">' + esc(q.error) + '</span>' : esc(q.status)) + '</td>'
+                + '<td>' + esc(Math.round((q.bytes || 0) / 1024)) + ' KB</td><td>' + esc(q.ms) + ' ms</td>'
+                + '<td>' + (q.block ? '<span class="rs-badge FAILED">' + esc(q.block) + '</span>' : '<span class="rs-muted">ไม่พบ</span>') + '</td></tr>';
+        });
+        h += '</tbody></table>';
+        h += '<ul style="margin:12px 0;line-height:1.8">'
+            + '<li>JSON-LD: ' + (d.rating !== null && d.rating !== undefined
+                ? '<b>' + esc(d.rating) + '/' + esc(d.ratingBest || 10) + '</b>' + (d.ratingCount ? ' (' + esc(d.ratingCount) + ' รีวิว)' : '')
+                : (d.jsonLdFound ? 'พบ ' + esc(d.jsonLdBlocks) + ' บล็อก แต่ไม่มี aggregateRating' : 'ไม่พบ')) + '</li>'
+            + '<li>รหัสที่พัก: ' + (d.propertyId ? '<b>' + esc(d.propertyId) + '</b> <span class="rs-muted">(' + esc(d.propertyIdPattern) + ')</span>' : '<span class="rs-err">ไม่พบ</span>')
+            + (d.propertyIdCandidates ? ' <span class="rs-muted">อื่น ๆ: ' + esc(d.propertyIdCandidates) + '</span>' : '') + '</li>'
+            + '<li>เส้นทาง HTML (DOM รายการรีวิว): ' + (d.htmlDomReviews > 0 ? '<b>พบ ' + esc(d.htmlDomReviews) + ' รีวิว</b>'
+                : (d.htmlDomBlocks > 0 ? '<span class="rs-err">เห็น ' + esc(d.htmlDomBlocks) + ' บล็อก แต่แกะไม่ได้</span>' : 'ไม่พบใน HTML ที่เซิร์ฟเวอร์ส่งมา')) + '</li>'
+            + '<li>เส้นทางที่ใช้ได้: <code>' + esc(d.parsePath) + '</code> · แกะได้ <b>' + esc(d.reviewsParsed) + '</b> รีวิว</li>'
+            + ((d.unknownProviders || []).length ? '<li>providerId ไม่รู้จัก: ' + esc(d.unknownProviders.join(', ')) + ' (ตั้ง providerMap)</li>' : '')
+            + '</ul>';
+        if ((d.previews || []).length) {
+            h += '<div class="rs-muted" style="margin-bottom:4px">ตัวอย่าง 3 รายการแรก</div>';
+            d.previews.forEach(function (p) {
+                h += '<div class="rs-help">⭐ <b>' + esc(p.rating === null || p.rating === undefined ? '?' : p.rating) + '/' + esc(p.scale || 10) + '</b> · '
+                    + esc(p.origin) + ' · ' + esc(p.name || '(ไม่มีชื่อ)') + ' · ' + esc(p.date || 'ไม่มีวันที่')
+                    + (p.extId ? ' <span class="rs-muted">' + esc(p.extId) + '</span>' : '')
+                    + (p.title ? '<div><b>' + esc(p.title) + '</b></div>' : '') + '<div>' + esc(p.text) + '</div></div>';
+            });
+        }
+        if ((d.warnings || []).length) h += '<div class="rs-alert warn">' + d.warnings.map(esc).join('<br/>') + '</div>';
+        h += '<div class="rs-muted">บรรทัดสรุป (แบบเดียวกับที่บันทึกใน log ตอนดึงจริง): <code>' + esc(d.compact) + '</code></div>';
+        $('rsTestBody').innerHTML = h;
+        $('rsTestWhen').textContent = '(' + s.name + ' · ' + new Date().toLocaleString('th-TH') + ')';
+        $('rsTestCard').style.display = 'block';
+        $('rsTestCard').scrollIntoView({ behavior: 'smooth' });
+    }
 
     window.rsLoadLog = function (code) {
         $('rsLogFilter').textContent = code ? '(' + code + ')' : '(ทุกแหล่ง)';
@@ -412,8 +490,11 @@
         var s = state.editing; if (!s) return;
         var m = $('mdMethod').value;
         $('mdHelp').innerHTML = HELP[m] || '';
-        $('mdHelp').className = 'rs-help' + (m === 'URL_FETCH' || m === 'PLACES_API' ? ' legal' : '');
-        $('mdUrlWrap').style.display = (m === 'URL_FETCH') ? '' : 'none';
+        $('mdHelp').className = 'rs-help' + (m === 'URL_FETCH' || m === 'PLACES_API' || m === 'AGODA_LIGHT' ? ' legal' : '');
+        $('mdUrlWrap').style.display = (m === 'URL_FETCH' || m === 'AGODA_LIGHT') ? '' : 'none';
+        $('mdInterval').min = m === 'AGODA_LIGHT' ? AGODA_MIN_INTERVAL : 15;
+        if (m === 'AGODA_LIGHT' && Number($('mdInterval').value) < AGODA_MIN_INTERVAL) $('mdInterval').value = 1440;
+        if (m === 'AGODA_LIGHT' && s.code === 'AGODA' && !$('mdUrl').value) $('mdUrl').value = 'https://www.agoda.com/th-th/take-time-mirror-room/hotel/chonburi-th.html';
         var cfg = s.config || {};
         var h = '';
         (FIELDS[m] || []).forEach(function (f) {
