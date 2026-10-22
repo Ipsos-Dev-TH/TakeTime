@@ -461,5 +461,32 @@ namespace Take_Time_BangPhra.Account.Report
         /// txtCilWitnessPosition control.
         /// </summary>
         protected global::System.Web.UI.WebControls.TextBox txtCilWitnessPosition;
+
+        /// <summary>
+        /// ddlGoodsReceipt control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.DropDownList ddlGoodsReceipt;
+
+        /// <summary>
+        /// btnAddGrniLine control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Button btnAddGrniLine;
+
+        /// <summary>
+        /// litGrniInfo control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Literal litGrniInfo;
     }
 }

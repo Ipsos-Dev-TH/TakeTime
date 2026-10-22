@@ -1772,6 +1772,10 @@ namespace Take_Time_BangPhra.Integration
         public string MovementType { get; set; }
         public decimal Quantity { get; set; }
         public decimal UnitCost { get; set; }
+        // NextAcc StockMovementResponse (ProductDtos.cs:102-112) — ใช้แยก movement ซื้อเข้าจาก OCR/ใบซื้อ (PHASE19_31)
+        public decimal BalanceAfter { get; set; }
+        public string Reference { get; set; }
+        public string Notes { get; set; }
     }
 
     public class PayrollEmployeeSyncRow

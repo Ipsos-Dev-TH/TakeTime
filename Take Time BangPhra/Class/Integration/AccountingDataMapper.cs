@@ -1197,6 +1197,72 @@ namespace Take_Time_BangPhra.Integration
             };
         }
 
+        /// <summary>
+        /// คืนสินค้าให้ผู้ขาย / ใบลดหนี้จากผู้ขาย (PHASE19_31):
+        ///   Dr คู่บัญชี (GRNI | ACCOUNTS_PAYABLE | แหล่งเงิน)   purchaseNet + vatReversal   (ราคาที่ผู้ขายลดหนี้/คืนเงิน)
+        ///       Cr INVENTORY                                     carryingCost (จำนวนคืน × ต้นทุนเฉลี่ย)
+        ///       Cr INPUT_VAT                                     vatReversal  (§82/10 ลดภาษีซื้อเดือนที่ได้รับใบลดหนี้)
+        ///   ผลต่าง purchaseNet − carryingCost → PURCHASE_RETURNS (Cr เมื่อบวก / Dr เมื่อลบ) — กัน GRNI/เจ้าหนี้ค้างเศษ
+        ///   และคงสินค้าคงเหลือ GL = จำนวน × ค่าเฉลี่ย.
+        /// </summary>
+        public CreateJournalEntryRequest MapPurchaseReturnToJournal(string returnRef, DateTime returnDate,
+            string supplierName, string supplierDocNo, string counterKey,
+            decimal purchaseNet, decimal carryingCost, decimal vatReversal,
+            string paymentMethod = null, string paymentAccountId = null, string reason = null)
+        {
+            purchaseNet = Math.Round(purchaseNet, 2, MidpointRounding.AwayFromZero);
+            carryingCost = Math.Round(carryingCost, 2, MidpointRounding.AwayFromZero);
+            vatReversal = Math.Round(vatReversal, 2, MidpointRounding.AwayFromZero);
+            decimal counterAmount = purchaseNet + vatReversal;
+            if (counterAmount <= 0 && carryingCost <= 0)
+                throw new ArgumentException($"MapPurchaseReturnToJournal: ยอดเป็นศูนย์ ref={returnRef}");
+
+            Guid counterAccountId;
+            string counterDesc;
+            switch ((counterKey ?? "").ToUpperInvariant())
+            {
+                case "CASH":
+                    counterAccountId = ResolveAccountId(paymentAccountId) ?? GetPaymentMethodAccountId(paymentMethod);
+                    counterDesc = $"รับเงินคืนจากผู้ขาย - {supplierName}";
+                    break;
+                case "ACCOUNTS_PAYABLE":
+                    counterAccountId = GetAccountId("ACCOUNTS_PAYABLE");
+                    counterDesc = $"ลดหนี้ผู้ขาย - {supplierName}";
+                    break;
+                default:
+                    counterAccountId = GetAccountId("GRNI");
+                    counterDesc = $"ลดยอดรับของยังไม่วางบิล - {supplierName}";
+                    break;
+            }
+
+            var lines = new List<JournalEntryLineRequest>();
+            if (counterAmount > 0)
+                lines.Add(new JournalEntryLineRequest { AccountId = counterAccountId, DebitAmount = counterAmount, CreditAmount = 0, Description = counterDesc });
+            if (carryingCost > 0)
+                lines.Add(new JournalEntryLineRequest { AccountId = GetAccountId("INVENTORY"), DebitAmount = 0, CreditAmount = carryingCost, Description = $"คืนสินค้าให้ผู้ขาย (ต้นทุนเฉลี่ย) {returnRef}" });
+            if (vatReversal > 0)
+                lines.Add(new JournalEntryLineRequest { AccountId = GetAccountId("INPUT_VAT"), DebitAmount = 0, CreditAmount = vatReversal, Description = $"กลับภาษีซื้อตามใบลดหนี้ {supplierDocNo}".Trim() });
+
+            decimal diff = purchaseNet - carryingCost;
+            if (diff != 0)
+            {
+                var prId = GetAccountId("PURCHASE_RETURNS");
+                lines.Add(diff > 0
+                    ? new JournalEntryLineRequest { AccountId = prId, DebitAmount = 0, CreditAmount = diff, Description = "ผลต่างราคาคืนสินค้าสูงกว่าต้นทุนเฉลี่ย" }
+                    : new JournalEntryLineRequest { AccountId = prId, DebitAmount = -diff, CreditAmount = 0, Description = "ผลต่างราคาคืนสินค้าต่ำกว่าต้นทุนเฉลี่ย" });
+            }
+
+            return new CreateJournalEntryRequest
+            {
+                EntryDate = returnDate,
+                JournalType = (counterKey ?? "").ToUpperInvariant() == "CASH" ? NexaaccJournalType.CashReceipts : NexaaccJournalType.Purchase,
+                Description = $"คืนสินค้าให้ผู้ขาย {supplierName}" + (string.IsNullOrEmpty(supplierDocNo) ? "" : $" ใบลดหนี้ {supplierDocNo}")
+                    + (string.IsNullOrEmpty(reason) ? "" : $" ({reason})"),
+                Reference = returnRef,
+                Lines = lines
+            };
+        }
+
         // ──────────────────────────────────────────────
         // Receipt / Document Mapping
         // ──────────────────────────────────────────────

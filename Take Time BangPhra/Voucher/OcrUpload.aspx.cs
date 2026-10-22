@@ -528,10 +528,17 @@ namespace Take_Time_BangPhra.Voucher
 
             // GR/IR: ถ้าใบนี้คือ "ใบกำกับของสินค้าที่รับเข้าสต๊อกแล้ว" → เดบิต GRNI (ล้างรับของ) แทนค่าใช้จ่าย
             // → NextAcc โพสต์ Dr GRNI + Dr ภาษีซื้อ / Cr แหล่งเงิน = ล้างพักรับของ + เคลม VAT, ไม่โพสต์สินค้าซ้ำ
-            string grniCode = LookupMappedAccountCode("GRNI");
+            // บัญชีล้างรับของตามโหมดรับของ — ตัวเดียวกับหน้าใบสำคัญจ่าย (PurchaseService.ClearingAccountKey, PHASE19_31):
+            //   GR/IR (default) → GRNI · Nexaacc_StockIn_SkipJournal/LOCAL (รับของไม่โพสต์ JE) → สินค้าคงเหลือ · GR/IR ปิด → เจ้าหนี้
+            string clearKey = "GRNI";
+            try { clearKey = Take_Time_BangPhra.Purchasing.PurchaseService.ClearingAccountKey(new AccountingConfig(Conn)); } catch { }
+            string grniCode = LookupMappedAccountCode(clearKey);
             if (!string.IsNullOrEmpty(grniCode))
                 ddlChargeAccount.Items.Add(new ListItem(
-                    $"🔄 ล้างรับของ GRNI {grniCode} (ใบกำกับสินค้าที่รับเข้าสต๊อกแล้ว)", grniCode));
+                    clearKey == "GRNI"
+                        ? $"🔄 ล้างรับของ GRNI {grniCode} (ใบกำกับสินค้าที่รับเข้าสต๊อกแล้ว)"
+                        : $"🔄 ล้างรับของ {grniCode} {Take_Time_BangPhra.Purchasing.PurchaseService.ClearingAccountLabel(clearKey)} (ใบกำกับสินค้าที่รับเข้าสต๊อกแล้ว)",
+                    grniCode));
 
             // 5x ค่าใช้จ่าย + 12x สินทรัพย์ถาวร + เจ้าหนี้/เงินทดรองกรรมการ (2x ที่ชื่อมี "กรรมการ")
             // → รองรับเคส "คืนเงินทดรองกรรมการ" (Dr เจ้าหนี้กรรมการ / Cr เงินสด-ธนาคาร) ที่เดบิตเป็นหนี้สิน

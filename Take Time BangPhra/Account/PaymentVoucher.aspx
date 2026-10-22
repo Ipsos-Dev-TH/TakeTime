@@ -456,7 +456,7 @@
                     </asp:SqlDataSource>
                     &nbsp;
                     <asp:CheckBox ID="chkIsCredit" runat="server" Text=" เครดิต (ยังไม่จ่ายเงิน)" Font-Bold="true" />
-                    <span style="color: #888; font-size: 12px; margin-left: 5px;">ติ๊กถ้าเป็นเครดิต — NextAcc จะไม่บันทึกชำระเงินอัตโนมัติ</span>
+                    <span style="color: #888; font-size: 12px; margin-left: 5px;">ติ๊กถ้าเป็นเครดิต — NextAcc จะไม่บันทึกชำระเงินอัตโนมัติ · จ่ายภายหลังที่ <a href="/Account/CreditPurchasePayment">ชำระใบซื้อเชื่อ</a></span>
                     <br />
                     <div style="margin-top:6px;">
                         <span style="font-size:12px; color:#2b6cb0;">บังคับแหล่งจ่ายเงิน (ผังบัญชี NextAcc):</span>
@@ -535,7 +535,16 @@
                  </td>
             </tr>
 
-           
+            <tr style="background-color:#e8f5e9;">
+                 <td class="modal-sm" style="width: 20%; text-align: right; vertical-align: top;">ค่าสินค้าที่รับเข้าแล้ว:</td>
+                <td>
+                    &nbsp;<asp:DropDownList ID="ddlGoodsReceipt" runat="server" Width="60%" CssClass="form-control" />
+                    <asp:Button ID="btnAddGrniLine" runat="server" Text="➕ ชำระค่าสินค้าที่รับเข้าแล้ว" CssClass="btn-add" OnClick="btnAddGrniLine_Click" />
+                    <br />
+                    <span style="color:#2e7d32; font-size:11px;">ใบนี้คือค่าสินค้าที่บันทึกรับเข้าสต๊อก (หน้า นำเข้าสินค้า) แล้ว → เลือกการรับของ แล้วกดปุ่ม: รายการจะลง Dr GRNI/ล้างรับของ แทนค่าใช้จ่าย (สินค้าลงต้นทุนตอนขายแล้ว — ห้ามลงค่าใช้จ่ายซ้ำ). ภาษีซื้อยังเคลมตามปกติ</span>
+                    <asp:Literal ID="litGrniInfo" runat="server"></asp:Literal>
+                 </td>
+            </tr>
 
             <tr style="background-color:whitesmoke;">
                  <td class="modal-sm" style="width: 20%; text-align: right">หมวดค่าใช้จ่าย (รายการ): </td>

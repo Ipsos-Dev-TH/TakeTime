@@ -1355,6 +1355,198 @@ namespace Take_Time_BangPhra.Integration
         }
 
         // ──────────────────────────────────────────────
+        // ฝั่งซื้อ (PHASE19_31): รับของแยก "JE" กับ "qty push" + คืนสินค้าให้ผู้ขาย
+        // ──────────────────────────────────────────────
+
+        /// <summary>
+        /// รับสินค้าเข้าสต๊อก (หน้า Product/In) — แยกสองเรื่องที่ EnqueueStockIn ผูกติดกัน:
+        ///   postJournal → STOCK_IN (Dr สินค้าคงเหลือ / Cr GRNI ฯลฯ — ตาม ProcessStockIn เดิม) เฉพาะเมื่อต้นทุน > 0
+        ///   pushQty     → STOCK_QTY_PUSH (ทำงานเฉพาะเมื่อ Nexaacc_StockQtySync=1)
+        /// เดิม Nexaacc_StockIn_SkipJournal / voucher LOCAL / ต้นทุน 0 ทำให้ข้าม EnqueueStockIn ทั้งก้อน ⇒ จำนวนไม่ถึง NextAcc เลย.
+        /// โหมด Nexaacc_Purchase_Qty_Source=NEXTACC_OCR ผู้เรียกส่ง pushQty=false (ใบซื้อ/OCR ใน NextAcc เป็นผู้รับเข้าเอง).
+        /// คืน queue id ของ STOCK_IN (ไม่มี JE = -1 แม้ qty push เข้าคิวแล้ว)
+        /// </summary>
+        public long EnqueueGoodsReceipt(int productId, string productName, decimal quantity, decimal costPerUnit,
+            DateTime receiveDate, string supplierName, string stockRef, bool postJournal, bool pushQty)
+        {
+            if (!_config.IsConfigured) return -1;
+            if (productId <= 0 || quantity <= 0) return -1;
+
+            string refStr = !string.IsNullOrEmpty(stockRef) ? stockRef : $"PIN-{productId}-{receiveDate:yyyyMMddHHmmss}";
+            if (pushQty)
+                EnqueueStockQtyPush(productId, productName, quantity, "IN", costPerUnit > 0 ? costPerUnit : 0m, receiveDate, refStr);
+
+            if (!postJournal || costPerUnit <= 0) return -1;
+
+            long existing = FindPendingEntry("STOCK", "STOCK_IN", "stockRef", refStr);
+            if (existing > 0) return existing;
+            long completed = FindRecentCompletedEntry("STOCK", "STOCK_IN", "stockRef", refStr, 86400);
+            if (completed > 0) return completed;
+
+            var payload = new Dictionary<string, object>
+            {
+                { "stockRef", refStr },
+                { "productId", productId },
+                { "productName", productName ?? "" },
+                { "quantity", quantity },
+                { "costPerUnit", costPerUnit },
+                { "totalCost", Math.Round(quantity * costPerUnit, 2) },
+                { "receiveDate", AcctDate(receiveDate, true) },
+                { "supplierName", supplierName ?? "" },
+                { "paymentMethod", "" },        // Product/In ไม่จ่ายเงินเอง — ชำระผ่านใบสำคัญจ่ายที่ผูก batch
+                { "hasInputVat", false }        // ราคาที่ส่งเป็นสุทธิเสมอ; ภาษีซื้อลงที่ใบสำคัญจ่าย/ใบกำกับ
+            };
+            return InsertQueue("STOCK", productId, "STOCK_IN", payload);
+        }
+
+        /// <summary>บรรทัดสินค้าที่คืนผู้ขาย (สำหรับ qty push)</summary>
+        public sealed class PurchaseReturnLine
+        {
+            public int ProductId;
+            public string ProductName;
+            public decimal Quantity;
+            public decimal CarryingUnitCost;
+        }
+
+        /// <summary>
+        /// คืนสินค้าให้ผู้ขาย / ใบลดหนี้จากผู้ขาย (หน้า Product/PurchaseReturn).
+        ///   • qty push OUT ต่อสินค้า (ถ้า pushQty และเปิด Nexaacc_StockQtySync) ref "{returnRef}-{productId}"
+        ///   • JE PURCHASE_RETURN (ถ้า counterKey ≠ NONE): Dr คู่บัญชี (GRNI/เจ้าหนี้/แหล่งเงิน) ราคาซื้อ+VAT
+        ///     / Cr สินค้าคงเหลือ ณ ค่าเฉลี่ย / Cr ภาษีซื้อ (กลับ) / ผลต่าง → PURCHASE_RETURNS (51300). ref = returnRef
+        /// idempotent: คิวกันซ้ำด้วย stockRef=returnRef (30 วัน) + NextAcc journal Reference เดียวกัน
+        /// </summary>
+        public long EnqueuePurchaseReturn(string returnRef, string receiptBatch, string supplierName, string supplierDocNo,
+            DateTime returnDate, string counterKey, decimal purchaseNet, decimal carryingCost, decimal vatReversal,
+            string paymentMethod, string paymentAccountId, IList<PurchaseReturnLine> lines, bool pushQty, string reason)
+        {
+            if (!_config.IsConfigured || string.IsNullOrEmpty(returnRef)) return -1;
+
+            if (pushQty && lines != null)
+                foreach (var l in lines)
+                    if (l != null && l.ProductId > 0 && l.Quantity > 0)
+                        EnqueueStockQtyPush(l.ProductId, l.ProductName, l.Quantity, "OUT", l.CarryingUnitCost, returnDate, $"{returnRef}-{l.ProductId}");
+
+            if (string.IsNullOrEmpty(counterKey) || counterKey == "NONE") return -1;
+            if (purchaseNet + vatReversal <= 0 && carryingCost <= 0) return -1;
+
+            long existing = FindPendingEntry("STOCK", "PURCHASE_RETURN", "stockRef", returnRef);
+            if (existing > 0) return existing;
+            long completed = FindRecentCompletedEntry("STOCK", "PURCHASE_RETURN", "stockRef", returnRef, 86400 * 30);
+            if (completed > 0) return completed;
+
+            var payload = new Dictionary<string, object>
+            {
+                { "stockRef", returnRef },
+                { "receiptBatch", receiptBatch ?? "" },
+                { "supplierName", supplierName ?? "" },
+                { "supplierDocNo", supplierDocNo ?? "" },
+                { "returnDate", AcctDate(returnDate, true) },
+                { "counterKey", counterKey },
+                { "purchaseNet", Math.Round(purchaseNet, 2) },
+                { "carryingCost", Math.Round(carryingCost, 2) },
+                { "vatReversal", Math.Round(vatReversal, 2) },
+                { "paymentMethod", paymentMethod ?? "" },
+                { "reason", reason ?? "" }
+            };
+            if (!string.IsNullOrEmpty(paymentAccountId)) payload["paymentAccountId"] = paymentAccountId;
+            return InsertQueue("STOCK", 0, "PURCHASE_RETURN", payload);
+        }
+
+        private async Task<string> ProcessPurchaseReturn(Dictionary<string, object> p)
+        {
+            string returnRef = p["stockRef"]?.ToString();
+            string counterKey = p.ContainsKey("counterKey") ? p["counterKey"]?.ToString() : "GRNI";
+            decimal purchaseNet = p.ContainsKey("purchaseNet") ? SafeDec(p["purchaseNet"]) : 0m;
+            decimal carrying = p.ContainsKey("carryingCost") ? SafeDec(p["carryingCost"]) : 0m;
+            decimal vat = p.ContainsKey("vatReversal") ? SafeDec(p["vatReversal"]) : 0m;
+            DateTime returnDate = ParseAcctDate(p["returnDate"]?.ToString());
+            string supplierName = p.ContainsKey("supplierName") ? p["supplierName"]?.ToString() : "";
+            string supplierDocNo = p.ContainsKey("supplierDocNo") ? p["supplierDocNo"]?.ToString() : "";
+            string paymentMethod = p.ContainsKey("paymentMethod") ? p["paymentMethod"]?.ToString() : null;
+            string paymentAccountId = p.ContainsKey("paymentAccountId") ? p["paymentAccountId"]?.ToString() : null;
+            string reason = p.ContainsKey("reason") ? p["reason"]?.ToString() : "";
+            if (counterKey == "CASH" && string.IsNullOrEmpty(paymentAccountId) && !string.IsNullOrEmpty(paymentMethod))
+                paymentAccountId = LookupPaidHowAccountId(paymentMethod);
+
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ProcessPurchaseReturn: ref={returnRef} counter={counterKey} net={purchaseNet:N2} carrying={carrying:N2} vat={vat:N2}", "SYSTEM");
+
+            var journal = _mapper.MapPurchaseReturnToJournal(returnRef, returnDate, supplierName, supplierDocNo,
+                counterKey, purchaseNet, carrying, vat, paymentMethod, paymentAccountId, reason);
+            var result = await _apiClient.CreateJournalAsync(journal);
+            Guid docId = RequireValidDocId(result?.data?.Id, $"PurchaseReturn ref={returnRef}");
+            await SafePostJournalAsync(docId);
+            return docId.ToString();
+        }
+
+        /// <summary>
+        /// ขากลับ (pull): movement "ซื้อเข้า" ที่ NextAcc สร้างเองจาก OCR stock import (Reference "OCR-IMPORT/…",
+        /// NextAcc OcrController.cs:1294) หรือจากใบซื้อ PurchaseInvoice/GoodsReceiptNote (Notes "จาก {DocumentType} เลขที่ …",
+        /// Reference = เลขเอกสาร — DocumentService.cs:17045-17046, 17215-17220). ตัดสินตาม Nexaacc_Purchase_Qty_Source:
+        ///   TAKETIME   → ข้าม (Product/In เป็นแหล่งจริงอยู่แล้ว ไม่งั้นนับซ้ำ) — mark Seen "SKIP_PURCHASE"
+        ///   NEXTACC_OCR → ถ้ามีแถว Product_In ที่คีย์ไว้ของสินค้าเดียวกัน เลขที่ใบกำกับตรง จำนวนตรง และยังไม่ผูก movement
+        ///                 → ผูก (Product_In.Nexaacc_Movement_Id) แทน insert ซ้ำ — mark Seen "PULL_LINKED";
+        ///                 ไม่เจอ → insert Product_In ตามเดิม + อัปเดตต้นทุนเฉลี่ย — mark Seen "PULL"
+        /// คืน true = จัดการแล้ว (ผู้เรียก continue), false = ไม่ใช่ movement ซื้อ (ใช้ทางเดิม)
+        /// </summary>
+        private bool HandlePurchaseOriginMovement(StockMovementResponse m, int ttProductId, decimal qty)
+        {
+            if (m == null || qty <= 0 || m.Quantity < 0) return false;
+            string reference = (m.Reference ?? "").Trim();
+            string notes = (m.Notes ?? "").Trim();
+            bool fromOcrImport = reference.StartsWith("OCR-IMPORT/", StringComparison.OrdinalIgnoreCase);
+            bool fromPurchaseDoc = notes.StartsWith("จาก PurchaseInvoice", StringComparison.OrdinalIgnoreCase)
+                || notes.StartsWith("จาก GoodsReceiptNote", StringComparison.OrdinalIgnoreCase);
+            if (!fromOcrImport && !fromPurchaseDoc) return false;
+
+            string mode = (_config.GetConfigValue("Nexaacc_Purchase_Qty_Source", "TAKETIME") ?? "TAKETIME").Trim().ToUpperInvariant();
+            if (mode != "NEXTACC_OCR")
+            {
+                MarkMovementSeen(m.Id, "SKIP_PURCHASE", ttProductId);
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"StockQtyPull: ข้าม movement ซื้อเข้า {m.Id} ({reference}) product={ttProductId} qty={qty:N2} — Nexaacc_Purchase_Qty_Source=TAKETIME (รับของที่ Product/In). ⚠ ถ้ารับของนี้คีย์ที่ Product/In ด้วย ฝั่ง NextAcc จะนับซ้ำ — อย่านำเข้าสต๊อกจาก OCR ใน NextAcc", "SYSTEM");
+                return true;
+            }
+
+            string docKey = fromOcrImport ? reference.Substring("OCR-IMPORT/".Length).Trim() : reference;
+            try
+            {
+                if (!string.IsNullOrEmpty(docKey)
+                    && Take_Time_BangPhra.Purchasing.PurchaseService.HasMovementLink(_connectionString)
+                    && Take_Time_BangPhra.Purchasing.PurchaseService.HasPurchaseColumns(_connectionString))
+                {
+                    int linked = _code.DatabaseInsertSafe(_connectionString,
+                        @"UPDATE TOP (1) Product_In SET Nexaacc_Movement_Id = @mid
+                          WHERE Product_ID = @pid AND Nexaacc_Movement_Id IS NULL
+                            AND Supplier_Doc_No IN (@k1, @k2)
+                            AND ABS(CAST(Amount AS DECIMAL(18,4)) - @q) < 0.0001",
+                        new Dictionary<string, object>
+                        {
+                            { "@mid", m.Id }, { "@pid", ttProductId }, { "@k1", docKey }, { "@k2", reference }, { "@q", qty }
+                        });
+                    if (linked > 0)
+                    {
+                        MarkMovementSeen(m.Id, "PULL_LINKED", ttProductId);
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"StockQtyPull: movement ซื้อเข้า {m.Id} ({reference}) ผูกกับ Product_In ที่คีย์ไว้ (ใบ {docKey}) product={ttProductId} — ไม่ insert ซ้ำ", "SYSTEM");
+                        return true;
+                    }
+                }
+            }
+            catch (Exception exLink)
+            {
+                _code.Logs(_connectionString, "AccountingSync", $"StockQtyPull: ผูก movement {m.Id} ไม่สำเร็จ: {exLink.Message}", "SYSTEM");
+            }
+
+            // ไม่มีแถวที่คีย์ไว้ → NextAcc เป็นแหล่งจริง: รับเข้าฝั่ง TakeTime + ต้นทุนเฉลี่ย
+            if (m.UnitCost > 0)
+                Take_Time_BangPhra.Inventory.CostService.ApplyReceipt(_connectionString, ttProductId, qty, m.UnitCost, false);
+            InsertInboundProductIn(ttProductId, qty, m.UnitCost, m.MovementDate);
+            MarkMovementSeen(m.Id, "PULL", ttProductId);
+            return true;
+        }
+
+        // ──────────────────────────────────────────────
         // Sync จำนวนสต๊อก (qty) 2 ทาง กับ NextAcc /product/stock/*  (feature-flag, default off)
         //   ขาออก: STOCK_QTY_PUSH → POST /product/stock/adjust (qty-only, ไม่ซ้ำ GL)
         //   ขากลับ: PullNextAccStockMovementsIfDue → GET /product/{id}/stock/movements → ลง Product_In/Out
@@ -1484,6 +1676,7 @@ namespace Take_Time_BangPhra.Integration
 
                 decimal qty = Math.Abs(m.Quantity);
                 if (qty <= 0) { MarkMovementSeen(m.Id, "PULL", ttProductId); continue; }
+                if (HandlePurchaseOriginMovement(m, ttProductId, qty)) continue;   // ซื้อเข้าจาก OCR/ใบซื้อ NextAcc (PHASE19_31)
 
                 string mt = (m.MovementType ?? "").ToUpperInvariant();
                 bool isIn;
@@ -4062,6 +4255,8 @@ namespace Take_Time_BangPhra.Integration
                     return await ProcessStockAdjustment(payload);
                 case "STOCK_WRITEOFF":
                     return await ProcessStockWriteOff(payload);
+                case "PURCHASE_RETURN":
+                    return await ProcessPurchaseReturn(payload);
                 case "SYNC_PRODUCT_MASTER":
                     return await ProcessProductSync(payload);
 

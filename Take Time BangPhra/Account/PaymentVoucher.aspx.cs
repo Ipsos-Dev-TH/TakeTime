@@ -103,6 +103,9 @@ namespace Take_Time_BangPhra.Account.Report
                 LoadNexaaccPaidHowOptions();
                 LoadNexaaccChargeOptions();
 
+                // ชำระค่าสินค้าที่รับเข้าสต๊อกแล้ว (GR/IR) — รายการรับของที่ยังไม่ผูกใบสำคัญจ่าย
+                LoadGoodsReceiptOptions();
+
                 // ใบรับรองแทนใบเสร็จรับเงิน — ค่าตั้งต้นผู้รับรอง (ผู้ใช้ที่ login) / พยาน (กรรมการ)
                 InitCertInLieuDefaults();
 
@@ -260,6 +263,9 @@ namespace Take_Time_BangPhra.Account.Report
 
                     Session["dtDetail"] = dtPaymentDetail;
 
+                    // การรับของที่ผูกกับใบนี้ (แก้ไข = ลบแล้วบันทึกใหม่ → ต้องผูกซ้ำตอนบันทึก)
+                    RestoreLinkedGoodsReceipts(id);
+
                     // Check if there's an asset linked to this payment voucher
                     LoadExistingAssetData(id);
 
@@ -303,6 +309,11 @@ namespace Take_Time_BangPhra.Account.Report
                     DateTime docDate = DateTime.Now;
                     string docNum = documentHelper.CreateDocumentNumber("Account_Payment", "PAY", docDate);
                     txtVoucherNo.Text = docNum;
+
+                    // มาจากหน้า นำเข้าสินค้า (จ่ายแล้ว/ซื้อเชื่อ) หรือปุ่ม "ใบสำคัญจ่าย" ของการรับของ → กรอกให้
+                    string grn = Request.QueryString["grn"];
+                    if (!string.IsNullOrEmpty(grn))
+                        PrefillFromGoodsReceipt(grn, Request.QueryString["ph"], Request.QueryString["credit"] == "1");
                 }
                 try
                 {
@@ -546,6 +557,252 @@ namespace Take_Time_BangPhra.Account.Report
             return Tuple.Create<string, string>(null, null);
         }
 
+        // ──────────────────────────────────────────────
+        // ชำระค่าสินค้าที่รับเข้าสต๊อกแล้ว (GR/IR, PHASE19_31)
+        //   รับของ (Product/In) = Dr สินค้าคงเหลือ / Cr GRNI 21240 → ใบสำคัญจ่ายของสินค้านั้นต้อง Dr GRNI (ล้าง) ไม่ใช่ค่าใช้จ่าย
+        //   ไม่งั้นต้นทุนซ้ำ (COGS ตอนขาย + ค่าใช้จ่ายตอนจ่าย) และ GRNI ค้างไม่มีวันล้าง
+        // ──────────────────────────────────────────────
+
+        private static readonly System.Text.RegularExpressions.Regex GrnBatchRegex =
+            new System.Text.RegularExpressions.Regex(@"GR-\d{8}-\d{6}-\d{3}");
+
+        private void LoadGoodsReceiptOptions()
+        {
+            ddlGoodsReceipt.Items.Clear();
+            ddlGoodsReceipt.Items.Add(new ListItem("— ไม่ใช่ค่าสินค้าที่รับเข้าสต๊อก —", ""));
+            var dt = Take_Time_BangPhra.Purchasing.PurchaseService.ListBatches(conn, true, 200);
+            if (dt == null)
+            {
+                ddlGoodsReceipt.Enabled = false;
+                btnAddGrniLine.Enabled = false;
+                return;
+            }
+            foreach (DataRow r in dt.Rows)
+                ddlGoodsReceipt.Items.Add(new ListItem(GoodsReceiptOptionText(r), r["Batch"].ToString()));
+        }
+
+        private static string GoodsReceiptOptionText(DataRow r)
+        {
+            DateTime at = r["Received_At"] == DBNull.Value ? DateTime.MinValue : Convert.ToDateTime(r["Received_At"]);
+            decimal net = r["Net_Total"] == DBNull.Value ? 0m : Convert.ToDecimal(r["Net_Total"]);
+            decimal vat = r["Vat_Amount"] == DBNull.Value ? 0m : Convert.ToDecimal(r["Vat_Amount"]);
+            string st = r["Payment_Status"]?.ToString() ?? "";
+            string stTh = st == "PAID" ? "จ่ายแล้ว" : st == "CREDIT" ? "ซื้อเชื่อ" : "รอใบแจ้งหนี้";
+            return $"{r["Batch"]} · {at:dd/MM/yy} · {r["Supplier_Name"]} · ใบ {r["Supplier_Doc_No"]} · สุทธิ {net:N2}" +
+                   (vat > 0 ? $" + VAT {vat:N2}" : "") + $" · {stTh}";
+        }
+
+        /// <summary>โหมดแก้ไข: ให้ batch ที่ผูกกับใบนี้อยู่ปรากฏในรายการ (ถูกกรองออกเพราะผูกแล้ว)</summary>
+        private void RestoreLinkedGoodsReceipts(string voucherId)
+        {
+            foreach (var b in Take_Time_BangPhra.Purchasing.PurchaseService.BatchesOfVoucher(conn, voucherId))
+                if (ddlGoodsReceipt.Items.FindByValue(b) == null)
+                    ddlGoodsReceipt.Items.Add(new ListItem(b + " (ผูกกับใบนี้อยู่)", b));
+        }
+
+        /// <summary>(GUID, code, label) ของบัญชีล้างรับของตามโหมดรับของ (GRNI / INVENTORY / ACCOUNTS_PAYABLE)</summary>
+        private Tuple<string, string, string> ResolveGoodsReceiptClearingAccount()
+        {
+            string key = "GRNI";
+            try { key = Take_Time_BangPhra.Purchasing.PurchaseService.ClearingAccountKey(new Integration.AccountingConfig(conn)); } catch { }
+            var acc = Take_Time_BangPhra.Purchasing.PurchaseService.LookupMappedAccount(conn, key);
+            return Tuple.Create(acc.Item1, acc.Item2, Take_Time_BangPhra.Purchasing.PurchaseService.ClearingAccountLabel(key));
+        }
+
+        /// <summary>batch ที่ผูกกับใบนี้ = batch ที่อยู่ในรายละเอียดของบรรทัดล้างรับของ (รอดทั้งการลบบรรทัดและการแก้ไขใบ)</summary>
+        private List<string> GetLinkedGoodsReceipts()
+        {
+            var res = new List<string>();
+            DataTable dt = Session["dtDetail"] as DataTable;
+            if (dt == null || !dt.Columns.Contains("PaidTypeName")) return res;
+            foreach (DataRow r in dt.Rows)
+            {
+                if (r.RowState == DataRowState.Deleted) continue;
+                if (!(r["PaidTypeName"]?.ToString() ?? "").StartsWith(Take_Time_BangPhra.Purchasing.PurchaseService.GrniLinePrefix)) continue;
+                foreach (System.Text.RegularExpressions.Match m in GrnBatchRegex.Matches(r["Detail"]?.ToString() ?? ""))
+                    if (!res.Contains(m.Value)) res.Add(m.Value);
+            }
+            return res;
+        }
+
+        protected void btnAddGrniLine_Click(object sender, EventArgs e)
+        {
+            string batch = ddlGoodsReceipt.SelectedValue;
+            if (string.IsNullOrEmpty(batch))
+            {
+                ClientScript.RegisterStartupScript(this.GetType(), "grnipick", "alert('กรุณาเลือกการรับของที่จะชำระ');", true);
+                return;
+            }
+            string err = AddGoodsReceiptLine(batch);
+            if (err != null)
+                ClientScript.RegisterStartupScript(this.GetType(), "grnierr", "alert('" + err.Replace("'", "\\'") + "');", true);
+        }
+
+        /// <summary>เพิ่มบรรทัด "ชำระค่าสินค้าที่รับเข้าแล้ว" ของ batch (ยอด = สุทธิของจำนวนที่ยังไม่คืน). คืนข้อความผิดพลาด / null</summary>
+        private string AddGoodsReceiptLine(string batch)
+        {
+            var info = Take_Time_BangPhra.Purchasing.PurchaseService.GetBatch(conn, batch);
+            if (info == null) return "ไม่พบการรับของ " + batch;
+            if (GetLinkedGoodsReceipts().Contains(batch)) return "การรับของนี้อยู่ในรายการแล้ว";
+
+            decimal amount = 0m;
+            foreach (var l in info.Lines)
+                amount += Math.Round(l.ReturnableQty * l.UnitCost, 2, MidpointRounding.AwayFromZero);
+            if (amount <= 0) return "การรับของนี้คืนผู้ขายครบแล้ว — ไม่มียอดให้ชำระ";
+
+            var clr = ResolveGoodsReceiptClearingAccount();
+            bool syncOn = false;
+            try { var cfg = new Integration.AccountingConfig(conn); syncOn = cfg.IsConfigured && cfg.Enabled && !cfg.IsVoucherLocal; } catch { }
+            // ส่ง NextAcc ต้องมี GUID จริงของบัญชี (JOURNAL mode อ่านแค่ AccountId — ไม่มี = ตกไปบัญชีค่าใช้จ่ายตามหมวด = ผิด)
+            if (syncOn && string.IsNullOrEmpty(clr.Item1))
+                return string.IsNullOrEmpty(clr.Item2)
+                    ? "ยังไม่ได้ตั้ง mapping บัญชีล้างรับของ (GRNI/INVENTORY) ในหน้า Accounting Integration"
+                    : "ไม่พบรหัสบัญชี " + clr.Item2 + " ในผังบัญชี NextAcc — กด \"ดึง Chart of Accounts\" ในหน้า Accounting Integration ก่อน";
+
+            DataTable dtDetail = (DataTable)Session["dtDetail"];
+            if (!dtDetail.Columns.Contains("PaidTypeId"))
+            {
+                dtDetail.Columns.Add("PaidTypeId");
+                dtDetail.Columns.Add("PaidTypeName");
+                dtDetail.Columns.Add("NexaaccAccountId");
+            }
+            if (!dtDetail.Columns.Contains("AccountCode"))
+                dtDetail.Columns.Add("AccountCode");
+
+            string detail = $"ค่าสินค้ารับเข้า {batch} {info.SupplierName}" + (string.IsNullOrEmpty(info.SupplierDocNo) ? "" : $" ใบ {info.SupplierDocNo}");
+            string catName = $"{Take_Time_BangPhra.Purchasing.PurchaseService.GrniLinePrefix} {clr.Item2} {clr.Item3}".Trim();
+            dtDetail.Rows.Add(dtDetail.Rows.Count + 1, detail, NumberHelper.TwoDecimalPoints(amount),
+                "", catName, clr.Item1 ?? "", clr.Item2 ?? "");
+            Session["dtDetail"] = dtDetail;
+            GridView1.DataSource = dtDetail;
+            GridView1.DataBind();
+            if (DropDownList4.SelectedIndex > 0)
+                calAmount(dtDetail, DropDownList4.SelectedValue);
+
+            // ภาษีซื้อ: มี VAT + ผู้ขายมีเลขผู้เสียภาษี → เคลม (ใบกำกับเต็มรูป); รับของที่ไม่มี VAT → ไม่มีอะไรให้เคลม
+            if (info.VatAmount > 0 && info.VatLikelyClaimable) ddlVatClaim.SelectedValue = "1";
+
+            litGrniInfo.Text = "<div style='margin-top:4px;font-size:12px;color:#1b5e20;'>✔ เพิ่ม " + HttpUtility.HtmlEncode(batch)
+                + " สุทธิ " + amount.ToString("N2") + (info.VatAmount > 0 ? " (VAT ตอนรับของ " + info.VatAmount.ToString("N2") + ")" : "")
+                + " → Dr " + HttpUtility.HtmlEncode(clr.Item3) + "</div>";
+            return null;
+        }
+
+        /// <summary>เปิดจากหน้า นำเข้าสินค้า: เลือกผู้ขาย/แหล่งเงิน/เครดิต/ประเภทภาษี + เพิ่มบรรทัดล้างรับของให้</summary>
+        private void PrefillFromGoodsReceipt(string batch, string paidHowId, bool isCredit)
+        {
+            var info = Take_Time_BangPhra.Purchasing.PurchaseService.GetBatch(conn, batch);
+            if (info == null) return;
+            try
+            {
+                if (ddlGoodsReceipt.Items.FindByValue(batch) != null) ddlGoodsReceipt.SelectedValue = batch;
+
+                // ผู้ขาย: เลขผู้เสียภาษีก่อน แล้วชื่อ
+                DataTable dtV = null;
+                if (Take_Time_BangPhra.Purchasing.PurchaseService.IsThaiTaxId(info.SupplierTaxId))
+                    dtV = code.DatabaseQuerySafe(conn, "SELECT TOP 1 ID FROM Vendor WHERE Status = 'True' AND REPLACE(REPLACE(ISNULL(IDNumber,''),'-',''),' ','') = @t",
+                        new Dictionary<string, object> { { "@t", System.Text.RegularExpressions.Regex.Replace(info.SupplierTaxId, @"\D", "") } });
+                if ((dtV == null || dtV.Rows.Count == 0) && !string.IsNullOrEmpty(info.SupplierName))
+                    dtV = code.DatabaseQuerySafe(conn, "SELECT TOP 1 ID FROM Vendor WHERE Status = 'True' AND Name = @n",
+                        new Dictionary<string, object> { { "@n", info.SupplierName } });
+                if (dtV != null && dtV.Rows.Count > 0)
+                {
+                    var it = DropDownList1.Items.FindByValue(dtV.Rows[0]["ID"].ToString());
+                    if (it != null) DropDownList1.SelectedValue = it.Value;
+                }
+
+                if (!string.IsNullOrEmpty(paidHowId) && DropDownList2.Items.FindByValue(paidHowId) != null)
+                    DropDownList2.SelectedValue = paidHowId;
+                chkIsCredit.Checked = isCredit;
+                if (info.SupplierDocDate.HasValue)
+                    TextBox8.Text = info.SupplierDocDate.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+                // ประเภทภาษี: มี VAT → 7% แบบไม่รวม (รายการเป็นยอดสุทธิ), ไม่มี → 0%
+                var dtVat = code.DatabaseQuerySafe(conn,
+                    "SELECT ID, Vat_Percent FROM Account_Vat_Type WHERE Status = 'True' ORDER BY ID", null);
+                if (dtVat != null)
+                {
+                    int wantPct = info.VatAmount > 0 ? 7 : 0;
+                    foreach (DataRow r in dtVat.Rows)
+                    {
+                        int pct; int.TryParse(r["Vat_Percent"]?.ToString(), out pct);
+                        string vid = r["ID"].ToString();
+                        if (pct == wantPct && vid != "2" && DropDownList4.Items.FindByValue(vid) != null)
+                        {
+                            DropDownList4.SelectedValue = vid;
+                            Label1.Text = DropDownList4.SelectedItem.Text;
+                            break;
+                        }
+                    }
+                }
+
+                // หมวดหัวใบ: หมวดที่ชื่อสื่อถึงซื้อสินค้า (ถ้ามี)
+                foreach (ListItem li in DropDownList3.Items)
+                    if (li.Text.Contains("สินค้า") || li.Text.Contains("ซื้อ")) { DropDownList3.SelectedValue = li.Value; break; }
+            }
+            catch { }
+
+            string err = AddGoodsReceiptLine(batch);
+            if (err != null)
+                litGrniInfo.Text = "<div style='margin-top:4px;font-size:12px;color:#b71c1c;'>" + HttpUtility.HtmlEncode(err) + "</div>";
+        }
+
+        /// <summary>
+        /// ตรวจก่อนบันทึก (สองจังหวะ — กดซ้ำ = ยืนยัน):
+        ///  • ไม่มีบรรทัดล้างรับของ แต่มีการรับของที่ยังไม่ผูกของผู้ขายเดียวกัน/สินค้าตรงกับรายละเอียด → เตือนต้นทุนซ้ำ
+        ///  • มีบรรทัดล้างรับของ + เลือก "ไม่เคลม VAT" → VAT ถูกรวมเข้าบรรทัด GRNI = GRNI ค้างเศษ
+        /// คืนข้อความเตือน หรือ null (ผ่าน)
+        /// </summary>
+        private string CheckGoodsReceiptLinkWarnings()
+        {
+            try
+            {
+                if (!Take_Time_BangPhra.Purchasing.PurchaseService.HasPurchaseColumns(conn)) return null;
+                DataTable dtDetail = Session["dtDetail"] as DataTable;
+                if (dtDetail == null || dtDetail.Rows.Count == 0) return null;
+                var linked = GetLinkedGoodsReceipts();
+                string msg = null, sig = null;
+
+                if (linked.Count == 0)
+                {
+                    string paidType = DropDownList3.SelectedItem?.Text ?? "";
+                    if (paidType.Contains("เงินเดือน")) return null;
+                    string vendorName = DropDownList1.SelectedItem?.Text ?? "";
+                    string vendorTax = null;
+                    try
+                    {
+                        var dtT = code.DatabaseQuerySafe(conn, "SELECT TOP 1 IDNumber FROM Vendor WHERE ID = @id",
+                            new Dictionary<string, object> { { "@id", DropDownList1.SelectedValue ?? "" } });
+                        if (dtT != null && dtT.Rows.Count > 0) vendorTax = dtT.Rows[0][0]?.ToString();
+                    }
+                    catch { }
+                    var texts = new List<string>();
+                    foreach (DataRow r in dtDetail.Rows) texts.Add(r["Detail"]?.ToString() ?? "");
+                    var matches = Take_Time_BangPhra.Purchasing.PurchaseService.FindUnlinkedMatches(conn, vendorName, vendorTax, texts);
+                    if (matches.Count > 0)
+                    {
+                        sig = "U:" + string.Join(",", matches);
+                        msg = "⚠️ ใบนี้ดูเหมือนค่าสินค้าที่บันทึกรับเข้าสต๊อกแล้ว แต่ยังไม่ได้ผูกการรับของ:\n" + string.Join("\n", matches)
+                            + "\n\nถ้าใช่: เลือกในช่อง \"ค่าสินค้าที่รับเข้าแล้ว\" แล้วกด \"ชำระค่าสินค้าที่รับเข้าแล้ว\" แทนบรรทัดค่าใช้จ่าย (ไม่งั้นต้นทุนซ้ำ + GRNI ค้าง)"
+                            + "\nถ้าไม่ใช่: กดบันทึกอีกครั้งเพื่อยืนยัน";
+                    }
+                }
+                else if (ddlVatClaim.SelectedValue == "0" && decimal.TryParse(TextBox4.Text, out var vatNow) && vatNow > 0)
+                {
+                    sig = "V:" + string.Join(",", linked) + ":" + vatNow.ToString("0.00");
+                    msg = "⚠️ ใบที่ผูกการรับของ แต่เลือก \"ไม่เคลมภาษีซื้อ\": VAT จะถูกรวมเข้าบรรทัดล้างรับของ → GRNI ค้างเศษเท่ายอด VAT"
+                        + "\nถ้าผู้ขายออกใบกำกับเต็มรูปไม่ได้ ควรบันทึกรับของใหม่ด้วยราคารวม VAT (ไม่มี VAT) แทน"
+                        + "\nกดบันทึกอีกครั้งเพื่อยืนยันบันทึกตามนี้";
+                }
+
+                if (msg == null) return null;
+                if ((ViewState["GrniWarnAck"] as string) == sig) return null;   // กดซ้ำ = ยืนยัน
+                ViewState["GrniWarnAck"] = sig;
+                return msg;
+            }
+            catch { return null; }
+        }
+
         protected void Button3_Click(object sender, EventArgs e)
         {
             string command = Request.QueryString["command"];
@@ -577,6 +834,16 @@ namespace Take_Time_BangPhra.Account.Report
                     ClientScript.RegisterStartupScript(this.GetType(), "cilvalidate", "alert('" + cilErr + "');", true);
                     return;
                 }
+            }
+
+            // ค่าสินค้าที่รับเข้าสต๊อกแล้วแต่ไม่ได้ผูก = ต้นทุนซ้ำ (Dr สินค้าคงเหลือตอนรับ + Dr ค่าใช้จ่ายตอนจ่าย) → เตือนก่อน
+            // (ตรวจก่อนขั้น void/ลบใบเดิมในโหมดแก้ไข — กดบันทึกซ้ำ = ยืนยันว่าไม่ใช่ค่าสินค้าที่รับเข้าแล้ว)
+            string grniWarn = CheckGoodsReceiptLinkWarnings();
+            if (grniWarn != null)
+            {
+                ClientScript.RegisterStartupScript(this.GetType(), "grniwarn",
+                    "alert('" + grniWarn.Replace("\\", "\\\\").Replace("'", "\\'").Replace("\n", "\\n") + "');", true);
+                return;
             }
 
             if (command == "edit")
@@ -801,6 +1068,21 @@ namespace Take_Time_BangPhra.Account.Report
                             fallbackParams);
                     }
                 }
+
+                // ผูกการรับของ (Product_In.Linked_Voucher_Id / Payment_Status, Account_Payment.Linked_Goods_Receipt)
+                try
+                {
+                    if (command == "edit" && !string.IsNullOrEmpty(id))
+                        Take_Time_BangPhra.Purchasing.PurchaseService.UnlinkVoucher(conn, id);
+                    var linkedBatches = GetLinkedGoodsReceipts();
+                    if (linkedBatches.Count > 0)
+                        Take_Time_BangPhra.Purchasing.PurchaseService.LinkBatchesToVoucher(conn, linkedBatches, docNum, isCredit);
+                }
+                catch (Exception linkEx)
+                {
+                    try { new code().Logs(conn, "Purchase", $"Link goods receipt failed: doc={docNum} {linkEx.Message}", "SYSTEM"); } catch { }
+                }
+
                 string path = AppCfg.Get("PaymentFolderPath").ToString();
                 try
                 {
@@ -1136,6 +1418,14 @@ namespace Take_Time_BangPhra.Account.Report
                             string lineAccCode = dtDetail.Columns.Contains("AccountCode") ? dtDetail.Rows[i]["AccountCode"]?.ToString() : "";
                             if (string.IsNullOrEmpty(lineAccCode))
                                 lineAccCode = sync.LookupPaidTypeAccountCode(lineCat);
+                            // บรรทัด "ชำระค่าสินค้าที่รับเข้าแล้ว" → บังคับบัญชีล้างรับของ (GRNI/สินค้าคงเหลือ/เจ้าหนี้ ตามโหมดรับของ)
+                            // ไม่ใช่ค่าใช้จ่าย — รวมถึงตอนแก้ไขใบที่โหลดจากฐานข้อมูล (ไม่มีคอลัมน์ AccountCode)
+                            if ((lineCat ?? "").StartsWith(Take_Time_BangPhra.Purchasing.PurchaseService.GrniLinePrefix))
+                            {
+                                var clr = ResolveGoodsReceiptClearingAccount();
+                                if (!string.IsNullOrEmpty(clr.Item2)) lineAccCode = clr.Item2;
+                                if (!string.IsNullOrEmpty(clr.Item1)) lineAccId = clr.Item1;
+                            }
 
                             expenseLines.Add(new Dictionary<string, object>
                             {

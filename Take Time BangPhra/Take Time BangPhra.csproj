@@ -603,6 +603,8 @@
     <Content Include="Product\SellReport.aspx" />
     <Content Include="Product\Stock.aspx" />
     <Content Include="Product\In.aspx" />
+    <Content Include="Product\PurchaseReturn.aspx" />
+    <Content Include="Account\CreditPurchasePayment.aspx" />
     <Content Include="Product\Default.aspx" />
     <Content Include="Reserve.aspx" />
     <Content Include="Resources\ContentInformation.xml" />
@@ -982,6 +984,8 @@
     <Compile Include="Class\NumberHelper.cs" />
     <Compile Include="Class\RoomChargeDataAccess.cs" />
     <Compile Include="Class\RoomChargeService.cs" />
+    <Compile Include="Class\Inventory\CostService.cs" />
+    <Compile Include="Class\Purchasing\PurchaseService.cs" />
     <Compile Include="Class\TelegramService.cs" />
     <Compile Include="Class\Services\LoyaltyService.cs" />
     <Compile Include="Class\DefaultCompat.cs" />
@@ -1734,6 +1738,20 @@
     </Compile>
     <Compile Include="Product\In.aspx.designer.cs">
       <DependentUpon>In.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Product\PurchaseReturn.aspx.cs">
+      <DependentUpon>PurchaseReturn.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Product\PurchaseReturn.aspx.designer.cs">
+      <DependentUpon>PurchaseReturn.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Account\CreditPurchasePayment.aspx.cs">
+      <DependentUpon>CreditPurchasePayment.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Account\CreditPurchasePayment.aspx.designer.cs">
+      <DependentUpon>CreditPurchasePayment.aspx</DependentUpon>
     </Compile>
     <Compile Include="Product\Default.aspx.cs">
       <DependentUpon>Default.aspx</DependentUpon>
