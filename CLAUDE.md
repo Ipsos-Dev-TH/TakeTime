@@ -337,12 +337,14 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    inbound Product_Out omit Account_Paid_How_ID. Needs Windows build + live test.
 
 10. **หัวกระดาษเอกสารขาย (`Nexaacc_Receipt_Header_Type` AUTO|ABBREVIATED, PHASE19_18):** NextAcc คำนวณหัวตอนพิมพ์
-   (`PdfGenerationService.ComputeDocumentTitle`) — "ใบเสร็จรับเงิน/ใบกำกับภาษีอย่างย่อ" เฉพาะเมื่อผ่าน
-   `AbbreviatedTaxInvoiceRule` (จด VAT + `Company.IsRetailApproved`/`PhoR06ApprovedDate` หรือ site-settings
-   `RequirePhoR06ForAbbreviatedTaxInvoice=false`) ไม่งั้น TaxInvoice ของผู้ซื้อ declined/ไม่ครบ = "ใบเสร็จรับเงิน".
-   TakeTime บังคับหัวไม่ได้ — ปลดที่ NextAcc. หลัง sync log `หัวเอกสาร NextAcc:` (อ่าน documentTitle กลับ).
-   คำขอให้ ภ.พ.06 ใช้กับสลิปเครื่องเก็บเงินเท่านั้น + ค่าตั้งรายบริษัทสำหรับอย่างย่อแบบเอกสาร A4:
-   `docs/NextAcc_Change_Requests.md` ข้อ ก. (+ ข้อ ข. ผู้รับเงินใบรับรอง, ข้อ ง. ค่าธรรมเนียมเกตเวย์ตอน payout)
+   (`PdfGenerationService.ComputeDocumentTitle`) — "ใบเสร็จรับเงิน/ใบกำกับภาษีอย่างย่อ" เฉพาะเมื่อผ่าน `AbbreviatedTaxInvoiceRule`
+   ไม่งั้น TaxInvoice ของผู้ซื้อ declined/ไม่ครบ = "ใบเสร็จรับเงิน". **NextAcc HEAD `09e9ea6`:** `Judge(..., channel)`
+   (`Helpers/AbbreviatedTaxInvoiceRule.cs:90-115`) = จด VAT → `Company.IsRetailApproved` (ทุกช่องทาง) → **เอกสาร/A4 (`channel=Document`)
+   ไม่ต้อง ภ.พ.06**; ภ.พ.06 (`PhoR06ApprovedDate`) บังคับ **เฉพาะสลิป POS/เครื่องเก็บเงิน** (สวิตช์แพลตฟอร์ม
+   `RequirePhoR06ForAbbreviatedTaxInvoice` คุมแค่ด่าน ภ.พ.06). ⇒ หัว "อย่างย่อ" บนเอกสาร TakeTime ต้องการแค่ จด VAT + ติ๊ก
+   `IsRetailApproved` ในข้อมูลบริษัท NextAcc. TakeTime บังคับหัวไม่ได้ — หลัง sync log `หัวเอกสาร NextAcc:` (อ่าน documentTitle กลับ).
+   `docs/NextAcc_Change_Requests.md` ข้อ ก. (แก้แล้วฝั่ง NextAcc) + ข้อ ข. ผู้รับเงินใบรับรอง, ข้อ ง. ค่าธรรมเนียมเกตเวย์ตอน payout,
+   ข้อ ฉ.–ฎ. (COGS ใบขายสด, CN อ้าง Receipt, CN integration, ตัดจำหน่ายมีเหตุผล+GL, deemed sale, รายงาน ม.87(3))
 11. **ใบรับรองแทนใบเสร็จรับเงิน (type 15, PHASE19_19):** หน้า `Account/PaymentVoucher.aspx` ติ๊ก "ผู้รับเงินออกใบเสร็จไม่ได้"
    → payload `CREATE_VOUCHER_JOURNAL` มี certificateInLieu → `ProcessCertificateInLieu` (company `/document` type 15 +
    approve: Dr ค่าใช้จ่าย / Cr แหล่งเงิน (+Cr WHT), Paid ทันที). **ห้ามใช้** `/integration/certificates-in-lieu`
@@ -421,6 +423,48 @@ Channel Collect ต้องมาจาก `RevenuePostingService.PostOtaRoomRe
 สถานะที่ถือห้องใน `EmailReservationService.FreeStatusFilter` / `Default.aspx` ใช้ `RescheduleService.SqlHoldsRoom` แล้ว. แถวเงินสดปลอมเก่า: หน้า
 `Payment/PaymentHistory.aspx` แท็บ "⚠ เงินสดของใบ OTA" → Status `OTA_RECLASS` / คิว `OTA_CASH_RECLASS`
 (JE Dr OTA_RECEIVABLE / Cr เงินสด, ref `OTA-RECLASS-{receiptId}`, ตั้ง `Ota_Revenue_Ref=RECLASS-…`).
+
+## Sales & stock document policy (ต.ค. 2026)
+ทุกตาราง/คอลัมน์ใหม่ guarded (OBJECT_ID/COL_LENGTH) — ยังไม่รัน migration = พฤติกรรมเดิม.
+
+**นโยบายเอกสารขาย (PHASE19_29, `Class/Integration/SalesDocumentPolicy.cs`):** ตาราง `Sales_Doc_Policy(Sales_Channel, Channel_Type, Doc_Mode,
+Is_Enabled, …)` UNIQUE(ช่องทาง,ชนิด). ช่องทาง POS|ROOM_SERVICE|ACTIVITY|AMENITY|FRONTDESK_GATEWAY|DAMAGE|RESERVATION|`*` · ชนิดเงิน
+(`Account_Paid_How.Channel_Type`) CASH|TRANSFER|QR|CARD|GATEWAY_OTHER|DIRECTOR_LOAN|OTA|OTHER|`*` · โหมด IMMEDIATE|DAILY_ROLLUP|OFF.
+Seed: (`*`,CASH)=DAILY_ROLLUP, (`*`,`*`)=IMMEDIATE, (RESERVATION,`*`)=IMMEDIATE. ลำดับ `Resolve(conn, channel, paidHowId)`:
+`Account_Paid_How.Sales_Doc_Mode` (override รายแหล่งเงิน) → (ช่องทาง,ชนิด) → (ช่องทาง,`*`) → (`*`,ชนิด) → (`*`,`*`) → IMMEDIATE.
+Config: `Sales_Doc_Policy_Enabled` (ไม่มี = '0' เดิม), `Sales_Doc_Local_Slip_Required` (รวบรายวัน ⇒ POS ต้องพิมพ์สลิปอย่างย่อรายใบ),
+`Sales_Doc_Send_Local_Invoice_Email` ('0' = ไม่ส่ง PDF "[INV]" ของ TakeTime เมื่อเอกสาร NextAcc เป็นตัวจริง).
+เลขใบสรุป: `POSDAY-{yyyyMMdd}-{paidHowId}[-S{n}]`, `RSDAY-…`, ทั่วไป `{CHANNEL}DAY-…` — `-S{n}` = ใบเสริมของแถวมาช้า (แทน mark-and-skip เดิมที่ทำรายได้หาย).
+แอดมิน: `Admin/Settings/SalesDocPolicy.aspx`.
+
+**เหตุผลจ่ายออกสต๊อก (PHASE19_30, `Class/Inventory/StockOutReasonCatalog.cs`):** `Stock_Out_Reason(Code, Name_TH, Gl_Mapping_Key, Deemed_Sale_Vat,
+Vat_Base MARKET|COST, Requires_Approval, Requires_Evidence, Is_Active, Sort_Order, Help_TH)` + `Product_Out` เพิ่ม `Out_Reason_Code, Recorded_By,
+Approved_By/At, Approval_Status PENDING|APPROVED|REJECTED, Evidence_Path, Nexaacc_Journal_Ref, Is_Reversed`. แยก แตก/หมดอายุ/สูญหาย/
+เบิกใช้ (แม่บ้าน/ครัว)/อาหารพนักงาน/เจ้าของใช้/ของแจก/รับรอง/คืนผู้ขาย ไปบัญชีของตัวเอง (เดิมทุกอย่าง Dr 51200 "เสียหาย"). แอดมิน `Admin/Settings/StockOutReasons.aspx`.
+
+**ซื้อ/รับของ (PHASE19_31):** `Product_In` เพิ่ม `Supplier_Name/TaxId/Doc_No/Doc_Date, Vat_Amount, Payment_Status UNPAID|PAID|CREDIT,
+Linked_Voucher_Id, Receipt_Batch`; `Account_Payment.Linked_Goods_Receipt` (= Receipt_Batch) ⇒ ใบสำคัญจ่ายของที่รับเข้าแล้วลง **Dr GRNI 21240**
+ไม่ใช่ค่าใช้จ่าย (กันต้นทุนซ้ำ Product/In + PV). ซื้อเชื่อ `Account/CreditPurchasePayment.aspx`; ต้นทุนถัวเฉลี่ย `Class/Inventory/CostService.cs`.
+
+**รายงาน (อ่านอย่างเดียว, `Class/Reports/TaxReportKit.cs`, สิทธิ์ Owner / Admin+FIN_REPORT|SYS_ACCOUNTING / กลุ่มที่ให้ FIN_REPORT|SYS_ACCOUNTING):**
+`Report/DailySalesTaxSummary` (วัน×ช่องทาง×แหล่งเงิน: จำนวน/ยอด/VAT/เอกสาร NextAcc รายใบหรือใบสรุป + ธง ไม่มีเอกสาร/มาช้า/โอนยังไม่ตรวจ/ไม่ตรงนโยบาย
+— ใช้เป็นบันทึกสรุปยอดขายเงินสดรายวันที่รองรับใบสรุป), `Report/StockMovementReport` (ม.87(3): ยกมา/รับ/ขาย/จ่ายออกตามเหตุผล/คงเหลือ ราคาทุน
++ บัญชีคุมรายวัน), `Report/NextAccReconciliation` (รายได้/VAT/COGS/ตัดจำหน่าย TakeTime vs คิวที่ส่งสำเร็จ + คิวล้ม/ค้าง). เมนู การเงิน & บัญชี + การ์ดศูนย์ตั้งค่า.
+
+**ข้อกฎหมาย (สรุปจากงานค้นคว้า ไม่ใช่ความเห็นที่ลงนาม — ให้ผู้ทำบัญชียืนยัน):**
+- จด VAT ต้องออกใบกำกับทุกครั้งที่ความรับผิดเกิด (ม.86) ไม่ว่าเงินสด/โอน · โรงแรม/ร้านอาหาร = ค้าปลีก ⇒ ออก **อย่างย่อ** ได้ (ม.86/6); ผู้ซื้อจด VAT ขอ ⇒ เต็มรูป (ม.86/4).
+  ข้อยกเว้น ≤1,000 บาทไม่ต้องออก ใช้เฉพาะรายย่อย (ประกาศ ฉ.154) — รีสอร์ตนี้น่าจะไม่เข้า.
+- **ใบสรุปรายวัน (POSDAY ฯลฯ) = เอกสารประกอบการลงบัญชีเท่านั้น ไม่ใช่ใบกำกับของลูกค้า** — ทุกการขายเงินสดยังต้องมีใบอย่างย่อรายใบที่หน้าร้าน
+  (เครื่องที่ได้ ภ.พ.06 / e-Tax ABB / ใบเขียนมือเลขเรียง) แล้วลงรายงานภาษีขายเป็นยอดรวมต่อวันอ้างเลขแรก–สุดท้ายได้. ไม่มีใบให้ลูกค้าเลย = เสี่ยง ม.86
+  (เบี้ยปรับ ม.89). รวมหลายลูกค้าเป็นใบกำกับใบเดียวไม่ได้ (ป.86/2542 ข้อ 1 ใช้กับผู้ซื้อรายเดียว — เช่น folio ห้องพัก).
+- ภ.พ.06 = อนุมัติ **เครื่องบันทึกการเก็บเงิน**; ใบอย่างย่อพิมพ์จากซอฟต์แวร์หลังบ้านเป็นจุดเทา (ถามสรรพากรชลบุรี).
+- บริการ (ห้อง/อาหารเสิร์ฟ/กิจกรรม) tax point = รับชำระ (ม.78/1(1)) ⇒ มัดจำค่าห้อง VAT เกิดทันที (โหมด RECEIPT+no-defer ตรงสุด; defer เสี่ยง ม.89/1);
+  ขายสินค้า = ส่งมอบ (ม.78). Service charge อยู่ในฐาน VAT; ทิปผ่านบิล = เจ้าหนี้พนักงาน.
+- แตก/หมดอายุ **ทำลายมีหลักฐาน** (ป.79/2541 แก้ ป.84/2542: รายงาน ผู้อนุมัติ พยาน ภาพ) ไม่ใช่การขาย ไม่ต้องกลับภาษีซื้อ; **สูญหาย/ถูกขโมย/ขาดจากการนับ
+  = สินค้าขาดจากรายงาน ⇒ ถือเป็นขาย ม.77/1(8)(จ) เสีย VAT ราคาตลาด** (กค 0706/พ./6444). เจ้าของใช้เอง = ขาย (ม.77/1(8)(ง)) + รายจ่ายต้องห้าม;
+  อาหารพนักงานตามระเบียบ/ของแถมพร้อมการขาย (ระบุในใบกำกับ)/ตัวอย่าง-ของแจก = ไม่รวมฐาน (ประกาศ ฉ.40); ใช้สต๊อกในการให้บริการห้องพักเอง = ไม่ใช่การขาย.
+- ภาษีซื้อเคลมได้เฉพาะใบกำกับเต็มรูป ม.86/4 (อย่างย่อ/ใบเสร็จธรรมดา = ต้องห้าม ม.82/5(3)); ผู้ขายออกใบเสร็จไม่ได้ ⇒ ใบรับรองแทนใบเสร็จ (type 15).
+- รายงานสินค้าและวัตถุดิบ ม.87(3) ต้องจัดทำสำหรับสินค้าที่มีไว้ขาย — NextAcc ไม่มีตัวสร้าง (คำขอ ข้อ ฎ.) ⇒ ใช้ `Report/StockMovementReport`.
 
 ## Git / workflow
 Feature branch: `claude/vibrant-davinci-nzwlgq` (based on default branch

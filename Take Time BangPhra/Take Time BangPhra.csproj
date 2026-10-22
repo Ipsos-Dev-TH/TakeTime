@@ -452,6 +452,9 @@
     <Content Include="Admin\Report\CustomerAnalytics.aspx" />
     <Content Include="Admin\Report\ProfitLoss.aspx" />
     <Content Include="Admin\Report\AIReportSummary.aspx" />
+    <Content Include="Report\StockMovementReport.aspx" />
+    <Content Include="Report\DailySalesTaxSummary.aspx" />
+    <Content Include="Report\NextAccReconciliation.aspx" />
     <Content Include="Admin\Vendor.aspx" />
     <Content Include="Admin\CustomerManagement.aspx" />
     <Content Include="Admin\CRM\GuestProfile.aspx" />
@@ -1178,6 +1181,27 @@
     <Compile Include="Admin\Report\AIReportSummary.aspx.designer.cs">
       <DependentUpon>AIReportSummary.aspx</DependentUpon>
     </Compile>
+    <Compile Include="Report\StockMovementReport.aspx.cs">
+      <DependentUpon>StockMovementReport.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Report\StockMovementReport.aspx.designer.cs">
+      <DependentUpon>StockMovementReport.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Report\DailySalesTaxSummary.aspx.cs">
+      <DependentUpon>DailySalesTaxSummary.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Report\DailySalesTaxSummary.aspx.designer.cs">
+      <DependentUpon>DailySalesTaxSummary.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Report\NextAccReconciliation.aspx.cs">
+      <DependentUpon>NextAccReconciliation.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Report\NextAccReconciliation.aspx.designer.cs">
+      <DependentUpon>NextAccReconciliation.aspx</DependentUpon>
+    </Compile>
     <Compile Include="Admin\RoomQRGenerator.aspx.cs">
       <DependentUpon>RoomQRGenerator.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>
@@ -1565,6 +1589,7 @@
     <Compile Include="Class\Payments\BookingPayment.cs" />
     <Compile Include="Class\Payments\SecurityHoldService.cs" />
     <Compile Include="Class\Payments\PaymentChannelCatalog.cs" />
+    <Compile Include="Class\Reports\TaxReportKit.cs" />
     <Compile Include="Guest\MyPoints.aspx.cs">
       <DependentUpon>MyPoints.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>

@@ -323,6 +323,24 @@ namespace Take_Time_BangPhra.Admin.Settings
                 "ตรวจสอบ แจ้งเตือน ทดสอบ debug", true));
             groups.Add(adv);
 
+            // ── 10. รายงานภาษี & กระทบยอด (อ่านอย่างเดียว — หน้าปลายทางกันสิทธิ์เองด้วย TaxReportKit) ──
+            var taxRep = new Group("รายงานภาษี & กระทบยอด NextAcc",
+                "รายงานที่ผู้ทำบัญชีใช้ตรวจความครบของเอกสารขาย ภาษีขาย และสต๊อก ก่อนปิดงวด/ยื่น ภ.พ.30",
+                "fa-file-invoice-dollar", "#37474f", Perm.SysAccounting + "|" + Perm.FinReport);
+            taxRep.Items.Add(new Item("สรุปยอดขายและภาษีขายรายวัน",
+                "รายวัน × ช่องทางขาย × แหล่งเงิน: จำนวน ยอดรวม VAT เอกสาร NextAcc ที่ครอบ (รายใบ/ใบสรุปรายวัน) + ธง **ขายที่ยังไม่มีเอกสาร / มาช้า / โอนยังไม่ตรวจ**",
+                "~/Report/DailySalesTaxSummary",
+                "รายงาน ภาษีขาย ยอดขาย รายวัน สรุป เงินสด rollup posday ใบสรุป ภ.พ.30 vat ตรวจ เอกสาร"));
+            taxRep.Items.Add(new Item("รายงานสินค้าและวัตถุดิบ (ม.87(3))",
+                "ยกมา · รับเข้า · ขาย · จ่ายออกอื่นแยกตามเหตุผล · คงเหลือ (จำนวน/มูลค่าตามราคาทุน) + บัญชีคุมรายวันรายสินค้า · CSV/พิมพ์",
+                "~/Report/StockMovementReport",
+                "รายงาน สินค้า วัตถุดิบ สต๊อก คงเหลือ 87 ม.87 stock inventory ตัดจำหน่าย เบิก"));
+            taxRep.Items.Add(new Item("กระทบยอด TakeTime กับ NextAcc",
+                "เทียบรายวัน: รายได้ ภาษีขาย ต้นทุนขาย ตัดจำหน่ายสต๊อก กับเอกสารที่ส่ง NextAcc + **คิวล้มเหลว/ค้าง** และการขายที่ไม่มีเอกสาร",
+                "~/Report/NextAccReconciliation",
+                "กระทบยอด reconcile nextacc คิว queue ล้มเหลว ต้นทุนขาย cogs รายได้ ภาษีขาย ส่วนต่าง"));
+            groups.Add(taxRep);
+
             return groups;
         }
 
