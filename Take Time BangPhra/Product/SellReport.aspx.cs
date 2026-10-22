@@ -102,6 +102,31 @@ namespace Take_Time_BangPhra.Product
                         && chk.Rows[0]["Pos_Rollup_Ref"] != DBNull.Value
                         ? chk.Rows[0]["Pos_Rollup_Ref"].ToString() : "";
 
+                    // แถว "เบิกสินค้า" (มีเหตุผล หรือ OutType WRITEOFF/ADJUSTMENT_LOSS) ห้ามลบดิบ:
+                    // ลงบัญชี/ส่งจำนวนไป NextAcc แล้ว → กลับรายการ (Is_Reversed + JE reverse + คืนสต็อก);
+                    // ยังไม่เคยส่ง → ลบได้ (StockOutService.CancelOrDelete). แถวที่ถูกรวบเข้า POSDAY แล้วใช้ guard เดิม
+                    if ((string.IsNullOrEmpty(rcptId) || rcptId == "0")
+                        && !rollupRef.StartsWith("POSDAY", StringComparison.OrdinalIgnoreCase))
+                    {
+                        long outId;
+                        if (long.TryParse(Convert.ToString(deleteParams["@ID"]), out outId))
+                        {
+                            var so = new Take_Time_BangPhra.Inventory.StockOutService(conn);
+                            var soRow = so.LoadRow(outId);
+                            if (Take_Time_BangPhra.Inventory.StockOutService.IsStockOutRow(soRow))
+                            {
+                                string user = Session["UserName"]?.ToString();
+                                if (string.IsNullOrWhiteSpace(user)) user = "UserID:" + (Session["UserID"]?.ToString() ?? "?");
+                                string soMsg;
+                                so.CancelOrDelete(outId, user, "ลบจากหน้ารายงานขาย", out soMsg);
+                                ClientScript.RegisterStartupScript(this.GetType(), "soCancel",
+                                    "alert('" + (soMsg ?? "").Replace("\\", "\\\\").Replace("'", "\\'").Replace("\n", "\\n") + "');", true);
+                                Button3_Click1(null, null);
+                                return;
+                            }
+                        }
+                    }
+
                     if (!string.IsNullOrEmpty(rcptId) && rcptId != "0")
                     {
                         ClientScript.RegisterStartupScript(this.GetType(), "delBlocked",

@@ -1264,6 +1264,147 @@ namespace Take_Time_BangPhra.Integration
         }
 
         // ──────────────────────────────────────────────
+        // เบิกสินค้าตามเหตุผล (Stock_Out_Reason — PHASE19_30)
+        // ──────────────────────────────────────────────
+
+        /// <summary>ข้อมูลสำหรับ JE เบิกสินค้า 1 แถว (Product_Out) — ยอดคำนวณตอน enqueue (snapshot)</summary>
+        public sealed class StockOutJournalInput
+        {
+            public long ProductOutId { get; set; }
+            public int ProductId { get; set; }
+            public string ProductName { get; set; }
+            public decimal Quantity { get; set; }
+            public decimal CostPerUnit { get; set; }
+            public string ReasonCode { get; set; }
+            public string ReasonName { get; set; }
+            public string GlMappingKey { get; set; }
+            /// <summary>ฐานภาษีขายเสมือนขาย (ราคาตลาดถอด VAT หรือต้นทุน) — 0 = ไม่มีภาษีขาย</summary>
+            public decimal DeemedVatBase { get; set; }
+            public decimal DeemedVatAmount { get; set; }
+            public DateTime OutDate { get; set; }
+            public string Note { get; set; }
+        }
+
+        /// <summary>ExternalRef ของ JE เบิกสินค้า — idempotent ฝั่ง NextAcc (/integration/journals dedup by Reference)</summary>
+        public static string StockOutRef(long productOutId) => "STOCKOUT-" + productOutId;
+
+        /// <summary>
+        /// JE เบิกสินค้าตามเหตุผล:
+        ///   Dr บัญชีของเหตุผล (Gl_Mapping_Key)   ต้นทุน
+        ///       Cr INVENTORY                     ต้นทุน
+        ///   ถ้าถือเป็นการขาย ม.77/1(8) (DeemedVatAmount > 0):
+        ///   Dr บัญชีของเหตุผล (หรือ OUTPUT_VAT_DEEMED_EXPENSE)   VAT
+        ///       Cr OUTPUT_VAT (21911)                            VAT = 7% × ฐาน
+        /// NextAcc นับบรรทัด Cr 21911 ของ JE ที่ไม่มีเอกสารต้นทางเข้า ภ.พ.30 (TaxService.cs:1229-1334,
+        /// ฐาน = VAT ÷ อัตรา) — ขาเดบิตจึงห้ามเป็นบัญชีที่ตัวตรวจถือเป็นภาษีขาย/ภาษีซื้อ
+        /// (ชื่อมี "ภาษีขาย"/"ภาษีซื้อ" หรือรหัส 2191x/116x — TaxService.cs:1264-1293) ไม่งั้นหักล้างกันเหลือ 0
+        /// </summary>
+        public CreateJournalEntryRequest MapStockOutReasonToJournal(StockOutJournalInput i)
+        {
+            if (i == null) throw new ArgumentNullException(nameof(i));
+            decimal totalCost = Math.Round(i.Quantity * i.CostPerUnit, 2, MidpointRounding.AwayFromZero);
+            decimal vat = Math.Round(i.DeemedVatAmount, 2, MidpointRounding.AwayFromZero);
+            if (totalCost < 0 || vat < 0)
+                throw new ArgumentException($"MapStockOutReasonToJournal: ยอดติดลบ cost={totalCost} vat={vat}");
+            if (totalCost == 0 && vat == 0)
+                throw new ArgumentException($"MapStockOutReasonToJournal: ไม่มียอดให้ลงบัญชี (ต้นทุน 0, ภาษีขาย 0) row={i.ProductOutId}");
+
+            string reasonLabel = string.IsNullOrWhiteSpace(i.ReasonName) ? (i.ReasonCode ?? "เบิกสินค้า") : i.ReasonName;
+            Guid debitId = ResolveStockOutDebitAccount(i.GlMappingKey, i.ReasonCode);
+            var lines = new List<JournalEntryLineRequest>();
+
+            if (totalCost > 0)
+            {
+                var inventoryAccountId = GetAccountId("INVENTORY");
+                lines.Add(new JournalEntryLineRequest { AccountId = debitId, DebitAmount = totalCost, CreditAmount = 0,
+                    Description = $"เบิกสินค้า ({reasonLabel}) - {i.ProductName} qty={i.Quantity:N2} @ต้นทุน {i.CostPerUnit:N2}" });
+                lines.Add(new JournalEntryLineRequest { AccountId = inventoryAccountId, DebitAmount = 0, CreditAmount = totalCost,
+                    Description = $"ตัดสต็อก - {i.ProductName} qty={i.Quantity:N2}" });
+            }
+
+            if (vat > 0)
+            {
+                Guid vatDebitId = debitId;
+                Guid dedicated;
+                if (TryGetAccountId("OUTPUT_VAT_DEEMED_EXPENSE", out dedicated) && dedicated != Guid.Empty)
+                {
+                    if (IsVatReportAccount(dedicated))
+                        LogMappingWarn("OUTPUT_VAT_DEEMED_EXPENSE",
+                            "ผูกกับบัญชีภาษีขาย/ภาษีซื้อ — จะหักล้างภาษีขายจนไม่เข้า ภ.พ.30 จึงใช้บัญชีของเหตุผลแทน");
+                    else
+                        vatDebitId = dedicated;
+                }
+                if (IsVatReportAccount(vatDebitId))
+                    throw new ArgumentException($"MapStockOutReasonToJournal: บัญชีเดบิตของเหตุผล {i.ReasonCode} เป็นบัญชีภาษีขาย/ภาษีซื้อ " +
+                        "— ภาษีขายเสมือนขายจะถูกหักล้างใน ภ.พ.30 แก้ mapping ของเหตุผลนี้ก่อน");
+
+                var outputVatId = GetAccountId("OUTPUT_VAT");
+                string outCode = GetAccountCodeFromId(outputVatId) ?? "";
+                if (outCode != "21911")
+                    LogMappingWarn("OUTPUT_VAT", $"รหัส {outCode} ไม่ใช่ 21911 — NextAcc นับภาษีขายจาก JE เข้า ภ.พ.30 เฉพาะ 21911 หรือบัญชีชื่อ 'ภาษีขาย' (TaxService.cs:1277-1285)");
+
+                lines.Add(new JournalEntryLineRequest { AccountId = vatDebitId, DebitAmount = vat, CreditAmount = 0,
+                    Description = $"ภาษีขายที่กิจการรับภาระ (ม.77/1(8)) - {i.ProductName}" });
+                lines.Add(new JournalEntryLineRequest { AccountId = outputVatId, DebitAmount = 0, CreditAmount = vat,
+                    Description = $"ภาษีขาย 7% ฐานราคาตลาด {i.DeemedVatBase:N2} - {i.ProductName} qty={i.Quantity:N2}" });
+            }
+
+            string desc = vat > 0
+                ? $"นำสินค้าไปใช้/ขาดจากรายงาน ถือเป็นการขาย ม.77/1(8) ({reasonLabel}) - {i.ProductName} ฐาน {i.DeemedVatBase:N2}"
+                : $"เบิกสินค้า ({reasonLabel}) - {i.ProductName}";
+            if (!string.IsNullOrWhiteSpace(i.Note))
+                desc += " | " + i.Note.Trim();
+            if (desc.Length > 480) desc = desc.Substring(0, 480);
+
+            return new CreateJournalEntryRequest
+            {
+                EntryDate = i.OutDate,
+                JournalType = NexaaccJournalType.General,
+                Description = desc,
+                Reference = StockOutRef(i.ProductOutId),
+                Lines = lines
+            };
+        }
+
+        /// <summary>บัญชีเดบิตของเหตุผล → fallback INVENTORY_LOSS → STOCK_LOSS_EXPENSE (พฤติกรรมเดิม) + log เตือน</summary>
+        private Guid ResolveStockOutDebitAccount(string glKey, string reasonCode)
+        {
+            Guid id;
+            if (!string.IsNullOrWhiteSpace(glKey) && TryGetAccountId(glKey.Trim(), out id) && id != Guid.Empty)
+                return id;
+            if (!string.Equals(glKey, "INVENTORY_LOSS", StringComparison.OrdinalIgnoreCase)
+                && TryGetAccountId("INVENTORY_LOSS", out id) && id != Guid.Empty)
+            {
+                LogMappingWarn(glKey ?? "(ว่าง)", $"เหตุผลการเบิก {reasonCode}: ยังไม่ผูกบัญชี → ใช้ INVENTORY_LOSS แทน");
+                return id;
+            }
+            LogMappingWarn(glKey ?? "(ว่าง)", $"เหตุผลการเบิก {reasonCode}: ยังไม่ผูกบัญชี → ใช้ STOCK_LOSS_EXPENSE แทน");
+            return GetAccountId("STOCK_LOSS_EXPENSE");
+        }
+
+        /// <summary>บัญชีที่ NextAcc ภ.พ.30 (JE fallback) ถือเป็นภาษีขาย/ภาษีซื้อ — ตามรหัสหรือชื่อ (TaxService.cs:1264-1293)</summary>
+        private bool IsVatReportAccount(Guid accountId)
+        {
+            string code = GetAccountCodeFromId(accountId) ?? "";
+            if (code.StartsWith("2191") || code.StartsWith("116")) return true;
+            if (code.Length == 0) return false;
+            try
+            {
+                var dt = _Code.DatabaseQuerySafe(_connectionString,
+                    @"IF OBJECT_ID('dbo.Accounting_Nexaacc_Accounts','U') IS NOT NULL
+                        SELECT TOP 1 Account_Name FROM dbo.Accounting_Nexaacc_Accounts WHERE Account_Code = @c",
+                    new Dictionary<string, object> { { "@c", code } });
+                if (dt != null && dt.Columns.Contains("Account_Name") && dt.Rows.Count > 0)
+                {
+                    string name = dt.Rows[0]["Account_Name"]?.ToString() ?? "";
+                    return name.Contains("ภาษีขาย") || name.Contains("ภาษีซื้อ");
+                }
+            }
+            catch { }
+            return false;
+        }
+
+        // ──────────────────────────────────────────────
         // Receipt / Document Mapping
         // ──────────────────────────────────────────────
 

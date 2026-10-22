@@ -520,6 +520,7 @@
     <Content Include="Admin\Settings\Index.aspx" />
     <Content Include="Admin\Settings\PermissionGroups.aspx" />
     <Content Include="Admin\Settings\ProductAccounting.aspx" />
+    <Content Include="Admin\Settings\StockOutReasons.aspx" />
     <Content Include="Admin\CRM\MemberVouchers.aspx" />
     <Content Include="Admin\CRM\MemberHub.aspx" />
     <Content Include="Admin\CRM\ReviewAnalytics.aspx" />
@@ -602,6 +603,7 @@
     <Content Include="Global.asax" />
     <Content Include="Product\SellReport.aspx" />
     <Content Include="Product\Stock.aspx" />
+    <Content Include="Product\StockOutReport.aspx" />
     <Content Include="Product\In.aspx" />
     <Content Include="Product\PurchaseReturn.aspx" />
     <Content Include="Account\CreditPurchasePayment.aspx" />
@@ -991,6 +993,8 @@
     <Compile Include="Class\DefaultCompat.cs" />
     <Compile Include="Class\Feature.cs" />
     <Compile Include="Class\Perm.cs" />
+    <Compile Include="Class\Inventory\StockOutReasonCatalog.cs" />
+    <Compile Include="Class\Inventory\StockOutService.cs" />
     <Compile Include="Class\UploadHelper.cs" />
     <Compile Include="Class\Services\DbRunLease.cs" />
     <Compile Include="Class\Services\EmailReservationService.cs" />
@@ -1514,6 +1518,13 @@
     <Compile Include="Admin\Settings\ProductAccounting.aspx.designer.cs">
       <DependentUpon>ProductAccounting.aspx</DependentUpon>
     </Compile>
+    <Compile Include="Admin\Settings\StockOutReasons.aspx.cs">
+      <DependentUpon>StockOutReasons.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Settings\StockOutReasons.aspx.designer.cs">
+      <DependentUpon>StockOutReasons.aspx</DependentUpon>
+    </Compile>
     <Compile Include="Admin\Settings\PermissionGroups.aspx.cs">
       <DependentUpon>PermissionGroups.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>
@@ -1731,6 +1742,13 @@
     </Compile>
     <Compile Include="Product\Stock.aspx.designer.cs">
       <DependentUpon>Stock.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Product\StockOutReport.aspx.cs">
+      <DependentUpon>StockOutReport.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Product\StockOutReport.aspx.designer.cs">
+      <DependentUpon>StockOutReport.aspx</DependentUpon>
     </Compile>
     <Compile Include="Product\In.aspx.cs">
       <DependentUpon>In.aspx</DependentUpon>

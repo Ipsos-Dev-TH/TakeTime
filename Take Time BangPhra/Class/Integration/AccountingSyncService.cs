@@ -1544,6 +1544,322 @@ namespace Take_Time_BangPhra.Integration
             InsertInboundProductIn(ttProductId, qty, m.UnitCost, m.MovementDate);
             MarkMovementSeen(m.Id, "PULL", ttProductId);
             return true;
+        // เบิกสินค้าตามเหตุผล (Stock_Out_Reason — PHASE19_30): JE ต่อแถว Product_Out, ref STOCKOUT-{ID}
+        //   Dr บัญชีของเหตุผล / Cr INVENTORY (ต้นทุน) + [ถือเป็นการขาย ม.77/1(8)] Dr บัญชีของเหตุผล / Cr OUTPUT_VAT
+        //   กลับรายการ = /integration/journals/reverse (ref STOCKOUT-REV-{ID}) + qty IN
+        // ──────────────────────────────────────────────
+
+        /// <summary>
+        /// ลงบัญชีการเบิก 1 แถว (เรียกเมื่อแถว APPROVED แล้วเท่านั้น). คืน: &gt;0 = queue id ·
+        /// 0 = ลงบัญชีไปแล้ว · -1 = ยังไม่ตั้งค่า/ปิด integration หรือข้อมูลไม่ครบ ·
+        /// -2 = ไม่มียอด GL (ต้นทุน 0 และไม่มีภาษีขาย) — แต่ยัง push จำนวนสต๊อกให้ NextAcc แล้ว (แก้ของเดิมที่ข้ามเงียบ)
+        /// </summary>
+        public long EnqueueStockOutReasonJournal(long productOutId, int productId, string productName, decimal quantity,
+            decimal costPerUnit, decimal marketPricePerUnitGross, string reasonCode, string reasonName, string glMappingKey,
+            bool deemedSaleVat, string vatBase, DateTime outDate, string note)
+        {
+            if (!_config.IsConfigured || !_config.Enabled) return -1;
+            if (productOutId <= 0 || productId <= 0 || quantity <= 0) return -1;
+            // คืนสินค้าผู้ขาย: หน้าคืนสินค้าลง JE (PRT-…) + qty เองแล้ว — ห้ามลงซ้ำ
+            if (string.Equals(reasonCode, "RETURN_TO_VENDOR", StringComparison.OrdinalIgnoreCase)) return -1;
+            if (costPerUnit < 0) costPerUnit = 0;
+
+            string refStr = AccountingDataMapper.StockOutRef(productOutId);
+
+            // จำนวนสต๊อกส่งเสมอ แม้ต้นทุน 0 (เดิม cost ≤ 0 → ไม่มีทั้ง GL และ qty → NextAcc สต๊อกเกินจริง)
+            // ครั้งเดียวต่อแถว: dedup ของ EnqueueStockQtyPush ดูแค่ 24 ชม. → กด "ลงบัญชีอีกครั้ง" ทีหลังจะ push ซ้ำ
+            string qSt, qResp;
+            if (FindAnyStockQueueEntry("STOCK_QTY_PUSH", "QTY-OUT-" + refStr, out qSt, out qResp) <= 0)
+                EnqueueStockQtyPush(productId, productName, quantity, "OUT", costPerUnit, outDate, refStr);
+
+            decimal vatBaseAmt = 0m, vatAmt = 0m;
+            if (deemedSaleVat && BusinessUsesVat())
+            {
+                bool market = !string.Equals(vatBase, "COST", StringComparison.OrdinalIgnoreCase);
+                if (market && marketPricePerUnitGross > 0)
+                    // ราคาขายใน TakeTime เป็นราคารวม VAT (POS rollup ถอด 7/107 เช่นกัน) → ฐาน ม.79/3 = ราคาตลาดก่อน VAT
+                    vatBaseAmt = Math.Round(quantity * marketPricePerUnitGross / 1.07m, 2, MidpointRounding.AwayFromZero);
+                else
+                {
+                    if (market)
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"⚠ StockOut {refStr}: เหตุผล {reasonCode} ต้องใช้ราคาตลาด แต่สินค้า {productId} ไม่มีราคาขาย — ใช้ต้นทุนเป็นฐานภาษีแทน", "SYSTEM");
+                    vatBaseAmt = Math.Round(quantity * costPerUnit, 2, MidpointRounding.AwayFromZero);
+                }
+                vatAmt = Math.Round(vatBaseAmt * 0.07m, 2, MidpointRounding.AwayFromZero);
+            }
+
+            decimal totalCost = Math.Round(quantity * costPerUnit, 2, MidpointRounding.AwayFromZero);
+            if (totalCost <= 0 && vatAmt <= 0)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"⚠ StockOut {refStr}: สินค้า {productId} {productName} ไม่มีต้นทุน (Cost_Price/ราคาซื้อ = 0) — ไม่ลง GL, ส่งเฉพาะจำนวนสต๊อก. ตั้งต้นทุนสินค้าแล้วกด 'ลงบัญชีอีกครั้ง' ที่หน้าสต็อก", "SYSTEM");
+                return -2;
+            }
+
+            if (!string.IsNullOrEmpty(ParseStockOutJournalGuid(ReadStockOutJournalRef(productOutId)))) return 0;
+            long existing = FindPendingEntry("STOCK", "STOCK_OUT_REASON_JOURNAL", "stockRef", refStr);
+            if (existing > 0) return existing;
+            long done = FindRecentCompletedEntry("STOCK", "STOCK_OUT_REASON_JOURNAL", "stockRef", refStr, 86400 * 3650);
+            if (done > 0) return done;
+
+            var payload = new Dictionary<string, object>
+            {
+                { "stockRef", refStr },
+                { "productOutId", productOutId },
+                { "productId", productId },
+                { "productName", productName ?? "" },
+                { "quantity", quantity },
+                { "costPerUnit", costPerUnit },
+                { "reasonCode", reasonCode ?? "" },
+                { "reasonName", reasonName ?? "" },
+                { "glMappingKey", glMappingKey ?? "" },
+                { "deemedVatBase", vatBaseAmt },
+                { "deemedVatAmount", vatAmt },
+                { "outDate", AcctDate(outDate, true) },
+                { "note", note ?? "" }
+            };
+            return InsertQueue("STOCK", productId, "STOCK_OUT_REASON_JOURNAL", payload);
+        }
+
+        /// <summary>
+        /// กลับรายการการเบิกที่ลงบัญชี/ส่งจำนวนไปแล้ว (แถวถูก mark Is_Reversed ก่อนเรียก).
+        /// legacyJournalId/legacyQtySrcRef = แถวเบิกแบบเก่า (STOCK_WRITEOFF ref SWO-{logId}) ที่รู้ JE จาก Stock_Adjustment_Log.
+        /// คืน &gt;0 queue id · 0 = ไม่เคยลง GL (ส่งเฉพาะ qty IN ถ้ามี) · -1 = ยังไม่ตั้งค่า
+        /// </summary>
+        public long EnqueueStockOutReasonReversal(long productOutId, int productId, string productName, decimal quantity,
+            decimal costPerUnit, DateTime reverseDate, string reason, string legacyJournalId = null, string legacyQtySrcRef = null)
+        {
+            if (!_config.IsConfigured) return -1;
+            if (productOutId <= 0) return -1;
+
+            string createRef = AccountingDataMapper.StockOutRef(productOutId);
+            string refStr = "STOCKOUT-REV-" + productOutId;
+            string qtySrc = string.IsNullOrEmpty(legacyQtySrcRef) ? createRef : legacyQtySrcRef;
+
+            // qty IN เฉพาะเมื่อเคยส่ง qty OUT ของแถวนี้ (กัน NextAcc ได้สต๊อกเพิ่มลอย ๆ)
+            string outStatus, outResp, inStatus, inResp;
+            if (FindAnyStockQueueEntry("STOCK_QTY_PUSH", "QTY-OUT-" + qtySrc, out outStatus, out outResp) > 0
+                && FindAnyStockQueueEntry("STOCK_QTY_PUSH", "QTY-IN-REV-" + qtySrc, out inStatus, out inResp) <= 0)
+                EnqueueStockQtyPush(productId, productName, quantity, "IN", costPerUnit, reverseDate, "REV-" + qtySrc);
+
+            string st, resp;
+            bool hasJournal = !string.IsNullOrEmpty(legacyJournalId)
+                || !string.IsNullOrEmpty(ParseStockOutJournalGuid(ReadStockOutJournalRef(productOutId)))
+                || FindAnyStockQueueEntry("STOCK_OUT_REASON_JOURNAL", createRef, out st, out resp) > 0;
+            if (!hasJournal) return 0;
+
+            long existing = FindPendingEntry("STOCK", "STOCK_OUT_REASON_REVERSE", "stockRef", refStr);
+            if (existing > 0) return existing;
+            long done = FindRecentCompletedEntry("STOCK", "STOCK_OUT_REASON_REVERSE", "stockRef", refStr, 86400 * 3650);
+            if (done > 0) return done;
+
+            var payload = new Dictionary<string, object>
+            {
+                { "stockRef", refStr },
+                { "createRef", createRef },
+                { "productOutId", productOutId },
+                { "productId", productId },
+                { "productName", productName ?? "" },
+                { "journalId", legacyJournalId ?? "" },
+                { "reverseDate", AcctDate(reverseDate, true) },
+                { "reason", reason ?? "" }
+            };
+            return InsertQueue("STOCK", productId > 0 ? productId : 0, "STOCK_OUT_REASON_REVERSE", payload);
+        }
+
+        private async Task<string> ProcessStockOutReasonJournal(Dictionary<string, object> p)
+        {
+            long rowId = Convert.ToInt64(p["productOutId"]);
+            string state = ReadStockOutRowState(rowId);
+            if (state != "OK")
+            {
+                _code.Logs(_connectionString, "AccountingSync", $"StockOutReason row={rowId}: ข้ามการลงบัญชี ({state})", "SYSTEM");
+                return "SKIPPED_" + state;
+            }
+
+            var input = new AccountingDataMapper.StockOutJournalInput
+            {
+                ProductOutId = rowId,
+                ProductId = Convert.ToInt32(p["productId"]),
+                ProductName = p.ContainsKey("productName") ? p["productName"]?.ToString() : "",
+                Quantity = SafeDec(p["quantity"]),
+                CostPerUnit = p.ContainsKey("costPerUnit") ? SafeDec(p["costPerUnit"]) : 0m,
+                ReasonCode = p.ContainsKey("reasonCode") ? p["reasonCode"]?.ToString() : "",
+                ReasonName = p.ContainsKey("reasonName") ? p["reasonName"]?.ToString() : "",
+                GlMappingKey = p.ContainsKey("glMappingKey") ? p["glMappingKey"]?.ToString() : "",
+                DeemedVatBase = p.ContainsKey("deemedVatBase") ? SafeDec(p["deemedVatBase"]) : 0m,
+                DeemedVatAmount = p.ContainsKey("deemedVatAmount") ? SafeDec(p["deemedVatAmount"]) : 0m,
+                OutDate = ParseAcctDate(p["outDate"]?.ToString()),
+                Note = p.ContainsKey("note") ? p["note"]?.ToString() : ""
+            };
+
+            _code.Logs(_connectionString, "AccountingSync",
+                $"ProcessStockOutReasonJournal: row={rowId} reason={input.ReasonCode} product={input.ProductName} qty={input.Quantity} cost={input.CostPerUnit} deemedVat={input.DeemedVatAmount} base={input.DeemedVatBase}", "SYSTEM");
+
+            var journal = _mapper.MapStockOutReasonToJournal(input);
+            var result = await _apiClient.CreateJournalAsync(journal);
+            Guid jid = RequireValidDocId(result?.data?.Id, $"StockOutReason row={rowId}");
+            await SafePostJournalAsync(jid);
+            SetStockOutJournalRef(rowId, jid.ToString());
+            return jid.ToString();
+        }
+
+        private async Task<string> ProcessStockOutReasonReverse(Dictionary<string, object> p)
+        {
+            long rowId = Convert.ToInt64(p["productOutId"]);
+            string refStr = p.ContainsKey("stockRef") ? p["stockRef"]?.ToString() : "STOCKOUT-REV-" + rowId;
+            string createRef = p.ContainsKey("createRef") ? p["createRef"]?.ToString() : AccountingDataMapper.StockOutRef(rowId);
+            string reason = p.ContainsKey("reason") ? p["reason"]?.ToString() : "";
+            DateTime revDate = p.ContainsKey("reverseDate") ? ParseAcctDate(p["reverseDate"]?.ToString()) : DateTime.Today;
+
+            // หา JE ต้นฉบับ: payload (แถวเก่า) → Product_Out.Nexaacc_Journal_Ref → ผลของคิวสร้าง
+            Guid jid;
+            string fromPayload = p.ContainsKey("journalId") ? p["journalId"]?.ToString() : "";
+            if (!Guid.TryParse(fromPayload ?? "", out jid) || jid == Guid.Empty)
+            {
+                Guid.TryParse(ParseStockOutJournalGuid(ReadStockOutJournalRef(rowId)) ?? "", out jid);
+            }
+            if (jid == Guid.Empty)
+            {
+                string st, resp;
+                if (FindAnyStockQueueEntry("STOCK_OUT_REASON_JOURNAL", createRef, out st, out resp) > 0)
+                {
+                    if (st == "PROCESSING")
+                        throw new Exception($"StockOutReverse {refStr}: คิวลงบัญชีต้นฉบับ ({createRef}) กำลังทำงาน — รอให้เสร็จแล้ว retry");
+                    if (st == "COMPLETED") Guid.TryParse(resp ?? "", out jid);
+                    // PENDING/FAILED: ตัวสร้างจะเห็น Is_Reversed=1 แล้วข้ามเอง (ReadStockOutRowState) → ไม่มีอะไรให้กลับ
+                }
+            }
+            if (jid == Guid.Empty)
+            {
+                _code.Logs(_connectionString, "AccountingSync", $"StockOutReverse {refStr}: ไม่พบ JE ต้นฉบับที่ลงไปแล้ว — ไม่ต้องกลับรายการ", "SYSTEM");
+                return "NOTHING_TO_REVERSE";
+            }
+
+            string desc = $"กลับรายการเบิกสินค้า {createRef}" + (string.IsNullOrWhiteSpace(reason) ? "" : " — " + reason.Trim());
+            try
+            {
+                var rev = await _apiClient.ReverseJournalWithRefAsync(jid, refStr, revDate, desc);
+                if (rev?.success == true && rev.data != null && rev.data.Id != Guid.Empty)
+                {
+                    MarkStockOutReversedRef(rowId, jid, rev.data.Id.ToString());
+                    _code.Logs(_connectionString, "AccountingSync", $"StockOutReverse {refStr}: กลับรายการ JE {jid} → {rev.data.Id}", "SYSTEM");
+                    return rev.data.Id.ToString();
+                }
+                if (IsAlreadyReversedMessage(rev?.message))
+                {
+                    MarkStockOutReversedRef(rowId, jid, "ALREADY");
+                    return "ALREADY_REVERSED";
+                }
+                throw new Exception($"StockOutReverse {refStr}: NextAcc ปฏิเสธ: {rev?.message ?? "null"}");
+            }
+            catch (Exception ex) when (IsAlreadyReversedMessage(ex.Message))
+            {
+                MarkStockOutReversedRef(rowId, jid, "ALREADY");
+                return "ALREADY_REVERSED";
+            }
+        }
+
+        private static bool IsAlreadyReversedMessage(string msg)
+        {
+            if (string.IsNullOrEmpty(msg)) return false;
+            string m = DecodeUnicodeEscapes(msg);
+            return m.Contains("ถูกกลับรายการไปแล้ว") || m.IndexOf("already reversed", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        /// <summary>"OK" | "MISSING" | "REVERSED" | "NOT_APPROVED" — ตัวสร้าง JE ต้องข้ามแถวที่ถูกยกเลิก/ยังไม่อนุมัติ</summary>
+        private string ReadStockOutRowState(long rowId)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 ID, Is_Reversed, Approval_Status, Out_Reason_Code FROM Product_Out WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", rowId } });
+                if (dt == null || dt.Rows.Count == 0) return "MISSING";
+                var r = dt.Rows[0];
+                if (r["Is_Reversed"] != DBNull.Value && Convert.ToBoolean(r["Is_Reversed"])) return "REVERSED";
+                if (string.Equals(r["Out_Reason_Code"]?.ToString(), "RETURN_TO_VENDOR", StringComparison.OrdinalIgnoreCase)) return "PURCHASE_RETURN";
+                string ap = r["Approval_Status"] == DBNull.Value ? "" : r["Approval_Status"].ToString();
+                if (ap.Length > 0 && !string.Equals(ap, "APPROVED", StringComparison.OrdinalIgnoreCase)) return "NOT_APPROVED";
+                return "OK";
+            }
+            catch
+            {
+                // ยังไม่รัน PHASE19_30 → เช็คแค่ว่าแถวยังอยู่
+                try
+                {
+                    var dt = _code.DatabaseQuerySafe(_connectionString,
+                        "SELECT TOP 1 ID FROM Product_Out WHERE ID = @id",
+                        new Dictionary<string, object> { { "@id", rowId } });
+                    return dt != null && dt.Rows.Count > 0 ? "OK" : "MISSING";
+                }
+                catch { return "OK"; }
+            }
+        }
+
+        private string ReadStockOutJournalRef(long rowId)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 Nexaacc_Journal_Ref FROM Product_Out WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", rowId } });
+                if (dt != null && dt.Rows.Count > 0 && dt.Rows[0][0] != DBNull.Value) return dt.Rows[0][0].ToString();
+            }
+            catch { /* ยังไม่มีคอลัมน์ */ }
+            return null;
+        }
+
+        /// <summary>Nexaacc_Journal_Ref = "{jeId}" หรือ "{jeId}|REV:{revId}" → คืน jeId (string) หรือ null</summary>
+        internal static string ParseStockOutJournalGuid(string journalRef)
+        {
+            if (string.IsNullOrWhiteSpace(journalRef)) return null;
+            string head = journalRef.Split('|')[0].Trim();
+            Guid g;
+            return Guid.TryParse(head, out g) && g != Guid.Empty ? g.ToString() : null;
+        }
+
+        private void SetStockOutJournalRef(long rowId, string journalId)
+        {
+            try
+            {
+                _code.DatabaseInsertSafe(_connectionString,
+                    "UPDATE Product_Out SET Nexaacc_Journal_Ref = @ref WHERE ID = @id",
+                    new Dictionary<string, object> { { "@ref", journalId }, { "@id", rowId } });
+            }
+            catch { /* ยังไม่มีคอลัมน์ — คิวเก็บ id ไว้ใน Nexaacc_Response_Id แล้ว */ }
+        }
+
+        private void MarkStockOutReversedRef(long rowId, Guid originalId, string reversalId)
+        {
+            string v = originalId + "|REV:" + (reversalId ?? "");
+            if (v.Length > 100) v = v.Substring(0, 100);
+            SetStockOutJournalRef(rowId, v);
+        }
+
+        /// <summary>คิว STOCK ของ ref นี้ (ทุกสถานะ) — คืน id ล่าสุด, status, Nexaacc_Response_Id</summary>
+        private long FindAnyStockQueueEntry(string actionType, string stockRef, out string status, out string responseId)
+        {
+            status = null; responseId = null;
+            if (string.IsNullOrEmpty(stockRef)) return -1;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 ID, Status, Nexaacc_Response_Id FROM Accounting_Sync_Queue
+                      WHERE Entity_Type = 'STOCK' AND Action_Type = @a AND Payload LIKE @pattern
+                      ORDER BY ID DESC",
+                    new Dictionary<string, object>
+                    {
+                        { "@a", actionType },
+                        { "@pattern", $"%\"stockRef\":\"{stockRef}\"%" }
+                    });
+                if (dt == null || dt.Rows.Count == 0) return -1;
+                status = dt.Rows[0]["Status"]?.ToString();
+                responseId = dt.Rows[0]["Nexaacc_Response_Id"] == DBNull.Value ? null : dt.Rows[0]["Nexaacc_Response_Id"].ToString();
+                return Convert.ToInt64(dt.Rows[0]["ID"]);
+            }
+            catch { return -1; }
         }
 
         // ──────────────────────────────────────────────
@@ -4257,6 +4573,10 @@ namespace Take_Time_BangPhra.Integration
                     return await ProcessStockWriteOff(payload);
                 case "PURCHASE_RETURN":
                     return await ProcessPurchaseReturn(payload);
+                case "STOCK_OUT_REASON_JOURNAL":
+                    return await ProcessStockOutReasonJournal(payload);
+                case "STOCK_OUT_REASON_REVERSE":
+                    return await ProcessStockOutReasonReverse(payload);
                 case "SYNC_PRODUCT_MASTER":
                     return await ProcessProductSync(payload);
 

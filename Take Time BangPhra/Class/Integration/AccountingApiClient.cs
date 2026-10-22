@@ -736,6 +736,40 @@ namespace Take_Time_BangPhra.Integration
             };
         }
 
+        /// <summary>
+        /// กลับรายการ Journal พร้อม ExternalRef ของตัวกลับรายการเอง (เช่น STOCKOUT-REV-{id}) —
+        /// NextAcc ใช้ ExternalRef เป็น Reference ของ JE กลับรายการ (IntegrationService.ProcessJournalReverseAsync
+        /// :4646 <c>Reference = request.ExternalRef ?? original.Reference</c>) → ไม่ชน Reference ของต้นฉบับ
+        /// ที่ /integration/journals ใช้ dedup. ต้นฉบับถูก mark Reversed และหลุดจาก ภ.พ.30 JE fallback (TaxService.cs:1245-1246)
+        /// </summary>
+        public async Task<ApiResponse<JournalEntryResponse>> ReverseJournalWithRefAsync(Guid entryId, string externalRef,
+            DateTime? reversalDate, string description)
+        {
+            var revReq = new CreateIntegrationReverseJournalRequest
+            {
+                ExternalRef = externalRef,
+                OriginalJournalEntryId = entryId,
+                ReversalDate = reversalDate,
+                Description = description ?? $"กลับรายการ Journal #{entryId}"
+            };
+            var flat = await PostAsync<CreateIntegrationReverseJournalRequest, IntegrationSyncResponse>(
+                "/api/integration/journals/reverse", revReq);
+
+            Guid revId = flat?.journalEntryId ?? flat?.documentId ?? Guid.Empty;
+            return new ApiResponse<JournalEntryResponse>
+            {
+                success = flat?.success ?? false,
+                message = flat?.message,
+                data = (flat != null && revId != Guid.Empty) ? new JournalEntryResponse
+                {
+                    Id = revId,
+                    EntryNumber = flat.documentNumber,
+                    Status = 1,
+                    OriginalEntryId = entryId
+                } : null
+            };
+        }
+
         public async Task DeleteJournalAsync(Guid entryId)
         {
             await ExecuteWithRetryAsync<object>(HttpMethod.Delete, $"{CompanyPath}/accounting/journals/{entryId}", null);
