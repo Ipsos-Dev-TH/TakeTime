@@ -413,6 +413,20 @@
             </div>
         </div>
 
+        <!-- ทำเครื่องหมายรับเงินย้อนหลัง (Owner/Admin, แสดงเมื่อเปิดนโยบายเอกสารขาย) — ออเดอร์เงินสด/โอนก่อนเปิดนโยบาย
+             ไม่เคยกด "ยืนยันรับเงินแล้ว" → รายได้ไม่เข้าบัญชี (นโยบายนับเฉพาะ PAID) -->
+        <asp:Panel ID="pnlRsBackfill" runat="server" Visible="false"
+            style="background:#fff8e1;border-left:4px solid #f9a825;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px;">
+            <b><i class="fas fa-history"></i> ทำเครื่องหมายรับเงินย้อนหลัง (ครั้งเดียว)</b>
+            <div style="color:#5d4037;margin:4px 0 8px;">ออเดอร์เงินสด/เงินโอนที่ส่งของแล้วแต่ยังไม่ได้กด "ยืนยันรับเงินแล้ว" ในช่วงวันที่นี้ จะถูกตั้งเป็นรับเงินแล้ว
+                (วันรับเงิน = วันสั่ง) แล้วรายได้จะเข้าบัญชีรอบถัดไปตามนโยบายเอกสารขาย — ใช้เฉพาะออเดอร์ที่เก็บเงินจริงแล้ว</div>
+            <span>ตั้งแต่ <asp:TextBox ID="txtBackfillFrom" runat="server" TextMode="Date" /></span>
+            <span>ถึง <asp:TextBox ID="txtBackfillTo" runat="server" TextMode="Date" /></span>
+            <asp:Button ID="btnBackfillPaid" runat="server" Text="ทำเครื่องหมายรับเงินแล้ว" CssClass="btn-action btn-claim"
+                OnClick="btnBackfillPaid_Click"
+                OnClientClick="return confirm('ยืนยัน: ตั้งออเดอร์เงินสด/โอนที่ยังไม่ยืนยันรับเงินในช่วงนี้เป็น \'รับเงินแล้ว\'?\nรายได้จะถูกส่งเข้าบัญชีรอบถัดไป');" />
+        </asp:Panel>
+
         <!-- Order Layout -->
         <div class="order-layout">
             <!-- Order List -->

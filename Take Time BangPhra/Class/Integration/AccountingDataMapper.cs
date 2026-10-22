@@ -1376,12 +1376,22 @@ namespace Take_Time_BangPhra.Integration
             };
         }
 
-        /// <summary>บัญชีเดบิตของเหตุผล → fallback INVENTORY_LOSS → STOCK_LOSS_EXPENSE (พฤติกรรมเดิม) + log เตือน</summary>
+        /// <summary>
+        /// บัญชีเดบิตของเหตุผล → fallback INVENTORY_LOSS → STOCK_LOSS_EXPENSE (พฤติกรรมเดิม) + log เตือน.
+        /// ยกเว้น key ส่วนของเจ้าของ (OWNER_DRAWINGS / mapping ชนิด EQUITY เช่น เหตุผล OWNER_USE): <b>ห้าม</b> ถอยไปบัญชีค่าใช้จ่าย/สูญหาย —
+        /// ของที่หุ้นส่วนนำไปใช้ส่วนตัวเป็นรายจ่ายต้องห้าม ม.65 ตรี(3) ต้องลงบัญชีถอนใช้ส่วนตัว ไม่ใช่ค่าใช้จ่าย →
+        /// โยน error ให้คิวล้ม (FAILED พร้อมวิธีแก้) จนกว่าจะผูกบัญชี แล้วกด Retry
+        /// </summary>
         private Guid ResolveStockOutDebitAccount(string glKey, string reasonCode)
         {
             Guid id;
             if (!string.IsNullOrWhiteSpace(glKey) && TryGetAccountId(glKey.Trim(), out id) && id != Guid.Empty)
                 return id;
+            if (IsEquityMappingKey(glKey))
+                throw new InvalidOperationException(
+                    $"เหตุผลการเบิก {reasonCode}: ยังไม่ผูกบัญชี {glKey} (ส่วนของเจ้าของ) — ไม่ลงเป็นค่าใช้จ่ายแทน " +
+                    "(รายจ่ายส่วนตัวหักไม่ได้ ม.65 ตรี(3)). 💡 วิธีแก้: ผูกบัญชีเงินถอน/บัญชีกระแสรายวันหุ้นส่วน (เช่น 31030) " +
+                    "ในหน้า Accounting Integration (mapping " + glKey + ") แล้วกด Retry รายการนี้");
             if (!string.Equals(glKey, "INVENTORY_LOSS", StringComparison.OrdinalIgnoreCase)
                 && TryGetAccountId("INVENTORY_LOSS", out id) && id != Guid.Empty)
             {
@@ -1391,6 +1401,27 @@ namespace Take_Time_BangPhra.Integration
             LogMappingWarn(glKey ?? "(ว่าง)", $"เหตุผลการเบิก {reasonCode}: ยังไม่ผูกบัญชี → ใช้ STOCK_LOSS_EXPENSE แทน");
             return GetAccountId("STOCK_LOSS_EXPENSE");
         }
+
+        /// <summary>
+        /// key บัญชีส่วนของเจ้าของ (ถอนใช้ส่วนตัว/กระแสรายวันหุ้นส่วน): OWNER_DRAWINGS หรือ mapping ที่ Mapping_Type = EQUITY
+        /// (PHASE19_30 seed). ใช้กันการถอยไปบัญชีค่าใช้จ่าย — public static ให้หน้า health check ใช้ตรรกะเดียวกัน
+        /// </summary>
+        public static bool IsEquityMappingKey(string conn, string glKey)
+        {
+            if (string.IsNullOrWhiteSpace(glKey)) return false;
+            if (string.Equals(glKey.Trim(), "OWNER_DRAWINGS", StringComparison.OrdinalIgnoreCase)) return true;
+            try
+            {
+                var dt = new code().DatabaseQuerySafe(conn,
+                    "SELECT TOP 1 Mapping_Type FROM Accounting_Account_Mapping WHERE TakeTime_Code = @k",
+                    new Dictionary<string, object> { { "@k", glKey.Trim() } });
+                return dt != null && dt.Rows.Count > 0
+                    && string.Equals(dt.Rows[0]["Mapping_Type"]?.ToString(), "EQUITY", StringComparison.OrdinalIgnoreCase);
+            }
+            catch { return false; }
+        }
+
+        private bool IsEquityMappingKey(string glKey) => IsEquityMappingKey(_connectionString, glKey);
 
         /// <summary>บัญชีที่ NextAcc ภ.พ.30 (JE fallback) ถือเป็นภาษีขาย/ภาษีซื้อ — ตามรหัสหรือชื่อ (TaxService.cs:1264-1293)</summary>
         private bool IsVatReportAccount(Guid accountId)

@@ -27,6 +27,10 @@
                         <asp:ListItem Value="ROOM_SERVICE" Text="รูมเซอร์วิส" />
                         <asp:ListItem Value="RESERVATION" Text="ห้องพัก/การจอง" />
                         <asp:ListItem Value="OTA" Text="OTA" />
+                        <asp:ListItem Value="ACTIVITY" Text="กิจกรรม" />
+                        <asp:ListItem Value="AMENITY" Text="ของใช้/อาเมนิตี้" />
+                        <asp:ListItem Value="FRONTDESK_GATEWAY" Text="เงินเกตเวย์หน้าร้าน" />
+                        <asp:ListItem Value="DAMAGE" Text="ค่าเสียหาย" />
                         <asp:ListItem Value="OTHER" Text="อื่น ๆ" />
                     </asp:DropDownList>
                 </div>

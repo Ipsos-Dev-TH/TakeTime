@@ -106,7 +106,7 @@ namespace Take_Time_BangPhra.Product
                     // ลงบัญชี/ส่งจำนวนไป NextAcc แล้ว → กลับรายการ (Is_Reversed + JE reverse + คืนสต็อก);
                     // ยังไม่เคยส่ง → ลบได้ (StockOutService.CancelOrDelete). แถวที่ถูกรวบเข้า POSDAY แล้วใช้ guard เดิม
                     if ((string.IsNullOrEmpty(rcptId) || rcptId == "0")
-                        && !rollupRef.StartsWith("POSDAY", StringComparison.OrdinalIgnoreCase))
+                        && !Integration.AccountingSyncService.IsPosRollupRef(rollupRef))
                     {
                         long outId;
                         if (long.TryParse(Convert.ToString(deleteParams["@ID"]), out outId))
@@ -133,10 +133,53 @@ namespace Take_Time_BangPhra.Product
                             "alert('รายการนี้ออกใบกำกับ/ใบเสร็จแล้ว (" + rcptId + ") — ลบตรงนี้ไม่ได้\\nกรุณายกเลิกใบเสร็จที่หน้าจัดการเอกสาร (จะ void บน NextAcc ให้ด้วย)');", true);
                         return;
                     }
+                    // นโยบายเอกสารขาย = ไม่ส่งบัญชี (OFF-POLICY): ไม่มีเอกสาร/ต้นทุน/จำนวนบน NextAcc → ลบได้
+                    // (สต๊อกในระบบคืนเองเพราะคงเหลือ = ΣProduct_In − ΣProduct_Out)
+                    if (rollupRef == Integration.AccountingSyncService.PosOffPolicyRef)
+                    {
+                        code.DatabaseInsertSafe(conn, "DELETE FROM [dbo].[Product_Out] WHERE ID = @ID", deleteParams);
+                        ClientScript.RegisterStartupScript(this.GetType(), "delOffPolicy",
+                            "alert('ลบรายการขายแล้ว — รายการนี้นโยบายเอกสารขายตั้ง \"ไม่ส่งบัญชี\" จึงไม่มีเอกสาร NextAcc ต้องยกเลิก\\nสต๊อกในระบบคืนให้อัตโนมัติ');", true);
+                        Button3_Click1(null, null);
+                        return;
+                    }
+
+                    // ถูกรวบเข้าใบสรุปรายวันแล้ว (POSDAY-/PS…, พักรอรวบใหม่ REROLL-, หรือสินค้าไม่รวมใบสรุป EXCLUDED-)
+                    // → ยกเลิกรายการเดียวแบบลงบัญชีถูก: คืนสต๊อก + กลับต้นทุน + ยกเลิกใบสรุปแล้วรวบแถวที่เหลือใหม่
+                    //   (AccountingSyncService.VoidRolledUpPosSale — เหตุผลที่ไม่ใช้ใบลดหนี้ดูที่เมธอด)
+                    if (Integration.AccountingSyncService.IsPosRollupRef(rollupRef)
+                        || rollupRef.StartsWith(Integration.AccountingSyncService.PosRerollPrefix, StringComparison.OrdinalIgnoreCase)
+                        || rollupRef.StartsWith("EXCLUDED-", StringComparison.OrdinalIgnoreCase))
+                    {
+                        long saleId;
+                        string vmsg = "อ่านรหัสรายการไม่ได้";
+                        if (long.TryParse(Convert.ToString(deleteParams["@ID"]), out saleId))
+                        {
+                            string user = Session["UserName"]?.ToString();
+                            if (string.IsNullOrWhiteSpace(user)) user = "UserID:" + (Session["UserID"]?.ToString() ?? "?");
+                            new Integration.AccountingSyncService(conn).VoidRolledUpPosSale(saleId, user, out vmsg);
+                        }
+                        ClientScript.RegisterStartupScript(this.GetType(), "voidRolled",
+                            "alert('" + (vmsg ?? "").Replace("\\", "\\\\").Replace("'", "\\'").Replace("\n", "\\n") + "');", true);
+                        Button3_Click1(null, null);
+                        return;
+                    }
+                    if (rollupRef.StartsWith("PENDING-", StringComparison.OrdinalIgnoreCase))
+                    {
+                        ClientScript.RegisterStartupScript(this.GetType(), "delPending",
+                            "alert('รายการนี้กำลังถูกรวบเข้าใบสรุปรายวัน (" + rollupRef.Substring("PENDING-".Length) + ") — รอสักครู่แล้วลองใหม่');", true);
+                        return;
+                    }
+                    if (rollupRef.StartsWith(Integration.AccountingSyncService.PosVoidRevPrefix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        ClientScript.RegisterStartupScript(this.GetType(), "delVoided",
+                            "alert('รายการนี้ถูกยกเลิกไปแล้ว (คืนสต๊อกและกลับต้นทุนแล้ว) — ไม่ต้องลบซ้ำ');", true);
+                        return;
+                    }
                     if (!string.IsNullOrEmpty(rollupRef) && rollupRef != "LEGACY")
                     {
                         ClientScript.RegisterStartupScript(this.GetType(), "delBlocked2",
-                            "alert('รายการนี้ถูกรวบเข้าใบรับเงินสดรายวัน (" + rollupRef + ") และลงบัญชี NextAcc แล้ว — ลบตรงนี้ไม่ได้\\nต้องปรับปรุงผ่านเอกสารบัญชีแทน');", true);
+                            "alert('รายการนี้ผูกกับการลงบัญชี NextAcc แล้ว (" + rollupRef + ") — ลบตรงนี้ไม่ได้\\nต้องปรับปรุงผ่านเอกสารบัญชีแทน');", true);
                         return;
                     }
                 }

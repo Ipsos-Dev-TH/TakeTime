@@ -31,6 +31,67 @@ namespace Take_Time_BangPhra.Admin.RoomService
                 LoadOrderList();
                 UpdatePendingBadge();
             }
+            pnlRsBackfill.Visible = CanBackfillPaid();
+            if (pnlRsBackfill.Visible && !IsPostBack)
+            {
+                txtBackfillFrom.Text = DateTime.Today.AddDays(-30).ToString("yyyy-MM-dd");
+                txtBackfillTo.Text = DateTime.Today.AddDays(-1).ToString("yyyy-MM-dd");
+            }
+        }
+
+        /// <summary>ปุ่มรับเงินย้อนหลัง: Owner/Admin + เปิดนโยบายเอกสารขาย (ปิดนโยบาย = นับทุกออเดอร์อยู่แล้ว ไม่ต้องใช้)</summary>
+        private bool CanBackfillPaid()
+        {
+            string role = Session["User"]?.ToString();
+            if (role != "Owner" && role != "Admin") return false;
+            return Take_Time_BangPhra.Integration.ChannelPosting.PolicyEnabled(_connectionString);
+        }
+
+        /// <summary>
+        /// ทำเครื่องหมายรับเงินย้อนหลังแบบกลุ่ม (ครั้งเดียวหลังเปิดนโยบายเอกสารขาย): ออเดอร์เงินสด/โอนที่ส่งของแล้ว
+        /// ยังไม่ PAID และยังไม่ลงบัญชี (Acct_Post_Ref IS NULL) ในช่วงวันสั่ง → PAID + Paid_Date = วันสั่ง (เดิมว่าง)
+        /// RevenuePostingService จะออกใบตามนโยบายรอบถัดไป (วันที่สรุปไปแล้ว = ใบเสริม -S{n}). Owner/Admin เท่านั้น
+        /// </summary>
+        protected void btnBackfillPaid_Click(object sender, EventArgs e)
+        {
+            if (!CanBackfillPaid()) return;
+            DateTime from, to;
+            if (!DateTime.TryParse(txtBackfillFrom.Text, System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None, out from)
+                || !DateTime.TryParse(txtBackfillTo.Text, System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None, out to))
+            {
+                ScriptManager.RegisterStartupScript(this, GetType(), "bfErr", "alert('กรุณาเลือกช่วงวันที่ให้ถูกต้อง');", true);
+                return;
+            }
+            if (to < from) { var t = from; from = to; to = t; }
+            try
+            {
+                bool hasPaidDate = Take_Time_BangPhra.Integration.ChannelPosting.HasColumn(_connectionString, "Guest_Room_Service_Orders", "Paid_Date");
+                int n = _code.DatabaseInsertSafe(_connectionString,
+                    "UPDATE Guest_Room_Service_Orders SET Payment_Status = 'PAID'" +
+                    (hasPaidDate ? ", Paid_Date = COALESCE(Paid_Date, Order_Date)" : "") +
+                    " WHERE Payment_Method IN ('CASH','TRANSFER')" +
+                    " AND ISNULL(Payment_Status,'') NOT IN ('PAID','CHARGED')" +
+                    " AND Order_Status NOT IN ('CANCELLED','PENDING')" +
+                    " AND Acct_Post_Ref IS NULL" +
+                    " AND Order_Date >= @f AND Order_Date < @t",
+                    new Dictionary<string, object> { { "@f", from.Date }, { "@t", to.Date.AddDays(1) } });
+                try
+                {
+                    _code.Logs(_connectionString, "RoomService",
+                        $"ทำเครื่องหมายรับเงินย้อนหลัง {from:yyyy-MM-dd}..{to:yyyy-MM-dd}: {n} ออเดอร์ (เงินสด/โอน)",
+                        Session["username"]?.ToString() ?? "Unknown");
+                }
+                catch { }
+                ScriptManager.RegisterStartupScript(this, GetType(), "bfDone",
+                    "alert('ตั้งรับเงินแล้ว " + n + " ออเดอร์ — รายได้จะเข้าบัญชีรอบถัดไปตามนโยบายเอกสารขาย');", true);
+            }
+            catch (Exception ex)
+            {
+                ScriptManager.RegisterStartupScript(this, GetType(), "bfEx",
+                    "alert('เกิดข้อผิดพลาด: " + ex.Message.Replace("\\", "\\\\").Replace("'", "\\'").Replace("\n", " ") + "');", true);
+            }
         }
 
         /// <summary>

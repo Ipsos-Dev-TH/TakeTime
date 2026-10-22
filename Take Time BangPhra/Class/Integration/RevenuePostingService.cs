@@ -47,8 +47,10 @@ namespace Take_Time_BangPhra.Integration
         /// โพสต์รายได้/ต้นทุนรูมเซอร์วิส — no-op ถ้าปิดสวิตช์ (Nexaacc_RoomServiceRevenue). เรียกจาก background timer.
         ///
         /// กติกา (ต.ค. 2026 — แก้รายได้หาย/รายได้เกินจากการตรวจ audit A ข้อ 6):
-        ///  • นับเฉพาะออเดอร์ที่ "รับเงินแล้วจริง" (Payment_Status = PAID — โอนที่ตรวจสลิปแล้ว/เงินสดที่พนักงานกด
+        ///  • นโยบายเอกสารขายเปิด: นับเฉพาะออเดอร์ที่ "รับเงินแล้วจริง" (Payment_Status = PAID — โอนที่ตรวจสลิปแล้ว/เงินสดที่พนักงานกด
         ///    "ยืนยันรับเงินแล้ว"/จ่ายออนไลน์ผ่านเกตเวย์). สลิปที่ยังไม่ตรวจ/เงินสดที่ยังไม่เก็บ = ยังไม่ลง
+        ///    (ออเดอร์เก่าก่อนเปิดนโยบาย → ปุ่ม "ทำเครื่องหมายรับเงินย้อนหลัง" หน้า Admin/RoomService/OrderManagement)
+        ///    นโยบายปิด: แบบเดิม — ทุกออเดอร์ที่ไม่ใช่ CANCELLED/PENDING ตามวันสั่ง
         ///  • ลงบิลห้อง (CHARGE_TO_ROOM/CHARGED) = รายได้ไปกับใบเสร็จเช็คเอาท์ → ที่นี่ลงเฉพาะต้นทุน+สต๊อก
         ///  • นโยบายเอกสารขายเปิด (SalesDocumentPolicy) → แยกตามแหล่งเงินของออเดอร์:
         ///      IMMEDIATE = ใบรายออเดอร์ RS-{orderId} ทันทีที่รับเงิน · DAILY_ROLLUP = RSDAY-{yyyyMMdd}-{paidHowId}
@@ -82,7 +84,13 @@ namespace Take_Time_BangPhra.Integration
 
                 bool policy = ChannelPosting.PolicyEnabled(_conn);
                 bool hasPaidDate = ChannelPosting.HasColumn(_conn, "Guest_Room_Service_Orders", "Paid_Date");
-                string settleExpr = hasPaidDate ? "COALESCE(o.Paid_Date, o.Order_Date)" : "o.Order_Date";
+                // นโยบายปิด = พฤติกรรมเดิมก่อน PHASE19_32 ทั้งหมด: ทุกออเดอร์ที่ส่งของ/ยืนยันแล้ว (ไม่ดู Payment_Status)
+                // จัดกลุ่มตามวันสั่ง — กฎ "เฉพาะ PAID" + วันรับเงิน ใช้เมื่อเปิดนโยบายเท่านั้น
+                // (ไม่งั้นร้านที่ยังไม่เปิดนโยบาย/ไม่เคยกด "ยืนยันรับเงิน" รายได้เงินสดรูมเซอร์วิสหายเงียบ)
+                string settleExpr = policy && hasPaidDate ? "COALESCE(o.Paid_Date, o.Order_Date)" : "o.Order_Date";
+                string paidFilter = policy
+                    ? "AND (o.Payment_Status IN ('PAID', 'CHARGED') OR o.Payment_Method = 'CHARGE_TO_ROOM')"
+                    : "";
 
                 var orders = _code.DatabaseQuerySafe(_conn,
                     $@"SELECT TOP 500 o.ID, o.Order_Date, {settleExpr} AS Settle_Date,
@@ -90,7 +98,7 @@ namespace Take_Time_BangPhra.Integration
                          FROM Guest_Room_Service_Orders o
                         WHERE o.Acct_Post_Ref IS NULL
                           AND o.Order_Status NOT IN ('CANCELLED', 'PENDING')
-                          AND (o.Payment_Status IN ('PAID', 'CHARGED') OR o.Payment_Method = 'CHARGE_TO_ROOM')
+                          {paidFilter}
                         ORDER BY {settleExpr}, o.ID", null);
                 if (orders == null || orders.Rows.Count == 0) return;
 
@@ -233,7 +241,8 @@ namespace Take_Time_BangPhra.Integration
             bool hasPaidDate = ChannelPosting.HasColumn(_conn, "Guest_Room_Service_Orders", "Paid_Date");
             bool hasSvc = ChannelPosting.HasColumn(_conn, "Guest_Room_Service_Orders", "Service_Charge");
             bool hasFlag = HasRollupFlagColumn();
-            string settleExpr = hasPaidDate ? "COALESCE(o.Paid_Date, o.Order_Date)" : "o.Order_Date";
+            // วันเอกสารตรงกับการจัดกลุ่มใน PostRoomServiceRevenueIfDue (นโยบายปิด = วันสั่งแบบเดิม)
+            string settleExpr = hasPaidDate && ChannelPosting.PolicyEnabled(_conn) ? "COALESCE(o.Paid_Date, o.Order_Date)" : "o.Order_Date";
 
             // ออเดอร์ในกลุ่ม + ส่วนแบ่งค่าบริการ (ค่าบริการของออเดอร์ตามสัดส่วนสินค้าที่ "รวมในใบสรุป")
             var heads = _code.DatabaseQuerySafe(_conn,
@@ -336,8 +345,9 @@ namespace Take_Time_BangPhra.Integration
                     if (pid <= 0 || qty <= 0) continue;
 
                     WriteRoomServiceStockOut(refId, pid, qty, qty > 0 ? Math.Round(gross / qty, 2) : 0m, outDate);
-                    if (cost > 0 && Convert.ToInt32(r["Incl"]) == 1)
-                        _sync.EnqueueStockOutCogs(pid, name, qty, cost, outDate, why, stockRef: $"RSCOGS-{refId}-{pid}");
+                    // ต้นทุน + จำนวนสต๊อก NextAcc: ทุกสินค้าที่ออกจากสต๊อกจริง รวมสินค้าที่ตั้ง "ไม่รวมใบสรุปรายวัน"
+                    // (รายได้ไปทางอื่น แต่ของออกแล้ว — แบบเดียวกับใบสรุป POS) · ต้นทุน 0 → ส่งเฉพาะจำนวน (EnqueueStockOutCogs)
+                    _sync.EnqueueStockOutCogs(pid, name, qty, cost, outDate, why, stockRef: $"RSCOGS-{refId}-{pid}");
                 }
 
             _code.DatabaseInsertSafe(_conn,

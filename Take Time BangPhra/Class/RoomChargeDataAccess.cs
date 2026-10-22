@@ -484,12 +484,26 @@ namespace Take_Time_BangPhra
                 { "@dateTime", DateTime.Now }
             };
 
-            _code.DatabaseInsertSafe(_connectionString,
-                @"INSERT INTO Product_In (DateTime_In, Product_ID, Amount, PricePerUnit)
-                  SELECT @dateTime, @productId, @quantity,
-                         ISNULL(Sell_Price, 0)
-                  FROM Product WHERE ID = @productId",
-                parameters);
+            // แถวคืนสต๊อกจากการยกเลิก (ราคาเป็นราคาขาย ไม่ใช่ราคาซื้อ) → InType VOID_RESTOCK กันตรรกะราคาซื้อล่าสุด/
+            // รายงานรับซื้อ (InType PURCHASE/NULL) นับแถวนี้เป็นการซื้อ · ยังไม่มีคอลัมน์ InType (PHASE12_09) = แบบเดิม
+            try
+            {
+                _code.DatabaseInsertSafe(_connectionString,
+                    @"INSERT INTO Product_In (DateTime_In, Product_ID, Amount, PricePerUnit, InType)
+                      SELECT @dateTime, @productId, @quantity,
+                             ISNULL(Sell_Price, 0), @inType
+                      FROM Product WHERE ID = @productId",
+                    new Dictionary<string, object>(parameters) { { "@inType", Take_Time_BangPhra.Integration.AccountingSyncService.VoidRestockInType } });
+            }
+            catch
+            {
+                _code.DatabaseInsertSafe(_connectionString,
+                    @"INSERT INTO Product_In (DateTime_In, Product_ID, Amount, PricePerUnit)
+                      SELECT @dateTime, @productId, @quantity,
+                             ISNULL(Sell_Price, 0)
+                      FROM Product WHERE ID = @productId",
+                    parameters);
+            }
         }
 
         /// <summary>

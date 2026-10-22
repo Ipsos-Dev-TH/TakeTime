@@ -10,6 +10,10 @@ namespace Take_Time_BangPhra.Admin.RoomService
     {
         protected global::System.Web.UI.WebControls.Panel pnlPendingBadge;
         protected global::System.Web.UI.WebControls.Label lblPendingCount;
+        protected global::System.Web.UI.WebControls.Panel pnlRsBackfill;
+        protected global::System.Web.UI.WebControls.TextBox txtBackfillFrom;
+        protected global::System.Web.UI.WebControls.TextBox txtBackfillTo;
+        protected global::System.Web.UI.WebControls.Button btnBackfillPaid;
         protected global::System.Web.UI.WebControls.Repeater rptOrderList;
         protected global::System.Web.UI.WebControls.Panel pnlNoOrders;
         protected global::System.Web.UI.WebControls.Panel pnlOrderDetail;

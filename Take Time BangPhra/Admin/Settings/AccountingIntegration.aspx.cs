@@ -1838,6 +1838,35 @@ namespace Take_Time_BangPhra.Admin.Settings
                 }
                 catch { }
 
+                // ── 4d) เหตุผลการเบิกที่ลงส่วนของเจ้าของ (OWNER_USE → OWNER_DRAWINGS) ยังไม่ผูกบัญชี ─────
+                //   mapper ไม่ถอยไปบัญชีค่าใช้จ่ายแล้ว (รายจ่ายส่วนตัวหักไม่ได้ ม.65 ตรี(3)) → คิวเบิกสินค้าจะล้มจนกว่าจะผูก
+                try
+                {
+                    var eq = _code.DatabaseQuerySafe(ConnStr,
+                        @"IF OBJECT_ID('dbo.Stock_Out_Reason', 'U') IS NOT NULL
+                            SELECT r.Code, r.Name_TH, r.Gl_Mapping_Key,
+                                   ISNULL(CAST(m.Nexaacc_AccountId AS NVARCHAR(50)), '') AS Acc
+                              FROM dbo.Stock_Out_Reason r
+                              LEFT JOIN dbo.Accounting_Account_Mapping m
+                                     ON m.TakeTime_Code = r.Gl_Mapping_Key AND ISNULL(m.Is_Active, 1) = 1
+                             WHERE ISNULL(r.Is_Active, 1) = 1
+                               AND (r.Gl_Mapping_Key = 'OWNER_DRAWINGS' OR m.Mapping_Type = 'EQUITY')", null);
+                    if (eq != null && eq.Columns.Contains("Acc"))
+                    {
+                        var miss = new List<string>();
+                        foreach (DataRow r in eq.Rows)
+                            if (string.IsNullOrWhiteSpace(r["Acc"]?.ToString()))
+                                miss.Add($"{r["Code"]} ({r["Name_TH"]}) → {r["Gl_Mapping_Key"]}");
+                        if (miss.Count > 0)
+                            add("error", $"เหตุผลการเบิกที่ลงบัญชีส่วนของเจ้าของยังไม่ผูกบัญชี ({miss.Count} รายการ)",
+                                string.Join("\n", miss)
+                                + "\n\nผูกบัญชีเงินถอน/บัญชีกระแสรายวันหุ้นส่วน (เช่น 31030 หรือ 11330 ลูกหนี้กรรมการ) ใน mapping ด้านล่างของหน้านี้ "
+                                + "— ยังไม่ผูก รายการเบิกด้วยเหตุผลนี้จะ sync ไม่ผ่าน (ระบบไม่ลงเป็นค่าใช้จ่ายแทน เพราะรายจ่ายส่วนตัวหักไม่ได้ ม.65 ตรี(3)) "
+                                + "ผูกแล้วกด Retry ที่คิว");
+                    }
+                }
+                catch { /* ยังไม่รัน PHASE19_30 */ }
+
                 // ── 5) คิวที่ตายค้าง / ค้างนาน ─────────────────────────────────
                 var q = _code.DatabaseQuerySafe(ConnStr,
                     @"SELECT

@@ -312,6 +312,11 @@ namespace Take_Time_BangPhra.TaxReports
                 case ChRoomService: return "รูมเซอร์วิส";
                 case ChReservation: return "ห้องพัก/การจอง";
                 case ChOta: return "OTA (Channel Collect)";
+                // ช่องทางของสมุด Sales_Channel_Posting (PHASE19_32)
+                case "ACTIVITY": return "กิจกรรม";
+                case "AMENITY": return "ของใช้/อาเมนิตี้";
+                case "FRONTDESK_GATEWAY": return "เงินเกตเวย์หน้าร้าน (ไม่มีบันทึกขาย)";
+                case "DAMAGE": return "ค่าเสียหาย";
                 default: return "อื่น ๆ (สมาชิก/บัตรกำนัล ฯลฯ)";
             }
         }
@@ -521,7 +526,9 @@ namespace Take_Time_BangPhra.TaxReports
         public const string FNoDoc = "NO_DOC", FFailed = "FAILED", FPending = "PENDING", FLate = "LATE",
             FExcluded = "EXCLUDED", FUnverified = "UNVERIFIED", FVoided = "VOIDED", FToday = "TODAY",
             FPolicy = "POLICY", FDeposit = "DEPOSIT", FOrderPending = "ORDER_PENDING", FLegacy = "LEGACY",
-            FInfoOnly = "INFO_ONLY";
+            FInfoOnly = "INFO_ONLY",
+            // FPolicyOff: นโยบายเอกสารขาย = ไม่ส่งบัญชี (OFF-POLICY / RSOFF / สมุดช่องทาง Status OFF) — ตั้งใจไม่ส่ง ไม่ใช่ตกหล่น
+            FPolicyOff = "POLICY_OFF";
 
         public static bool IsProblemFlag(string f) =>
             f == FNoDoc || f == FFailed || f == FPending || f == FLate || f == FUnverified || f == FPolicy || f == FOrderPending;
@@ -539,6 +546,8 @@ namespace Take_Time_BangPhra.TaxReports
             public string Channel, ChannelType, PaidHowName, PolicyMode = "";
             public int Count;
             public decimal Gross, Vat;
+            /// <summary>ส่วนของ Gross/Vat ที่นโยบายตั้ง "ไม่ส่งบัญชี" — กระทบยอดกับ NextAcc ไม่นับส่วนนี้ (ตั้งใจไม่ส่ง)</summary>
+            public decimal PolicyOffGross, PolicyOffVat;
             /// <summary>true = แสดงเพื่อทราบเท่านั้น ไม่นับเป็นยอดขาย (ชาร์จเข้าห้อง / สลิปรอตรวจ)</summary>
             public bool InfoOnly;
             public string Note = "";
@@ -559,8 +568,17 @@ namespace Take_Time_BangPhra.TaxReports
         }
 
         private static readonly Regex RollupIdRx = new Regex(@"^([A-Z]+)DAY-(\d{8})-", RegexOptions.Compiled);
+        /// <summary>รูปย่อเมื่อเลขเต็มยาวเกิน 20 ตัว (ChannelPosting.NextFreeRollupRef): {P}DAY{yyMMdd}-{key}[-S{n}]</summary>
+        private static readonly Regex RollupCompactIdRx = new Regex(@"^[A-Z]+DAY\d{6}-", RegexOptions.Compiled);
 
-        public static bool IsRollupId(string id) => !string.IsNullOrEmpty(id) && RollupIdRx.IsMatch(id);
+        /// <summary>
+        /// เลขเอกสารสรุปรายวัน (ไม่ใช่ยอดขายรายใบ): {P}DAY-{yyyyMMdd}-… / {P}DAY{yyMMdd}-… (RSDAY/ACTDAY/…) และ
+        /// ใบสรุปขายหน้าร้านทุกรูป รวมใบเพิ่มเติมแบบย่อ PS{yyMMdd}-{แหล่งเงิน}[-S{n}] (AccountingSyncService.IsPosRollupRef)
+        /// — ไม่รู้จักรูปย่อ = ใบสรุปถูกนับเป็นยอดขายซ้ำกับแถวขาย
+        /// </summary>
+        public static bool IsRollupId(string id) =>
+            !string.IsNullOrEmpty(id) && (RollupIdRx.IsMatch(id) || RollupCompactIdRx.IsMatch(id)
+                                          || Take_Time_BangPhra.Integration.AccountingSyncService.IsPosRollupRef(id));
 
         private static string SanitizeKey(string s)
         {
@@ -623,10 +641,19 @@ namespace Take_Time_BangPhra.TaxReports
             }
             catch (Exception ex) { res.Notes.Add("อ่านแถวขาย POS ไม่ได้: " + ex.Message); }
 
+            // ใบรายการเดียวที่ช่องทางอื่นนับเองแล้ว — ข้ามในส่วนใบเสร็จ กันนับสองรอบ:
+            //   RS-{orderId} (รูมเซอร์วิสรายออเดอร์) นับในส่วน C จากออเดอร์ · ใบรายการเดียวของสมุดช่องทาง
+            //   (Sales_Channel_Posting.Post_Ref เช่น ACT-/AMN-/FDG-/DMG-) นับในส่วน E ตามวันขาย
+            bool rsReady = TableExists(conn, "Guest_Room_Service_Orders") && ColumnExists(conn, "Guest_Room_Service_Orders", "Acct_Post_Ref");
+            bool ledgerReady = TableExists(conn, "Sales_Channel_Posting");
             try
             {
                 var dtr = Query(conn,
-                    @"SELECT ID, Reservation_ID, Created_Date, Total_Amount, Vat, Paid_Type, IsDeposit
+                    @"SELECT ID, Reservation_ID, Created_Date, Total_Amount, Vat, Paid_Type, IsDeposit, " +
+                    (rsReady ? "CASE WHEN EXISTS (SELECT 1 FROM Guest_Room_Service_Orders so WHERE so.Acct_Post_Ref = Account_Receipt.ID) THEN 1 ELSE 0 END"
+                             : "0") + " AS InRs, " +
+                    (ledgerReady ? "CASE WHEN EXISTS (SELECT 1 FROM Sales_Channel_Posting sp WHERE sp.Post_Ref = Account_Receipt.ID) THEN 1 ELSE 0 END"
+                                 : "0") + @" AS InLedger
                         FROM Account_Receipt
                        WHERE Created_Date >= @f AND Created_Date < @t
                          AND ISNULL(Status, '') NOT IN (N'Cancel', N'Void', N'ยกเลิก')",
@@ -636,6 +663,7 @@ namespace Take_Time_BangPhra.TaxReports
                     string id = Str(r["ID"]).Trim();
                     decimal total = Dec(r["Total_Amount"]);
                     if (IsRollupId(id)) { rollupTotals[id] = total; continue; }   // ใบสรุป = เอกสารครอบ ไม่ใช่ยอดขายซ้ำ
+                    if (Str(r["InRs"]) == "1" || Str(r["InLedger"]) == "1") continue;   // นับในส่วน C / E แล้ว
                     DateTime day = NormalizeEra(Convert.ToDateTime(r["Created_Date"])).Date;
                     string resId = Str(r["Reservation_ID"]).Trim();
                     string ch = id.StartsWith("OTA", StringComparison.OrdinalIgnoreCase) ? ChOta
@@ -687,24 +715,42 @@ namespace Take_Time_BangPhra.TaxReports
                 var groupByRef = new Dictionary<string, SaleGroup>(StringComparer.OrdinalIgnoreCase);
                 foreach (DataRow r in dto.Rows)
                 {
+                    string rf = Str(r["REF"]).Trim();
+                    // แถวขายที่ถูกยกเลิกจริง (คืนสต๊อก+กลับต้นทุนแล้ว) — ไม่ใช่ยอดขาย
+                    if (rf.StartsWith(Take_Time_BangPhra.Integration.AccountingSyncService.PosVoidRevPrefix, StringComparison.OrdinalIgnoreCase))
+                        continue;
                     DateTime day = NormalizeEra(Convert.ToDateTime(r["D"])).Date;
                     string phId = Str(r["PH"]).Trim();
                     var ph = book.Get(phId);
                     var g = G(day, ChPos, ph);
                     decimal gross = Dec(r["Gross"]);
+                    decimal vat = VatFromGross(gross, res.UseVat);
                     g.Count += Convert.ToInt32(r["Bills"]);
                     g.Gross += gross;
-                    g.Vat += VatFromGross(gross, res.UseVat);
-                    string rf = Str(r["REF"]).Trim();
-                    string expectedRef = "POSDAY-" + day.ToString("yyyyMMdd", Inv) + "-" + phId;
+                    g.Vat += vat;
+                    // เลขใบแรกตามที่ระบบรวบจริง (POSDAY-… หรือ PS… เมื่อ ID แหล่งเงินยาว)
+                    string expectedRef = Take_Time_BangPhra.Integration.AccountingSyncService.PosRollupBaseRef(day, phId);
                     if (rf.Length == 0)
                     {
                         if (day >= today) g.Flags.Add(FToday);
                         else
                         {
                             g.Flags.Add(FNoDoc);
-                            if (RollupTotal(expectedRef) != null) { g.Flags.Add(FLate); g.ProblemIds.Add(expectedRef + " (มาช้า)"); }
+                            if (expectedRef != null && RollupTotal(expectedRef) != null) { g.Flags.Add(FLate); g.ProblemIds.Add(expectedRef + " (มาช้า)"); }
                         }
+                    }
+                    else if (rf == Take_Time_BangPhra.Integration.AccountingSyncService.PosOffPolicyRef)
+                    {
+                        // นโยบาย = ไม่ส่งบัญชี → ตั้งใจไม่ส่ง ไม่ใช่ "ไม่มีเอกสาร"
+                        g.Flags.Add(FPolicyOff);
+                        g.PolicyOffGross += gross; g.PolicyOffVat += vat;
+                    }
+                    else if (rf.StartsWith("PENDING-", StringComparison.OrdinalIgnoreCase))
+                        g.Flags.Add(FPending);                     // กำลังรวบเข้าใบสรุป (claim ค้าง/รอบนี้)
+                    else if (rf.StartsWith(Take_Time_BangPhra.Integration.AccountingSyncService.PosRerollPrefix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        g.Flags.Add(FPending);                     // ใบสรุปถูกยกเลิก รอ void บน NextAcc แล้วรวบใหม่
+                        g.ProblemIds.Add(rf.Substring(Take_Time_BangPhra.Integration.AccountingSyncService.PosRerollPrefix.Length) + " (ยกเลิกแล้ว รอรวบใหม่)");
                     }
                     else if (rf.StartsWith("EXCLUDED-", StringComparison.OrdinalIgnoreCase)) g.Flags.Add(FExcluded);
                     else if (rf == "LEGACY" || rf == "NEXTACC") g.Flags.Add(FLegacy);
@@ -779,10 +825,82 @@ namespace Take_Time_BangPhra.TaxReports
                             }
                         }
                         else if (rf.StartsWith("EXCLUDED", StringComparison.OrdinalIgnoreCase) || rf == "LEGACY") g.Flags.Add(FLegacy);
-                        else AttachReceiptDoc(res, g, rf, true);
+                        else if (rf.StartsWith("~", StringComparison.Ordinal)) g.Flags.Add(FPending);   // จองเลขแล้ว กำลังออกเอกสาร
+                        else if (rf.StartsWith("RSOFF", StringComparison.Ordinal))
+                        {
+                            // นโยบาย = ไม่ออกเอกสาร (ต้นทุน/สต๊อกยังลง) → ตั้งใจไม่ส่ง
+                            g.Flags.Add(FPolicyOff);
+                            g.PolicyOffGross += gross; g.PolicyOffVat += VatFromGross(gross, res.UseVat);
+                        }
+                        else if (rf.StartsWith("RSCTR", StringComparison.Ordinal))
+                        {
+                            // ลงบิลห้อง (Payment_Status CHARGED) — รายได้อยู่ในใบเสร็จเช็คเอาท์: ย้ายไปแถวแสดงเพื่อทราบ ไม่นับซ้ำ
+                            g.Count -= Convert.ToInt32(r["N"]); g.Gross -= gross; g.Vat -= VatFromGross(gross, res.UseVat);
+                            var gc = G(day, ChRoomService, RoomServicePaidHow("CHARGE_TO_ROOM"));
+                            gc.Count += Convert.ToInt32(r["N"]); gc.Gross += gross; gc.Vat += VatFromGross(gross, res.UseVat);
+                            gc.InfoOnly = true;
+                            gc.Note = "ลงบิลห้อง — รายได้อยู่ในใบเสร็จเช็คเอาท์ (ไม่นับซ้ำ)";
+                        }
+                        // RS-{orderId} = ใบรายออเดอร์ (ส่วน A ข้ามใบนี้แล้ว) · RSDAY… = ใบสรุปรายวัน
+                        else AttachReceiptDoc(res, g, rf, !rf.StartsWith("RS-", StringComparison.Ordinal));
                     }
                 }
                 catch (Exception ex) { res.Notes.Add("อ่านรูมเซอร์วิสไม่ได้: " + ex.Message); }
+            }
+
+            // ── E. สมุดการขายรายช่องทาง (Sales_Channel_Posting — PHASE19_32: กิจกรรม/ของใช้/เกตเวย์หน้าร้าน/ค่าเสียหาย) ──
+            //    1 แถว = 1 การขายที่รับเงินแล้ว นับตามวันขาย. ใบรายการเดียว (Post_Ref ไม่ใช่ใบสรุป) ส่วน A ข้ามไว้แล้ว;
+            //    ใบสรุป {P}DAY… ส่วน A ไม่นับ (เป็นเอกสารครอบ) ⇒ ยอดของช่องทางเหล่านี้มาจากสมุดนี้ที่เดียว.
+            //    MATCHED (เงินเกตเวย์จับคู่การขาย POS แล้ว) = นับใน POS แล้ว → ข้าม · NOPOLICY = นโยบายยังไม่เปิด (ไม่ส่ง) → แสดงเพื่อทราบ
+            if (ledgerReady)
+            {
+                try
+                {
+                    var dtl = Query(conn,
+                        @"SELECT Sale_Date AS D, Sales_Channel AS CH, ISNULL(Paid_How_ID, 0) AS PH, ISNULL(Paid_How_Name, '') AS PN,
+                                 ISNULL([Status], '') AS ST, ISNULL(Doc_Mode, '') AS DM, ISNULL(Post_Ref, '') AS REF,
+                                 COUNT(*) AS N, SUM(Amount) AS G
+                            FROM Sales_Channel_Posting
+                           WHERE Sale_Date >= @f AND Sale_Date < @t AND ISNULL([Status], '') <> 'MATCHED'
+                           GROUP BY Sale_Date, Sales_Channel, ISNULL(Paid_How_ID, 0), ISNULL(Paid_How_Name, ''),
+                                    ISNULL([Status], ''), ISNULL(Doc_Mode, ''), ISNULL(Post_Ref, '')",
+                        new Dictionary<string, object> { { "@f", from.Date }, { "@t", toEx } });
+                    foreach (DataRow r in dtl.Rows)
+                    {
+                        DateTime day = NormalizeEra(Convert.ToDateTime(r["D"])).Date;
+                        string ch = Str(r["CH"]).Trim().ToUpperInvariant();
+                        if (ch.Length == 0) ch = ChOther;
+                        string st = Str(r["ST"]).Trim().ToUpperInvariant();
+                        string rf = Str(r["REF"]).Trim();
+                        string phId = Str(r["PH"]).Trim();
+                        var ph = phId != "0" ? book.Get(phId) : book.GetByName(Str(r["PN"]));
+                        decimal gross = Dec(r["G"]);
+                        decimal vat = VatFromGross(gross, res.UseVat);
+                        int n = Convert.ToInt32(r["N"]);
+
+                        if (st == "NOPOLICY")
+                        {
+                            var gi = G(day, ch, new PaidHow { Name = ph.Name + " (นโยบายยังไม่เปิด)", ChannelType = ph.ChannelType });
+                            gi.InfoOnly = true;
+                            gi.Count += n; gi.Gross += gross; gi.Vat += vat;
+                            gi.Note = "บันทึกในสมุดช่องทาง แต่นโยบายเอกสารขายยังไม่เปิด — ไม่ส่งบัญชี (พฤติกรรมเดิม)";
+                            continue;
+                        }
+
+                        var g = G(day, ch, ph);
+                        g.Count += n; g.Gross += gross; g.Vat += vat;
+                        if (st == "OFF")
+                        {
+                            g.Flags.Add(FPolicyOff);
+                            g.PolicyOffGross += gross; g.PolicyOffVat += vat;
+                        }
+                        else if (st == "POSTED" && rf.Length > 0) AttachReceiptDoc(res, g, rf, IsRollupId(rf));
+                        else if (st == "PENDING" && Str(r["DM"]).Equals("DAILY_ROLLUP", StringComparison.OrdinalIgnoreCase) && day >= today)
+                            g.Flags.Add(FToday);
+                        else g.Flags.Add(FPending);            // PENDING / POSTING — รอส่ง
+                    }
+                }
+                catch (Exception ex) { res.Notes.Add("อ่านสมุดการขายรายช่องทางไม่ได้: " + ex.Message); }
             }
 
             // ── D. สลิปที่ลูกค้าแนบเองรอตรวจ (ยังไม่ใช่รายได้) ─────────────────────────
@@ -900,6 +1018,7 @@ namespace Take_Time_BangPhra.TaxReports
                 case FDeposit: return Chip("มีมัดจำ", "info");
                 case FOrderPending: return Chip("ออเดอร์ยังไม่ยืนยัน", "warn");
                 case FLegacy: return Chip("ข้อมูลเก่า/นำเข้า (ไม่มีเอกสาร)", "off");
+                case FPolicyOff: return Chip("ไม่ส่งตามนโยบาย", "off");
                 default: return Chip(f, "off");
             }
         }
@@ -920,6 +1039,7 @@ namespace Take_Time_BangPhra.TaxReports
                 case FDeposit: return "มีมัดจำ";
                 case FOrderPending: return "ออเดอร์ยังไม่ยืนยัน";
                 case FLegacy: return "ข้อมูลเก่า/นำเข้า";
+                case FPolicyOff: return "ไม่ส่งตามนโยบาย";
                 default: return f;
             }
         }

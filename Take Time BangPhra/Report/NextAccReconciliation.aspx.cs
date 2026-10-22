@@ -87,7 +87,8 @@ namespace Take_Time_BangPhra.TaxReports
                 if (g.InfoOnly) continue;
                 var r = Day(g.Day);
                 if (r == null) continue;
-                r.TtRev += g.Gross; r.TtVat += g.Vat;
+                // ยอดที่นโยบายตั้ง "ไม่ส่งบัญชี" ตั้งใจไม่ขึ้น NextAcc → ไม่เอามาเทียบ (ไม่งั้นทุกวันขึ้นว่าไม่ตรง)
+                r.TtRev += g.Gross - g.PolicyOffGross; r.TtVat += g.Vat - g.PolicyOffVat;
             }
 
             // ── รายได้/VAT ฝั่งคิว NextAcc ─────────────────────────────────────────
@@ -161,12 +162,19 @@ namespace Take_Time_BangPhra.TaxReports
             bool hasReason = TaxReportKit.ColumnExists(conn, "Product_Out", "Out_Reason_Code");
             bool hasApproval = TaxReportKit.ColumnExists(conn, "Product_Out", "Approval_Status");
             bool hasReversed = TaxReportKit.ColumnExists(conn, "Product_Out", "Is_Reversed");
+            bool hasRollupRef = TaxReportKit.ColumnExists(conn, "Product_Out", "Pos_Rollup_Ref");
+            bool rsTables = TaxReportKit.TableExists(conn, "Guest_Room_Service_Orders") && TaxReportKit.TableExists(conn, "Guest_Room_Service_Items");
+            bool rsHasRef = rsTables && TaxReportKit.ColumnExists(conn, "Guest_Room_Service_Orders", "Acct_Post_Ref");
             string cat = "CASE ";
             if (hasReason) cat += "WHEN ISNULL(o.Out_Reason_Code, '') NOT IN ('', 'SALE') THEN 'OTHER' ";
             if (hasOutType) cat += "WHEN o.OutType IN ('WRITEOFF','ADJUSTMENT_LOSS','RETURN_TO_VENDOR') THEN 'OTHER' ";
             cat += "WHEN o.Remark = N'NEXTACC_SYNC' THEN 'NEXTACC' ELSE 'SALE' END";
             string excl = (hasReversed ? " AND ISNULL(o.Is_Reversed, 0) = 0" : "") +
-                          (hasApproval ? " AND ISNULL(o.Approval_Status, '') NOT IN ('REJECTED', 'PENDING')" : "");
+                          (hasApproval ? " AND ISNULL(o.Approval_Status, '') NOT IN ('REJECTED', 'PENDING')" : "") +
+                          // แถวขายที่ยกเลิกแล้ว (คืนสต๊อก+กลับต้นทุน) — กันกรณียังไม่มีคอลัมน์ Is_Reversed
+                          (hasRollupRef ? " AND ISNULL(o.Pos_Rollup_Ref, '') NOT LIKE 'VOIDREV-%'" : "") +
+                          // รูมเซอร์วิสนับจากรายการออเดอร์ด้านล่างที่เดียว (แถว Product_Out 'รูมเซอร์วิส' = ออเดอร์เดียวกัน — เดิมนับสองรอบ)
+                          (rsHasRef ? " AND ISNULL(o.Remark, '') <> N'รูมเซอร์วิส'" : "");
             var dt = TaxReportKit.Query(conn,
                 @"SELECT x.D, x.Cat, SUM(x.Q * x.C) AS VC, SUM(x.Q * CASE WHEN x.C > 0 THEN x.C ELSE x.P END) AS VW
                     FROM (SELECT CAST(o.DateTime_Out AS DATE) AS D, " + cat + @" AS Cat,
@@ -185,8 +193,10 @@ namespace Take_Time_BangPhra.TaxReports
                 else if (c == "OTHER") d.TtWo += TaxReportKit.Dec(r["VW"]);
             }
 
-            // รูมเซอร์วิสไม่มีแถว Product_Out (ตัดต้นทุนจากใบสรุปรายวัน) — นับจากรายการออเดอร์
-            if (TaxReportKit.TableExists(conn, "Guest_Room_Service_Orders") && TaxReportKit.TableExists(conn, "Guest_Room_Service_Items"))
+            // รูมเซอร์วิส: RevenuePostingService เขียนแถว Product_Out (Remark 'รูมเซอร์วิส') ตอนออกเอกสาร/ลงต้นทุน — ออเดอร์
+            // ยังไม่ลงบัญชีไม่มีแถวนั้น ⇒ นับจากรายการออเดอร์ "ที่เดียว" (แถว Product_Out รูมเซอร์วิสถูกตัดออกจาก query ด้านบน)
+            // ไม่มีคอลัมน์ Acct_Post_Ref (ระบบเก่า: ไม่มีแถว Product_Out รูมเซอร์วิส) → นับจากออเดอร์อย่างเดียวเหมือนเดิม
+            if (rsTables)
             {
                 var dr = TaxReportKit.Query(conn,
                     @"SELECT CAST(o.Order_Date AS DATE) AS D, SUM(CAST(i.Quantity AS DECIMAL(18,4)) * ISNULL(p.Cost_Price, 0)) AS V
@@ -382,7 +392,9 @@ namespace Take_Time_BangPhra.TaxReports
 
             var nb = new StringBuilder("<div class='tr-infobox'><b>วิธีอ่าน / ข้อจำกัด</b><ul style='margin:6px 0 0 18px;padding:0'>");
             nb.Append("<li>ฝั่ง NextAcc คือยอดที่ TakeTime <b>ส่งสำเร็จ</b> ตามคิว (ไม่ได้ดึงยอด GL จริงจาก NextAcc) · ภาษีขายฝั่ง NextAcc ถอด 7% จากยอดเอกสารเมื่อ payload ไม่ระบุ VAT</li>");
-            nb.Append("<li>ต้นทุนขายฝั่ง TakeTime = จำนวนขาย × ราคาทุนปัจจุบัน — สินค้าที่ตั้ง <i>ไม่รวมใบสรุปรายวัน</i> หรือไม่มีราคาทุนจะไม่มี COGS ฝั่ง NextAcc ⇒ แสดงเป็นส่วนต่าง</li>");
+            nb.Append("<li>ต้นทุนขายฝั่ง TakeTime = จำนวนขาย × ราคาทุนปัจจุบัน (รูมเซอร์วิสนับจากรายการออเดอร์ครั้งเดียว · ไม่นับขายที่ยกเลิกแล้ว) — " +
+                      "สินค้าที่ไม่มีราคาทุนไม่มี COGS ฝั่ง NextAcc (ส่งเฉพาะจำนวน) และราคาทุนที่เปลี่ยนหลังวันขายทำให้ต่างเล็กน้อย ⇒ แสดงเป็นส่วนต่าง</li>");
+            nb.Append("<li>รายได้ที่นโยบายเอกสารขายตั้ง <i>ไม่ส่งบัญชี</i> ไม่นำมาเทียบ (ดูได้ที่รายงานสรุปยอดขายรายวัน ธง \"ไม่ส่งตามนโยบาย\")</li>");
             nb.Append("<li>ตัดจำหน่าย = จ่ายออกที่ไม่ใช่การขาย (เหตุผลจ่ายออก/ตัดจำหน่ายเดิม/ปรับลดจากตรวจนับ/คืนผู้ขาย) · ไม่นับรายการรออนุมัติหรือถูกปฏิเสธ</li>");
             nb.Append("<li>วันที่ฝั่งคิวอ่านจากวันที่เอกสารใน payload (ไม่มีใช้วันที่เข้าคิว) · ยอดที่ยกเลิก (VOID สำเร็จ) ไม่นับ</li>");
             foreach (var n in m.Notes) nb.Append("<li class='tr-diff'>").Append(TaxReportKit.H(n)).Append("</li>");

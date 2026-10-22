@@ -1024,9 +1024,17 @@ namespace Take_Time_BangPhra.Integration
             DateTime outDate, string reason, string stockRef = null)
         {
             if (!_config.IsConfigured) return -1;
-            if (quantity <= 0 || costPerUnit <= 0) return -1;
+            if (quantity <= 0) return -1;
 
             string refStr = !string.IsNullOrEmpty(stockRef) ? stockRef : $"POUT-{productId}-{outDate:yyyyMMddHHmmss}";
+
+            // ยังไม่มีราคาทุน (cost = 0) → ไม่มี JE ต้นทุน แต่ของออกจากสต๊อกจริง: ยังต้องส่งจำนวน (qty) ไป NextAcc
+            // (เดิม return ก่อนถึง EnqueueStockQtyPush → สต๊อก NextAcc ค้างเกินจริง). EnqueueStockQtyPush dedup ตาม ref เอง
+            if (costPerUnit <= 0)
+            {
+                EnqueueStockQtyPush(productId, productName, quantity, "OUT", 0m, outDate, refStr);
+                return -1;
+            }
 
             long existing = FindPendingEntry("STOCK", "STOCK_OUT_COGS", "stockRef", refStr);
             if (existing > 0) return existing;
@@ -1052,8 +1060,16 @@ namespace Take_Time_BangPhra.Integration
             DateTime reverseDate, string reason, string stockRef)
         {
             if (!_config.IsConfigured) return -1;
-            if (quantity <= 0 || costPerUnit <= 0) return -1;
+            if (quantity <= 0) return -1;
             if (string.IsNullOrEmpty(stockRef)) return -1;
+
+            // คู่กับ EnqueueStockOutCogs: ต้นทุน 0 = ไม่มี JE ให้กลับ แต่ต้องคืนจำนวน (qty IN) ที่เคยส่งออกไป
+            // ผู้เรียกต้องตรวจเองว่าเคยส่ง qty ออกจริง (HasStockQtyPush) — กันคืนจำนวนที่ไม่เคยตัด
+            if (costPerUnit <= 0)
+            {
+                EnqueueStockQtyPush(productId, productName, quantity, "IN", 0m, reverseDate, "REV-" + stockRef);
+                return -1;
+            }
 
             long existing = FindPendingEntry("STOCK", "STOCK_OUT_COGS_REVERSE", "stockRef", stockRef);
             if (existing > 0) return existing;
@@ -1219,6 +1235,17 @@ namespace Take_Time_BangPhra.Integration
             return r.StartsWith("POSDAY-", StringComparison.OrdinalIgnoreCase) || PosRollupCompactRef.IsMatch(r);
         }
 
+        /// <summary>เลขใบสรุปใบแรกของ (วัน, แหล่งเงิน) — ใช้ร่วมกับรายงาน (TaxReportKit) ให้ตรงกับที่รวบจริง</summary>
+        public static string PosRollupBaseRef(DateTime day, string paidHowId)
+        {
+            return BuildPosRollupRef(day, PosPaidHowKey(paidHowId), 0);
+        }
+
+        /// <summary>marker ระหว่างยกเลิกใบสรุป: แถวขายรอปล่อยไปรวบใหม่หลัง void บน NextAcc สำเร็จ (CompletePosRollupVoid)</summary>
+        public const string PosRerollPrefix = "REROLL-";
+        /// <summary>marker แถวขายที่ถูกยกเลิกจริง (คืนสต๊อก + กลับต้นทุนแล้ว) — ไม่นับเป็นยอดขาย</summary>
+        public const string PosVoidRevPrefix = "VOIDREV-";
+
         /// <summary>เลข ref ถัดไปที่ยังไม่ถูกใช้: POSDAY-… → PS…-S1 → -S2 … (null = เต็ม)</summary>
         private string NextFreePosRollupRef(DateTime day, string phKey)
         {
@@ -1236,11 +1263,17 @@ namespace Take_Time_BangPhra.Integration
             var dt = _code.DatabaseQuerySafe(_connectionString,
                 @"SELECT CASE WHEN EXISTS (SELECT 1 FROM Account_Receipt WHERE ID = @r)
                                 OR EXISTS (SELECT 1 FROM Product_Out
-                                            WHERE Pos_Rollup_Ref IN (@r, @p, @x, @v))
+                                            WHERE Pos_Rollup_Ref IN (@r, @p, @x, @v, @rr))
+                                -- ใบที่ถูกยกเลิกแล้วลบแถว Account_Receipt ทิ้ง: เลขเคยส่ง NextAcc แล้ว ห้ามใช้ซ้ำ
+                                -- (ExternalRef เดิม = NextAcc ตอบ Already synced / ทับใบที่ void ไปแล้ว)
+                                OR EXISTS (SELECT 1 FROM Accounting_Sync_Queue
+                                            WHERE Action_Type = 'CREATE_RECEIPT_DOCUMENT' AND Payload LIKE @q)
                               THEN 1 ELSE 0 END AS U",
                 new Dictionary<string, object>
                 {
-                    { "@r", r }, { "@p", "PENDING-" + r }, { "@x", "EXCLUDED-" + r }, { "@v", "VOIDREV-" + r }
+                    { "@r", r }, { "@p", "PENDING-" + r }, { "@x", "EXCLUDED-" + r }, { "@v", "VOIDREV-" + r },
+                    { "@rr", PosRerollPrefix + r },
+                    { "@q", "%\"receiptNumber\":\"" + r.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]") + "\"%" }
                 });
             return dt != null && dt.Rows.Count > 0 && Convert.ToInt32(dt.Rows[0]["U"]) == 1;
         }
@@ -1409,15 +1442,29 @@ namespace Take_Time_BangPhra.Integration
 
             if (!receiptExists)
             {
-                // 4) รายได้ → ใบกำกับภาษีขายสด walk-in (ผู้ซื้อไม่ประสงค์รับใบกำกับ, Dr แหล่งเงินนี้ตรง ๆ)
+                // 4) รายได้
+                //    นโยบายเอกสารขายเปิด → ใบกำกับภาษีขายสด walk-in (ผู้ซื้อไม่ประสงค์รับใบกำกับ, Dr แหล่งเงินนี้ตรง ๆ)
+                //    นโยบายปิด (Sales_Doc_Policy_Enabled ≠ 1) → เส้นเดิมก่อน PHASE19_29: EnqueueReceipt
+                //    (Dr เงินสด/Cr รายได้สินค้า/Cr ภาษีขาย ตามโหมดใบเสร็จที่ตั้งไว้) — ไม่เปลี่ยนพฤติกรรมของร้านที่ยังไม่เปิดนโยบาย
                 if (grossTotal > 0m)
                 {
-                    EnqueueWalkInSalesDocument(rollupRef, grossTotal, day.Date, "สรุปยอด" + label,
-                        paidHowName, paidHowAccId, SalesDocumentPolicy.ChPos, isDailyRollup: true);
+                    bool policyOn = false;
+                    try { policyOn = SalesDocumentPolicy.Enabled(_connectionString); } catch { policyOn = false; }
+                    if (policyOn)
+                        EnqueueWalkInSalesDocument(rollupRef, grossTotal, day.Date, "สรุปยอด" + label,
+                            paidHowName, paidHowAccId, SalesDocumentPolicy.ChPos, isDailyRollup: true);
+                    else
+                        EnqueueReceipt(0, rollupRef, grossTotal, 0, day.Date,
+                            $"ขายสดหน้าร้าน {day:dd/MM/yyyy} ({paidHowName})" + (supplementary ? " — เพิ่มเติม" : ""),
+                            isDeposit: false, paymentMethod: paidHowName,
+                            revenueType: "PRODUCT_REVENUE", paymentAccountId: paidHowAccId);
                 }
 
                 // 5) COGS ตัดสต๊อก ต่อสินค้า (Dr COGS / Cr Inventory) — ทุกสินค้าที่ออกจากร้านจริง
                 //    รวมสินค้าที่ตั้ง "ไม่รวมใบสรุปรายวัน" (รายได้ไปทางอื่น แต่ของออกจากสต๊อกแล้ว) และของแถม/ราคา 0
+                //    ต้นทุนต่อหน่วย = Product.Cost_Price "ปัจจุบัน" (ค่าเฉลี่ยเคลื่อนที่ — CostService) ณ ตอนรวบ:
+                //    ระบบยังไม่มีตารางประวัติราคาทุน จึงใช้ต้นทุน ณ วันที่ขายไม่ได้ — ปกติรวบภายในวันถัดไป ต่างกันน้อย;
+                //    ใบเพิ่มเติม (ขายย้อนวัน) อาจใช้ค่าเฉลี่ยหลังรับซื้อรอบใหม่. ต้นทุน 0 → ส่งเฉพาะจำนวน (EnqueueStockOutCogs)
                 foreach (DataRow r in prod.Rows)
                 {
                     int pid = 0; int.TryParse(r["PID"]?.ToString(), out pid);
@@ -1425,7 +1472,7 @@ namespace Take_Time_BangPhra.Integration
                     decimal cost = SafeDec(r["Cost"]);
                     string name = r["Name"]?.ToString() ?? "";
                     bool inc = Convert.ToInt32(r["Inc"]) == 1;
-                    if (pid > 0 && qty > 0 && cost > 0)
+                    if (pid > 0 && qty > 0)
                         EnqueueStockOutCogs(pid, name, qty, cost, day.Date,
                             inc ? "ขายสดหน้าร้าน (รวบรายวัน)" : "ขายหน้าร้าน (สินค้าไม่รวมใบสรุปรายวัน — ลงต้นทุน)",
                             stockRef: PosRollupCogsRef(rollupRef, pid));
@@ -1640,16 +1687,21 @@ namespace Take_Time_BangPhra.Integration
         }
 
         // ──────────────────────────────────────────────
-        // ยกเลิกขายหน้าร้าน → คืนสต๊อก + กลับต้นทุน (POS REC รายใบ / ใบสรุป POSDAY)
+        // ยกเลิกขายหน้าร้าน → คืนสต๊อก + กลับต้นทุน (POS REC รายใบ / ใบสรุป POSDAY / ยกเลิกรายการเดียวในใบสรุป)
         // ──────────────────────────────────────────────
 
         /// <summary>
         /// เรียกตอนสั่ง void ใบเสร็จ (EnqueueVoidReceipt) — ทำงานเฉพาะเมื่อใบในระบบ "ถูกยกเลิกจริง" (แถว Account_Receipt
         /// ถูกลบ หรือ Status = 'Cancel'; เส้นแก้ไขใบที่ void→สร้างใหม่เลขเดิมไม่เข้าเงื่อนไข) และมีแถวขายหน้าร้านผูกอยู่:
-        ///   ใบรายใบ (REC…)  : Product_Out.Account_Receipt_ID = ใบนี้ → กลับต้นทุน POSINV-{ใบ}-{pid}
-        ///   ใบสรุป (POSDAY-…): Product_Out.Pos_Rollup_Ref = ใบนี้ → กลับต้นทุน POSDAY-COGS-…-{pid}
-        /// คืนสต๊อกในระบบ (Product_In แถวคืน) + EnqueueStockOutCogsReversal ด้วยต้นทุนเดิมจากคิว (ถ้ามีคิวต้นทุนเดิม)
-        /// แถวขายถูกทำเครื่องหมาย VOIDREV-{ใบ} (ทำครั้งเดียว). ไม่โยน exception. คืนจำนวนสินค้าที่กลับรายการ
+        ///   ใบรายใบ (REC…)  : Product_Out.Account_Receipt_ID = ใบนี้ → การขายถูกยกเลิกจริง: คืนสต๊อกในระบบ
+        ///                     (Product_In InType VOID_RESTOCK) + กลับต้นทุน POSINV-{ใบ}-{pid} ด้วยต้นทุนเดิมจากคิว
+        ///                     แถวขายถูกทำเครื่องหมาย VOIDREV-{ใบ} (ทำครั้งเดียว)
+        ///   ใบสรุป (POSDAY-… / PS{yyMMdd}-…): การยกเลิก "เอกสาร" ไม่ได้แปลว่าการขายถูกยกเลิก (เช่น ยกเลิกเพื่อออกใหม่ หรือ
+        ///                     ถอดรายการที่ขายผิดออก — VoidRolledUpPosSale) → <b>ไม่คืนสต๊อก</b> แถวที่ยังขายจริงถูกพักเป็น
+        ///                     REROLL-{ใบ} แล้วปล่อยเป็น NULL เมื่อ void บน NextAcc สำเร็จ (CompletePosRollupVoid) →
+        ///                     รอบรวบถัดไปออกเป็นใบเพิ่มเติม PS…-S{n} (เดิม: ทำเครื่องหมาย VOIDREV + คืนสต๊อกทั้งใบ =
+        ///                     รายได้+ต้นทุนของการขายจริงหายจากบัญชี และสต๊อกในระบบเกินจริง)
+        /// ไม่โยน exception. คืนจำนวนสินค้า (ใบรายใบ) / จำนวนแถวที่พัก (ใบสรุป)
         /// </summary>
         public int TryReversePosSaleOnVoid(string receiptNumber)
         {
@@ -1664,11 +1716,21 @@ namespace Take_Time_BangPhra.Integration
                     || string.Equals(st.Rows[0]["S"]?.ToString(), "Cancel", StringComparison.OrdinalIgnoreCase);
                 if (!cancelled) return 0;
 
-                bool isRollup = IsPosRollupRef(receiptNumber);
-                string voidRef = "VOIDREV-" + receiptNumber;
-                string where = isRollup
-                    ? "Remark = N'ขาย' AND Pos_Rollup_Ref = @doc"
-                    : "Remark = N'ขาย' AND Account_Receipt_ID = @doc AND (Pos_Rollup_Ref IS NULL OR Pos_Rollup_Ref NOT LIKE 'VOIDREV-%')";
+                if (IsPosRollupRef(receiptNumber))
+                {
+                    // ใบสรุป: พักแถวที่รวมในใบ (เฉพาะสินค้าที่รวมรายได้ — แถว EXCLUDED- ต้นทุนลงไว้แล้วและไม่มีรายได้ในใบนี้ คงเดิม)
+                    int staged = _code.DatabaseInsertSafe(_connectionString,
+                        "UPDATE Product_Out SET Pos_Rollup_Ref = @s WHERE Remark = N'ขาย' AND Pos_Rollup_Ref = @doc",
+                        new Dictionary<string, object> { { "@doc", receiptNumber }, { "@s", PosRerollPrefix + receiptNumber } });
+                    if (staged > 0)
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"POS void: ใบสรุป {receiptNumber} ถูกยกเลิก → พัก {staged} แถวขาย ({PosRerollPrefix}{receiptNumber}) " +
+                            "รอ void บน NextAcc สำเร็จแล้วรวบใหม่เป็นใบเพิ่มเติม (ไม่คืนสต๊อก — ขายจริง)", "SYSTEM");
+                    return staged;
+                }
+
+                string voidRef = PosVoidRevPrefix + receiptNumber;
+                string where = "Remark = N'ขาย' AND Account_Receipt_ID = @doc AND (Pos_Rollup_Ref IS NULL OR Pos_Rollup_Ref NOT LIKE 'VOIDREV-%')";
                 var wp = new Dictionary<string, object> { { "@doc", receiptNumber } };
 
                 var rows = _code.DatabaseQuerySafe(_connectionString,
@@ -1681,15 +1743,7 @@ namespace Take_Time_BangPhra.Integration
                     "UPDATE Product_Out SET Pos_Rollup_Ref = @v WHERE " + where,
                     new Dictionary<string, object> { { "@doc", receiptNumber }, { "@v", voidRef } });
                 if (claimed <= 0) return 0;
-                try
-                {
-                    // คอลัมน์ Is_Reversed (PHASE19_30 — ทีมสต๊อก) ถ้ามี
-                    _code.DatabaseInsertSafe(_connectionString,
-                        "IF COL_LENGTH('dbo.Product_Out', 'Is_Reversed') IS NOT NULL " +
-                        "EXEC sp_executesql N'UPDATE Product_Out SET Is_Reversed = 1 WHERE Pos_Rollup_Ref = @v', N'@v NVARCHAR(60)', @v = @v",
-                        new Dictionary<string, object> { { "@v", voidRef } });
-                }
-                catch { }
+                MarkProductOutReversed("Pos_Rollup_Ref = @v", new Dictionary<string, object> { { "@v", voidRef } });
 
                 int n = 0;
                 foreach (DataRow r in rows.Rows)
@@ -1697,32 +1751,8 @@ namespace Take_Time_BangPhra.Integration
                     int pid; if (!int.TryParse(r["PID"]?.ToString(), out pid) || pid <= 0) continue;
                     decimal qty = SafeDec(r["Qty"]);
                     if (qty <= 0) continue;
-
-                    string cogsRef = isRollup ? PosRollupCogsRef(receiptNumber, pid) : $"POSINV-{receiptNumber}-{pid}";
-                    decimal origCost; decimal origQty; string pname;
-                    bool hadCogs = LookupStockOutCogsPayload(cogsRef, out origQty, out origCost, out pname);
-                    decimal cost = hadCogs ? origCost : 0m;
-                    if (!hadCogs)
-                    {
-                        try
-                        {
-                            var c = _code.DatabaseQuerySafe(_connectionString,
-                                "SELECT TOP 1 ISNULL(Cost_Price, 0) AS C, Product_Name FROM Product WHERE ID = @pid",
-                                new Dictionary<string, object> { { "@pid", pid } });
-                            if (c?.Rows.Count > 0) { cost = SafeDec(c.Rows[0]["C"]); pname = c.Rows[0]["Product_Name"]?.ToString(); }
-                        }
-                        catch { }
-                    }
-
-                    // คืนสต๊อกในระบบ (fn_GetProductStock = SUM(Product_In) − SUM(Product_Out))
-                    _code.DatabaseInsertSafe(_connectionString,
-                        "INSERT INTO [dbo].[Product_In] ([DateTime_In],[Product_ID],[Amount],[PricePerUnit]) VALUES (@d,@pid,@amt,@cost)",
-                        new Dictionary<string, object> { { "@d", DateTime.Now }, { "@pid", pid }, { "@amt", qty }, { "@cost", cost } });
-
-                    // กลับต้นทุนบน NextAcc เฉพาะเมื่อเคยลงต้นทุนไว้ (คิว STOCK_OUT_COGS มีอยู่) ด้วยต้นทุนเดิม
-                    if (hadCogs && origCost > 0 && _config.IsConfigured && _config.Enabled)
-                        EnqueueStockOutCogsReversal(pid, pname ?? "", qty, origCost, DateTime.Now,
-                            $"ยกเลิกขายหน้าร้าน ({receiptNumber})", cogsRef);
+                    string cogsRef = $"POSINV-{receiptNumber}-{pid}";
+                    ReversePosSaleCogs(pid, qty, cogsRef, cogsRef, true, $"ยกเลิกขายหน้าร้าน ({receiptNumber})");
                     n++;
                 }
 
@@ -1736,6 +1766,271 @@ namespace Take_Time_BangPhra.Integration
                     $"POS void reverse ({receiptNumber}) ล้มเหลว: {ex.Message}", "SYSTEM");
                 return 0;
             }
+        }
+
+        /// <summary>
+        /// ปล่อยแถวขายของใบสรุปที่ถูกยกเลิก (REROLL-{ใบ}) ไปรวบใหม่ — เรียกหลัง void บน NextAcc สำเร็จ (dispatcher VOID_RECEIPT)
+        /// หรือทันทีเมื่อใบยังไม่เคยขึ้น NextAcc (EnqueueVoidReceipt). ต้นทุน: <b>ย้าย</b> ไปอยู่กับใบเพิ่มเติม — กลับ COGS เดิม
+        /// ของใบที่ถูกยกเลิก (ต้นทุนเดิมจากคิว, ไม่คืนสต๊อกในระบบเพราะของขายไปจริง) แล้วรอบรวบถัดไปลง COGS ใหม่พร้อมใบ -S{n}
+        /// ⇒ สุทธิ GL/จำนวน NextAcc = เฉพาะแถวที่ถูกถอดออกจริงเท่านั้นที่ลดลง. idempotent (claim ด้วย UPDATE ... WHERE marker)
+        /// </summary>
+        public int CompletePosRollupVoid(string rollupRef)
+        {
+            if (string.IsNullOrWhiteSpace(rollupRef) || !IsPosRollupRef(rollupRef)) return 0;
+            rollupRef = rollupRef.Trim();
+            string staged = PosRerollPrefix + rollupRef;
+            try
+            {
+                var rows = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT Product_ID AS PID, SUM(Amount) AS Qty FROM Product_Out WHERE Pos_Rollup_Ref = @s GROUP BY Product_ID",
+                    new Dictionary<string, object> { { "@s", staged } });
+                if (rows == null || rows.Rows.Count == 0) return 0;
+
+                int released = _code.DatabaseInsertSafe(_connectionString,
+                    "UPDATE Product_Out SET Pos_Rollup_Ref = NULL WHERE Pos_Rollup_Ref = @s",
+                    new Dictionary<string, object> { { "@s", staged } });
+                if (released <= 0) return 0;
+
+                foreach (DataRow r in rows.Rows)
+                {
+                    int pid; if (!int.TryParse(r["PID"]?.ToString(), out pid) || pid <= 0) continue;
+                    decimal qty = SafeDec(r["Qty"]);
+                    if (qty <= 0) continue;
+                    string cogsRef = PosRollupCogsRef(rollupRef, pid);
+                    ReversePosSaleCogs(pid, qty, cogsRef, cogsRef, false,
+                        $"ย้ายต้นทุนจากใบสรุปที่ยกเลิก {rollupRef} ไปใบเพิ่มเติม (ไม่คืนสต๊อก)");
+                }
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"POS void: ใบสรุป {rollupRef} — ปล่อย {released} แถวขายไปรวบใหม่ (ใบเพิ่มเติม -S รอบถัดไป) + กลับต้นทุนเดิม {rows.Rows.Count} สินค้า", "SYSTEM");
+                return released;
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"CompletePosRollupVoid ({rollupRef}) ล้มเหลว: {ex.Message}", "SYSTEM");
+                return 0;
+            }
+        }
+
+        /// <summary>หลัง VOID_RECEIPT สำเร็จ — ใบสรุป POS: ปล่อยแถวไปรวบใหม่ (ไม่โยน: void สำเร็จแล้วห้ามล้มเพราะขั้นนี้)</summary>
+        private void CompletePosRollupVoidAfterVoid(Dictionary<string, object> p)
+        {
+            try
+            {
+                string rn = p != null && p.ContainsKey("receiptNumber") ? p["receiptNumber"]?.ToString() : null;
+                if (IsPosRollupRef(rn)) CompletePosRollupVoid(rn);
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// ใบสรุป POS ที่ยังไม่เคยขึ้น NextAcc (ไม่มี doc id ให้ void): ยกเลิก CREATE ที่ยังไม่ส่ง แล้วปล่อยแถวไปรวบใหม่ทันที.
+        /// CREATE กำลังส่ง (PROCESSING) หรือส่งแล้วแต่ไม่มี response id → ไม่ปล่อย (กันรายได้ซ้ำ) — log ให้ผู้ดูแลตรวจ/ยกเลิกซ้ำภายหลัง
+        /// </summary>
+        private void ReleasePosRollupNotOnNextAcc(string rollupRef)
+        {
+            try
+            {
+                string esc = (rollupRef ?? "").Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]");
+                var p = new Dictionary<string, object> { { "@p", $"%\"receiptNumber\":\"{esc}\"%" } };
+                if (_config.IsConfigured)
+                {
+                    var busy = _code.DatabaseQuerySafe(_connectionString,
+                        @"SELECT TOP 1 Status FROM Accounting_Sync_Queue
+                           WHERE Action_Type = 'CREATE_RECEIPT_DOCUMENT' AND Status IN ('PROCESSING', 'COMPLETED') AND Payload LIKE @p",
+                        p);
+                    if (busy != null && busy.Rows.Count > 0)
+                    {
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"⚠ POS void: ใบสรุป {rollupRef} มีคิวสร้างสถานะ {busy.Rows[0]["Status"]} แต่ยังหา doc id ไม่ได้ — " +
+                            $"ยังไม่ปล่อยแถวไปรวบใหม่ (กันรายได้ซ้ำ) แถวคงเป็น {PosRerollPrefix}{rollupRef}; ตรวจคิวแล้วสั่งยกเลิกใบนี้อีกครั้ง", "SYSTEM");
+                        return;
+                    }
+                    _code.DatabaseInsertSafe(_connectionString,
+                        @"UPDATE Accounting_Sync_Queue SET Status = 'CANCELLED', Error_Message = N'ยกเลิก: ใบสรุปถูกยกเลิกก่อนส่ง (รวบใหม่เป็นใบเพิ่มเติม)'
+                           WHERE Action_Type = 'CREATE_RECEIPT_DOCUMENT' AND Status IN ('PENDING', 'FAILED') AND Payload LIKE @p",
+                        p);
+                }
+                CompletePosRollupVoid(rollupRef);
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ReleasePosRollupNotOnNextAcc ({rollupRef}) ล้มเหลว: {ex.Message}", "SYSTEM");
+            }
+        }
+
+        /// <summary>
+        /// ยกเลิก "รายการขายเดียว" ที่ถูกรวบเข้าใบสรุปรายวันแล้ว (หน้า Product/SellReport):
+        ///   1) แถวนี้ → VOIDREV-{ใบ} (+ Is_Reversed) · claim แบบ atomic กันกดซ้ำ
+        ///   2) คืนสต๊อกในระบบ (Product_In InType VOID_RESTOCK) + กลับต้นทุนของแถวนี้ (ref PSVOID-{id}) ด้วยต้นทุนเดิมของใบ
+        ///   3) รายได้: <b>ยกเลิกใบสรุปทั้งใบแล้วรวบแถวที่เหลือใหม่</b> (ใบเพิ่มเติม PS…-S{n}) — ไม่ใช้ใบลดหนี้ เพราะ
+        ///      integration credit note ของ NextAcc ลง Dr รายได้+VAT / <b>Cr ลูกหนี้</b> และไม่คืนสต๊อก (audit B §4,
+        ///      IntegrationService.cs:1445-1492) → ใบกำกับขายสด (ไม่มีลูกหนี้) จะเหลือลูกหนี้ติดลบค้าง; resyncUpdate ก็ใช้ไม่ได้
+        ///      เพราะใบขายสดถือว่า "ชำระแล้ว" (ติด guard). void→ออกใหม่ = GL/ภ.พ.30 ถูกทั้งสองฝั่ง
+        ///      ข้อจำกัด: เดือนภาษีที่ยื่น ภ.พ.30 แล้ว NextAcc ปฏิเสธ void → คิว VOID ล้ม, แถวที่เหลือค้าง REROLL (ไม่ซ้ำ)
+        ///      ต้องออกใบลดหนี้ที่ NextAcc เอง
+        ///   แถวที่พักรอรวบใหม่ (REROLL-) → ข้อ 1–2 อย่างเดียว (กำลัง void ใบอยู่แล้ว) · แถว EXCLUDED- (ไม่มีรายได้ในใบ) → ข้อ 1–2
+        /// คืน true = ยกเลิกแล้ว
+        /// </summary>
+        public bool VoidRolledUpPosSale(long productOutId, string user, out string message)
+        {
+            message = null;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 ID, Product_ID, Amount, Pos_Rollup_Ref, Remark FROM Product_Out WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", productOutId } });
+                if (dt == null || dt.Rows.Count == 0) { message = "ไม่พบรายการขาย"; return false; }
+                var row = dt.Rows[0];
+                string marker = row["Pos_Rollup_Ref"] == DBNull.Value ? "" : row["Pos_Rollup_Ref"].ToString().Trim();
+                if (!string.Equals(row["Remark"]?.ToString(), "ขาย", StringComparison.Ordinal))
+                { message = "รายการนี้ไม่ใช่การขายหน้าร้าน"; return false; }
+
+                string rollupRef; bool voidDoc;
+                if (IsPosRollupRef(marker)) { rollupRef = marker; voidDoc = true; }
+                else if (marker.StartsWith(PosRerollPrefix, StringComparison.OrdinalIgnoreCase)) { rollupRef = marker.Substring(PosRerollPrefix.Length); voidDoc = false; }
+                else if (marker.StartsWith("EXCLUDED-", StringComparison.OrdinalIgnoreCase)) { rollupRef = marker.Substring("EXCLUDED-".Length); voidDoc = false; }
+                else { message = "รายการนี้ไม่ได้อยู่ในใบสรุปรายวัน (" + (marker.Length == 0 ? "ยังไม่รวบ" : marker) + ")"; return false; }
+                if (!IsPosRollupRef(rollupRef)) { message = "อ่านเลขใบสรุปไม่ได้ (" + marker + ")"; return false; }
+
+                int pid; int.TryParse(row["Product_ID"]?.ToString(), out pid);
+                decimal qty = SafeDec(row["Amount"]);
+
+                // 1) claim แถวนี้ (atomic — กดซ้ำ/สองหน้าต่างพร้อมกัน = ทำครั้งเดียว)
+                string voidRef = PosVoidRevPrefix + rollupRef;
+                int claimed = _code.DatabaseInsertSafe(_connectionString,
+                    "UPDATE Product_Out SET Pos_Rollup_Ref = @v WHERE ID = @id AND Pos_Rollup_Ref = @m",
+                    new Dictionary<string, object> { { "@v", voidRef }, { "@id", productOutId }, { "@m", marker } });
+                if (claimed <= 0) { message = "รายการนี้ถูกดำเนินการไปแล้ว — โหลดหน้าใหม่"; return false; }
+                MarkProductOutReversed("ID = @id", new Dictionary<string, object> { { "@id", productOutId } });
+
+                // 2) คืนสต๊อก + กลับต้นทุนของแถวนี้ (ต้นทุนเดิมที่ใบสรุปลงไว้)
+                if (pid > 0 && qty > 0)
+                    ReversePosSaleCogs(pid, qty, PosRollupCogsRef(rollupRef, pid), "PSVOID-" + productOutId, true,
+                        $"ยกเลิกขายหน้าร้าน #{productOutId} ในใบสรุป {rollupRef}" + (string.IsNullOrWhiteSpace(user) ? "" : " โดย " + user));
+
+                // 3) รายได้: ยกเลิกใบสรุปทั้งใบ → แถวที่เหลือรวบใหม่เป็นใบเพิ่มเติม
+                if (voidDoc)
+                {
+                    _code.DatabaseInsertSafe(_connectionString,
+                        "UPDATE Account_Receipt SET Status = 'Cancel' WHERE ID = @id",
+                        new Dictionary<string, object> { { "@id", rollupRef } });
+                    EnqueueVoidReceipt(rollupRef);
+                }
+
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"POS void รายการเดียว: Product_Out #{productOutId} (สินค้า {pid} x{qty:N2}) ออกจากใบสรุป {rollupRef} → {voidRef}" +
+                    (voidDoc ? " · สั่งยกเลิกใบสรุปทั้งใบ แถวที่เหลือจะรวบใหม่เป็นใบเพิ่มเติม" : "") + $" โดย {user}", "SYSTEM");
+                message = "ยกเลิกรายการขายแล้ว — คืนสต๊อกและกลับต้นทุนให้แล้ว"
+                    + (voidDoc
+                        ? "\nใบสรุปรายวัน " + rollupRef + " ถูกสั่งยกเลิกบน NextAcc; รายการที่เหลือของวันนั้นจะออกเป็นใบสรุปเพิ่มเติมอัตโนมัติรอบถัดไป"
+                          + "\n(ถ้าเดือนภาษีนั้นยื่น ภ.พ.30 แล้ว NextAcc จะไม่ให้ยกเลิก — ดูคิวบัญชี แล้วออกใบลดหนี้ที่ NextAcc แทน)"
+                        : "");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync", $"VoidRolledUpPosSale #{productOutId} ล้มเหลว: {ex.Message}", "SYSTEM");
+                message = "ยกเลิกไม่สำเร็จ: " + ex.Message;
+                return false;
+            }
+        }
+
+        /// <summary>Product_Out.Is_Reversed = 1 (คอลัมน์ PHASE19_30 — ไม่มีคอลัมน์ = ข้าม)</summary>
+        private void MarkProductOutReversed(string where, Dictionary<string, object> ps)
+        {
+            try
+            {
+                if (!ProductOutHasColumn("Is_Reversed")) return;
+                _code.DatabaseInsertSafe(_connectionString, "UPDATE Product_Out SET Is_Reversed = 1 WHERE " + where, ps);
+            }
+            catch { }
+        }
+
+        private bool ProductOutHasColumn(string col)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT CASE WHEN COL_LENGTH('dbo.Product_Out', @c) IS NULL THEN 0 ELSE 1 END AS H",
+                    new Dictionary<string, object> { { "@c", col } });
+                return dt != null && dt.Rows.Count > 0 && Convert.ToInt32(dt.Rows[0]["H"]) == 1;
+            }
+            catch { return false; }
+        }
+
+        /// <summary>
+        /// กลับต้นทุนขายหน้าร้านของสินค้าหนึ่ง: ต้นทุนเดิมจากคิว STOCK_OUT_COGS (origCogsRef) → EnqueueStockOutCogsReversal(reverseRef).
+        /// ไม่มีคิวต้นทุนเดิม (ต้นทุน 0 ตอนขาย) → คืนเฉพาะจำนวน ถ้าเคยส่งจำนวนออกจริง (QTY-OUT-{origCogsRef}).
+        /// restockLocal = true → คืนสต๊อกในระบบด้วย (Product_In InType VOID_RESTOCK — ราคาซื้อล่าสุด/ค่าเฉลี่ยไม่นับแถวนี้)
+        /// </summary>
+        private void ReversePosSaleCogs(int pid, decimal qty, string origCogsRef, string reverseRef, bool restockLocal, string reason)
+        {
+            decimal origCost; decimal origQty; string pname;
+            bool hadCogs = LookupStockOutCogsPayload(origCogsRef, out origQty, out origCost, out pname);
+            decimal cost = hadCogs ? origCost : 0m;
+            if (!hadCogs || string.IsNullOrEmpty(pname))
+            {
+                try
+                {
+                    var c = _code.DatabaseQuerySafe(_connectionString,
+                        "SELECT TOP 1 ISNULL(Cost_Price, 0) AS C, Product_Name FROM Product WHERE ID = @pid",
+                        new Dictionary<string, object> { { "@pid", pid } });
+                    if (c?.Rows.Count > 0)
+                    {
+                        if (!hadCogs) cost = SafeDec(c.Rows[0]["C"]);
+                        if (string.IsNullOrEmpty(pname)) pname = c.Rows[0]["Product_Name"]?.ToString();
+                    }
+                }
+                catch { }
+            }
+
+            if (restockLocal) InsertVoidRestockRow(pid, qty, cost);
+
+            if (!_config.IsConfigured || !_config.Enabled) return;
+            if (hadCogs && origCost > 0)
+                EnqueueStockOutCogsReversal(pid, pname ?? "", qty, origCost, DateTime.Now, reason, reverseRef);
+            else if (HasStockQtyPush("QTY-OUT-" + origCogsRef))
+                EnqueueStockOutCogsReversal(pid, pname ?? "", qty, 0m, DateTime.Now, reason, reverseRef);   // จำนวนอย่างเดียว
+        }
+
+        /// <summary>Product_In.InType ของแถวคืนสต๊อกจากการยกเลิกขาย — ตรรกะราคาซื้อล่าสุด (InType PURCHASE/NULL) ไม่นับ</summary>
+        public const string VoidRestockInType = "VOID_RESTOCK";
+
+        /// <summary>คืนสต๊อกในระบบ (fn_GetProductStock = ΣProduct_In − ΣProduct_Out) — InType VOID_RESTOCK (ไม่มีคอลัมน์ = แบบเดิม)</summary>
+        private void InsertVoidRestockRow(int pid, decimal qty, decimal cost)
+        {
+            var ps = new Dictionary<string, object>
+            {
+                { "@d", DateTime.Now }, { "@pid", pid }, { "@amt", qty }, { "@cost", cost < 0 ? 0 : cost }, { "@t", VoidRestockInType }
+            };
+            try
+            {
+                _code.DatabaseInsertSafe(_connectionString,
+                    "INSERT INTO [dbo].[Product_In] ([DateTime_In],[Product_ID],[Amount],[PricePerUnit],[InType]) VALUES (@d,@pid,@amt,@cost,@t)", ps);
+            }
+            catch
+            {
+                ps.Remove("@t");
+                _code.DatabaseInsertSafe(_connectionString,
+                    "INSERT INTO [dbo].[Product_In] ([DateTime_In],[Product_ID],[Amount],[PricePerUnit]) VALUES (@d,@pid,@amt,@cost)", ps);
+            }
+        }
+
+        /// <summary>เคยเข้าคิวส่งจำนวนสต๊อก (STOCK_QTY_PUSH) ของ ref นี้หรือไม่ (ไม่นับที่ยกเลิก)</summary>
+        private bool HasStockQtyPush(string qtyRef)
+        {
+            try
+            {
+                string esc = (qtyRef ?? "").Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]");
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 ID FROM Accounting_Sync_Queue
+                       WHERE Action_Type = 'STOCK_QTY_PUSH' AND Status <> 'CANCELLED' AND Payload LIKE @p",
+                    new Dictionary<string, object> { { "@p", $"%\"stockRef\":\"{esc}\"%" } });
+                return dt != null && dt.Rows.Count > 0;
+            }
+            catch { return false; }
         }
 
         /// <summary>อ่าน payload คิว STOCK_OUT_COGS ล่าสุดของ stockRef (จำนวน/ต้นทุนที่ลงไว้จริง)</summary>
@@ -2634,7 +2929,11 @@ namespace Take_Time_BangPhra.Integration
         public long EnqueueVoidReceipt(string receiptNumber)
         {
             TryReversePosSaleOnVoid(receiptNumber);   // ขายหน้าร้านถูกยกเลิกจริง → คืนสต๊อก + กลับต้นทุน (PHASE19_29)
-            if (!_config.IsConfigured) return -1;
+            if (!_config.IsConfigured)
+            {
+                if (IsPosRollupRef(receiptNumber)) ReleasePosRollupNotOnNextAcc(receiptNumber);   // ไม่ได้เชื่อม NextAcc → ปล่อยรวบใหม่ทันที
+                return -1;
+            }
 
             // เอกสารรับเงิน OTA (OTADOC-) ถูกสร้างโดยคิว CREATE_OTA_SALES_DOCUMENT ไม่ใช่ CREATE_RECEIPT_DOCUMENT →
             // หา doc id แบบใบเสร็จปกติไม่เจอ (เดิมคืน -1 เงียบ เอกสารค้างใน NextAcc) — ใช้เส้นเฉพาะ
@@ -2649,7 +2948,12 @@ namespace Take_Time_BangPhra.Integration
             if (existing > 0) return existing;
 
             string nexaaccId = LookupNexaaccId(receiptNumber, "RECEIPT");
-            if (string.IsNullOrEmpty(nexaaccId)) return -1;
+            if (string.IsNullOrEmpty(nexaaccId))
+            {
+                // ใบสรุป POS ที่ยังไม่ขึ้น NextAcc — ไม่มีอะไรให้ void: ยกเลิกคิวสร้างที่ค้าง แล้วปล่อยแถวไปรวบใหม่
+                if (IsPosRollupRef(receiptNumber)) ReleasePosRollupNotOnNextAcc(receiptNumber);
+                return -1;
+            }
 
             var payload = new Dictionary<string, object>
             {
@@ -5049,7 +5353,13 @@ namespace Take_Time_BangPhra.Integration
                     return await ProcessCustomerContactSync(payload);
 
                 case "VOID_RECEIPT":
-                    return await ProcessVoidReceipt(payload);
+                {
+                    string voidResult = await ProcessVoidReceipt(payload);
+                    // ใบสรุปขายหน้าร้าน: ปล่อยแถวขายที่ยังขายจริงไปรวบใหม่ "หลัง" void บน NextAcc สำเร็จเท่านั้น
+                    // (void ถูกปฏิเสธ เช่น ยื่น ภ.พ.30 แล้ว → โยน exception ก่อนถึงตรงนี้ → แถวคงพักไว้ ไม่เกิดรายได้ซ้ำ)
+                    CompletePosRollupVoidAfterVoid(payload);
+                    return voidResult;
+                }
 
                 case "VOID_VOUCHER":
                     return await ProcessVoidVoucher(payload);
