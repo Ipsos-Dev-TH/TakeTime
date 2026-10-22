@@ -115,6 +115,13 @@ namespace Take_Time_BangPhra.Product
 
                     // 🏨 Load active guests for room charge dropdown
                     LoadActiveGuests();
+
+                    // 🧾 นโยบายเอกสารขาย (PHASE19_29): ช่องติ๊กเดิมกลายเป็น "ขอใบกำกับเต็มรูป/ระบุชื่อ" — ไม่ติ๊ก = ตามนโยบาย
+                    if (IsSalesDocPolicyOn())
+                    {
+                        CheckBox1.Text = "📄 ขอใบกำกับภาษีเต็มรูป / ระบุชื่อผู้ซื้อ (ไม่ติ๊ก = ออกเอกสารตามนโยบายของแหล่งเงิน)";
+                        ShowSalesDocRouteHint();
+                    }
                 }
                 else
                 {
@@ -255,7 +262,18 @@ namespace Take_Time_BangPhra.Product
 
         protected void CheckBox1_CheckedChanged1(object sender, EventArgs e)
         {
-            
+            // นโยบายเอกสารขายเปิด: CheckBox1 = "ขอใบกำกับภาษีเต็มรูป / ระบุชื่อ" → เปิดแผงข้อมูลผู้ซื้อให้เลย
+            if (!IsSalesDocPolicyOn()) return;
+            if (CheckBox1.Checked)
+            {
+                CheckBox2.Checked = true;
+                CheckBox2_CheckedChanged(sender, e);
+            }
+            else
+            {
+                CheckBox2.Checked = false;
+                Panel1.Visible = false;
+            }
         }
 
         protected void CheckBox2_CheckedChanged(object sender, EventArgs e)
@@ -536,6 +554,14 @@ namespace Take_Time_BangPhra.Product
 
         protected void DropDownList1_SelectedIndexChanged(object sender, EventArgs e)
         {
+            // นโยบายเอกสารขายเปิด (PHASE19_29): เส้นทางมาจากนโยบายตามชนิดแหล่งเงิน — ไม่บังคับติ๊ก "ออกใบกำกับ" ด้วย ID
+            // (เดิม hard-code "แหล่งเงิน ID 1 บังคับติ๊ก" — คงไว้เฉพาะตอนนโยบายยังไม่พร้อม = พฤติกรรมเดิม)
+            if (IsSalesDocPolicyOn())
+            {
+                CheckBox1.Enabled = true;
+                ShowSalesDocRouteHint();
+                return;
+            }
             if(DropDownList1.SelectedValue == "1")
             {
                 CheckBox1.Checked = true;
@@ -546,6 +572,35 @@ namespace Take_Time_BangPhra.Product
                 CheckBox1.Enabled = true;
                 CheckBox1.Checked = false;
             }
+        }
+
+        private bool IsSalesDocPolicyOn()
+        {
+            try { return Integration.SalesDocumentPolicy.Enabled(conn); } catch { return false; }
+        }
+
+        /// <summary>ป้ายใต้ dropdown แหล่งเงิน: ขายด้วยแหล่งเงินนี้จะออกเอกสารอะไร (ตามนโยบายเอกสารขาย)</summary>
+        private void ShowSalesDocRouteHint()
+        {
+            lblSalesDocRoute.Text = "";
+            if (!IsSalesDocPolicyOn()) return;
+            int phId;
+            if (!int.TryParse((DropDownList1.SelectedValue ?? "").Trim(), out phId) || phId <= 0)
+            {
+                lblSalesDocRoute.Text = "เลือกแหล่งเงินเพื่อดูว่าจะออกเอกสารแบบไหน";
+                return;
+            }
+            var r = Integration.SalesDocumentPolicy.Resolve(conn, Integration.SalesDocumentPolicy.ChPos, phId);
+            string text;
+            if (r.IsImmediate)
+                text = "🧾 ออกใบกำกับภาษีอย่างย่อบน NextAcc ทันที (ติ๊ก \"ขอใบกำกับเต็มรูป\" ถ้าลูกค้าต้องการระบุชื่อ)";
+            else if (r.IsRollup)
+                text = "📅 รวมเข้าเอกสารสรุปยอดขายรายวัน" + (Integration.SalesDocumentPolicy.LocalSlipRequired(conn)
+                    ? " · ระบบพิมพ์ใบกำกับภาษีอย่างย่อ (เลขเรียง) ให้ลูกค้าตอนบันทึก" : "");
+            else
+                text = "⛔ ไม่ส่งเข้าระบบบัญชี (นโยบายปิดไว้)" + (Integration.SalesDocumentPolicy.LocalSlipRequired(conn)
+                    ? " · ระบบพิมพ์ใบกำกับภาษีอย่างย่อให้ลูกค้าตอนบันทึก" : "");
+            lblSalesDocRoute.Text = HttpUtility.HtmlEncode(text + " — " + r.Reason);
         }
 
         protected void TextBox3_TextChanged(object sender, EventArgs e)
@@ -889,21 +944,68 @@ namespace Take_Time_BangPhra.Product
             }
 
             // ✅ Validation: Check payment method for non-room charge
-            if ((ddlGuestReservation.SelectedValue == "0" || rblChargeMode.SelectedValue != "ROOM_CHARGE")
-                && string.IsNullOrEmpty(DropDownList1.SelectedValue))
+            // ต้องเป็น ID แหล่งเงินจริง (> 0) — รายการ "--- โปรดเลือก ---" ไม่มี Value ASP.NET จึงใช้ข้อความเป็นค่า
+            // (เดิมเช็คแค่ IsNullOrEmpty → ผ่าน แล้วบันทึกข้อความ placeholder ลง Product_Out.Account_Paid_How_ID)
+            bool roomChargeMode = ddlGuestReservation.SelectedValue != "0" && rblChargeMode.SelectedValue == "ROOM_CHARGE";
+            int paidHowId = 0;
+            if (!roomChargeMode
+                && (!int.TryParse((DropDownList1.SelectedValue ?? "").Trim(), out paidHowId) || paidHowId <= 0))
             {
                 ClientScript.RegisterStartupScript(this.GetType(), "error",
                     "alert('⚠️ กรุณาเลือกวิธีการชำระเงิน');", true);
                 return;
             }
 
+            // ✅ ราคา/จำนวนในตะกร้าต้องเป็นตัวเลขที่ถูกต้อง (กันแก้ราคาเป็นข้อความแล้วบันทึกยอดผิด)
+            double cartTotal = 0;
+            foreach (DataRow cartRow in dtOrder.Rows)
+            {
+                double q, sp;
+                if (!double.TryParse(cartRow["Amount"]?.ToString(), out q) || q <= 0
+                    || !double.TryParse(cartRow["Sell_Price"]?.ToString(), out sp) || sp < 0)
+                {
+                    ClientScript.RegisterStartupScript(this.GetType(), "error",
+                        "alert('⚠️ จำนวน/ราคาในตะกร้าไม่ถูกต้อง: " + HttpUtility.JavaScriptStringEncode(cartRow["Product_Name"]?.ToString() ?? "") + "');", true);
+                    return;
+                }
+                cartRow["Price_Total"] = Math.Round(q * sp, 2);
+                cartTotal += Math.Round(q * sp, 2);
+            }
+            cartTotal = Math.Round(cartTotal, 2);
+            TextBox2.Text = cartTotal.ToString();
+
             // 🏨 Check if Room Charge mode
-            if (ddlGuestReservation.SelectedValue != "0" && rblChargeMode.SelectedValue == "ROOM_CHARGE")
+            if (roomChargeMode)
             {
                 // ROOM CHARGE MODE - Charge to guest room without immediate payment
                 ProcessRoomCharge(dtOrder);
                 return; // Exit method after processing room charge
             }
+
+            // 🧾 นโยบายเอกสารขาย (PHASE19_29) — เลือกเส้นทางตามแหล่งเงิน
+            //   CheckBox1 ติ๊ก = ขอเอกสารรายใบเสมอ (ติ๊ก "ระบุชื่อ" ด้วย = ใบกำกับเต็มรูป / ไม่ระบุ = อย่างย่อ walk-in)
+            //   ไม่ติ๊ก + นโยบายเปิด: IMMEDIATE → เอกสารรายใบ walk-in ทันที · DAILY_ROLLUP → รวมใบสรุปรายวัน · OFF → ไม่ส่งบัญชี
+            //   ไม่ติ๊ก + นโยบายปิด/ยังไม่รัน migration → พฤติกรรมเดิม (แถวรอรวบรายวันถ้าเปิด Nexaacc_PosDailyRollup)
+            bool policyOn = false;
+            Integration.SalesDocRoute route = null;
+            try
+            {
+                policyOn = Integration.SalesDocumentPolicy.Enabled(conn);
+                if (policyOn) route = Integration.SalesDocumentPolicy.Resolve(conn, Integration.SalesDocumentPolicy.ChPos, paidHowId);
+            }
+            catch { policyOn = false; route = null; }
+            bool issuePerSaleDoc = CheckBox1.Checked || (route != null && route.IsImmediate);
+            bool walkIn = issuePerSaleDoc && !CheckBox2.Checked;
+            bool needsLocalSlip = !issuePerSaleDoc && route != null && (route.IsRollup || route.IsOff)
+                && Integration.SalesDocumentPolicy.LocalSlipRequired(conn);
+            string offPolicyMarker = (!issuePerSaleDoc && route != null && route.IsOff)
+                ? Integration.AccountingSyncService.PosOffPolicyRef : null;
+            bool nextAccDocQueued = false;
+            if (route != null)
+                code.Logs(conn, "POS SalesDocPolicy",
+                    $"paidHow={paidHowId} type={route.ChannelType} mode={route.Mode} ({route.Reason}) " +
+                    $"CheckBox1={CheckBox1.Checked} named={CheckBox2.Checked} → {(issuePerSaleDoc ? (walkIn ? "เอกสารรายใบ walk-in" : "เอกสารรายใบระบุชื่อ") : (route.IsRollup ? "สรุปรายวัน" : "ไม่ส่งบัญชี"))}",
+                    Session["User"]?.ToString() ?? "SYSTEM");
 
             // 🏨 Store guest info for PAY_NOW mode (will be used after receipt creation)
             bool isPayNowMode = (ddlGuestReservation.SelectedValue != "0" && rblChargeMode.SelectedValue == "PAY_NOW");
@@ -913,7 +1015,7 @@ namespace Take_Time_BangPhra.Product
                 guestReservationId = Convert.ToInt32(ddlGuestReservation.SelectedValue);
             }
 
-            if (CheckBox1.Checked == true)
+            if (issuePerSaleDoc)
             {
 
                 DateTime receiptDate = Convert.ToDateTime(TextBox12.Text);
@@ -927,7 +1029,7 @@ namespace Take_Time_BangPhra.Product
                 string Month = receiptDate.Month.ToString("00");
 
                 // 🎁 Apply product category discounts for loyalty members
-                double originalTotal = Convert.ToDouble(TextBox2.Text);
+                double originalTotal = cartTotal;
                 double totalDiscount = 0;
                 string customerPhone = TextBox3.Text;
 
@@ -961,7 +1063,7 @@ namespace Take_Time_BangPhra.Product
                         // Apply total discount
                         if (totalDiscount > 0)
                         {
-                            originalTotal = Convert.ToDouble(TextBox2.Text);
+                            originalTotal = cartTotal;
                             total = originalTotal - totalDiscount;
 
                             // Show discount info to user
@@ -1089,6 +1191,15 @@ namespace Take_Time_BangPhra.Product
                     }
                     catch { }
                 }
+                // ผู้ซื้อไม่ระบุชื่อ (ไม่ติ๊ก "ระบุชื่อ") หรือหาข้อมูลลูกค้าไม่เจอ → ลูกค้าทั่วไป (Customer_ID 0)
+                // เดิมอ่าน dtcustomer.Rows[0] ตรง ๆ → ติ๊ก "ออกใบกำกับ" โดยไม่ระบุชื่อ = IndexOutOfRange บันทึกไม่ได้
+                if (dtcustomer == null || dtcustomer.Rows.Count == 0)
+                {
+                    if (CheckBox2.Checked)
+                        code.Logs(conn, "POS SalesDocPolicy", "ไม่พบข้อมูลลูกค้าที่ระบุ → ออกเป็นลูกค้าทั่วไป (อย่างย่อ)", Session["User"]?.ToString() ?? "SYSTEM");
+                    dtcustomer = BuildWalkInCustomerTable();
+                    walkIn = true;
+                }
                 // SECURE: INSERT Receipt with parameterized query
                 var receiptParams = new Dictionary<string, object>
                 {
@@ -1099,8 +1210,8 @@ namespace Take_Time_BangPhra.Product
                     { "@TotalAmountExcludeVat", Total_Amount_Exclude_Vat },
                     { "@PaidType", DropDownList1.SelectedItem.Text },
                     { "@CreatedByID", Session["UserID"].ToString() },
-                    { "@Etax", CheckBox3.Checked },
-                    { "@CustomerID", dtcustomer.Rows[0]["ID"].ToString() }
+                    { "@Etax", CheckBox3.Checked && !walkIn },
+                    { "@CustomerID", walkIn ? "0" : dtcustomer.Rows[0]["ID"].ToString() }
                 };
                 code.DatabaseInsertSafe(conn,
                     "INSERT INTO [dbo].[Account_Receipt] " +
@@ -1109,6 +1220,36 @@ namespace Take_Time_BangPhra.Product
                     receiptParams);
 
                 // SECURE: INSERT Receipt Detail with parameterized query
+                if (walkIn && Math.Abs(total - cartTotal) < 0.005)
+                {
+                    // อย่างย่อ walk-in: รายการรายสินค้า (ม.86/6 ต้องระบุชนิด/ราคาสินค้า) — ยอดรวม = ตะกร้า (ไม่มีส่วนลดสมาชิก)
+                    int lineNo = 0;
+                    foreach (DataRow orderRow in dtOrder.Rows)
+                    {
+                        double q = Convert.ToDouble(orderRow["Amount"]);
+                        double lineTotal = Convert.ToDouble(orderRow["Price_Total"]);
+                        if (lineTotal <= 0) continue;   // ของแถม/ราคา 0 ไม่ใช่รายได้ (ต้นทุนลงผ่าน POSINV ด้านล่าง)
+                        lineNo++;
+                        code.DatabaseInsertSafe(conn,
+                            "INSERT INTO [dbo].[Account_Receipt_Detail] " +
+                            "([Number],[Receipt_ID],[ProductType_ID],[Product_ID],[Product_Data],[Product_Amount],[Product_Unit],[Price_PerPeice],[Price_Amount]) " +
+                            "VALUES (@No,@ReceiptID,'3',@Pid,@ProductData,@Qty,N'ชิ้น',@Unit,@Total)",
+                            new Dictionary<string, object>
+                            {
+                                { "@No", lineNo }, { "@ReceiptID", docNum }, { "@Pid", orderRow["ID"]?.ToString() ?? "0" },
+                                { "@ProductData", orderRow["Product_Name"]?.ToString() ?? "" },
+                                { "@Qty", q }, { "@Unit", q > 0 ? Math.Round(lineTotal / q, 4) : lineTotal }, { "@Total", lineTotal }
+                            });
+                    }
+                    if (lineNo == 0)
+                        code.DatabaseInsertSafe(conn,
+                            "INSERT INTO [dbo].[Account_Receipt_Detail] " +
+                            "([Number],[Receipt_ID],[ProductType_ID],[Product_ID],[Product_Data],[Product_Amount],[Product_Unit],[Price_PerPeice],[Price_Amount]) " +
+                            "VALUES (1,@ReceiptID,'3','0',@ProductData,1,N'ครั้ง',@Total,@Total)",
+                            new Dictionary<string, object> { { "@ReceiptID", docNum }, { "@ProductData", TextBox11.Text }, { "@Total", total } });
+                }
+                else
+                {
                 var detailParams = new Dictionary<string, object>
                 {
                     { "@ReceiptID", docNum },
@@ -1120,6 +1261,7 @@ namespace Take_Time_BangPhra.Product
                     "([Number],[Receipt_ID],[ProductType_ID],[Product_ID],[Product_Data],[Product_Amount],[Product_Unit],[Price_PerPeice],[Price_Amount]) " +
                     "VALUES (1,@ReceiptID,'3','0',@ProductData,1,N'ครั้ง',@Total,@Total)",
                     detailParams);
+                }
 
                 // Auto-sync receipt to accounting
                 try
@@ -1131,11 +1273,24 @@ namespace Take_Time_BangPhra.Product
                         {
                             var sync = new Integration.AccountingSyncService(conn);
                             string posPayMethod = DropDownList1.SelectedItem?.Text ?? "CASH";
-                            string posPayAccId = sync.LookupPaidHowAccountId(posPayMethod);
-                            sync.EnqueueReceipt(0, docNum, Convert.ToDecimal(total), 0,
-                                Convert.ToDateTime(TextBox12.Text), dtcustomer.Rows[0]["Name"]?.ToString() ?? "",
-                                isDeposit: false, paymentMethod: posPayMethod,
-                                revenueType: "PRODUCT_REVENUE", paymentAccountId: posPayAccId);
+                            string posPayAccId = LookupPaidHowAccountIdById(paidHowId) ?? sync.LookupPaidHowAccountId(posPayMethod);
+                            long qid;
+                            if (walkIn)
+                            {
+                                // ลูกค้าไม่ระบุชื่อ → ใบกำกับภาษีขายสด "ผู้ซื้อไม่ประสงค์รับใบกำกับภาษี" (อย่างย่อ) Dr แหล่งเงินนี้ตรง ๆ
+                                qid = sync.EnqueueWalkInSalesDocument(docNum, Convert.ToDecimal(total),
+                                    Convert.ToDateTime(TextBox12.Text), $"ขายหน้าร้าน {docNum} ({posPayMethod})",
+                                    posPayMethod, posPayAccId, Integration.SalesDocumentPolicy.ChPos, isDailyRollup: false);
+                            }
+                            else
+                            {
+                                qid = sync.EnqueueReceipt(0, docNum, Convert.ToDecimal(total), 0,
+                                    Convert.ToDateTime(TextBox12.Text), dtcustomer.Rows[0]["Name"]?.ToString() ?? "",
+                                    isDeposit: false, paymentMethod: posPayMethod,
+                                    revenueType: "PRODUCT_REVENUE", paymentAccountId: posPayAccId,
+                                    customerPhone: TextBox3.Text);
+                            }
+                            nextAccDocQueued = qid > 0 && acctConfig.IsReceiptDocumentMode;
                         }
                     }
                 }
@@ -1354,7 +1509,8 @@ namespace Take_Time_BangPhra.Product
                     {
                     }
 
-                    if (CheckBox3.Checked == true)
+                    // e-Tax (XML/PDF-A3) เฉพาะผู้ซื้อระบุชื่อ — walk-in/อย่างย่อออก e-Tax ไม่ได้
+                    if (CheckBox3.Checked == true && !walkIn)
                     {
                         try
                         {
@@ -1479,7 +1635,11 @@ namespace Take_Time_BangPhra.Product
 
                                 pdf.CreatePDFA3Invoice(pdfFilePath, xmlFilePath, xmlFileName, xmlVersion, documentID, documentOID, outputPath, "Tax Invoice");
 
-                                if (CheckBox3.Checked == true)
+                                // มีเอกสารบน NextAcc แล้ว (นโยบายเปิด) → ไม่ส่ง PDF "[INV]" ของ TakeTime ซ้ำ
+                                // เว้นแต่ตั้ง Sales_Doc_Send_Local_Invoice_Email = 1 (ลูกค้าจะได้เอกสารภาษีสองเลข)
+                                bool suppressLocalInvoiceEmail = policyOn && nextAccDocQueued
+                                    && !Integration.SalesDocumentPolicy.SendLocalInvoiceEmail(conn);
+                                if (CheckBox3.Checked == true && !suppressLocalInvoiceEmail)
                                 {
 
                                     DateTime docDate = DateTime.Now;
@@ -1576,8 +1736,20 @@ namespace Take_Time_BangPhra.Product
                 }
             }
 
+            // ใบกำกับภาษีอย่างย่อในเครื่อง (นโยบาย = สรุปรายวัน/ปิด + Sales_Doc_Local_Slip_Required = 1):
+            // เลขเรียงต่อเดือน เก็บใน Product_Out.Pos_Slip_No → ใบสรุปรายวันอ้างช่วงเลขแรก–สุดท้าย
+            string localSlipNo = null;
+            if (needsLocalSlip && dtOrder.Rows.Count > 0)
+                localSlipNo = AllocatePosSlipNo(Convert.ToDateTime(TextBox12.Text));
+
             if (GridView1.Rows.Count > 0)
             {
+                // คอลัมน์เสริม (มีเฉพาะเมื่อรัน migration แล้ว): Pos_Rollup_Ref = OFF-POLICY (นโยบายไม่ส่งบัญชี), Pos_Slip_No
+                bool addOffMarker = offPolicyMarker != null && ProductOutHasColumn("Pos_Rollup_Ref");
+                bool addSlipNo = localSlipNo != null && ProductOutHasColumn("Pos_Slip_No");
+                string extraCols = (addOffMarker ? ",[Pos_Rollup_Ref]" : "") + (addSlipNo ? ",[Pos_Slip_No]" : "");
+                string extraVals = (addOffMarker ? ",@RollupRef" : "") + (addSlipNo ? ",@SlipNo" : "");
+
                 // SECURE: INSERT Product_Out with parameterized query
                 for(int i = 0;i<dtOrder.Rows.Count;i++)
                 {
@@ -1588,13 +1760,15 @@ namespace Take_Time_BangPhra.Product
                         { "@Amount", dtOrder.Rows[i]["Amount"].ToString() },
                         { "@PricePerUnit", dtOrder.Rows[i]["Sell_Price"].ToString() },
                         { "@ReceiptID", docNum },
-                        { "@PaidHowID", DropDownList1.SelectedValue }
+                        { "@PaidHowID", paidHowId.ToString() }
                     };
+                    if (addOffMarker) productOutParams["@RollupRef"] = offPolicyMarker;
+                    if (addSlipNo) productOutParams["@SlipNo"] = localSlipNo;
 
                     code.DatabaseInsertSafe(conn,
                         "INSERT INTO [dbo].[Product_Out] " +
-                        "([DateTime_Out],[Product_ID],[Amount],[PricePerUnit],[Account_Receipt_ID],[Account_Paid_How_ID],[Remark]) " +
-                        "VALUES (@DateTimeOut,@ProductID,@Amount,@PricePerUnit,@ReceiptID,@PaidHowID,N'ขาย')",
+                        "([DateTime_Out],[Product_ID],[Amount],[PricePerUnit],[Account_Receipt_ID],[Account_Paid_How_ID],[Remark]" + extraCols + ") " +
+                        "VALUES (@DateTimeOut,@ProductID,@Amount,@PricePerUnit,@ReceiptID,@PaidHowID,N'ขาย'" + extraVals + ")",
                         productOutParams);
                 }
 
@@ -1670,9 +1844,202 @@ namespace Take_Time_BangPhra.Product
                 catch { }
             }
 
+            if (localSlipNo != null)
+            {
+                // ไม่มีเอกสารรายใบบน NextAcc (สรุปรายวัน/ปิด) → แสดงใบกำกับภาษีอย่างย่อให้พิมพ์มอบลูกค้า (ม.86/6)
+                try
+                {
+                    litPosSlip.Text = BuildPosSlipHtml(localSlipNo, dtOrder, cartTotal, DropDownList1.SelectedItem?.Text ?? "",
+                        Convert.ToDateTime(TextBox12.Text + " " + DateTime.Now.ToString("HH:mm:ss")));
+                    pnlPosSlip.Visible = true;
+                }
+                catch (Exception slipEx)
+                {
+                    code.Logs(conn, "POS SalesDocPolicy", $"สร้างใบกำกับภาษีอย่างย่อ {localSlipNo} ไม่สำเร็จ: {slipEx.Message}", "SYSTEM");
+                }
+
+                // ล้างตะกร้า (ไม่ redirect — ต้องค้างหน้าให้พิมพ์ใบ)
+                btnClear_Click(null, null);
+                ClientScript.RegisterStartupScript(this.GetType(), "success",
+                    "alert('✅ บันทึกการขายเรียบร้อยแล้ว\\n🧾 ใบกำกับภาษีอย่างย่อเลขที่ " + HttpUtility.JavaScriptStringEncode(localSlipNo) +
+                    " — กดพิมพ์มอบให้ลูกค้า'); setTimeout(function(){ try { window.print(); } catch(e){} }, 300);", true);
+                return;
+            }
+
             // Show success message then redirect
             ClientScript.RegisterStartupScript(this.GetType(), "success",
                 "alert('✅ บันทึกการขายเรียบร้อยแล้ว'); window.location.href='/Product';", true);
+        }
+
+        /// <summary>ลูกค้าทั่วไป (walk-in) — โครงสร้างคอลัมน์เดียวกับ query ลูกค้าของหน้านี้ (ใช้กับรายงาน PDF ในเครื่อง)</summary>
+        private DataTable BuildWalkInCustomerTable()
+        {
+            DataTable t = null;
+            try
+            {
+                t = code.DatabaseQuerySafe(conn,
+                    "SELECT TOP 0 * FROM Customer " +
+                    "LEFT JOIN Customer_Type ON Customer_Type_ID = Customer_Type.ID " +
+                    "LEFT JOIN Address ON Address.ID = Address_ID", null);
+            }
+            catch { t = null; }
+            if (t == null) t = new DataTable();
+            foreach (string c in new[] { "ID", "Name", "FullName", "Address", "Address1", "IDNumber", "MobilePhone", "Email",
+                                         "Address_ID", "PostalCode", "Customer_Code", "Branch_Number" })
+                if (!t.Columns.Contains(c)) t.Columns.Add(c, typeof(string));
+
+            DataRow r = t.NewRow();
+            SetIfString(r, "Name", "ลูกค้าทั่วไป");
+            SetIfString(r, "FullName", "ประสงค์ไม่รับใบกำกับภาษี");
+            foreach (string c in new[] { "Address", "Address1", "IDNumber", "MobilePhone", "Email" }) SetIfString(r, c, "");
+            try { r["ID"] = Convert.ChangeType(0, t.Columns["ID"].DataType); } catch { }
+            t.Rows.Add(r);
+            return t;
+        }
+
+        private static void SetIfString(DataRow r, string col, string value)
+        {
+            if (r.Table.Columns.Contains(col) && r.Table.Columns[col].DataType == typeof(string)) r[col] = value;
+        }
+
+        /// <summary>Account_Paid_How.Nexaacc_AccountId จาก ID (แม่นกว่าค้นด้วยชื่อ) — ไม่มี = null</summary>
+        private string LookupPaidHowAccountIdById(int paidHowId)
+        {
+            if (paidHowId <= 0) return null;
+            try
+            {
+                var dt = code.DatabaseQuerySafe(conn,
+                    "SELECT TOP 1 Nexaacc_AccountId FROM Account_Paid_How WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", paidHowId } });
+                if (dt?.Rows.Count > 0 && dt.Rows[0][0] != DBNull.Value)
+                {
+                    string v = dt.Rows[0][0].ToString().Trim();
+                    return v.Length > 0 ? v : null;
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        private bool ProductOutHasColumn(string column)
+        {
+            try
+            {
+                var dt = code.DatabaseQuerySafe(conn,
+                    "SELECT CASE WHEN COL_LENGTH('dbo.Product_Out', @c) IS NULL THEN 0 ELSE 1 END",
+                    new Dictionary<string, object> { { "@c", column } });
+                return dt?.Rows.Count > 0 && Convert.ToInt32(dt.Rows[0][0]) == 1;
+            }
+            catch { return false; }
+        }
+
+        /// <summary>
+        /// เลขที่ใบกำกับภาษีอย่างย่อในเครื่อง ABB{yyMM}-{00001} เรียงต่อเดือน (ตาราง Sales_Doc_Slip_Seq — atomic).
+        /// ยังไม่รัน migration / ผิดพลาด → ABB{yyMMddHHmmss} (ไม่ซ้ำ แต่ไม่เรียง) + log
+        /// </summary>
+        private string AllocatePosSlipNo(DateTime saleDate)
+        {
+            string prefix = "ABB" + saleDate.ToString("yyMM", System.Globalization.CultureInfo.InvariantCulture);
+            try
+            {
+                var dt = code.DatabaseQuerySafe(conn,
+                    @"DECLARE @n INT;
+                      IF OBJECT_ID('dbo.Sales_Doc_Slip_Seq', 'U') IS NOT NULL
+                      BEGIN
+                          UPDATE dbo.Sales_Doc_Slip_Seq WITH (UPDLOCK, HOLDLOCK)
+                             SET @n = Last_No = Last_No + 1, Updated_At = GETDATE()
+                           WHERE Seq_Key = @k;
+                          IF @n IS NULL
+                          BEGIN
+                              BEGIN TRY
+                                  INSERT INTO dbo.Sales_Doc_Slip_Seq (Seq_Key, Last_No, Updated_At) VALUES (@k, 1, GETDATE());
+                                  SET @n = 1;
+                              END TRY
+                              BEGIN CATCH
+                                  UPDATE dbo.Sales_Doc_Slip_Seq SET @n = Last_No = Last_No + 1, Updated_At = GETDATE() WHERE Seq_Key = @k;
+                              END CATCH
+                          END
+                      END
+                      SELECT @n AS N;",
+                    new Dictionary<string, object> { { "@k", prefix } });
+                if (dt?.Rows.Count > 0 && dt.Rows[0]["N"] != DBNull.Value)
+                    return prefix + "-" + Convert.ToInt32(dt.Rows[0]["N"]).ToString("00000");
+            }
+            catch (Exception ex)
+            {
+                code.Logs(conn, "POS SalesDocPolicy", "จองเลขใบกำกับภาษีอย่างย่อไม่สำเร็จ: " + ex.Message, "SYSTEM");
+            }
+            return "ABB" + DateTime.Now.ToString("yyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        /// <summary>
+        /// HTML ใบกำกับภาษีอย่างย่อ (ม.86/6: คำว่า "ใบกำกับภาษีอย่างย่อ", ชื่อ/เลขประจำตัวผู้เสียภาษีผู้ขาย, เลขที่,
+        /// ชนิด/ราคาสินค้า, "ราคารวมภาษีมูลค่าเพิ่ม") — พิมพ์จากเบราว์เซอร์ (CSS @media print ในหน้า)
+        /// กิจการไม่จด VAT (Business_Info.Use_Vat) → หัว "ใบเสร็จรับเงิน"
+        /// </summary>
+        private string BuildPosSlipHtml(string slipNo, DataTable dtOrder, double total, string paidHowName, DateTime when)
+        {
+            string company = "", taxId = "", branch = "", address = "", phone = "";
+            bool useVat = false;
+            try
+            {
+                var bi = code.DatabaseQuerySafe(conn,
+                    "SELECT TOP 1 * FROM Business_Info LEFT JOIN Address ON Address.ID = Address_ID", null);
+                if (bi?.Rows.Count > 0)
+                {
+                    DataRow b = bi.Rows[0];
+                    Func<string, string> col = n => b.Table.Columns.Contains(n) && b[n] != DBNull.Value ? b[n].ToString().Trim() : "";
+                    company = col("Company_Name");
+                    taxId = col("LegalEntity_Number");
+                    branch = col("Branch_Number");
+                    phone = col("Phone_Number");
+                    address = (col("Address") + " " + col("Address1") + " " + col("SubDistrict") + " " + col("District") + " " + col("Province") + " " + col("PostalCode")).Trim();
+                    string uv = col("Use_Vat");
+                    useVat = uv == "1" || uv.Equals("true", StringComparison.OrdinalIgnoreCase);
+                }
+            }
+            catch { }
+            double vatPct = 7;
+            try
+            {
+                var v = code.DatabaseQuerySafe(conn, "SELECT TOP 1 Vat_Percent FROM Account_Vat_Type WHERE ID = 1", null);
+                if (v?.Rows.Count > 0 && v.Rows[0][0] != DBNull.Value) vatPct = Convert.ToDouble(v.Rows[0][0]);
+            }
+            catch { }
+
+            Func<string, string> enc = HttpUtility.HtmlEncode;
+            var sb = new System.Text.StringBuilder();
+            sb.Append("<div id='posSlip' class='pos-slip'>");
+            sb.Append("<div class='ps-c ps-b'>").Append(enc(company)).Append("</div>");
+            if (address.Length > 0) sb.Append("<div class='ps-c ps-s'>").Append(enc(address)).Append("</div>");
+            if (taxId.Length > 0)
+                sb.Append("<div class='ps-c ps-s'>เลขประจำตัวผู้เสียภาษี ").Append(enc(taxId))
+                  .Append(branch.Length > 0 ? (branch == "00000" ? " (สำนักงานใหญ่)" : " สาขาที่ " + enc(branch)) : "").Append("</div>");
+            if (phone.Length > 0) sb.Append("<div class='ps-c ps-s'>โทร ").Append(enc(phone)).Append("</div>");
+            sb.Append("<div class='ps-c ps-h'>").Append(useVat ? "ใบกำกับภาษีอย่างย่อ" : "ใบเสร็จรับเงิน").Append("</div>");
+            sb.Append("<div class='ps-row'><span>เลขที่ ").Append(enc(slipNo)).Append("</span><span>")
+              .Append(enc(when.ToString("dd/MM/yyyy HH:mm", new System.Globalization.CultureInfo("th-TH")))).Append("</span></div>");
+            sb.Append("<hr/>");
+            foreach (DataRow r in dtOrder.Rows)
+            {
+                double q = Convert.ToDouble(r["Amount"]);
+                double lt = Convert.ToDouble(r["Price_Total"]);
+                sb.Append("<div class='ps-row'><span>").Append(enc(r["Product_Name"]?.ToString() ?? ""))
+                  .Append(" × ").Append(q.ToString("0.##")).Append("</span><span>").Append(lt.ToString("N2")).Append("</span></div>");
+            }
+            sb.Append("<hr/>");
+            sb.Append("<div class='ps-row ps-b'><span>").Append(useVat ? "ราคารวมภาษีมูลค่าเพิ่ม" : "รวมทั้งสิ้น")
+              .Append("</span><span>").Append(total.ToString("N2")).Append("</span></div>");
+            if (useVat)
+            {
+                double vat = Math.Round(total * vatPct / (100 + vatPct), 2);
+                sb.Append("<div class='ps-row ps-s'><span>(ภาษีมูลค่าเพิ่ม ").Append(vatPct.ToString("0.##")).Append("% รวมอยู่แล้ว)</span><span>")
+                  .Append(vat.ToString("N2")).Append("</span></div>");
+            }
+            sb.Append("<div class='ps-row ps-s'><span>ชำระแล้ว</span><span>").Append(enc(paidHowName)).Append("</span></div>");
+            sb.Append("<div class='ps-c ps-s' style='margin-top:6px;'>ขอบคุณที่ใช้บริการ</div>");
+            sb.Append("</div>");
+            return sb.ToString();
         }
 
         // ✨ MIGRATED: cleantext() method has been replaced with ValidationHelper.CleanText()
@@ -1775,9 +2142,20 @@ namespace Take_Time_BangPhra.Product
             DataTable dtOrder = (DataTable)Session["dtOrder"];
             TextBox txtAmount = (TextBox)GridView1.Rows[e.RowIndex].Cells[2].Controls[0];
             TextBox txtPrice = (TextBox)GridView1.Rows[e.RowIndex].Cells[3].Controls[0];
+            // ตรวจตัวเลข + คำนวณยอดบรรทัดใหม่ (เดิมแก้แค่ Sell_Price ไม่แก้ Price_Total → ยอดรวม/ใบเสร็จ/ยอดรวบรายวันไม่ตรงกัน)
+            int amountVal;
+            double priceVal;
+            if (!int.TryParse((txtAmount.Text ?? "").Trim(), out amountVal) || amountVal <= 0
+                || !double.TryParse((txtPrice.Text ?? "").Trim(), out priceVal) || priceVal < 0)
+            {
+                ClientScript.RegisterStartupScript(this.GetType(), "editInvalid",
+                    "alert('⚠️ จำนวนต้องเป็นจำนวนเต็มมากกว่า 0 และราคาต้องเป็นตัวเลขไม่ติดลบ');", true);
+                return;
+            }
             GridView1.EditIndex = -1;
-            dtOrder.Rows[Convert.ToInt32(e.RowIndex)]["Amount"] = txtAmount.Text;
-            dtOrder.Rows[Convert.ToInt32(e.RowIndex)]["Sell_Price"] = txtPrice.Text;
+            dtOrder.Rows[Convert.ToInt32(e.RowIndex)]["Amount"] = amountVal;
+            dtOrder.Rows[Convert.ToInt32(e.RowIndex)]["Sell_Price"] = priceVal;
+            dtOrder.Rows[Convert.ToInt32(e.RowIndex)]["Price_Total"] = Math.Round(amountVal * priceVal, 2);
             GridView1.DataSource = dtOrder;
             GridView1.DataBind();
             Session["dtOrder"] = dtOrder;

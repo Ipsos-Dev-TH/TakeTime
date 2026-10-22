@@ -637,9 +637,11 @@ namespace Take_Time_BangPhra
                 ", " + chargeCols + ", " + payCols + @"
                   FROM Reservation r";
 
+            // ChargeType 'IMMEDIATE' = ขายหน้าร้านแบบ "ชำระทันที" ให้แขกในห้อง (POS PAY_NOW) — จ่ายด้วยใบเสร็จของตัวเองแล้ว
+            // ไม่ใช่ยอดใน folio (ไม่มี Payment_History ของการจอง) → ไม่นับในยอดรวม ไม่งั้นยอดค้างตอนเช็คเอาท์พองเท่ายอดขายนั้น
             if (withCharges)
                 sql += @"
-                  OUTER APPLY (SELECT SUM(CASE WHEN rbx.Status <> 'CANCELLED' THEN rbx.TotalAmount ELSE 0 END) AS Charges,
+                  OUTER APPLY (SELECT SUM(CASE WHEN rbx.Status <> 'CANCELLED' AND ISNULL(rbx.ChargeType, '') <> 'IMMEDIATE' THEN rbx.TotalAmount ELSE 0 END) AS Charges,
                                       SUM(CASE WHEN rbx.Status = 'PENDING' THEN rbx.TotalAmount ELSE 0 END) AS PendingCharges
                                  FROM Reservation_Product_Charges rbx
                                 WHERE rbx.Reservation_ID = r.ID) rbc";

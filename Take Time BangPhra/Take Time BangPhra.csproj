@@ -521,6 +521,7 @@
     <Content Include="Admin\Settings\PermissionGroups.aspx" />
     <Content Include="Admin\Settings\ProductAccounting.aspx" />
     <Content Include="Admin\Settings\StockOutReasons.aspx" />
+    <Content Include="Admin\Settings\SalesDocPolicy.aspx" />
     <Content Include="Admin\CRM\MemberVouchers.aspx" />
     <Content Include="Admin\CRM\MemberHub.aspx" />
     <Content Include="Admin\CRM\ReviewAnalytics.aspx" />
@@ -954,6 +955,7 @@
     <Compile Include="Class\AccountingService.cs" />
     <Compile Include="Class\Integration\AccountingSyncService.cs" />
     <Compile Include="Class\Integration\RevenuePostingService.cs" />
+    <Compile Include="Class\Integration\SalesDocumentPolicy.cs" />
     <Compile Include="Class\Integration\AccountingApiClient.cs" />
     <Compile Include="Class\Integration\AccountingConfig.cs" />
     <Compile Include="Class\Integration\AccountingModels.cs" />
@@ -1510,6 +1512,13 @@
     </Compile>
     <Compile Include="Member\Card.aspx.designer.cs">
       <DependentUpon>Card.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Settings\SalesDocPolicy.aspx.cs">
+      <DependentUpon>SalesDocPolicy.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Settings\SalesDocPolicy.aspx.designer.cs">
+      <DependentUpon>SalesDocPolicy.aspx</DependentUpon>
     </Compile>
     <Compile Include="Admin\Settings\ProductAccounting.aspx.cs">
       <DependentUpon>ProductAccounting.aspx</DependentUpon>

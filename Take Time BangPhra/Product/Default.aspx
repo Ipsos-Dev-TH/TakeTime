@@ -166,8 +166,9 @@
                                 AutoPostBack="True" OnSelectedIndexChanged="DropDownList1_SelectedIndexChanged"
                                 OnDataBound="DropDownList1_DataBound"
                                 AppendDataBoundItems="true">
-                                <asp:ListItem>--- โปรดเลือก ---</asp:ListItem>
+                                <asp:ListItem Value="">--- โปรดเลือก ---</asp:ListItem>
                             </asp:DropDownList>
+                            <asp:Label ID="lblSalesDocRoute" runat="server" CssClass="form-hint" style="display:block; margin-top:6px;"></asp:Label>
                             <asp:SqlDataSource ID="SqlDataSource1" runat="server"
                                 ConnectionString="<%$ ConnectionStrings:TaketimeConnectionString %>"
                                 SelectCommand="SELECT * FROM [Account_Paid_How] WHERE ([Status] = @Status)">
@@ -321,6 +322,34 @@
             </div>
         </div>
     </div>
+
+    <!-- 🧾 ใบกำกับภาษีอย่างย่อในเครื่อง (นโยบายเอกสารขาย: สรุปรายวัน/ปิด + Sales_Doc_Local_Slip_Required) -->
+    <asp:Panel ID="pnlPosSlip" runat="server" Visible="false" CssClass="pos-slip-panel">
+        <style>
+            .pos-slip-panel { max-width: 420px; margin: 16px auto; background: #fff; border-radius: 12px;
+                              box-shadow: 0 2px 10px rgba(0,0,0,.12); padding: 16px; }
+            .pos-slip { width: 72mm; max-width: 100%; margin: 0 auto; font-family: 'Sarabun', Tahoma, sans-serif;
+                        font-size: 13px; color: #000; line-height: 1.45; }
+            .pos-slip hr { border: 0; border-top: 1px dashed #000; margin: 6px 0; }
+            .pos-slip .ps-c { text-align: center; }
+            .pos-slip .ps-b { font-weight: 700; }
+            .pos-slip .ps-s { font-size: 11.5px; }
+            .pos-slip .ps-h { font-weight: 700; font-size: 15px; margin: 6px 0 4px; }
+            .pos-slip .ps-row { display: flex; justify-content: space-between; gap: 8px; }
+            .pos-slip-actions { display: flex; gap: 8px; justify-content: center; margin-top: 14px; flex-wrap: wrap; }
+            @media print {
+                body * { visibility: hidden !important; }
+                #posSlip, #posSlip * { visibility: visible !important; }
+                #posSlip { position: absolute; left: 0; top: 0; width: 72mm; }
+                .pos-slip-actions { display: none !important; }
+            }
+        </style>
+        <asp:Literal ID="litPosSlip" runat="server"></asp:Literal>
+        <div class="pos-slip-actions">
+            <button type="button" class="btn btn-success" onclick="window.print(); return false;">🖨 พิมพ์ใบกำกับภาษีอย่างย่อ</button>
+            <a href="/Product" class="btn btn-outline">➕ ขายรายการถัดไป</a>
+        </div>
+    </asp:Panel>
 
     <!-- Scanner Modal -->
     <div id="scannerModal" class="scanner-modal">
