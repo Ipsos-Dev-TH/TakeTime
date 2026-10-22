@@ -155,8 +155,28 @@ namespace Take_Time_BangPhra.Payment
                 + Server.HtmlEncode(RecordingName(req.Method)) + "\""
                 + (req.Method == PaymentGatewayConfig.MethodQr
                     ? " (ถ้าลูกค้าจ่ายด้วยบัตรผ่านลิงก์ เลือก \"" + Server.HtmlEncode(RecordingName(PaymentGatewayConfig.MethodCard)) + "\")"
-                    : ""));
+                    : "")
+                + FrontdeskSafetyNetHint());
             BindToday();
+        }
+
+        /// <summary>
+        /// ตาข่ายกันลืม (ChannelSalesPostingService.ScanFrontdeskGateway): หลังจบวัน + ระยะผ่อนผัน ยอดเกตเวย์ที่ไม่มีการบันทึกขาย POS
+        /// ด้วยแหล่งเงินเดียวกันจะถูกลงเป็นรายได้หน้าร้านอัตโนมัติ (FDG-{txnId}) — บอกพนักงานให้รู้ว่าบันทึกขายซ้ำย้อนหลังไม่ได้
+        /// </summary>
+        private string FrontdeskSafetyNetHint()
+        {
+            try
+            {
+                if (!Take_Time_BangPhra.Integration.ChannelPosting.TableReady(_conn)
+                    || !Take_Time_BangPhra.Integration.ChannelPosting.PolicyEnabled(_conn)
+                    || !Take_Time_BangPhra.Integration.ChannelPosting.ReadBool(_conn, "Nexaacc_FrontdeskGateway_AutoRevenue", true))
+                    return "";
+                int grace = Take_Time_BangPhra.Integration.ChannelPosting.ReadInt(_conn, "Nexaacc_FrontdeskGateway_GraceHours", 24);
+                return "<br/>ถ้าไม่ได้บันทึกขายภายในวันนี้ ระบบจะลงรายได้หน้าร้านให้อัตโนมัติเมื่อจบวันและครบ " + grace
+                     + " ชม. หลังรับเงิน — หลังจากนั้นห้ามบันทึกขายย้อนหลังด้วยแหล่งเงินนี้ (รายได้จะซ้ำ)";
+            }
+            catch { return ""; }
         }
 
         /// <summary>ชื่อแหล่งเงินที่ใช้บันทึกเงินที่รับผ่านเกตเวย์ที่ใช้อยู่ ด้วยวิธีนี้</summary>

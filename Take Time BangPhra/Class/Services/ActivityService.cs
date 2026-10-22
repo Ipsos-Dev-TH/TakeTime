@@ -600,7 +600,10 @@ namespace Take_Time_BangPhra.Services
                         { "@id", bookingId }, { "@ps", newPayStatus },
                         { "@admin", (object)adminId ?? DBNull.Value }
                     });
-                return (true, "ยืนยันการจองแล้ว" + (newPayStatus == "PAID" ? " (บันทึกว่าชำระเงินแล้ว)" : ""));
+                // สลิปผ่านการตรวจ = รับเงินแล้วจริง → ลงรายได้ (ครั้งเดียว — กันซ้ำด้วย ACT-{id})
+                string revNote = newPayStatus == "PAID" ? RecordActivityRevenue(bookingId, null, adminId) : null;
+                return (true, "ยืนยันการจองแล้ว" + (newPayStatus == "PAID" ? " (บันทึกว่าชำระเงินแล้ว)" : "")
+                    + (string.IsNullOrEmpty(revNote) ? "" : " · " + revNote));
             }
 
             _code.DatabaseInsertSafe(_conn,
@@ -621,11 +624,86 @@ namespace Take_Time_BangPhra.Services
         /// <summary>บันทึกว่าชำระเงินแล้ว (เช่น จ่ายสดที่เคาน์เตอร์)</summary>
         public void MarkPaid(long bookingId, short? adminId)
         {
+            MarkPaidWithSource(bookingId, adminId, null);
+        }
+
+        /// <summary>
+        /// บันทึกว่าชำระแล้ว + ลงรายได้เข้าสมุดช่องทาง (ACTIVITY) ตามนโยบายเอกสารขาย — คืนข้อความผลการลงรายได้ (null = ไม่มี)
+        /// paidHowName = แหล่งเงินจริง (เช่น เกตเวย์ที่ตัดเงิน) — ว่าง = ตามวิธีจ่ายของการจอง (เงินสด/โอน)
+        /// </summary>
+        public string MarkPaidWithSource(long bookingId, short? adminId, string paidHowName)
+        {
             _code.DatabaseInsertSafe(_conn,
                 @"UPDATE Activity_Bookings SET PaymentStatus = 'PAID',
                          VerifiedBy_AdminID = @admin, VerifiedDate = GETDATE() WHERE ID = @id",
                 new Dictionary<string, object>
                 { { "@id", bookingId }, { "@admin", (object)adminId ?? DBNull.Value } });
+            return RecordActivityRevenue(bookingId, paidHowName, adminId);
+        }
+
+        /// <summary>
+        /// รายได้กิจกรรมที่ "จ่ายเอง" → NextAcc ครั้งเดียว (Sales_Channel_Posting, Source_Key ACT-{bookingId})
+        /// เดิมกิจกรรมที่จ่ายโอน/เงินสด/ออนไลน์ไม่เคยเข้าบัญชีเลย (มีแค่ PaymentStatus = PAID)
+        ///   • ROOM_CHARGE + พนักงานกดชำระ (ไม่ระบุแหล่งเงิน) → รายได้ไปกับใบเสร็จห้องตามเดิม — ไม่บันทึกที่นี่
+        ///   • ROOM_CHARGE + จ่ายแยกผ่านเกตเวย์ → ปิดค่าใช้จ่ายในห้องที่ยังค้าง (ไม่ให้เช็คเอาท์เก็บซ้ำ) แล้วลงรายได้ที่นี่;
+        ///     ถ้าบิลห้องเก็บไปแล้ว = ไม่ลงซ้ำ (แจ้งให้คืนเงิน)
+        /// ไม่ throw — การรับเงินต้องไม่พังเพราะบัญชี
+        /// </summary>
+        private string RecordActivityRevenue(long bookingId, string paidHowName, short? adminId)
+        {
+            try
+            {
+                DataRow b = GetBooking(bookingId);
+                if (b == null) return null;
+                if (Convert.ToString(b["PaymentStatus"]) != "PAID") return null;
+                decimal amount = b["TotalAmount"] == DBNull.Value ? 0m : Convert.ToDecimal(b["TotalAmount"]);
+                if (amount <= 0m) return null;
+
+                var posting = new Take_Time_BangPhra.Integration.ChannelSalesPostingService(_conn);
+                string pm = (Convert.ToString(b["PaymentMethod"]) ?? "").Trim().ToUpperInvariant();
+                if (pm == "ROOM_CHARGE")
+                {
+                    if (string.IsNullOrWhiteSpace(paidHowName)) return null;
+                    long chargeId = b.Table.Columns.Contains("Charge_ID") && b["Charge_ID"] != DBNull.Value
+                        ? Convert.ToInt64(b["Charge_ID"]) : 0;
+                    string st = posting.SettleFolioChargeSeparately(chargeId, "ชำระแยกผ่าน " + paidHowName + " (จองกิจกรรม #" + bookingId + ")");
+                    if (st == "PAID")
+                        return "⚠ ค่ากิจกรรมนี้ถูกเก็บในใบเสร็จห้องพักแล้ว — ไม่ลงรายได้ซ้ำ ต้องคืนเงินที่รับซ้ำให้ลูกค้า";
+                }
+
+                int paidHowId = 0;
+                if (string.IsNullOrWhiteSpace(paidHowName))
+                {
+                    paidHowId = pm == "TRANSFER"
+                        ? Take_Time_BangPhra.Integration.ChannelPosting.PaidHowByType(_conn, "TRANSFER", "เงินโอน", out paidHowName)
+                        : Take_Time_BangPhra.Integration.ChannelPosting.PaidHowByType(_conn, "CASH", "เงินสด", out paidHowName);
+                }
+
+                string actName = b.Table.Columns.Contains("ActivityName") ? Convert.ToString(b["ActivityName"]) : "กิจกรรม";
+                DateTime bookDate = b["BookingDate"] == DBNull.Value ? DateTime.Today : Convert.ToDateTime(b["BookingDate"]);
+                int resId = b["Reservation_ID"] == DBNull.Value ? 0 : Convert.ToInt32(b["Reservation_ID"]);
+
+                return posting.Record(new Take_Time_BangPhra.Integration.ChannelSale
+                {
+                    Channel = Take_Time_BangPhra.Integration.SalesDocumentPolicy.ChActivity,
+                    SourceKey = "ACT-" + bookingId,
+                    ReservationId = resId,
+                    SaleDate = DateTime.Now,
+                    PaidHowId = paidHowId,
+                    PaidHowName = paidHowName,
+                    Amount = amount,
+                    Description = "ค่ากิจกรรม " + actName + " " + bookDate.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture)
+                                + " (จอง #" + bookingId + ")",
+                    CustomerName = b["GuestName"] == DBNull.Value ? null : Convert.ToString(b["GuestName"]),
+                    CustomerPhone = b["Customer_MobilePhone"] == DBNull.Value ? null : Convert.ToString(b["Customer_MobilePhone"]),
+                    CreatedBy = adminId.HasValue ? adminId.Value.ToString() : "SYSTEM"
+                });
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_conn, "ActivityBooking", $"RecordActivityRevenue #{bookingId} ล้มเหลว: {ex.Message}", "SYSTEM");
+                return null;
+            }
         }
 
         /// <summary>จำนวนรายการที่รอเจ้าหน้าที่ดำเนินการ (โชว์ badge หน้า Admin)</summary>

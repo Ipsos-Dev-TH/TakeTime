@@ -228,6 +228,10 @@ namespace Take_Time_BangPhra.Payment
 
             string status = b["Status"] == DBNull.Value ? "" : b["Status"].ToString();
             if (status == "CANCELLED") { Fail("การจองกิจกรรมนี้ถูกยกเลิกแล้ว"); return false; }
+            // ชาร์จเข้าห้องและถูกเก็บในบิลห้องพักแล้ว → จ่ายซ้ำไม่ได้
+            if (Convert.ToString(b["PaymentMethod"]) == "ROOM_CHARGE" && b.Table.Columns.Contains("Charge_ID")
+                && b["Charge_ID"] != DBNull.Value && FolioChargePaid(Convert.ToInt64(b["Charge_ID"])))
+            { Fail("ค่ากิจกรรมนี้ถูกรวมในใบเสร็จค่าห้องพักแล้ว"); return false; }
 
             Amount = b["TotalAmount"] == DBNull.Value ? 0m : Convert.ToDecimal(b["TotalAmount"]);
             if (Amount <= 0) { Fail("รายการนี้ไม่มีค่าใช้จ่าย"); return false; }
@@ -297,6 +301,9 @@ namespace Take_Time_BangPhra.Payment
             if (pm == "PAID") { Fail("ใบเบิกนี้ชำระเงินแล้ว"); return false; }
             if (pm == "FREE") { Fail("ใบเบิกนี้อยู่ในสิทธิ์ฟรี ไม่มียอดต้องชำระ"); return false; }
             if (Convert.ToString(r["ST"]) == "CANCELLED") { Fail("ใบเบิกนี้ถูกยกเลิกแล้ว"); return false; }
+            // คิดเข้าห้องและถูกเก็บในบิลห้องพักแล้ว → จ่ายซ้ำไม่ได้ (ยังไม่เก็บ = จ่ายแยกได้ ระบบปิดรายการในบิลห้องให้)
+            if (pm == "CHARGE_TO_ROOM" && FolioChargePaid(new Take_Time_BangPhra.Services.AmenityService(_conn).FindFolioChargeId(aid)))
+            { Fail("ใบเบิกนี้ถูกรวมในใบเสร็จค่าห้องพักแล้ว"); return false; }
 
             Amount = Convert.ToDecimal(r["Total_Amount"]);
             if (Amount <= 0) { Fail("ใบเบิกนี้ไม่มียอดต้องชำระ"); return false; }
@@ -758,6 +765,20 @@ namespace Take_Time_BangPhra.Payment
             pnlGateway.Visible = false;
             pnlDone.Visible = true;
             litDone.Text = Server.HtmlEncode(message);
+        }
+
+        /// <summary>ค่าใช้จ่ายในห้อง (Reservation_Product_Charges) ถูกเก็บเงินในบิลห้องแล้วหรือยัง</summary>
+        private bool FolioChargePaid(long chargeId)
+        {
+            if (chargeId <= 0) return false;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_conn,
+                    "SELECT TOP 1 1 FROM Reservation_Product_Charges WHERE ID = @id AND (Status = 'PAID' OR ISNULL(IsPaid, 0) = 1)",
+                    new Dictionary<string, object> { { "@id", chargeId } });
+                return dt != null && dt.Rows.Count > 0;
+            }
+            catch { return false; }
         }
 
         private void Fail(string message)

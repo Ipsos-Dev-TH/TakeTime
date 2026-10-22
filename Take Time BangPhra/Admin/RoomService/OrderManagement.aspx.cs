@@ -224,6 +224,11 @@ namespace Take_Time_BangPhra.Admin.RoomService
                     btnClaim.Visible = status == "PENDING";
                     btnDelivered.Visible = status == "CONFIRMED";
                     btnCancel.Visible = status != "DELIVERED" && status != "CANCELLED";
+                    // เงินสด/โอน: รายได้เข้าบัญชีเมื่อพนักงานยืนยันว่ารับเงินแล้วจริง (เก็บเงินสด/ตรวจสลิป) เท่านั้น
+                    string payMethod = Convert.ToString(order["Payment_Method"]);
+                    string payStatus = Convert.ToString(order["Payment_Status"]);
+                    btnMarkPaid.Visible = (payMethod == "CASH" || payMethod == "TRANSFER")
+                        && payStatus != "PAID" && payStatus != "CHARGED" && status != "CANCELLED";
 
                     ShowOnlinePayLink(orderId, totalAmt,
                         Convert.ToString(order["Payment_Status"]), status,
@@ -291,6 +296,41 @@ namespace Take_Time_BangPhra.Admin.RoomService
         protected void btnDelivered_Click(object sender, EventArgs e)
         {
             UpdateOrderStatus("DELIVERED");
+        }
+
+        /// <summary>
+        /// ยืนยันรับเงิน (เงินสดเก็บแล้ว / ตรวจสลิปโอนแล้ว) → Payment_Status = PAID + Paid_Date
+        /// ใบสรุปรายได้รูมเซอร์วิส (RevenuePostingService) นับเฉพาะออเดอร์ที่ PAID — ยังไม่ยืนยัน = ยังไม่ลงบัญชี
+        /// </summary>
+        protected void btnMarkPaid_Click(object sender, EventArgs e)
+        {
+            string orderId = hfSelectedOrder.Value;
+            if (string.IsNullOrEmpty(orderId)) return;
+            try
+            {
+                bool hasPaidDate = Take_Time_BangPhra.Integration.ChannelPosting.HasColumn(_connectionString, "Guest_Room_Service_Orders", "Paid_Date");
+                int n = _code.DatabaseInsertSafe(_connectionString,
+                    "UPDATE Guest_Room_Service_Orders SET Payment_Status = 'PAID'" + (hasPaidDate ? ", Paid_Date = GETDATE()" : "") +
+                    " WHERE ID = @OrderId AND Payment_Method IN ('CASH','TRANSFER')" +
+                    " AND ISNULL(Payment_Status,'') NOT IN ('PAID','CHARGED') AND Order_Status <> 'CANCELLED'",
+                    new Dictionary<string, object> { { "@OrderId", Convert.ToInt64(orderId) } });
+                try
+                {
+                    _code.Logs(_connectionString, "RoomService",
+                        $"ยืนยันรับเงินออเดอร์ #{orderId} ({(n > 0 ? "สำเร็จ" : "ไม่มีการเปลี่ยนแปลง")})",
+                        Session["username"]?.ToString() ?? "Unknown");
+                }
+                catch { }
+                LoadOrderDetail(Convert.ToInt64(orderId));
+                ScriptManager.RegisterStartupScript(this, GetType(), "paidUpdate",
+                    n > 0 ? "alert('บันทึกรับเงินแล้ว — รายได้จะเข้าบัญชีตามนโยบายเอกสารขาย');"
+                          : "alert('ออเดอร์นี้ชำระแล้ว/ไม่ใช่เงินสดหรือโอน');", true);
+            }
+            catch (Exception ex)
+            {
+                ScriptManager.RegisterStartupScript(this, GetType(), "error",
+                    "alert('เกิดข้อผิดพลาด: " + ex.Message.Replace("'", "\\'") + "');", true);
+            }
         }
 
         /// <summary>

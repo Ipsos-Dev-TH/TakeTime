@@ -37,7 +37,8 @@ namespace Take_Time_BangPhra
             bool keyReturned = true,
             string cleaningStatus = "GOOD",
             byte? guestSatisfaction = null,
-            string notes = null)
+            string notes = null,
+            int damagePaidHowId = 0)
         {
             try
             {
@@ -141,7 +142,13 @@ namespace Take_Time_BangPhra
                     {
                         // ตัดมัดจำออกจากเจ้าหนี้ (ADVANCE_DEPOSIT) → รับรู้รายได้ห้องพัก (ROOM_REVENUE)
                         // ถ้ามีค่าเสียหาย/ของหาย ระบบจะแบ่ง credit ระหว่าง Room Revenue และ Other Income
-                        TryEnqueueDepositClearing(reservationId, depositAmt, customerName, damageCharge + missingItemsCharge);
+                        decimal clearedForDamage = TryEnqueueDepositClearing(reservationId, depositAmt, customerName, damageCharge + missingItemsCharge);
+
+                        // ค่าเสียหาย/ของหายส่วนที่มัดจำ (ตัดตอนเช็คเอาท์) และเงินประกัน (หักแล้ว — ออกใบเสร็จค่าเสียหายตาม
+                        // CLAUDE.md ข้อ 14) ไม่ครอบคลุม → รายได้ค่าเสียหายตามนโยบายเอกสารขาย (เดิมหายเงียบ)
+                        long checkoutIdValue = row["CheckoutID"] == DBNull.Value ? 0 : Convert.ToInt64(row["CheckoutID"]);
+                        TryRecordUncoveredDamage(reservationId, checkoutIdValue, damageCharge + missingItemsCharge,
+                            clearedForDamage, damagePaidHowId, adminId, customerName);
 
                         return new CheckoutResult
                         {
@@ -275,13 +282,14 @@ namespace Take_Time_BangPhra
         /// Enqueue deposit clearing journal entry (DR ADVANCE_DEPOSIT, CR ROOM_REVENUE).
         /// ความล้มเหลวจะ log แต่ไม่ throw — เช็คเอาท์ต้องผ่านได้ถึงแม้ accounting sync มีปัญหา
         /// </summary>
-        private void TryEnqueueDepositClearing(int reservationId, decimal depositAmt, string customerName, decimal damageAmt)
+        /// <returns>ยอดมัดจำที่เข้าคิวตัดตอนเช็คเอาท์ (ส่วนนี้ครอบคลุมค่าเสียหายได้ — mapper แยกเป็นรายได้ค่าเสียหาย), 0 = ไม่ได้ตัด</returns>
+        private decimal TryEnqueueDepositClearing(int reservationId, decimal depositAmt, string customerName, decimal damageAmt)
         {
             if (depositAmt <= 0)
             {
                 _code.Logs(_connectionString, "Checkout",
                     $"TryEnqueueDepositClearing: skipped — Reservation #{reservationId} ไม่มีมัดจำ", "SYSTEM");
-                return;
+                return 0m;
             }
 
             // ป้องกัน double-clear: ถ้าใบเสร็จได้หักมัดจำไปแล้ว (Deposit_Applied_Amount > 0) ระบบ
@@ -293,7 +301,7 @@ namespace Take_Time_BangPhra
                 _code.Logs(_connectionString, "Checkout",
                     $"TryEnqueueDepositClearing: skipped — มัดจำ {depositAmt:N2} ถูกหักในใบเสร็จไปแล้วทั้งหมด ({alreadyApplied:N2})",
                     "SYSTEM");
-                return;
+                return 0m;
             }
 
             try
@@ -308,6 +316,77 @@ namespace Take_Time_BangPhra
             {
                 _code.Logs(_connectionString, "Checkout",
                     $"TryEnqueueDepositClearing failed for Reservation #{reservationId}: {ex.Message}", "SYSTEM");
+            }
+            // มัดจำก้อนนี้ครอบคลุมค่าเสียหายได้ไม่ว่าคิวจะเข้าสำเร็จหรือไม่ (เงินอยู่กับโรงแรมแล้ว — ห้ามนับเป็นเงินรับใหม่)
+            return toClear;
+        }
+
+        /// <summary>
+        /// ค่าเสียหาย/ของหายที่ "ไม่มีเงินค้ำ" → รายได้ค่าเสียหาย (DAMAGE_INCOME) ผ่านสมุดช่องทาง (DMG-{checkoutId}) ตามนโยบายเอกสารขาย
+        ///   ไม่ครอบคลุม = ยอดค่าเสียหาย − ส่วนที่มัดจำตัดตอนเช็คเอาท์ครอบคลุม − ยอดที่หักจากเงินประกันแล้ว (เงินประกันออกใบเสร็จ
+        ///   ค่าเสียหายเองตาม CLAUDE.md ข้อ 14 — ไม่นับซ้ำ)
+        /// ต้องเลือกแหล่งเงินที่รับจริงในหน้าเช็คเอาท์ — ไม่เลือก (ค่าเริ่มต้น) = พฤติกรรมเดิม: ไม่ลงอัตโนมัติ (กันซ้ำกับใบเสร็จที่ออกมือ)
+        /// ไม่ throw — เช็คเอาท์ต้องผ่านเสมอ
+        /// </summary>
+        private void TryRecordUncoveredDamage(int reservationId, long checkoutId, decimal damageTotal, decimal depositCovered,
+            int damagePaidHowId, int adminId, string customerName)
+        {
+            try
+            {
+                if (damageTotal <= 0.01m) return;
+                decimal captured = 0m;
+                try
+                {
+                    var dt = _code.DatabaseQuerySafe(_connectionString,
+                        @"SELECT ISNULL(SUM(Captured_Amount), 0) FROM Payment_Security_Holds
+                           WHERE Reservation_ID = @id AND [Status] = 'CAPTURED'",
+                        new Dictionary<string, object> { { "@id", reservationId } });
+                    if (dt != null && dt.Rows.Count > 0 && dt.Rows[0][0] != DBNull.Value) captured = Convert.ToDecimal(dt.Rows[0][0]);
+                }
+                catch { /* ยังไม่มีตารางเงินประกัน */ }
+
+                decimal uncovered = damageTotal - Math.Min(damageTotal, Math.Max(0m, depositCovered)) - captured;
+                if (uncovered <= 0.01m) return;
+
+                if (damagePaidHowId <= 0)
+                {
+                    _code.Logs(_connectionString, "Checkout",
+                        $"⚠ Reservation #{reservationId} ค่าเสียหาย/ของหาย {uncovered:N2} ไม่มีมัดจำ/เงินประกันครอบคลุม และไม่ได้เลือกแหล่งเงินที่รับ — " +
+                        "ไม่ลงบัญชีอัตโนมัติ (ออกใบเสร็จค่าเสียหายเอง)", "SYSTEM");
+                    return;
+                }
+
+                string phone = null;
+                try
+                {
+                    var r = _code.DatabaseQuerySafe(_connectionString,
+                        "SELECT TOP 1 Customer_MobilePhone FROM Reservation WHERE ID = @id",
+                        new Dictionary<string, object> { { "@id", reservationId } });
+                    if (r != null && r.Rows.Count > 0 && r.Rows[0][0] != DBNull.Value) phone = Convert.ToString(r.Rows[0][0]);
+                }
+                catch { }
+
+                string note = new ChannelSalesPostingService(_connectionString).Record(new ChannelSale
+                {
+                    Channel = SalesDocumentPolicy.ChDamage,
+                    SourceKey = checkoutId > 0 ? "DMG-" + checkoutId : "DMG-R" + reservationId + "-" + DateTime.Now.ToString("yyMMddHHmm"),
+                    ReservationId = reservationId,
+                    SaleDate = DateTime.Now,
+                    PaidHowId = damagePaidHowId,
+                    Amount = uncovered,
+                    RevenueKey = "DAMAGE_INCOME",
+                    Description = $"ค่าเสียหาย/อุปกรณ์สูญหาย การจอง #{reservationId}",
+                    CustomerName = customerName,
+                    CustomerPhone = phone,
+                    CreatedBy = adminId.ToString()
+                });
+                _code.Logs(_connectionString, "Checkout",
+                    $"Reservation #{reservationId} ค่าเสียหายไม่มีเงินค้ำ {uncovered:N2} (รวม {damageTotal:N2}, มัดจำครอบคลุม {depositCovered:N2}, เงินประกันหัก {captured:N2}) → {note ?? "ไม่ได้บันทึก (ยังไม่รัน PHASE19_32)"}",
+                    "SYSTEM");
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "Checkout", $"TryRecordUncoveredDamage #{reservationId}: {ex.Message}", "SYSTEM");
             }
         }
 

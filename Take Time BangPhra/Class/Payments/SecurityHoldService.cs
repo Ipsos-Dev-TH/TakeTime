@@ -242,6 +242,10 @@ namespace Take_Time_BangPhra.Payments
             string holdRef = CreateOffGatewayHold(ProviderCash, reservationId, amount, null, null, adminId, out error);
             if (holdRef == null) return null;
 
+            // บัญชี (opt-in Nexaacc_SecurityDeposit_Journal — ตามแบบข้อ 14 ของเงินประกันโอน): Dr เงินสด / Cr หนี้สินเงินประกัน
+            // เงินประกัน = เงินที่ต้องคืน ไม่ใช่รายได้ — เดิมเงินสดก้อนนี้อยู่นอกบัญชีทั้งขาเข้า/ขาออก
+            PostSecurityDepositJournal(GetByRef(holdRef), "IN", amount, null, "เงินสด");
+
             Notify.Send(Notify.Ev.PaymentHold,
                 "🛡 <b>รับเงินประกันเป็นเงินสด</b> " + amount.ToString("N2") + " บาท\n"
                 + "การจอง #" + reservationId + " · " + holdRef
@@ -488,7 +492,8 @@ namespace Take_Time_BangPhra.Payments
             if (isTransfer) SaveRefundRecord(hold.ID, remainder, refundRef, refundNote);
 
             // แหล่งเงินที่ต้องใช้ออก "ใบเสร็จค่าเสียหาย" (คำนวณครั้งเดียว ใช้ทั้งข้อความ/บันทึก/Telegram)
-            string damagePaidHow = isTransfer ? DamageReceiptPaidHowText(hold) : null;
+            bool isCashHold = isCash && !isTransfer;
+            string damagePaidHow = (isTransfer || isCashHold) ? DamageReceiptPaidHowText(hold) : null;
 
             // บัญชี (opt-in): ส่วนที่เหลือ = โอนคืน (Dr หนี้สิน / Cr ธนาคาร)
             // ส่วนที่หัก: **ไม่โพสต์ JE "DMG" แล้ว** — เดิม Dr หนี้สิน / Cr ธนาคาร ทันที แล้วพึ่งให้พนักงานออกใบเสร็จค่าเสียหาย
@@ -506,6 +511,13 @@ namespace Take_Time_BangPhra.Payments
                         + " (การจอง #" + hold.ReservationId + ") — ไม่โพสต์ JE SECDEP-" + hold.ID + "-DMG: หนี้สินเงินประกันส่วนนี้"
                         + " ต้องล้างด้วยใบเสร็จค่าเสียหายที่เลือกแหล่งเงิน \"" + damagePaidHow + "\""
                         + " (ห้ามเลือกเงินสด/บัญชีรับโอน — จะนับเงินซ้ำ)", "System");
+            }
+            else if (isCashHold)
+            {
+                // เงินประกันเงินสด: ส่วนที่เหลือ = คืนเงินสด (Dr หนี้สิน / Cr เงินสด) · ส่วนที่หักล้างด้วยใบเสร็จค่าเสียหาย
+                // แหล่งเงิน "หักจากเงินประกัน" (เมื่อลงหนี้สินไว้แล้ว) — กติกาเดียวกับเงินประกันโอน
+                if (remainder > 0)
+                    PostSecurityDepositJournal(hold, "OUT", remainder, null, "คืนเงินสด");
             }
 
             // เงินเข้าจริงแล้ว → ลงสมุดรายการชำระเงินกลาง (ตรวจย้อน/ออกใบเสร็จต่อได้)
@@ -529,7 +541,7 @@ namespace Take_Time_BangPhra.Payments
                     isTransfer
                         ? "หักจากเงินประกันเงินโอน " + hold.HoldRef + " — ออกใบเสร็จค่าเสียหาย (แหล่งเงิน: " + damagePaidHow + ")"
                         : isCash
-                        ? "หักจากเงินประกันเงินสด " + hold.HoldRef + " — ออกใบเสร็จค่าเสียหาย (แหล่งเงิน: เงินสด)"
+                        ? "หักจากเงินประกันเงินสด " + hold.HoldRef + " — ออกใบเสร็จค่าเสียหาย (แหล่งเงิน: " + damagePaidHow + ")"
                         : "ตัดจากวงเงินประกัน " + hold.HoldRef + " — ออกใบเสร็จค่าเสียหายโดยเลือกแหล่งเงินของเกตเวย์",
                     null);
             }
@@ -563,7 +575,7 @@ namespace Take_Time_BangPhra.Payments
             if (isCash)
                 return "หักค่าเสียหาย " + amount.ToString("N2") + " บาทแล้ว"
                      + (remainder > 0 ? " — คืนเงินสดลูกค้า " + remainder.ToString("N2") + " บาท" : "")
-                     + " และออกใบเสร็จค่าเสียหาย (แหล่งเงิน: เงินสด)";
+                     + " และออกใบเสร็จค่าเสียหาย (แหล่งเงิน: " + damagePaidHow + ")";
 
             return "ตัดค่าเสียหาย " + amount.ToString("N2") + " บาทแล้ว"
                  + (remainder > 0
@@ -646,6 +658,9 @@ namespace Take_Time_BangPhra.Payments
                 return "บันทึกคืนเงินประกันแล้ว — โอนคืนลูกค้า " + hold.Amount.ToString("N2") + " บาท (นอกเกตเวย์)"
                      + (string.IsNullOrWhiteSpace(refundRef) ? " · ยังไม่ได้ระบุเลขอ้างอิงการโอนคืน" : "");
             }
+
+            // บัญชี (opt-in): คืนเงินประกันเงินสดเต็มจำนวน — Dr หนี้สินเงินประกัน / Cr เงินสด (ต้องมีขารับ IN)
+            if (isCash) PostSecurityDepositJournal(hold, "OUT", hold.Amount, null, "คืนเงินสด");
 
             Notify.Send(Notify.Ev.PaymentHold,
                 (isCash ? "✅ <b>คืนเงินประกันเงินสดแล้ว</b> " : "✅ <b>คืนวงเงินประกันแล้ว</b> ")
@@ -899,10 +914,20 @@ namespace Take_Time_BangPhra.Payments
         {
             try
             {
-                if (hold == null || !hold.IsTransfer || amount <= 0) return;
-                PaymentChannel ch = channel ?? TransferChannel();
-                int paidHowId = ch != null ? ch.PaidHowId : 0;
-                string paidHowName = ch == null ? null : (string.IsNullOrEmpty(ch.PaidHowName) ? ch.Name : ch.PaidHowName);
+                if (hold == null || !(hold.IsTransfer || hold.IsCash) || amount <= 0) return;
+                int paidHowId;
+                string paidHowName;
+                if (hold.IsCash)
+                {
+                    // เงินประกันเงินสด → แหล่งเงินชนิด CASH (บัญชีเงินสดใน NextAcc)
+                    paidHowId = Take_Time_BangPhra.Integration.ChannelPosting.PaidHowByType(_conn, "CASH", "เงินสด", out paidHowName);
+                }
+                else
+                {
+                    PaymentChannel ch = channel ?? TransferChannel();
+                    paidHowId = ch != null ? ch.PaidHowId : 0;
+                    paidHowName = ch == null ? null : (string.IsNullOrEmpty(ch.PaidHowName) ? ch.Name : ch.PaidHowName);
+                }
                 var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(_conn);
                 long q = sync.EnqueueSecurityDepositJournal(hold.ID, hold.HoldRef, hold.ReservationId, kind, amount,
                     DateTime.Now, paidHowId, paidHowName, note);
@@ -967,7 +992,7 @@ namespace Take_Time_BangPhra.Payments
         {
             try
             {
-                if (hold == null || !hold.IsTransfer) return false;
+                if (hold == null || !(hold.IsTransfer || hold.IsCash)) return false;
                 return new Take_Time_BangPhra.Integration.AccountingSyncService(_conn).HasSecurityDepositInJournal(hold.ID);
             }
             catch { return false; }
@@ -981,7 +1006,7 @@ namespace Take_Time_BangPhra.Payments
         /// </summary>
         private string DamageReceiptPaidHowText(HoldRow hold)
         {
-            if (!HasSecurityDepositLiability(hold)) return TransferPaidHowText();
+            if (!HasSecurityDepositLiability(hold)) return hold != null && hold.IsCash ? "เงินสด" : TransferPaidHowText();
             return FindOffsetPaidHowName(_conn)
                 ?? (OffsetPaidHowDefaultName + " — ⚠ ยังไม่มีแหล่งเงินนี้: รัน migration PHASE19_25 แล้วผูกบัญชีเงินประกันรอคืน");
         }

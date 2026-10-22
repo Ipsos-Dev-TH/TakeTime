@@ -44,8 +44,23 @@ namespace Take_Time_BangPhra.Integration
         // ═══════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// โพสต์รายได้/ต้นทุนรูมเซอร์วิสของ "วันที่จบแล้ว" (&lt; วันนี้) — no-op ถ้าปิดสวิตช์.
-        /// เรียกจาก background timer. idempotent ด้วย `Guest_Room_Service_Orders.Acct_Post_Ref`
+        /// โพสต์รายได้/ต้นทุนรูมเซอร์วิส — no-op ถ้าปิดสวิตช์ (Nexaacc_RoomServiceRevenue). เรียกจาก background timer.
+        ///
+        /// กติกา (ต.ค. 2026 — แก้รายได้หาย/รายได้เกินจากการตรวจ audit A ข้อ 6):
+        ///  • นับเฉพาะออเดอร์ที่ "รับเงินแล้วจริง" (Payment_Status = PAID — โอนที่ตรวจสลิปแล้ว/เงินสดที่พนักงานกด
+        ///    "ยืนยันรับเงินแล้ว"/จ่ายออนไลน์ผ่านเกตเวย์). สลิปที่ยังไม่ตรวจ/เงินสดที่ยังไม่เก็บ = ยังไม่ลง
+        ///  • ลงบิลห้อง (CHARGE_TO_ROOM/CHARGED) = รายได้ไปกับใบเสร็จเช็คเอาท์ → ที่นี่ลงเฉพาะต้นทุน+สต๊อก
+        ///  • นโยบายเอกสารขายเปิด (SalesDocumentPolicy) → แยกตามแหล่งเงินของออเดอร์:
+        ///      IMMEDIATE = ใบรายออเดอร์ RS-{orderId} ทันทีที่รับเงิน · DAILY_ROLLUP = RSDAY-{yyyyMMdd}-{paidHowId}
+        ///      หลังจบวัน · OFF = ไม่ออกเอกสาร (ต้นทุน/สต๊อกยังลง)
+        ///    นโยบายปิด = แบบเดิม: รวบรายวันตามวิธีจ่าย (RSDAY-{yyyyMMdd}-{CASH|TRF|ONL})
+        ///  • ออเดอร์ที่ยืนยันช้า (วันนั้นออกใบสรุปไปแล้ว) → ใบเสริม -S{n} — เดิมถูก mark ทิ้งเงียบ ๆ (รายได้หาย)
+        ///  • ค่าบริการ (Service Charge) แยกบรรทัด → mapping SERVICE_CHARGE_REVENUE (ไม่ผูก = รายได้ขายสินค้าเหมือนเดิม)
+        ///    และอยู่ในฐาน VAT เดียวกับค่าสินค้า
+        ///  • ต้นทุน: ที่นี่เป็นแหล่งความจริงเดียว — ตัดสต๊อกในระบบ (Product_Out, Remark 'รูมเซอร์วิส') คู่กับ COGS ที่ส่ง
+        ///    NextAcc ในรอบเดียวกัน (เดิมส่ง COGS แต่ไม่ตัดสต๊อกในระบบ → สต๊อกสองฝั่งไม่ตรง)
+        /// idempotent: จองออเดอร์ด้วย Acct_Post_Ref = "~{ref}" ก่อน → ทำเอกสาร/ต้นทุน → ปิดเป็น "{ref}"
+        /// (process ตายกลางทาง = รอบถัดไปทำต่อจาก "~" เอง; ใบ IF NOT EXISTS + dedup คิว)
         /// </summary>
         public void PostRoomServiceRevenueIfDue(int maxDaysPerRun = 14)
         {
@@ -53,27 +68,105 @@ namespace Take_Time_BangPhra.Integration
 
             try
             {
-                // กลุ่ม (วัน × วิธีจ่าย) ที่ยังไม่โพสต์ — เฉพาะออเดอร์ที่ส่งของแล้ว/ยืนยันแล้ว
-                var days = _code.DatabaseQuerySafe(_conn,
-                    @"SELECT TOP (@cap) CAST(o.Order_Date AS DATE) AS D, o.Payment_Method AS PM
-                        FROM Guest_Room_Service_Orders o
-                       WHERE o.Acct_Post_Ref IS NULL
-                         AND o.Order_Status NOT IN ('CANCELLED', 'PENDING')
-                         AND CAST(o.Order_Date AS DATE) < CAST(GETDATE() AS DATE)
-                       GROUP BY CAST(o.Order_Date AS DATE), o.Payment_Method
-                       ORDER BY CAST(o.Order_Date AS DATE)",
-                    new Dictionary<string, object> { { "@cap", maxDaysPerRun } });
-
-                if (days == null || days.Rows.Count == 0) return;
-
-                foreach (DataRow g in days.Rows)
-                {
-                    DateTime day = Convert.ToDateTime(g["D"]);
-                    string payMethod = g["PM"]?.ToString() ?? "";
-                    try { ProcessRoomServiceDay(day, payMethod); }
-                    catch (Exception exDay)
+                // 0) งานที่จองไว้แล้วแต่ยังไม่จบ (process ตายกลางทาง)
+                var stale = _code.DatabaseQuerySafe(_conn,
+                    @"SELECT DISTINCT TOP 50 Acct_Post_Ref FROM Guest_Room_Service_Orders
+                       WHERE Acct_Post_Ref LIKE '~%'", null);
+                if (stale != null)
+                    foreach (DataRow s in stale.Rows)
                     {
-                        Log($"RoomServiceRevenue: วันที่ {day:yyyy-MM-dd} ({payMethod}) ล้มเหลว: {exDay.Message}");
+                        string claim = Convert.ToString(s[0]);
+                        try { FinishRoomServiceBatch(claim.Substring(1)); }
+                        catch (Exception exS) { Log($"RoomServiceRevenue: ทำต่อ {claim} ล้มเหลว: {exS.Message}"); }
+                    }
+
+                bool policy = ChannelPosting.PolicyEnabled(_conn);
+                bool hasPaidDate = ChannelPosting.HasColumn(_conn, "Guest_Room_Service_Orders", "Paid_Date");
+                string settleExpr = hasPaidDate ? "COALESCE(o.Paid_Date, o.Order_Date)" : "o.Order_Date";
+
+                var orders = _code.DatabaseQuerySafe(_conn,
+                    $@"SELECT TOP 500 o.ID, o.Order_Date, {settleExpr} AS Settle_Date,
+                              ISNULL(o.Payment_Method, '') AS PM, ISNULL(o.Payment_Status, '') AS PS
+                         FROM Guest_Room_Service_Orders o
+                        WHERE o.Acct_Post_Ref IS NULL
+                          AND o.Order_Status NOT IN ('CANCELLED', 'PENDING')
+                          AND (o.Payment_Status IN ('PAID', 'CHARGED') OR o.Payment_Method = 'CHARGE_TO_ROOM')
+                        ORDER BY {settleExpr}, o.ID", null);
+                if (orders == null || orders.Rows.Count == 0) return;
+
+                DateTime today = DateTime.Today;
+                var batches = new Dictionary<string, RsBatch>();
+                var order = new List<string>();
+                foreach (DataRow r in orders.Rows)
+                {
+                    long id = Convert.ToInt64(r["ID"]);
+                    string pm = Convert.ToString(r["PM"]).Trim().ToUpperInvariant();
+                    string ps = Convert.ToString(r["PS"]).Trim().ToUpperInvariant();
+                    DateTime orderDay = Convert.ToDateTime(r["Order_Date"]).Date;
+                    DateTime settleDay = Convert.ToDateTime(r["Settle_Date"]).Date;
+                    bool chargeToRoom = ps != "PAID" && (pm == "CHARGE_TO_ROOM" || ps == "CHARGED");
+
+                    string key; string stem; DateTime day; string groupKey;
+                    if (chargeToRoom)
+                    {
+                        if (orderDay >= today) continue;               // ต้นทุนลงบิลห้อง รวบหลังจบวันเหมือนเดิม
+                        key = "C|" + orderDay.ToString("yyyyMMdd"); stem = "RSCTR"; day = orderDay; groupKey = "0";
+                    }
+                    else
+                    {
+                        int paidHowId; string paidHowName;
+                        ResolveRoomServicePaidHow(id, pm, out paidHowId, out paidHowName);
+                        string mode = ChannelSalesPostingService.ModeRollup, reason;
+                        if (policy)
+                            ChannelPosting.ResolveMode(_conn, SalesDocumentPolicy.ChRoomService, paidHowId, out mode, out reason);
+                        groupKey = policy && paidHowId > 0 ? paidHowId.ToString() : LegacyMethodKey(pm);
+
+                        if (mode == ChannelSalesPostingService.ModeImmediate)
+                        {
+                            key = "I|" + id; stem = null; day = settleDay;
+                        }
+                        else if (mode == ChannelSalesPostingService.ModeOff)
+                        {
+                            if (settleDay >= today) continue;
+                            key = "O|" + settleDay.ToString("yyyyMMdd") + "|" + groupKey; stem = "RSOFF"; day = settleDay;
+                        }
+                        else
+                        {
+                            if (settleDay >= today) continue;            // ใบสรุปรายวัน = หลังจบวันเท่านั้น
+                            key = "R|" + settleDay.ToString("yyyyMMdd") + "|" + groupKey; stem = "RSDAY"; day = settleDay;
+                        }
+                    }
+
+                    RsBatch b;
+                    if (!batches.TryGetValue(key, out b))
+                    {
+                        if (batches.Count >= Math.Max(1, maxDaysPerRun) * 4) continue;   // กันรอบเดียวทำงานหนักเกิน
+                        b = new RsBatch { Stem = stem, Day = day, GroupKey = groupKey, OrderId = stem == null ? id : 0 };
+                        batches[key] = b;
+                        order.Add(key);
+                    }
+                    b.Ids.Add(id);
+                }
+
+                foreach (string k in order)
+                {
+                    RsBatch b = batches[k];
+                    try
+                    {
+                        string refId = b.Stem == null
+                            ? "RS-" + b.OrderId
+                            : ChannelPosting.NextFreeRollupRef(_conn, b.Stem, b.Day, b.GroupKey, RoomServiceRefUsed);
+                        if (string.IsNullOrEmpty(refId) || (b.Stem == null && RoomServiceRefUsed(refId)))
+                        {
+                            Log($"RoomServiceRevenue: หาเลขเอกสารว่างไม่ได้ ({k}) — ข้าม");
+                            continue;
+                        }
+                        if (ClaimRoomServiceOrders(b.Ids, refId) <= 0) continue;
+                        FinishRoomServiceBatch(refId);
+                    }
+                    catch (Exception exB)
+                    {
+                        Log($"RoomServiceRevenue: กลุ่ม {k} ล้มเหลว: {exB.Message}");
                     }
                 }
             }
@@ -83,95 +176,247 @@ namespace Take_Time_BangPhra.Integration
             }
         }
 
-        private void ProcessRoomServiceDay(DateTime day, string payMethod)
+        private sealed class RsBatch
         {
-            string ds = day.ToString("yyyyMMdd");
-            string methodKey = SanitizeKey(payMethod);
-            string postRef = $"RSDAY-{ds}-{methodKey}";
+            public string Stem;          // RSDAY / RSOFF / RSCTR — null = IMMEDIATE (RS-{orderId})
+            public DateTime Day;
+            public string GroupKey;
+            public long OrderId;
+            public readonly List<long> Ids = new List<long>();
+        }
 
-            // ลงบิลห้อง = รายได้อยู่ในใบเสร็จเช็คเอาท์แล้ว → โพสต์เฉพาะต้นทุน กันรายได้ซ้ำ
-            bool chargeToRoom = payMethod.Equals("CHARGE_TO_ROOM", StringComparison.OrdinalIgnoreCase);
-
-            // ยอดต่อสินค้าในกลุ่ม (ราคาขาย + ต้นทุนจาก Product.Cost_Price)
-            // สินค้าที่ตั้ง "ไม่รวมใบสรุปรายวัน" (Include_In_Daily_Rollup = 0) ถูกกรองออก
-            // ทั้งรายได้และต้นทุน — ตั้งได้รายสินค้าที่หน้า ตั้งค่าลงบัญชีรายสินค้า
-            // (LEFT JOIN: สินค้าที่หาไม่เจอ/ถูกลบ ถือว่ารวมตามเดิม)
-            string flagFilter = HasRollupFlagColumn()
-                ? " AND ISNULL(p.Include_In_Daily_Rollup, 1) = 1" : "";
-            var prod = _code.DatabaseQuerySafe(_conn,
-                @"SELECT i.Product_ID AS PID,
-                         SUM(i.Quantity) AS Qty,
-                         SUM(i.Subtotal) AS Gross,
-                         MAX(ISNULL(p.Product_Name, i.Product_Name)) AS Name,
-                         MAX(p.Cost_Price) AS Cost
-                    FROM Guest_Room_Service_Orders o
-                    JOIN Guest_Room_Service_Items i ON i.Order_ID = o.ID
-                    LEFT JOIN Product p ON p.ID = i.Product_ID
-                   WHERE o.Acct_Post_Ref IS NULL
-                     AND o.Order_Status NOT IN ('CANCELLED', 'PENDING')
-                     AND CAST(o.Order_Date AS DATE) = @d
-                     AND o.Payment_Method = @pm" + flagFilter + @"
-                   GROUP BY i.Product_ID",
-                new Dictionary<string, object> { { "@d", day.Date }, { "@pm", payMethod } });
-
-            if (prod == null || prod.Rows.Count == 0)
+        /// <summary>เลขนี้ถูกใช้กับออเดอร์ไปแล้วหรือยัง (ทั้งที่จบแล้วและที่จองค้าง "~")</summary>
+        private bool RoomServiceRefUsed(string refId)
+        {
+            try
             {
-                // ไม่มีรายการสินค้า (ออเดอร์ว่าง/ข้อมูลไม่ครบ) → mark กันวนซ้ำ
-                MarkRoomServiceRows(day, payMethod, postRef);
-                return;
+                var dt = _code.DatabaseQuerySafe(_conn,
+                    "SELECT TOP 1 1 FROM Guest_Room_Service_Orders WHERE Acct_Post_Ref IN (@r, @c)",
+                    new Dictionary<string, object> { { "@r", refId }, { "@c", "~" + refId } });
+                return dt != null && dt.Rows.Count > 0;
+            }
+            catch { return false; }
+        }
+
+        /// <summary>จองออเดอร์ (เฉพาะที่ยังว่าง) ด้วย "~{ref}" — คืนจำนวนที่จองได้</summary>
+        private int ClaimRoomServiceOrders(List<long> ids, string refId)
+        {
+            if (ids == null || ids.Count == 0) return 0;
+            int total = 0;
+            for (int start = 0; start < ids.Count; start += 200)
+            {
+                var p = new Dictionary<string, object> { { "@c", "~" + refId } };
+                var names = new List<string>();
+                for (int i = start; i < ids.Count && i < start + 200; i++)
+                {
+                    string n = "@i" + (i - start);
+                    names.Add(n);
+                    p[n] = ids[i];
+                }
+                total += _code.DatabaseInsertSafe(_conn,
+                    "UPDATE Guest_Room_Service_Orders SET Acct_Post_Ref = @c WHERE Acct_Post_Ref IS NULL AND ID IN (" +
+                    string.Join(",", names) + ")", p);
+            }
+            return total;
+        }
+
+        /// <summary>
+        /// ออกเอกสาร + ต้นทุนของออเดอร์ที่จองด้วย "~{refId}" แล้วปิดเป็น "{refId}" — ชนิดดูจากคำนำหน้า:
+        /// RS- = รายออเดอร์ · RSDAY/RSDAY(ย่อ) = สรุปรายวัน · RSOFF = นโยบายไม่ออกเอกสาร · RSCTR = ลงบิลห้อง (ต้นทุนอย่างเดียว)
+        /// เรียกซ้ำได้ (ใบ IF NOT EXISTS, คิว dedup ตามเลขใบ/stockRef, Product_Out IF NOT EXISTS)
+        /// </summary>
+        private void FinishRoomServiceBatch(string refId)
+        {
+            string claim = "~" + refId;
+            bool revenueDoc = refId.StartsWith("RS-", StringComparison.Ordinal) || refId.StartsWith("RSDAY", StringComparison.Ordinal);
+            bool chargeToRoom = refId.StartsWith("RSCTR", StringComparison.Ordinal);
+            bool hasPaidDate = ChannelPosting.HasColumn(_conn, "Guest_Room_Service_Orders", "Paid_Date");
+            bool hasSvc = ChannelPosting.HasColumn(_conn, "Guest_Room_Service_Orders", "Service_Charge");
+            bool hasFlag = HasRollupFlagColumn();
+            string settleExpr = hasPaidDate ? "COALESCE(o.Paid_Date, o.Order_Date)" : "o.Order_Date";
+
+            // ออเดอร์ในกลุ่ม + ส่วนแบ่งค่าบริการ (ค่าบริการของออเดอร์ตามสัดส่วนสินค้าที่ "รวมในใบสรุป")
+            var heads = _code.DatabaseQuerySafe(_conn,
+                $@"SELECT o.ID, o.Order_Number, {settleExpr} AS Settle_Date, ISNULL(o.Payment_Method, '') AS PM,
+                          o.Customer_MobilePhone AS Phone,
+                          {(hasSvc ? "ISNULL(o.Service_Charge, 0)" : "CAST(0 AS DECIMAL(18,2))")} AS SC,
+                          ISNULL((SELECT SUM(i.Subtotal) FROM Guest_Room_Service_Items i WHERE i.Order_ID = o.ID), 0) AS ItemsAll,
+                          ISNULL((SELECT SUM(i.Subtotal) FROM Guest_Room_Service_Items i
+                                   LEFT JOIN Product p ON p.ID = i.Product_ID
+                                  WHERE i.Order_ID = o.ID{(hasFlag ? " AND ISNULL(p.Include_In_Daily_Rollup, 1) = 1" : "")}), 0) AS ItemsIncl
+                     FROM Guest_Room_Service_Orders o
+                    WHERE o.Acct_Post_Ref = @c
+                    ORDER BY o.ID",
+                new Dictionary<string, object> { { "@c", claim } });
+            if (heads == null || heads.Rows.Count == 0) return;
+
+            DataRow first = heads.Rows[0];
+            DateTime docDate = Convert.ToDateTime(first["Settle_Date"]).Date;
+            decimal scTotal = 0m;
+            foreach (DataRow h in heads.Rows)
+            {
+                decimal sc = SafeDec(h["SC"]), all = SafeDec(h["ItemsAll"]), incl = SafeDec(h["ItemsIncl"]);
+                if (sc <= 0m) continue;
+                scTotal += all > 0m ? Math.Round(sc * incl / all, 2, MidpointRounding.AwayFromZero) : sc;
             }
 
-            decimal itemsTotal = 0m;
-            foreach (DataRow r in prod.Rows) itemsTotal += SafeDec(r["Gross"]);
+            // ยอดต่อสินค้า (ราคาขาย + ต้นทุนจาก Product.Cost_Price + สวิตช์รวมใบสรุปรายสินค้า)
+            var prod = _code.DatabaseQuerySafe(_conn,
+                $@"SELECT i.Product_ID AS PID,
+                          SUM(i.Quantity) AS Qty,
+                          SUM(i.Subtotal) AS Gross,
+                          MAX(ISNULL(p.Product_Name, i.Product_Name)) AS Name,
+                          MAX(p.Cost_Price) AS Cost,
+                          MAX({(hasFlag ? "CASE WHEN ISNULL(p.Include_In_Daily_Rollup, 1) = 1 THEN 1 ELSE 0 END" : "1")}) AS Incl
+                     FROM Guest_Room_Service_Orders o
+                     JOIN Guest_Room_Service_Items i ON i.Order_ID = o.ID
+                     LEFT JOIN Product p ON p.ID = i.Product_ID
+                    WHERE o.Acct_Post_Ref = @c
+                    GROUP BY i.Product_ID",
+                new Dictionary<string, object> { { "@c", claim } });
 
-            // ค่าบริการที่เก็บจากลูกค้า (PHASE18_21) — เป็นรายได้เพิ่มจากค่าสินค้า ต้องลงบัญชีด้วย
-            decimal serviceChargeTotal = SumServiceCharge(day, payMethod);
-            decimal grossTotal = itemsTotal + serviceChargeTotal;
+            decimal itemsIncluded = 0m;
+            if (prod != null)
+                foreach (DataRow r in prod.Rows)
+                    if (Convert.ToInt32(r["Incl"]) == 1) itemsIncluded += SafeDec(r["Gross"]);
 
-            // ── รายได้ (เฉพาะออเดอร์ที่ลูกค้าจ่ายเอง) ──
-            if (!chargeToRoom && grossTotal > 0m)
+            // ── รายได้ ──
+            decimal grossTotal = itemsIncluded + scTotal;
+            if (revenueDoc && grossTotal > 0m)
             {
-                // กันซ้ำข้ามรอบ: ถ้าเคยสร้างใบสรุปของกลุ่มนี้แล้ว = รอบก่อน enqueue สำเร็จแต่ crash ก่อน mark
-                if (ReceiptExists(postRef))
+                bool single = refId.StartsWith("RS-", StringComparison.Ordinal);
+                string pm = Convert.ToString(first["PM"]).Trim().ToUpperInvariant();
+                int paidHowId; string paidHowName;
+                ResolveRoomServicePaidHow(Convert.ToInt64(first["ID"]), pm, out paidHowId, out paidHowName);
+
+                string scKey = scTotal > 0m ? ChannelPosting.ResolveRevenueKey(_conn, ChannelPosting.RevenueChain("SERVICE_CHARGE", null)) : null;
+                string itemsType = ChannelPosting.ProductTypeIdForRevenueKey(_conn, "PRODUCT_REVENUE") ?? "3";
+                string headText = single
+                    ? $"รูมเซอร์วิส ออเดอร์ {first["Order_Number"]} ({paidHowName})"
+                    : $"รูมเซอร์วิสสรุปรายวัน {docDate:dd/MM/yyyy} ({paidHowName})" + (refId.Contains("-S") ? " — ใบเสริม (ยืนยันรับเงินช้า)" : "");
+
+                var lines = new List<ChannelReceiptLine>();
+                if (itemsIncluded > 0m)
+                    lines.Add(new ChannelReceiptLine { Text = headText, Amount = itemsIncluded, ProductTypeId = itemsType });
+                if (scTotal > 0m)
+                    lines.Add(new ChannelReceiptLine
+                    {
+                        Text = "ค่าบริการรูมเซอร์วิส (Service Charge)",
+                        Amount = scTotal,
+                        // ไม่ระบุชนิด → ใช้ revenueType ของใบ = SERVICE_CHARGE_REVENUE (ถ้าผูกบัญชีแล้ว)
+                        ProductTypeId = scKey == "PRODUCT_REVENUE" ? itemsType : null
+                    });
+
+                ChannelPosting.WriteSummaryReceipt(_conn, refId, docDate, paidHowName, lines);
+
+                string accId = ChannelPosting.PaidHowAccountId(_conn, paidHowId) ?? _sync.LookupPaidHowAccountId(paidHowName);
+                long q = _sync.EnqueueReceipt(0, refId, grossTotal, 0, docDate, headText,
+                    isDeposit: false, paymentMethod: paidHowName,
+                    revenueType: scKey ?? "PRODUCT_REVENUE", paymentAccountId: accId,
+                    customerPhone: single ? Convert.ToString(first["Phone"]) : null);
+                if (q <= 0)
                 {
-                    MarkRoomServiceRows(day, payMethod, postRef);
+                    // คงสถานะจอง "~" ไว้ — รอบถัดไปทำต่อ (ไม่ทิ้งรายได้)
+                    LogOnce("rs-enq-" + refId, $"RoomServiceRevenue: {refId} เข้าคิวเอกสารไม่สำเร็จ ({q}) — จะลองใหม่รอบถัดไป");
                     return;
                 }
-
-                string paidHowName = MapPaymentMethodToPaidHow(payMethod);
-                string paidHowAccId = _sync.LookupPaidHowAccountId(paidHowName);
-
-                _sync.EnqueueReceipt(0, postRef, grossTotal, 0, day.Date,
-                    $"รูมเซอร์วิส {day:dd/MM/yyyy} ({paidHowName})",
-                    isDeposit: false, paymentMethod: paidHowName,
-                    revenueType: "PRODUCT_REVENUE", paymentAccountId: paidHowAccId);
-
-                // บรรทัดที่ 1 = ค่าสินค้า, บรรทัดที่ 2 = ค่าบริการ (ถ้ามี) → ยอดรวมของบรรทัด
-                // ต้องเท่ากับยอดใบเสร็จ ไม่งั้น mapper จะเตือน line sum ≠ totalAmount
-                CreateSummaryReceiptRow(postRef, 0, day, itemsTotal, paidHowName,
-                    $"รูมเซอร์วิสสรุปรายวัน {day:dd/MM/yyyy} ({paidHowName})", "3",
-                    serviceChargeTotal, "ค่าบริการรูมเซอร์วิส");
             }
 
-            // ── ต้นทุน/สต๊อก (ทุกออเดอร์ รวมที่ลงบิลห้อง) ──
-            foreach (DataRow r in prod.Rows)
-            {
-                int pid; int.TryParse(r["PID"]?.ToString(), out pid);
-                decimal qty = SafeDec(r["Qty"]);
-                decimal cost = SafeDec(r["Cost"]);
-                string name = r["Name"]?.ToString() ?? "";
-                if (pid > 0 && qty > 0 && cost > 0)
+            // ── ต้นทุน + สต๊อกในระบบ (ทุกออเดอร์ รวมที่ลงบิลห้อง/นโยบายไม่ออกเอกสาร) ──
+            string why = chargeToRoom ? "รูมเซอร์วิส (ลงบิลห้อง)" : "รูมเซอร์วิส (จ่ายเอง)";
+            DateTime outDate = docDate;
+            if (prod != null)
+                foreach (DataRow r in prod.Rows)
                 {
-                    _sync.EnqueueStockOutCogs(pid, name, qty, cost, day.Date,
-                        chargeToRoom ? "รูมเซอร์วิส (ลงบิลห้อง)" : "รูมเซอร์วิส (จ่ายเอง)",
-                        stockRef: $"RSDAY-COGS-{ds}-{methodKey}-{pid}");
-                }
-            }
+                    int pid; int.TryParse(Convert.ToString(r["PID"]), out pid);
+                    decimal qty = SafeDec(r["Qty"]);
+                    decimal cost = SafeDec(r["Cost"]);
+                    decimal gross = SafeDec(r["Gross"]);
+                    string name = Convert.ToString(r["Name"]);
+                    if (pid <= 0 || qty <= 0) continue;
 
-            MarkRoomServiceRows(day, payMethod, postRef);
-            Log($"RoomServiceRevenue: {day:yyyy-MM-dd} ({payMethod}) " +
-                $"{(chargeToRoom ? "COGS อย่างเดียว (รายได้อยู่ในใบเสร็จห้อง)" : $"รายได้ {grossTotal:N2} (สินค้า {itemsTotal:N2} + ค่าบริการ {serviceChargeTotal:N2}) + COGS")} " +
-                $"— {prod.Rows.Count} รายการ ref={postRef}");
+                    WriteRoomServiceStockOut(refId, pid, qty, qty > 0 ? Math.Round(gross / qty, 2) : 0m, outDate);
+                    if (cost > 0 && Convert.ToInt32(r["Incl"]) == 1)
+                        _sync.EnqueueStockOutCogs(pid, name, qty, cost, outDate, why, stockRef: $"RSCOGS-{refId}-{pid}");
+                }
+
+            _code.DatabaseInsertSafe(_conn,
+                "UPDATE Guest_Room_Service_Orders SET Acct_Post_Ref = @r WHERE Acct_Post_Ref = @c",
+                new Dictionary<string, object> { { "@r", refId }, { "@c", claim } });
+
+            Log($"RoomServiceRevenue: {refId} — {heads.Rows.Count} ออเดอร์ " +
+                (revenueDoc ? $"รายได้ {grossTotal:N2} (สินค้า {itemsIncluded:N2} + ค่าบริการ {scTotal:N2}) + " : chargeToRoom ? "ลงบิลห้อง: " : "นโยบายไม่ออกเอกสาร: ") +
+                $"ต้นทุน/สต๊อก {prod?.Rows.Count ?? 0} สินค้า");
+        }
+
+        /// <summary>
+        /// ตัดสต๊อกในระบบ (Product_Out) ของรูมเซอร์วิส — Remark 'รูมเซอร์วิส' + Account_Receipt_ID = เลขเอกสาร
+        /// (ไม่เข้าเงื่อนไขรวบยอดขาย POS: ต้อง Remark 'ขาย' + Account_Receipt_ID '0') · IF NOT EXISTS กันซ้ำ
+        /// </summary>
+        private void WriteRoomServiceStockOut(string refId, int productId, decimal qty, decimal pricePerUnit, DateTime outDate)
+        {
+            try
+            {
+                _code.DatabaseInsertSafe(_conn,
+                    @"IF NOT EXISTS (SELECT 1 FROM Product_Out WHERE Account_Receipt_ID = @r AND Product_ID = @pid AND Remark = N'รูมเซอร์วิส')
+                      INSERT INTO Product_Out (DateTime_Out, Product_ID, Amount, PricePerUnit, Account_Receipt_ID, Remark)
+                      VALUES (@dt, @pid, @qty, @price, @r, N'รูมเซอร์วิส')",
+                    new Dictionary<string, object>
+                    {
+                        { "@r", refId }, { "@pid", productId }, { "@qty", qty }, { "@price", pricePerUnit },
+                        { "@dt", outDate.Date.AddHours(12) }
+                    });
+            }
+            catch (Exception ex)
+            {
+                Log($"RoomServiceRevenue: ตัดสต๊อกในระบบ {refId} สินค้า #{productId} ไม่สำเร็จ: {ex.Message}");
+            }
+        }
+
+        /// <summary>คีย์วิธีจ่ายแบบเดิม (สั้นพอให้ RSDAY-{yyyyMMdd}-{key}-S{n} ยาวไม่เกินคอลัมน์เลขใบ)</summary>
+        private static string LegacyMethodKey(string pm)
+        {
+            switch ((pm ?? "").ToUpperInvariant())
+            {
+                case "CASH": return "CASH";
+                case "TRANSFER": return "TRF";
+                case "ONLINE": return "ONL";
+                default: return SanitizeKey(pm).Length > 4 ? SanitizeKey(pm).Substring(0, 4) : SanitizeKey(pm);
+            }
+        }
+
+        /// <summary>
+        /// แหล่งเงินของออเดอร์: ONLINE = แหล่งเงินของเกตเวย์ที่ตัดเงินจริง (Payment_Transaction ของออเดอร์ →
+        /// PaymentChannelCatalog.ResolveRecordingPaidHowName เดียวกับค่าห้อง) · อื่น ๆ = ชื่อเดิม (เงินสด/เงินโอน)
+        /// แล้วหา Account_Paid_How.ID (ไม่พบตามชื่อ → แถวแรกตามชนิดช่องทาง CASH/TRANSFER)
+        /// </summary>
+        private void ResolveRoomServicePaidHow(long orderId, string pm, out int paidHowId, out string paidHowName)
+        {
+            paidHowName = null;
+            string up = (pm ?? "").ToUpperInvariant();
+            if (up == "ONLINE")
+            {
+                try
+                {
+                    var t = _code.DatabaseQuerySafe(_conn,
+                        @"SELECT TOP 1 Provider, Method, Card_Brand FROM Payment_Transaction
+                           WHERE Source_Type = 'ROOMSERVICE' AND Source_ID = @id AND [Status] = 'PAID' ORDER BY ID DESC",
+                        new Dictionary<string, object> { { "@id", orderId.ToString() } });
+                    if (t != null && t.Rows.Count > 0)
+                        paidHowName = Take_Time_BangPhra.Payments.PaymentChannelCatalog.ResolveRecordingPaidHowName(_conn,
+                            Convert.ToString(t.Rows[0]["Provider"]), Convert.ToString(t.Rows[0]["Method"]),
+                            t.Rows[0]["Card_Brand"] == DBNull.Value ? null : Convert.ToString(t.Rows[0]["Card_Brand"]));
+                }
+                catch { }
+            }
+            if (string.IsNullOrWhiteSpace(paidHowName)) paidHowName = MapPaymentMethodToPaidHow(pm);
+            paidHowId = ChannelPosting.FindPaidHowId(_conn, paidHowName);
+            if (paidHowId <= 0 && (up == "CASH" || up == "TRANSFER"))
+            {
+                string n;
+                int id = ChannelPosting.PaidHowByType(_conn, up, paidHowName, out n);
+                if (id > 0) { paidHowId = id; paidHowName = n; }
+            }
         }
 
         // ตรวจครั้งเดียวต่อ process ว่าคอลัมน์ตั้งค่ารายสินค้า (PHASE18_24) มีหรือยัง
@@ -192,40 +437,17 @@ namespace Take_Time_BangPhra.Integration
             return exists;
         }
 
-        /// <summary>
-        /// รวมค่าบริการ (Service Charge) ของกลุ่ม (วัน × วิธีจ่าย) ที่ยังไม่โพสต์.
-        /// คอลัมน์มาจาก PHASE18_21 — ฐานที่ยังไม่อัปเดตคืน 0 (พฤติกรรมเดิม)
-        /// </summary>
-        private decimal SumServiceCharge(DateTime day, string payMethod)
-        {
-            try
-            {
-                var dt = _code.DatabaseQuerySafe(_conn,
-                    @"SELECT ISNULL(SUM(o.Service_Charge), 0)
-                        FROM Guest_Room_Service_Orders o
-                       WHERE o.Acct_Post_Ref IS NULL
-                         AND o.Order_Status NOT IN ('CANCELLED', 'PENDING')
-                         AND CAST(o.Order_Date AS DATE) = @d
-                         AND o.Payment_Method = @pm",
-                    new Dictionary<string, object> { { "@d", day.Date }, { "@pm", payMethod } });
-                return dt?.Rows.Count > 0 ? SafeDec(dt.Rows[0][0]) : 0m;
-            }
-            catch { return 0m; }   // ยังไม่ได้รัน PHASE18_21
-        }
+        // ═══════════════════════════════════════════════════════════════════
+        // 1b) รายได้ช่องทางอื่นนอก POS (กิจกรรม / เบิกของใช้ / เกตเวย์หน้าร้าน / ค่าเสียหาย)
+        // ═══════════════════════════════════════════════════════════════════
 
-        private void MarkRoomServiceRows(DateTime day, string payMethod, string postRef)
+        /// <summary>
+        /// ส่งรายการค้างของสมุด Sales_Channel_Posting (IMMEDIATE ที่ยังไม่เข้าคิว, ใบสรุปรายวัน, ตาข่ายเงินเกตเวย์หน้าร้าน)
+        /// — no-op ถ้าไม่มีตาราง/นโยบายเอกสารขายยังไม่เปิด. ดู ChannelSalesPostingService
+        /// </summary>
+        public void PostChannelSalesIfDue()
         {
-            _code.DatabaseInsertSafe(_conn,
-                @"UPDATE Guest_Room_Service_Orders
-                     SET Acct_Post_Ref = @ref
-                   WHERE Acct_Post_Ref IS NULL
-                     AND Order_Status NOT IN ('CANCELLED', 'PENDING')
-                     AND CAST(Order_Date AS DATE) = @d
-                     AND Payment_Method = @pm",
-                new Dictionary<string, object>
-                {
-                    { "@ref", postRef }, { "@d", day.Date }, { "@pm", payMethod }
-                });
+            new ChannelSalesPostingService(_conn).PostDueIfAny();
         }
 
         /// <summary>วิธีจ่ายของรูมเซอร์วิส → ชื่อแหล่งรับเงินใน Account_Paid_How (ใช้หาบัญชี NextAcc)</summary>

@@ -21,7 +21,28 @@ namespace Take_Time_BangPhra
             {
                 LoadReservationData();
                 LoadSecurityHold();
+                LoadDamagePaidHow();
             }
+        }
+
+        /// <summary>
+        /// แหล่งเงินที่รับค่าเสียหาย/ของหาย (ส่วนที่มัดจำ/เงินประกันไม่ครอบคลุม) — ค่าเริ่มต้น "ยังไม่รับเงิน/ออกใบเสร็จเอง"
+        /// = ไม่ลงบัญชีอัตโนมัติ (พฤติกรรมเดิม กันซ้ำกับใบเสร็จที่ออกมือ). เลือกแหล่งเงิน = ลงรายได้ค่าเสียหายตามนโยบายเอกสารขาย
+        /// </summary>
+        private void LoadDamagePaidHow()
+        {
+            try
+            {
+                ddlDamagePaidHow.Items.Clear();
+                ddlDamagePaidHow.Items.Add(new System.Web.UI.WebControls.ListItem("— ยังไม่รับเงิน / ออกใบเสร็จเอง —", "0"));
+                var dt = new code().DatabaseQuerySafe(connectionString,
+                    "SELECT ID, Paid_How FROM Account_Paid_How WHERE Status = 'True' ORDER BY ID", null);
+                if (dt != null)
+                    foreach (System.Data.DataRow r in dt.Rows)
+                        ddlDamagePaidHow.Items.Add(new System.Web.UI.WebControls.ListItem(
+                            Convert.ToString(r["Paid_How"]), Convert.ToString(r["ID"])));
+            }
+            catch { /* ส่วนเสริม — พังต้องไม่กระทบเช็คเอาท์ */ }
         }
 
         // ── วงเงินประกันความเสียหาย ──────────────────────────────────────────
@@ -495,7 +516,8 @@ namespace Take_Time_BangPhra
                     keyReturned: chkKeyReturn.Checked,
                     cleaningStatus: chkCleaning.Checked ? "GOOD" : "DIRTY",
                     guestSatisfaction: (byte)rating,
-                    notes: notes
+                    notes: notes,
+                    damagePaidHowId: SelectedDamagePaidHowId()
                 );
 
                 if (result.Success)
@@ -525,6 +547,13 @@ namespace Take_Time_BangPhra
             {
                 ShowError("เกิดข้อผิดพลาด: " + ex.Message);
             }
+        }
+
+        private int SelectedDamagePaidHowId()
+        {
+            int id;
+            try { return ddlDamagePaidHow != null && int.TryParse(ddlDamagePaidHow.SelectedValue, out id) ? id : 0; }
+            catch { return 0; }
         }
 
         private void DisableChecklistItems()

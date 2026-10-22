@@ -459,6 +459,10 @@
                             <asp:TextBox ID="txtMissingAmount" runat="server" TextMode="Number" step="0.01" min="0"
                                 Style="max-width:160px;display:inline-block;" placeholder="0.00" />
                         </div>
+                        <div style="margin-top:6px;">
+                            <label style="font-size:0.85em;color:#c0392b;">รับค่าเสียหาย/ของหาย (ส่วนที่มัดจำ/เงินประกันไม่ครอบคลุม) ด้วย:</label>
+                            <asp:DropDownList ID="ddlDamagePaidHow" runat="server" Style="max-width:260px;display:inline-block;" />
+                        </div>
                     </div>
                 </div>
 

@@ -270,11 +270,76 @@ namespace Take_Time_BangPhra.Services
                 catch { }
             }
 
+            // ของที่มีราคา (CHARGE_TO_ROOM) → ลงค่าใช้จ่ายในห้อง (Reservation_Product_Charges) ให้ไปอยู่ในบิลเช็คเอาท์
+            // เดิมไม่มีที่ไหนอ่านยอดนี้ตอนเช็คเอาท์/ยอดค้าง ⇒ ของที่คิดเงินไม่เคยถูกเก็บและไม่เคยเข้าบัญชี
+            if (payMethod == "CHARGE_TO_ROOM" && total > 0m)
+                CreateFolioCharge(result.RequestId, reservationId, number, total, lines);
+
             result.RequestNumber = number;
             result.TotalAmount = total;
             result.Lines = lines;
             result.Ok = true;
             return result;
+        }
+
+        /// <summary>คำนำหน้าหมายเหตุของค่าใช้จ่ายในห้องที่มาจากใบเบิก (ใช้หาแถวกลับ — ไม่ต้องเพิ่มคอลัมน์)</summary>
+        public const string FolioNotePrefix = "AMENITY:";
+
+        private static string FolioNoteKey(long requestId) { return FolioNotePrefix + requestId + " "; }
+
+        /// <summary>
+        /// ลงใบเบิกที่คิดเงินเป็นค่าใช้จ่ายในห้อง (Product_ID NULL — ไม่ใช่สินค้าในสต๊อก แบบเดียวกับค่ากิจกรรม)
+        /// → ขึ้นในยอดค้าง (ReservationBalance), บิลเช็คเอาท์ (AddProductChargesToReceipt) และบล็อกเช็คเอาท์ถ้ายังไม่ชำระ
+        /// ล้มเหลว (เช่น ยังไม่รัน migration ที่ให้ Product_ID เป็น NULL ได้) = log ไว้ ไม่กระทบใบเบิก
+        /// </summary>
+        private void CreateFolioCharge(long requestId, long reservationId, string number, decimal total, List<AmenityLine> lines)
+        {
+            try
+            {
+                var sb = new StringBuilder();
+                foreach (var l in lines)
+                {
+                    if (l.Subtotal <= 0m) continue;
+                    if (sb.Length > 0) sb.Append(", ");
+                    sb.Append(l.Name).Append(" x").Append(l.Quantity - l.FreeQty);
+                }
+                string name = "ของใช้ในห้อง: " + (sb.Length > 0 ? sb.ToString() : number);
+                if (name.Length > 250) name = name.Substring(0, 250);
+
+                _code.DatabaseInsertSafe(_conn,
+                    @"IF NOT EXISTS (SELECT 1 FROM Reservation_Product_Charges WHERE Reservation_ID = @res AND Notes LIKE @like)
+                      INSERT INTO Reservation_Product_Charges
+                        (Reservation_ID, Product_ID, Product_Name, Quantity, UnitPrice, TotalAmount,
+                         ChargeType, Notes, Status, IsPaid, StockDeducted)
+                      VALUES
+                        (@res, NULL, @name, 1, @amount, @amount,
+                         'ROOM_CHARGE', @notes, 'PENDING', 0, 0)",
+                    new Dictionary<string, object>
+                    {
+                        { "@res", reservationId },
+                        { "@name", name },
+                        { "@amount", total },
+                        { "@notes", FolioNoteKey(requestId) + "ใบเบิกของใช้ " + number },
+                        { "@like", FolioNoteKey(requestId) + "%" }
+                    });
+            }
+            catch (Exception ex)
+            {
+                try { _code.Logs(_conn, "Amenity", $"ลงค่าใช้จ่ายในห้องของใบเบิก {number} ไม่สำเร็จ: {ex.Message}", "SYSTEM"); } catch { }
+            }
+        }
+
+        /// <summary>ID ค่าใช้จ่ายในห้องของใบเบิกนี้ (0 = ไม่มี — ใบเก่าก่อนแก้ หรือฟรี)</summary>
+        public long FindFolioChargeId(long requestId)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_conn,
+                    "SELECT TOP 1 ID FROM Reservation_Product_Charges WHERE Notes LIKE @like ORDER BY ID DESC",
+                    new Dictionary<string, object> { { "@like", FolioNoteKey(requestId) + "%" } });
+                return dt != null && dt.Rows.Count > 0 ? Convert.ToInt64(dt.Rows[0][0]) : 0;
+            }
+            catch { return 0; }
         }
 
         public DataTable GetRequests(long reservationId)
@@ -355,6 +420,25 @@ namespace Take_Time_BangPhra.Services
                         { "@staff", staffId.HasValue ? (object)staffId.Value : DBNull.Value },
                         { "@done", done ? 1 : 0 }
                     });
+
+                // ยกเลิกใบเบิก → ยกเลิกค่าใช้จ่ายในห้องที่ลงไว้ด้วย (เฉพาะที่ยังไม่ถูกเก็บเงิน)
+                if (status == "CANCELLED")
+                {
+                    try
+                    {
+                        _code.DatabaseInsertSafe(_conn,
+                            @"UPDATE Reservation_Product_Charges
+                                 SET Status = 'CANCELLED', CancelledDate = GETDATE(),
+                                     CancelledBy_AdminID = @staff, CancelReason = N'ยกเลิกใบเบิกของใช้'
+                               WHERE Notes LIKE @like AND Status = 'PENDING' AND ISNULL(IsPaid, 0) = 0",
+                            new Dictionary<string, object>
+                            {
+                                { "@like", FolioNoteKey(requestId) + "%" },
+                                { "@staff", staffId.HasValue ? (object)staffId.Value : DBNull.Value }
+                            });
+                    }
+                    catch { }
+                }
                 return true;
             }
             catch { return false; }

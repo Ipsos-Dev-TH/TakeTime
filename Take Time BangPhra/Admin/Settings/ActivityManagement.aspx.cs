@@ -300,8 +300,10 @@ namespace Take_Time_BangPhra.Admin.Settings
                             break;
                         }
                     case "MarkPaidItem":
-                        _svc.MarkPaid(id, admin);
-                        ShowMessage("บันทึกว่าชำระเงินแล้ว", true);
+                        {
+                            string revNote = _svc.MarkPaidWithSource(id, admin, null);
+                            ShowMessage("บันทึกว่าชำระเงินแล้ว" + (string.IsNullOrEmpty(revNote) ? "" : " · " + revNote), true);
+                        }
                         break;
                     case "CancelItem":
                         {

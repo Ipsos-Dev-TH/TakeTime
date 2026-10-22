@@ -143,6 +143,9 @@ namespace Take_Time_BangPhra
                     catch (Exception rsx) { System.Diagnostics.Trace.TraceError($"RoomServiceRevenue timer error: {rsx.Message}"); }
                     try { revenue.PostOtaRoomRevenueIfDue(); }
                     catch (Exception otx) { System.Diagnostics.Trace.TraceError($"OtaRoomRevenue timer error: {otx.Message}"); }
+                    // รายได้ช่องทางนอก POS (กิจกรรม/เบิกของใช้/เกตเวย์หน้าร้าน/ค่าเสียหาย) — no-op ถ้ายังไม่รัน PHASE19_32/นโยบายเอกสารขายปิด
+                    try { revenue.PostChannelSalesIfDue(); }
+                    catch (Exception chx) { System.Diagnostics.Trace.TraceError($"ChannelSales timer error: {chx.Message}"); }
                 }
                 catch (Exception rvx) { System.Diagnostics.Trace.TraceError($"RevenuePosting timer error: {rvx.Message}"); }
 

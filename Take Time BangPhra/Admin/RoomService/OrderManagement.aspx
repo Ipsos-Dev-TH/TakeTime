@@ -557,6 +557,8 @@
                     <div class="action-area">
                         <asp:Button ID="btnClaim" runat="server" Text=" รับออเดอร์" CssClass="btn-action btn-claim" OnClick="btnClaim_Click" />
                         <asp:Button ID="btnDelivered" runat="server" Text=" จัดส่งแล้ว" CssClass="btn-action btn-delivered" OnClick="btnDelivered_Click" />
+                        <asp:Button ID="btnMarkPaid" runat="server" Text=" ยืนยันรับเงินแล้ว" CssClass="btn-action btn-claim" OnClick="btnMarkPaid_Click"
+                            Visible="false" OnClientClick="return confirm('ยืนยันว่าได้รับเงินของออเดอร์นี้แล้ว (เงินสดเก็บแล้ว / ตรวจสลิปโอนแล้ว)?\nรายได้จะถูกส่งเข้าบัญชีตามนโยบายเอกสารขาย');" />
                         <asp:Button ID="btnCancel" runat="server" Text=" ยกเลิก" CssClass="btn-action btn-cancel" OnClick="btnCancel_Click"
                             OnClientClick="return confirm('ยืนยันยกเลิกออเดอร์นี้?');" />
                     </div>

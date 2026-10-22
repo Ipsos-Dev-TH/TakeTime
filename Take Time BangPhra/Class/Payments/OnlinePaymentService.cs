@@ -695,19 +695,87 @@ namespace Take_Time_BangPhra.Payments
                 {
                     cmd.Parameters.AddWithValue("@id", reqId);
                     if (cmd.ExecuteNonQuery() > 0)
-                        return "บันทึกว่าใบเบิกของใช้ #" + reqId + " ชำระเงินแล้ว";
+                        return "บันทึกว่าใบเบิกของใช้ #" + reqId + " ชำระเงินแล้ว" + RecordAmenityRevenue(txn, reqId);
                 }
+                string pm;
                 using (var chk = new System.Data.SqlClient.SqlCommand(
                     "SELECT ISNULL(Payment_Method,'') FROM Guest_Amenity_Request WHERE ID = @id", con))
                 {
                     chk.Parameters.AddWithValue("@id", reqId);
-                    string pm = Convert.ToString(chk.ExecuteScalar());
-                    if (pm == "PAID") return "ใบเบิก #" + reqId + " ถูกบันทึกว่าจ่ายแล้วก่อนหน้านี้";
-                    if (pm == "CHARGE_TO_ROOM")
-                        throw new Exception("ใบเบิก #" + reqId + " ถูกคิดเข้าห้องพักไปแล้ว — "
-                            + "รับเงินซ้ำไม่ได้ ต้องคืนเงินลูกค้าหรือปรับบิลห้องก่อน");
-                    return "ไม่พบใบเบิก #" + reqId;
+                    pm = Convert.ToString(chk.ExecuteScalar());
                 }
+                if (pm == "PAID") return "ใบเบิก #" + reqId + " ถูกบันทึกว่าจ่ายแล้วก่อนหน้านี้";
+                if (pm != "CHARGE_TO_ROOM") return "ไม่พบใบเบิก #" + reqId;
+
+                // ใบเบิกที่คิดเข้าห้อง (ค่าเริ่มต้นของของที่มีราคา) แต่ลูกค้าเลือกจ่ายแยก:
+                // เดิม throw ทุกครั้ง → ปล่อยสิทธิ์ให้ลองใหม่วนไม่จบ ทั้งที่เกตเวย์ตัดเงินไปแล้ว
+                // ตอนนี้: ค่าใช้จ่ายในห้องยังไม่ถูกเก็บ → ปิดรายการในห้อง (เช็คเอาท์ไม่เก็บซ้ำ) แล้วลงรายได้จากเงินก้อนนี้
+                //         ถูกเก็บในบิลห้องไปแล้ว → ไม่ลงซ้ำ แจ้งให้คืนเงิน (ไม่ throw — กรณีนี้ลองใหม่กี่รอบก็ไม่หาย)
+                long chargeId = new AmenityService(_conn).FindFolioChargeId(reqId);
+                string st = new Take_Time_BangPhra.Integration.ChannelSalesPostingService(_conn)
+                    .SettleFolioChargeSeparately(chargeId, "ชำระแยกออนไลน์ " + (txn.TxnRef ?? "") + " (ใบเบิก #" + reqId + ")");
+                if (st == "PAID")
+                {
+                    Log("⚠ ใบเบิก #" + reqId + " ถูกเก็บในบิลห้องแล้ว แต่ลูกค้าจ่ายออนไลน์ซ้ำ " + txn.TxnRef + " — ต้องคืนเงิน");
+                    return "⚠ ใบเบิก #" + reqId + " ถูกเก็บรวมในบิลห้องพักไปแล้ว — รับเงินซ้ำ ต้องคืนเงินลูกค้า " + txn.Amount.ToString("N2") + " บาท";
+                }
+                using (var up = new System.Data.SqlClient.SqlCommand(@"
+                    UPDATE Guest_Amenity_Request SET Payment_Method = 'PAID'
+                     WHERE ID = @id AND Payment_Method = 'CHARGE_TO_ROOM'", con))
+                {
+                    up.Parameters.AddWithValue("@id", reqId);
+                    up.ExecuteNonQuery();
+                }
+                return "บันทึกว่าใบเบิกของใช้ #" + reqId + " ชำระแยกออนไลน์แล้ว (ปิดรายการในบิลห้อง)" + RecordAmenityRevenue(txn, reqId);
+            }
+        }
+
+        /// <summary>แหล่งเงินของเกตเวย์ที่ตัดเงินจริง (ชื่อแถว Account_Paid_How — ตัวเดียวกับค่าห้อง)</summary>
+        private string RecordingPaidHowName(PaymentTransaction txn)
+        {
+            try
+            {
+                return PaymentChannelCatalog.ResolveRecordingPaidHowName(_conn, txn.Provider, txn.Method, txn.CardBrand)
+                       ?? PaymentChannelCatalog.LegacyPaidHowName;
+            }
+            catch { return PaymentChannelCatalog.LegacyPaidHowName; }
+        }
+
+        /// <summary>รายได้เบิกของใช้ที่จ่ายแยก → สมุดช่องทาง AMENITY (ครั้งเดียว, AMN-{id}) — คืนข้อความต่อท้าย</summary>
+        private string RecordAmenityRevenue(PaymentTransaction txn, long reqId)
+        {
+            try
+            {
+                int resId = 0;
+                string number = null;
+                var dt = new code().DatabaseQuerySafe(_conn,
+                    "SELECT TOP 1 Reservation_ID, Request_Number FROM Guest_Amenity_Request WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", reqId } });
+                if (dt != null && dt.Rows.Count > 0)
+                {
+                    if (dt.Rows[0]["Reservation_ID"] != DBNull.Value) resId = Convert.ToInt32(dt.Rows[0]["Reservation_ID"]);
+                    number = Convert.ToString(dt.Rows[0]["Request_Number"]);
+                }
+                string note = new Take_Time_BangPhra.Integration.ChannelSalesPostingService(_conn).Record(
+                    new Take_Time_BangPhra.Integration.ChannelSale
+                    {
+                        Channel = Take_Time_BangPhra.Integration.SalesDocumentPolicy.ChAmenity,
+                        SourceKey = "AMN-" + reqId,
+                        ReservationId = resId,
+                        SaleDate = txn.PaidAt ?? DateTime.Now,
+                        PaidHowName = RecordingPaidHowName(txn),
+                        Amount = txn.Amount,
+                        Description = "ของใช้ในห้องพัก ใบเบิก " + (number ?? ("#" + reqId)) + " (ชำระออนไลน์ " + txn.TxnRef + ")",
+                        CustomerName = txn.CustomerName,
+                        CustomerPhone = txn.CustomerPhone,
+                        CreatedBy = "SYSTEM"
+                    });
+                return string.IsNullOrEmpty(note) ? "" : " · " + note;
+            }
+            catch (Exception ex)
+            {
+                Log("RecordAmenityRevenue #" + reqId + ": " + ex.Message);
+                return "";
             }
         }
 
@@ -720,9 +788,11 @@ namespace Take_Time_BangPhra.Payments
             using (var con = new System.Data.SqlClient.SqlConnection(_conn))
             {
                 con.Open();
+                // Paid_Date (PHASE19_32) = วันรับเงินจริง — ใบสรุปรายได้รูมเซอร์วิสจัดกลุ่มตามวันนี้ (จุดเกิดภาษี)
+                bool hasPaidDate = Take_Time_BangPhra.Integration.ChannelPosting.HasColumn(_conn, "Guest_Room_Service_Orders", "Paid_Date");
                 using (var cmd = new System.Data.SqlClient.SqlCommand(@"
                     UPDATE Guest_Room_Service_Orders
-                       SET Payment_Status = 'PAID', Payment_Method = 'ONLINE'
+                       SET Payment_Status = 'PAID', Payment_Method = 'ONLINE'" + (hasPaidDate ? ", Paid_Date = GETDATE()" : "") + @"
                      WHERE ID = @id AND ISNULL(Payment_Status,'') NOT IN ('PAID','CHARGED')", con))
                 {
                     cmd.Parameters.AddWithValue("@id", orderId);
@@ -750,8 +820,10 @@ namespace Take_Time_BangPhra.Payments
                 return "รหัสการจองกิจกรรมไม่ถูกต้อง (" + (txn.SourceId ?? "-") + ")";
 
             var svc = new ActivityService(_conn);
-            svc.MarkPaid(bookingId, null);
-            return "บันทึกว่าจองกิจกรรม #" + bookingId + " ชำระเงินแล้ว";
+            // แหล่งเงินของเกตเวย์ที่ตัดเงินจริง (ชื่อเดียวกับค่าห้อง) → รายได้กิจกรรมเข้าบัญชีตามนโยบายเอกสารขาย
+            string paidHow = RecordingPaidHowName(txn);
+            string rev = svc.MarkPaidWithSource(bookingId, null, paidHow);
+            return "บันทึกว่าจองกิจกรรม #" + bookingId + " ชำระเงินแล้ว" + (string.IsNullOrEmpty(rev) ? "" : " · " + rev);
         }
 
         // ── แจ้งเตือน ────────────────────────────────────────────────────────

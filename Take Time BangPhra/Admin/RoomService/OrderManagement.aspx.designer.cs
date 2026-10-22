@@ -38,6 +38,7 @@ namespace Take_Time_BangPhra.Admin.RoomService
         /// </summary>
         protected global::System.Web.UI.WebControls.Button btnClaim;
         protected global::System.Web.UI.WebControls.Button btnDelivered;
+        protected global::System.Web.UI.WebControls.Button btnMarkPaid;
         protected global::System.Web.UI.WebControls.Button btnCancel;
         protected global::System.Web.UI.WebControls.Panel pnlSelectOrder;
         protected global::System.Web.UI.WebControls.HiddenField hfSelectedOrder;
