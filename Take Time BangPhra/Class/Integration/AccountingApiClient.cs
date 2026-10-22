@@ -737,7 +737,7 @@ namespace Take_Time_BangPhra.Integration
         }
 
         /// <summary>
-        /// กลับรายการ Journal พร้อม ExternalRef ของตัวกลับรายการเอง (เช่น STOCKOUT-REV-{id}) —
+        /// กลับรายการ Journal พร้อม ExternalRef ของตัวกลับรายการเอง (เช่น STKREV-{id}) —
         /// NextAcc ใช้ ExternalRef เป็น Reference ของ JE กลับรายการ (IntegrationService.ProcessJournalReverseAsync
         /// :4646 <c>Reference = request.ExternalRef ?? original.Reference</c>) → ไม่ชน Reference ของต้นฉบับ
         /// ที่ /integration/journals ใช้ dedup. ต้นฉบับถูก mark Reversed และหลุดจาก ภ.พ.30 JE fallback (TaxService.cs:1245-1246)

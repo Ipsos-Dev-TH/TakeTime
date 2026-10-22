@@ -24,7 +24,7 @@ namespace Take_Time_BangPhra.Inventory
     /// <summary>
     /// การเบิกสินค้าออกนอกการขาย (เสียหาย/หมดอายุ/ส่งเสริมการขาย/ใช้ภายใน ฯลฯ) — PHASE19_30
     /// บันทึก Product_Out พร้อมเหตุผล → อนุมัติ (ถ้าเหตุผลกำหนด) → ลงบัญชี NextAcc เฉพาะแถว APPROVED
-    /// (AccountingSyncService.EnqueueStockOutReasonJournal, ref STOCKOUT-{ID}).
+    /// (AccountingSyncService.EnqueueStockOutReasonJournal, ref STKOUT-{ID}; คิวเก่า STOCKOUT-{ID}).
     /// ยกเลิก: แถวที่ยังไม่เคยส่ง NextAcc ลบได้ / แถวที่ส่งแล้ว mark Is_Reversed + คืนสต็อก (Product_In
     /// InType='STOCKOUT_REV') + JE กลับรายการ + qty IN. หน้าเบิกไม่เขียน Remark='ขาย' (กัน POS rollup หยิบไป)
     /// </summary>
@@ -344,9 +344,12 @@ namespace Take_Time_BangPhra.Inventory
             {
                 // เคยส่งเข้าคิว NextAcc แล้ว (JE หรือจำนวนสต๊อก) = ต้องกลับรายการ ไม่ใช่ลบ
                 string createRef = AccountingDataMapper.StockOutRef(id);
+                string oldCreateRef = AccountingDataMapper.LegacyStockOutRef(id);   // คิวก่อนเปลี่ยน prefix
                 footprint = !string.IsNullOrWhiteSpace(row.JournalRef)
                     || QueueHasAny("STOCK_OUT_REASON_JOURNAL", createRef)
-                    || QueueHasAny("STOCK_QTY_PUSH", "QTY-OUT-" + createRef);
+                    || QueueHasAny("STOCK_QTY_PUSH", "QTY-OUT-" + createRef)
+                    || QueueHasAny("STOCK_OUT_REASON_JOURNAL", oldCreateRef)
+                    || QueueHasAny("STOCK_QTY_PUSH", "QTY-OUT-" + oldCreateRef);
             }
 
             if (!footprint)

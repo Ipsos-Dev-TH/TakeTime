@@ -33,11 +33,11 @@
 --          ตามชื่อ/รหัส (TaxService.cs:1277-1293) → ขาเดบิตจะหักล้างภาษีขายจนไม่เข้า ภ.พ.30 (โค้ดกันไว้แล้ว)
 --    mapping ที่ยังว่าง → โค้ดลงบัญชี STOCK_LOSS_EXPENSE แทน (พฤติกรรมเดิม) และเขียน log เตือน
 --
--- การลงบัญชี (เฉพาะแถว APPROVED, ref STOCKOUT-{Product_Out.ID}, /api/integration/journals idempotent):
+-- การลงบัญชี (เฉพาะแถว APPROVED, ref STKOUT-{Product_Out.ID}, /api/integration/journals idempotent):
 --   Dr <บัญชีของเหตุผล> / Cr INVENTORY  (ต้นทุน)
 --   ถ้า Deemed_Sale_Vat=1 และกิจการจด VAT: Dr <บัญชีของเหตุผล หรือ OUTPUT_VAT_DEEMED_EXPENSE> / Cr OUTPUT_VAT (21911)
 --     = 7% ของฐาน (ราคาตลาด) — NextAcc นับเข้า ภ.พ.30 ผ่าน JE fallback (TaxService.cs:1229-1334, ฐาน = VAT ÷ 7%)
---   กลับรายการ: /api/integration/journals/reverse (ref STOCKOUT-REV-{ID}) — ต้นฉบับถูกตัดออกจาก ภ.พ.30 (TaxService.cs:1245-1246)
+--   กลับรายการ: /api/integration/journals/reverse (ref STKREV-{ID}) — ต้นฉบับถูกตัดออกจาก ภ.พ.30 (TaxService.cs:1245-1246)
 --
 -- idempotent — รันซ้ำได้, ไม่ลบข้อมูล, ไม่แตะค่าที่ผู้ดูแลแก้ไว้แล้ว
 -- ════════════════════════════════════════════════════════════════════════════

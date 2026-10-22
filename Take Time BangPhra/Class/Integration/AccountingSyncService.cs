@@ -2023,9 +2023,13 @@ namespace Take_Time_BangPhra.Integration
             InsertInboundProductIn(ttProductId, qty, m.UnitCost, m.MovementDate);
             MarkMovementSeen(m.Id, "PULL", ttProductId);
             return true;
-        // เบิกสินค้าตามเหตุผล (Stock_Out_Reason — PHASE19_30): JE ต่อแถว Product_Out, ref STOCKOUT-{ID}
+        }
+
+        // ──────────────────────────────────────────────
+        // เบิกสินค้าตามเหตุผล (Stock_Out_Reason — PHASE19_30): JE ต่อแถว Product_Out, ref STKOUT-{ID}
         //   Dr บัญชีของเหตุผล / Cr INVENTORY (ต้นทุน) + [ถือเป็นการขาย ม.77/1(8)] Dr บัญชีของเหตุผล / Cr OUTPUT_VAT
-        //   กลับรายการ = /integration/journals/reverse (ref STOCKOUT-REV-{ID}) + qty IN
+        //   กลับรายการ = /integration/journals/reverse (ref STKREV-{ID}) + qty IN
+        //   (prefix ≤ 6 ตัวอักษรตาม regex เลขอ้างอิง ภ.พ.30 ของ NextAcc; คิวเก่าที่ถือ "STOCKOUT-…" ยังค้น/คง ref เดิม)
         // ──────────────────────────────────────────────
 
         /// <summary>
@@ -2044,11 +2048,13 @@ namespace Take_Time_BangPhra.Integration
             if (costPerUnit < 0) costPerUnit = 0;
 
             string refStr = AccountingDataMapper.StockOutRef(productOutId);
+            string legacyRef = AccountingDataMapper.LegacyStockOutRef(productOutId);
 
             // จำนวนสต๊อกส่งเสมอ แม้ต้นทุน 0 (เดิม cost ≤ 0 → ไม่มีทั้ง GL และ qty → NextAcc สต๊อกเกินจริง)
             // ครั้งเดียวต่อแถว: dedup ของ EnqueueStockQtyPush ดูแค่ 24 ชม. → กด "ลงบัญชีอีกครั้ง" ทีหลังจะ push ซ้ำ
             string qSt, qResp;
-            if (FindAnyStockQueueEntry("STOCK_QTY_PUSH", "QTY-OUT-" + refStr, out qSt, out qResp) <= 0)
+            if (FindAnyStockQueueEntry("STOCK_QTY_PUSH", "QTY-OUT-" + refStr, out qSt, out qResp) <= 0
+                && FindAnyStockQueueEntry("STOCK_QTY_PUSH", "QTY-OUT-" + legacyRef, out qSt, out qResp) <= 0)
                 EnqueueStockQtyPush(productId, productName, quantity, "OUT", costPerUnit, outDate, refStr);
 
             decimal vatBaseAmt = 0m, vatAmt = 0m;
@@ -2078,8 +2084,10 @@ namespace Take_Time_BangPhra.Integration
 
             if (!string.IsNullOrEmpty(ParseStockOutJournalGuid(ReadStockOutJournalRef(productOutId)))) return 0;
             long existing = FindPendingEntry("STOCK", "STOCK_OUT_REASON_JOURNAL", "stockRef", refStr);
+            if (existing <= 0) existing = FindPendingEntry("STOCK", "STOCK_OUT_REASON_JOURNAL", "stockRef", legacyRef);
             if (existing > 0) return existing;
             long done = FindRecentCompletedEntry("STOCK", "STOCK_OUT_REASON_JOURNAL", "stockRef", refStr, 86400 * 3650);
+            if (done <= 0) done = FindRecentCompletedEntry("STOCK", "STOCK_OUT_REASON_JOURNAL", "stockRef", legacyRef, 86400 * 3650);
             if (done > 0) return done;
 
             var payload = new Dictionary<string, object>
@@ -2113,8 +2121,18 @@ namespace Take_Time_BangPhra.Integration
             if (productOutId <= 0) return -1;
 
             string createRef = AccountingDataMapper.StockOutRef(productOutId);
-            string refStr = "STOCKOUT-REV-" + productOutId;
-            string qtySrc = string.IsNullOrEmpty(legacyQtySrcRef) ? createRef : legacyQtySrcRef;
+            string refStr = AccountingDataMapper.StockOutReverseRef(productOutId);
+            string oldCreateRef = AccountingDataMapper.LegacyStockOutRef(productOutId);
+            string oldRefStr = AccountingDataMapper.LegacyStockOutReverseRef(productOutId);
+            string qtySrc = legacyQtySrcRef;
+            if (string.IsNullOrEmpty(qtySrc))
+            {
+                // แถวที่ push qty OUT ไว้ด้วย ref รุ่นแรก "STOCKOUT-…" → กลับด้วย ref เดียวกัน
+                string qs, qr;
+                qtySrc = FindAnyStockQueueEntry("STOCK_QTY_PUSH", "QTY-OUT-" + createRef, out qs, out qr) <= 0
+                         && FindAnyStockQueueEntry("STOCK_QTY_PUSH", "QTY-OUT-" + oldCreateRef, out qs, out qr) > 0
+                    ? oldCreateRef : createRef;
+            }
 
             // qty IN เฉพาะเมื่อเคยส่ง qty OUT ของแถวนี้ (กัน NextAcc ได้สต๊อกเพิ่มลอย ๆ)
             string outStatus, outResp, inStatus, inResp;
@@ -2125,12 +2143,15 @@ namespace Take_Time_BangPhra.Integration
             string st, resp;
             bool hasJournal = !string.IsNullOrEmpty(legacyJournalId)
                 || !string.IsNullOrEmpty(ParseStockOutJournalGuid(ReadStockOutJournalRef(productOutId)))
-                || FindAnyStockQueueEntry("STOCK_OUT_REASON_JOURNAL", createRef, out st, out resp) > 0;
+                || FindAnyStockQueueEntry("STOCK_OUT_REASON_JOURNAL", createRef, out st, out resp) > 0
+                || FindAnyStockQueueEntry("STOCK_OUT_REASON_JOURNAL", oldCreateRef, out st, out resp) > 0;
             if (!hasJournal) return 0;
 
             long existing = FindPendingEntry("STOCK", "STOCK_OUT_REASON_REVERSE", "stockRef", refStr);
+            if (existing <= 0) existing = FindPendingEntry("STOCK", "STOCK_OUT_REASON_REVERSE", "stockRef", oldRefStr);
             if (existing > 0) return existing;
             long done = FindRecentCompletedEntry("STOCK", "STOCK_OUT_REASON_REVERSE", "stockRef", refStr, 86400 * 3650);
+            if (done <= 0) done = FindRecentCompletedEntry("STOCK", "STOCK_OUT_REASON_REVERSE", "stockRef", oldRefStr, 86400 * 3650);
             if (done > 0) return done;
 
             var payload = new Dictionary<string, object>
@@ -2170,7 +2191,10 @@ namespace Take_Time_BangPhra.Integration
                 DeemedVatBase = p.ContainsKey("deemedVatBase") ? SafeDec(p["deemedVatBase"]) : 0m,
                 DeemedVatAmount = p.ContainsKey("deemedVatAmount") ? SafeDec(p["deemedVatAmount"]) : 0m,
                 OutDate = ParseAcctDate(p["outDate"]?.ToString()),
-                Note = p.ContainsKey("note") ? p["note"]?.ToString() : ""
+                Note = p.ContainsKey("note") ? p["note"]?.ToString() : "",
+                // คิวที่เข้าก่อนเปลี่ยน prefix ถือ "STOCKOUT-…" → คง ref เดิม (อาจถึง NextAcc แล้ว — กัน JE ซ้ำ)
+                Reference = p.ContainsKey("stockRef") && (p["stockRef"]?.ToString() ?? "").StartsWith("STOCKOUT-", StringComparison.Ordinal)
+                    ? p["stockRef"].ToString() : null
             };
 
             _code.Logs(_connectionString, "AccountingSync",
@@ -2187,7 +2211,7 @@ namespace Take_Time_BangPhra.Integration
         private async Task<string> ProcessStockOutReasonReverse(Dictionary<string, object> p)
         {
             long rowId = Convert.ToInt64(p["productOutId"]);
-            string refStr = p.ContainsKey("stockRef") ? p["stockRef"]?.ToString() : "STOCKOUT-REV-" + rowId;
+            string refStr = p.ContainsKey("stockRef") ? p["stockRef"]?.ToString() : AccountingDataMapper.StockOutReverseRef(rowId);
             string createRef = p.ContainsKey("createRef") ? p["createRef"]?.ToString() : AccountingDataMapper.StockOutRef(rowId);
             string reason = p.ContainsKey("reason") ? p["reason"]?.ToString() : "";
             DateTime revDate = p.ContainsKey("reverseDate") ? ParseAcctDate(p["reverseDate"]?.ToString()) : DateTime.Today;
@@ -2202,7 +2226,8 @@ namespace Take_Time_BangPhra.Integration
             if (jid == Guid.Empty)
             {
                 string st, resp;
-                if (FindAnyStockQueueEntry("STOCK_OUT_REASON_JOURNAL", createRef, out st, out resp) > 0)
+                if (FindAnyStockQueueEntry("STOCK_OUT_REASON_JOURNAL", createRef, out st, out resp) > 0
+                    || FindAnyStockQueueEntry("STOCK_OUT_REASON_JOURNAL", AccountingDataMapper.LegacyStockOutRef(rowId), out st, out resp) > 0)
                 {
                     if (st == "PROCESSING")
                         throw new Exception($"StockOutReverse {refStr}: คิวลงบัญชีต้นฉบับ ({createRef}) กำลังทำงาน — รอให้เสร็จแล้ว retry");

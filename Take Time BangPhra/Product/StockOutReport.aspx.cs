@@ -138,7 +138,7 @@ namespace Take_Time_BangPhra.Product
                   .Append("<td>").Append(H(Convert.ToString(r["Reason"]))).Append("</td>")
                   .Append("<td>").Append(H(Convert.ToString(r["Recorded_By"]))).Append("</td>")
                   .Append("<td>").Append(H(Convert.ToString(r["Approved_By"]))).Append("</td>")
-                  .Append("<td>STOCKOUT-").Append(H(Convert.ToString(r["ID"]))).Append("</td>")
+                  .Append("<td>STKOUT-").Append(H(Convert.ToString(r["ID"]))).Append("</td>")
                   .Append("<td>").Append(hasEv ? "มี (ภาพ/เอกสารแนบ)" : "—").Append("</td></tr>");
             }
             sb.Append("<tr class='tot'><td colspan='3'>รวม</td><td class='n'>").Append(totQty.ToString("N0"))

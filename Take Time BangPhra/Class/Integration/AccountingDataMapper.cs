@@ -1283,10 +1283,20 @@ namespace Take_Time_BangPhra.Integration
             public decimal DeemedVatAmount { get; set; }
             public DateTime OutDate { get; set; }
             public string Note { get; set; }
+            /// <summary>ExternalRef ที่ต้องใช้ (คิวเก่าที่ถือ ref "STOCKOUT-…" ไว้ — คง ref เดิมกัน JE ซ้ำ); ว่าง = StockOutRef(ProductOutId)</summary>
+            public string Reference { get; set; }
         }
 
-        /// <summary>ExternalRef ของ JE เบิกสินค้า — idempotent ฝั่ง NextAcc (/integration/journals dedup by Reference)</summary>
-        public static string StockOutRef(long productOutId) => "STOCKOUT-" + productOutId;
+        /// <summary>
+        /// ExternalRef ของ JE เบิกสินค้า — idempotent ฝั่ง NextAcc (/integration/journals dedup by Reference).
+        /// prefix ≤ 6 ตัวอักษร: regex เลขอ้างอิงของ NextAcc (ภ.พ.30) รับแค่ 2–6 ตัวพิมพ์ใหญ่ — "STOCKOUT-" เดิมแสดงเป็น "OCKOUT-…"
+        /// </summary>
+        public static string StockOutRef(long productOutId) => "STKOUT-" + productOutId;
+        /// <summary>ExternalRef ของ JE กลับรายการเบิกสินค้า (prefix ≤ 6 ตัวอักษร)</summary>
+        public static string StockOutReverseRef(long productOutId) => "STKREV-" + productOutId;
+        /// <summary>ref รุ่นแรก (ก่อนเปลี่ยน prefix) — ใช้ค้นคิว/กันซ้ำของรายการที่เข้าคิวไปแล้วเท่านั้น ห้ามใช้สร้างใหม่</summary>
+        public static string LegacyStockOutRef(long productOutId) => "STOCKOUT-" + productOutId;
+        public static string LegacyStockOutReverseRef(long productOutId) => "STOCKOUT-REV-" + productOutId;
 
         /// <summary>
         /// JE เบิกสินค้าตามเหตุผล:
@@ -1361,7 +1371,7 @@ namespace Take_Time_BangPhra.Integration
                 EntryDate = i.OutDate,
                 JournalType = NexaaccJournalType.General,
                 Description = desc,
-                Reference = StockOutRef(i.ProductOutId),
+                Reference = string.IsNullOrWhiteSpace(i.Reference) ? StockOutRef(i.ProductOutId) : i.Reference.Trim(),
                 Lines = lines
             };
         }
