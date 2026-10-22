@@ -25,6 +25,7 @@ namespace Take_Time_BangPhra.Account.Report
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.FinVoucher)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             this.MaintainScrollPositionOnPostBack = true;
             documentHelper = new DocumentHelper(conn);
             assetService = new AssetService();
@@ -97,6 +98,16 @@ namespace Take_Time_BangPhra.Account.Report
 
                 // Load Asset Categories
                 LoadAssetCategories();
+
+                // โหลดผังบัญชีจริงจาก NextAcc (เหมือนหน้า OCR) — แหล่งจ่ายเงิน + ผังค่าใช้จ่าย
+                LoadNexaaccPaidHowOptions();
+                LoadNexaaccChargeOptions();
+
+                // ชำระค่าสินค้าที่รับเข้าสต๊อกแล้ว (GR/IR) — รายการรับของที่ยังไม่ผูกใบสำคัญจ่าย
+                LoadGoodsReceiptOptions();
+
+                // ใบรับรองแทนใบเสร็จรับเงิน — ค่าตั้งต้นผู้รับรอง (ผู้ใช้ที่ login) / พยาน (กรรมการ)
+                InitCertInLieuDefaults();
 
                 string command = Request.QueryString["command"];
                 string uid = Request.QueryString["uid"];
@@ -173,6 +184,9 @@ namespace Take_Time_BangPhra.Account.Report
                         chkIsCredit.Checked = Convert.ToBoolean(dtPayment.Rows[0]["IsCredit"]);
                     }
 
+                    // ใบรับรองแทนใบเสร็จรับเงิน (ถ้าใบนี้เคยบันทึกไว้) — ต้องโหลดก่อน LoadNextAccReference (ใช้เลือกลิงก์)
+                    LoadCertInLieu(dtPayment.Rows[0]);
+
                     // Load NextAcc document reference
                     LoadNextAccReference(id);
 
@@ -188,7 +202,7 @@ namespace Take_Time_BangPhra.Account.Report
                     DropDownList1.SelectedIndex = DropDownList1.Items.IndexOf(DropDownList1.Items.FindByValue(dtVendorSelected.Rows[0]["ID"].ToString()));
                     DropDownList1.DataBind();
 
-                    string path = System.Configuration.ConfigurationManager.AppSettings["PaymentFolderPath"].ToString();
+                    string path = AppCfg.Get("PaymentFolderPath").ToString();
                     string paymentPath = path + "\\" + docdate.Year + "\\" + docdate.Month;
                     // Fallback: check padded month directory for files created with zero-padded month
                     if (!Directory.Exists(paymentPath))
@@ -233,6 +247,8 @@ namespace Take_Time_BangPhra.Account.Report
                         dtPaymentDetail.Columns.Add("PaidTypeName");
                     if (!dtPaymentDetail.Columns.Contains("NexaaccAccountId"))
                         dtPaymentDetail.Columns.Add("NexaaccAccountId");
+                    if (!dtPaymentDetail.Columns.Contains("AccountCode"))
+                        dtPaymentDetail.Columns.Add("AccountCode");
 
                     // For old data without per-line categories, fill from header category
                     for (int i = 0; i < dtPaymentDetail.Rows.Count; i++)
@@ -247,6 +263,9 @@ namespace Take_Time_BangPhra.Account.Report
 
                     Session["dtDetail"] = dtPaymentDetail;
 
+                    // การรับของที่ผูกกับใบนี้ (แก้ไข = ลบแล้วบันทึกใหม่ → ต้องผูกซ้ำตอนบันทึก)
+                    RestoreLinkedGoodsReceipts(id);
+
                     // Check if there's an asset linked to this payment voucher
                     LoadExistingAssetData(id);
 
@@ -260,6 +279,7 @@ namespace Take_Time_BangPhra.Account.Report
                     dtDetail.Columns.Add("PaidTypeId");
                     dtDetail.Columns.Add("PaidTypeName");
                     dtDetail.Columns.Add("NexaaccAccountId");
+                    dtDetail.Columns.Add("AccountCode");
                 }
                 catch
                 {
@@ -289,6 +309,11 @@ namespace Take_Time_BangPhra.Account.Report
                     DateTime docDate = DateTime.Now;
                     string docNum = documentHelper.CreateDocumentNumber("Account_Payment", "PAY", docDate);
                     txtVoucherNo.Text = docNum;
+
+                    // มาจากหน้า นำเข้าสินค้า (จ่ายแล้ว/ซื้อเชื่อ) หรือปุ่ม "ใบสำคัญจ่าย" ของการรับของ → กรอกให้
+                    string grn = Request.QueryString["grn"];
+                    if (!string.IsNullOrEmpty(grn))
+                        PrefillFromGoodsReceipt(grn, Request.QueryString["ph"], Request.QueryString["credit"] == "1");
                 }
                 try
                 {
@@ -303,7 +328,20 @@ namespace Take_Time_BangPhra.Account.Report
                     Literal1.Text = "<script> var Material_Name = " + jsonArray + ";\r\nautocomplete(document.getElementById(\"MainContent_TextBox9\"), Material_Name);</script>";
                 }
                 catch { }
-                
+
+                // แจ้งบันทึกสำเร็จ (server-side redirect จาก Button3 → ?saved=1) + สถานะ sync ไป NextAcc
+                if (Request.QueryString["saved"] == "1")
+                {
+                    string s = Request.QueryString["s"] ?? "";
+                    string syncMsg;
+                    if (s == "queued") syncMsg = "✅ ส่งเข้าคิว sync ไป NextAcc แล้ว";
+                    else if (s == "off") syncMsg = "ℹ️ ยังไม่ได้เปิด/ตั้งค่า NextAcc — เอกสารบันทึกในระบบเท่านั้น (ไม่ sync)";
+                    else syncMsg = "⚠️ บันทึกแล้ว แต่ส่ง sync ไป NextAcc ไม่สำเร็จ — ตรวจสอบการตั้งค่า/คิว sync";
+                    string alertMsg = ("✅ บันทึกใบสำคัญจ่ายเรียบร้อยแล้ว\\n" + syncMsg).Replace("'", "\\'");
+                    ClientScript.RegisterStartupScript(this.GetType(), "savedok",
+                        "alert('" + alertMsg + "');", true);
+                }
+
             }
 
         }
@@ -312,9 +350,11 @@ namespace Take_Time_BangPhra.Account.Report
         {
             Label1.Text = DropDownList4.SelectedItem.Text;
 
-            if (string.IsNullOrEmpty(ddlLineCategory.SelectedValue))
+            // อนุญาตให้เลือก "หมวดค่าใช้จ่าย (mapping)" หรือ "ผังบัญชี NextAcc โดยตรง" อย่างใดอย่างหนึ่ง
+            bool pickedNexaaccCharge = !string.IsNullOrEmpty(ddlLineChargeNexaacc.SelectedValue);
+            if (string.IsNullOrEmpty(ddlLineCategory.SelectedValue) && !pickedNexaaccCharge)
             {
-                ClientScript.RegisterStartupScript(this.GetType(), "catAlert", "alert('กรุณาเลือกหมวดค่าใช้จ่ายสำหรับรายการนี้');", true);
+                ClientScript.RegisterStartupScript(this.GetType(), "catAlert", "alert('กรุณาเลือกหมวดค่าใช้จ่าย หรือผังบัญชี NextAcc สำหรับรายการนี้');", true);
                 return;
             }
 
@@ -327,20 +367,38 @@ namespace Take_Time_BangPhra.Account.Report
                     dtDetail.Columns.Add("PaidTypeName");
                     dtDetail.Columns.Add("NexaaccAccountId");
                 }
+                if (!dtDetail.Columns.Contains("AccountCode"))
+                    dtDetail.Columns.Add("AccountCode");
 
                 string paidTypeId = ddlLineCategory.SelectedValue;
-                string paidTypeName = ddlLineCategory.SelectedItem.Text;
+                string paidTypeName = ddlLineCategory.SelectedItem?.Text ?? "";
                 string nexaaccAccId = "";
-                try
+                string accountCode = "";
+
+                if (pickedNexaaccCharge)
                 {
-                    var sync = new Integration.AccountingSyncService(conn);
-                    nexaaccAccId = sync.LookupPaidTypeAccountId(paidTypeName) ?? "";
+                    // เลือกผังบัญชี NextAcc โดยตรง → ใช้ code/GUID/ชื่อบัญชีนั้นตรง ๆ (เลี่ยง mapping)
+                    accountCode = ddlLineChargeNexaacc.SelectedValue;             // = Account_Code
+                    string accName = ddlLineChargeNexaacc.SelectedItem?.Text ?? accountCode;
+                    var info = LookupNexaaccByCode(accountCode);
+                    nexaaccAccId = info.Item1 ?? "";                              // Nexaacc_AccountId (GUID)
+                    // ใช้ชื่อบัญชี NextAcc เป็นชื่อหมวด (แสดงใน GridView + เป็น ItemName ฝั่ง NextAcc)
+                    paidTypeName = !string.IsNullOrEmpty(info.Item2) ? info.Item2 : accName;
+                    if (string.IsNullOrEmpty(ddlLineCategory.SelectedValue)) paidTypeId = "";
                 }
-                catch { }
+                else
+                {
+                    try
+                    {
+                        var sync = new Integration.AccountingSyncService(conn);
+                        nexaaccAccId = sync.LookupPaidTypeAccountId(paidTypeName) ?? "";
+                    }
+                    catch { }
+                }
 
                 dtDetail.Rows.Add(dtDetail.Rows.Count + 1, TextBox1.Text,
                     NumberHelper.TwoDecimalPoints(Convert.ToDecimal(TextBox2.Text)),
-                    paidTypeId, paidTypeName, nexaaccAccId);
+                    paidTypeId, paidTypeName, nexaaccAccId, accountCode);
                 Session["dtDetail"] = (DataTable)dtDetail;
                 GridView1.DataSource = dtDetail;
                 GridView1.DataBind();
@@ -436,6 +494,315 @@ namespace Take_Time_BangPhra.Account.Report
             txtWHTAmount.Text = whtAmount.ToString("N2");
         }
 
+        // ──────────────────────────────────────────────
+        // ผังบัญชีจาก NextAcc โดยตรง (เหมือนหน้า OCR) — เลี่ยงปัญหา mapping ผิด
+        // ──────────────────────────────────────────────
+
+        /// <summary>ดึงผังบัญชีจาก cache NextAcc (Accounting_Nexaacc_Accounts) ตาม code filter.
+        /// codeFilter เป็นค่าคงที่ในโค้ด (ไม่ใช่ user input). คืน null ถ้ายังไม่ได้ Sync ผังบัญชี</summary>
+        private DataTable LoadNexaaccAccounts(string codeFilter)
+        {
+            try
+            {
+                return code.DatabaseQuerySafe(conn,
+                    "SELECT Nexaacc_AccountId, Account_Code, Account_Name FROM Accounting_Nexaacc_Accounts " +
+                    "WHERE ISNULL(Is_Active, 1) = 1 AND (" + codeFilter + ") ORDER BY Account_Code", null);
+            }
+            catch { return null; }
+        }
+
+        /// <summary>แหล่งจ่ายเงิน — ผังบัญชีจริงจาก NextAcc (11x เงินสด/ธนาคาร + 21x เจ้าหนี้กรรมการ), value = Nexaacc_AccountId</summary>
+        private void LoadNexaaccPaidHowOptions()
+        {
+            ddlPaidHowNexaacc.Items.Clear();
+            ddlPaidHowNexaacc.Items.Add(new ListItem("— ใช้ตามวิธีจ่ายเงิน (mapping) —", ""));
+            var na = LoadNexaaccAccounts("Account_Code LIKE '11%' OR Account_Code LIKE '21%'");
+            if (na != null)
+                foreach (DataRow r in na.Rows)
+                    ddlPaidHowNexaacc.Items.Add(new ListItem(
+                        ($"{r["Account_Code"]} {r["Account_Name"]}").Trim(),
+                        r["Nexaacc_AccountId"]?.ToString() ?? ""));
+        }
+
+        /// <summary>ผังบัญชีค่าใช้จ่าย — ผังบัญชีจริงจาก NextAcc (5x ค่าใช้จ่าย + 12x สินทรัพย์ถาวร), value = Account_Code</summary>
+        private void LoadNexaaccChargeOptions()
+        {
+            ddlLineChargeNexaacc.Items.Clear();
+            ddlLineChargeNexaacc.Items.Add(new ListItem("— ใช้หมวดค่าใช้จ่าย (mapping) —", ""));
+            // 5x ค่าใช้จ่าย + 12x สินทรัพย์ถาวร + เจ้าหนี้/เงินทดรองกรรมการ (2x ชื่อมี "กรรมการ")
+            // → รองรับเคส "คืนเงินทดรองกรรมการ" (Dr เจ้าหนี้กรรมการ / Cr เงินสด-ธนาคาร)
+            var na = LoadNexaaccAccounts(
+                "Account_Code LIKE '5%' OR Account_Code LIKE '12%' OR (Account_Code LIKE '2%' AND Account_Name LIKE N'%กรรมการ%')");
+            if (na != null)
+                foreach (DataRow r in na.Rows)
+                {
+                    string c = r["Account_Code"]?.ToString() ?? "";
+                    string n = r["Account_Name"]?.ToString() ?? "";
+                    ddlLineChargeNexaacc.Items.Add(new ListItem($"{c} {n}".Trim(), c));
+                }
+        }
+
+        /// <summary>หา Nexaacc_AccountId (GUID) + ชื่อบัญชี จาก Account_Code ใน cache. คืน (id, name)</summary>
+        private Tuple<string, string> LookupNexaaccByCode(string accountCode)
+        {
+            try
+            {
+                var dt = code.DatabaseQuerySafe(conn,
+                    "SELECT TOP 1 Nexaacc_AccountId, Account_Name FROM Accounting_Nexaacc_Accounts WHERE Account_Code = @c",
+                    new Dictionary<string, object> { { "@c", accountCode ?? "" } });
+                if (dt != null && dt.Rows.Count > 0)
+                    return Tuple.Create(dt.Rows[0]["Nexaacc_AccountId"]?.ToString(), dt.Rows[0]["Account_Name"]?.ToString());
+            }
+            catch { }
+            return Tuple.Create<string, string>(null, null);
+        }
+
+        // ──────────────────────────────────────────────
+        // ชำระค่าสินค้าที่รับเข้าสต๊อกแล้ว (GR/IR, PHASE19_31)
+        //   รับของ (Product/In) = Dr สินค้าคงเหลือ / Cr GRNI 21240 → ใบสำคัญจ่ายของสินค้านั้นต้อง Dr GRNI (ล้าง) ไม่ใช่ค่าใช้จ่าย
+        //   ไม่งั้นต้นทุนซ้ำ (COGS ตอนขาย + ค่าใช้จ่ายตอนจ่าย) และ GRNI ค้างไม่มีวันล้าง
+        // ──────────────────────────────────────────────
+
+        private static readonly System.Text.RegularExpressions.Regex GrnBatchRegex =
+            new System.Text.RegularExpressions.Regex(@"GR-\d{8}-\d{6}-\d{3}");
+
+        private void LoadGoodsReceiptOptions()
+        {
+            ddlGoodsReceipt.Items.Clear();
+            ddlGoodsReceipt.Items.Add(new ListItem("— ไม่ใช่ค่าสินค้าที่รับเข้าสต๊อก —", ""));
+            var dt = Take_Time_BangPhra.Purchasing.PurchaseService.ListBatches(conn, true, 200);
+            if (dt == null)
+            {
+                ddlGoodsReceipt.Enabled = false;
+                btnAddGrniLine.Enabled = false;
+                return;
+            }
+            foreach (DataRow r in dt.Rows)
+                ddlGoodsReceipt.Items.Add(new ListItem(GoodsReceiptOptionText(r), r["Batch"].ToString()));
+        }
+
+        private static string GoodsReceiptOptionText(DataRow r)
+        {
+            DateTime at = r["Received_At"] == DBNull.Value ? DateTime.MinValue : Convert.ToDateTime(r["Received_At"]);
+            decimal net = r["Net_Total"] == DBNull.Value ? 0m : Convert.ToDecimal(r["Net_Total"]);
+            decimal vat = r["Vat_Amount"] == DBNull.Value ? 0m : Convert.ToDecimal(r["Vat_Amount"]);
+            string st = r["Payment_Status"]?.ToString() ?? "";
+            string stTh = st == "PAID" ? "จ่ายแล้ว" : st == "CREDIT" ? "ซื้อเชื่อ" : "รอใบแจ้งหนี้";
+            return $"{r["Batch"]} · {at:dd/MM/yy} · {r["Supplier_Name"]} · ใบ {r["Supplier_Doc_No"]} · สุทธิ {net:N2}" +
+                   (vat > 0 ? $" + VAT {vat:N2}" : "") + $" · {stTh}";
+        }
+
+        /// <summary>โหมดแก้ไข: ให้ batch ที่ผูกกับใบนี้อยู่ปรากฏในรายการ (ถูกกรองออกเพราะผูกแล้ว)</summary>
+        private void RestoreLinkedGoodsReceipts(string voucherId)
+        {
+            foreach (var b in Take_Time_BangPhra.Purchasing.PurchaseService.BatchesOfVoucher(conn, voucherId))
+                if (ddlGoodsReceipt.Items.FindByValue(b) == null)
+                    ddlGoodsReceipt.Items.Add(new ListItem(b + " (ผูกกับใบนี้อยู่)", b));
+        }
+
+        /// <summary>(GUID, code, label) ของบัญชีล้างรับของตามโหมดรับของ (GRNI / INVENTORY / ACCOUNTS_PAYABLE)</summary>
+        private Tuple<string, string, string> ResolveGoodsReceiptClearingAccount()
+        {
+            string key = "GRNI";
+            try { key = Take_Time_BangPhra.Purchasing.PurchaseService.ClearingAccountKey(new Integration.AccountingConfig(conn)); } catch { }
+            var acc = Take_Time_BangPhra.Purchasing.PurchaseService.LookupMappedAccount(conn, key);
+            return Tuple.Create(acc.Item1, acc.Item2, Take_Time_BangPhra.Purchasing.PurchaseService.ClearingAccountLabel(key));
+        }
+
+        /// <summary>batch ที่ผูกกับใบนี้ = batch ที่อยู่ในรายละเอียดของบรรทัดล้างรับของ (รอดทั้งการลบบรรทัดและการแก้ไขใบ)</summary>
+        private List<string> GetLinkedGoodsReceipts()
+        {
+            var res = new List<string>();
+            DataTable dt = Session["dtDetail"] as DataTable;
+            if (dt == null || !dt.Columns.Contains("PaidTypeName")) return res;
+            foreach (DataRow r in dt.Rows)
+            {
+                if (r.RowState == DataRowState.Deleted) continue;
+                if (!(r["PaidTypeName"]?.ToString() ?? "").StartsWith(Take_Time_BangPhra.Purchasing.PurchaseService.GrniLinePrefix)) continue;
+                foreach (System.Text.RegularExpressions.Match m in GrnBatchRegex.Matches(r["Detail"]?.ToString() ?? ""))
+                    if (!res.Contains(m.Value)) res.Add(m.Value);
+            }
+            return res;
+        }
+
+        protected void btnAddGrniLine_Click(object sender, EventArgs e)
+        {
+            string batch = ddlGoodsReceipt.SelectedValue;
+            if (string.IsNullOrEmpty(batch))
+            {
+                ClientScript.RegisterStartupScript(this.GetType(), "grnipick", "alert('กรุณาเลือกการรับของที่จะชำระ');", true);
+                return;
+            }
+            string err = AddGoodsReceiptLine(batch);
+            if (err != null)
+                ClientScript.RegisterStartupScript(this.GetType(), "grnierr", "alert('" + err.Replace("'", "\\'") + "');", true);
+        }
+
+        /// <summary>เพิ่มบรรทัด "ชำระค่าสินค้าที่รับเข้าแล้ว" ของ batch (ยอด = สุทธิของจำนวนที่ยังไม่คืน). คืนข้อความผิดพลาด / null</summary>
+        private string AddGoodsReceiptLine(string batch)
+        {
+            var info = Take_Time_BangPhra.Purchasing.PurchaseService.GetBatch(conn, batch);
+            if (info == null) return "ไม่พบการรับของ " + batch;
+            if (GetLinkedGoodsReceipts().Contains(batch)) return "การรับของนี้อยู่ในรายการแล้ว";
+
+            decimal amount = 0m;
+            foreach (var l in info.Lines)
+                amount += Math.Round(l.ReturnableQty * l.UnitCost, 2, MidpointRounding.AwayFromZero);
+            if (amount <= 0) return "การรับของนี้คืนผู้ขายครบแล้ว — ไม่มียอดให้ชำระ";
+
+            var clr = ResolveGoodsReceiptClearingAccount();
+            bool syncOn = false;
+            try { var cfg = new Integration.AccountingConfig(conn); syncOn = cfg.IsConfigured && cfg.Enabled && !cfg.IsVoucherLocal; } catch { }
+            // ส่ง NextAcc ต้องมี GUID จริงของบัญชี (JOURNAL mode อ่านแค่ AccountId — ไม่มี = ตกไปบัญชีค่าใช้จ่ายตามหมวด = ผิด)
+            if (syncOn && string.IsNullOrEmpty(clr.Item1))
+                return string.IsNullOrEmpty(clr.Item2)
+                    ? "ยังไม่ได้ตั้ง mapping บัญชีล้างรับของ (GRNI/INVENTORY) ในหน้า Accounting Integration"
+                    : "ไม่พบรหัสบัญชี " + clr.Item2 + " ในผังบัญชี NextAcc — กด \"ดึง Chart of Accounts\" ในหน้า Accounting Integration ก่อน";
+
+            DataTable dtDetail = (DataTable)Session["dtDetail"];
+            if (!dtDetail.Columns.Contains("PaidTypeId"))
+            {
+                dtDetail.Columns.Add("PaidTypeId");
+                dtDetail.Columns.Add("PaidTypeName");
+                dtDetail.Columns.Add("NexaaccAccountId");
+            }
+            if (!dtDetail.Columns.Contains("AccountCode"))
+                dtDetail.Columns.Add("AccountCode");
+
+            string detail = $"ค่าสินค้ารับเข้า {batch} {info.SupplierName}" + (string.IsNullOrEmpty(info.SupplierDocNo) ? "" : $" ใบ {info.SupplierDocNo}");
+            string catName = $"{Take_Time_BangPhra.Purchasing.PurchaseService.GrniLinePrefix} {clr.Item2} {clr.Item3}".Trim();
+            dtDetail.Rows.Add(dtDetail.Rows.Count + 1, detail, NumberHelper.TwoDecimalPoints(amount),
+                "", catName, clr.Item1 ?? "", clr.Item2 ?? "");
+            Session["dtDetail"] = dtDetail;
+            GridView1.DataSource = dtDetail;
+            GridView1.DataBind();
+            if (DropDownList4.SelectedIndex > 0)
+                calAmount(dtDetail, DropDownList4.SelectedValue);
+
+            // ภาษีซื้อ: มี VAT + ผู้ขายมีเลขผู้เสียภาษี → เคลม (ใบกำกับเต็มรูป); รับของที่ไม่มี VAT → ไม่มีอะไรให้เคลม
+            if (info.VatAmount > 0 && info.VatLikelyClaimable) ddlVatClaim.SelectedValue = "1";
+
+            litGrniInfo.Text = "<div style='margin-top:4px;font-size:12px;color:#1b5e20;'>✔ เพิ่ม " + HttpUtility.HtmlEncode(batch)
+                + " สุทธิ " + amount.ToString("N2") + (info.VatAmount > 0 ? " (VAT ตอนรับของ " + info.VatAmount.ToString("N2") + ")" : "")
+                + " → Dr " + HttpUtility.HtmlEncode(clr.Item3) + "</div>";
+            return null;
+        }
+
+        /// <summary>เปิดจากหน้า นำเข้าสินค้า: เลือกผู้ขาย/แหล่งเงิน/เครดิต/ประเภทภาษี + เพิ่มบรรทัดล้างรับของให้</summary>
+        private void PrefillFromGoodsReceipt(string batch, string paidHowId, bool isCredit)
+        {
+            var info = Take_Time_BangPhra.Purchasing.PurchaseService.GetBatch(conn, batch);
+            if (info == null) return;
+            try
+            {
+                if (ddlGoodsReceipt.Items.FindByValue(batch) != null) ddlGoodsReceipt.SelectedValue = batch;
+
+                // ผู้ขาย: เลขผู้เสียภาษีก่อน แล้วชื่อ
+                DataTable dtV = null;
+                if (Take_Time_BangPhra.Purchasing.PurchaseService.IsThaiTaxId(info.SupplierTaxId))
+                    dtV = code.DatabaseQuerySafe(conn, "SELECT TOP 1 ID FROM Vendor WHERE Status = 'True' AND REPLACE(REPLACE(ISNULL(IDNumber,''),'-',''),' ','') = @t",
+                        new Dictionary<string, object> { { "@t", System.Text.RegularExpressions.Regex.Replace(info.SupplierTaxId, @"\D", "") } });
+                if ((dtV == null || dtV.Rows.Count == 0) && !string.IsNullOrEmpty(info.SupplierName))
+                    dtV = code.DatabaseQuerySafe(conn, "SELECT TOP 1 ID FROM Vendor WHERE Status = 'True' AND Name = @n",
+                        new Dictionary<string, object> { { "@n", info.SupplierName } });
+                if (dtV != null && dtV.Rows.Count > 0)
+                {
+                    var it = DropDownList1.Items.FindByValue(dtV.Rows[0]["ID"].ToString());
+                    if (it != null) DropDownList1.SelectedValue = it.Value;
+                }
+
+                if (!string.IsNullOrEmpty(paidHowId) && DropDownList2.Items.FindByValue(paidHowId) != null)
+                    DropDownList2.SelectedValue = paidHowId;
+                chkIsCredit.Checked = isCredit;
+                if (info.SupplierDocDate.HasValue)
+                    TextBox8.Text = info.SupplierDocDate.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+                // ประเภทภาษี: มี VAT → 7% แบบไม่รวม (รายการเป็นยอดสุทธิ), ไม่มี → 0%
+                var dtVat = code.DatabaseQuerySafe(conn,
+                    "SELECT ID, Vat_Percent FROM Account_Vat_Type WHERE Status = 'True' ORDER BY ID", null);
+                if (dtVat != null)
+                {
+                    int wantPct = info.VatAmount > 0 ? 7 : 0;
+                    foreach (DataRow r in dtVat.Rows)
+                    {
+                        int pct; int.TryParse(r["Vat_Percent"]?.ToString(), out pct);
+                        string vid = r["ID"].ToString();
+                        if (pct == wantPct && vid != "2" && DropDownList4.Items.FindByValue(vid) != null)
+                        {
+                            DropDownList4.SelectedValue = vid;
+                            Label1.Text = DropDownList4.SelectedItem.Text;
+                            break;
+                        }
+                    }
+                }
+
+                // หมวดหัวใบ: หมวดที่ชื่อสื่อถึงซื้อสินค้า (ถ้ามี)
+                foreach (ListItem li in DropDownList3.Items)
+                    if (li.Text.Contains("สินค้า") || li.Text.Contains("ซื้อ")) { DropDownList3.SelectedValue = li.Value; break; }
+            }
+            catch { }
+
+            string err = AddGoodsReceiptLine(batch);
+            if (err != null)
+                litGrniInfo.Text = "<div style='margin-top:4px;font-size:12px;color:#b71c1c;'>" + HttpUtility.HtmlEncode(err) + "</div>";
+        }
+
+        /// <summary>
+        /// ตรวจก่อนบันทึก (สองจังหวะ — กดซ้ำ = ยืนยัน):
+        ///  • ไม่มีบรรทัดล้างรับของ แต่มีการรับของที่ยังไม่ผูกของผู้ขายเดียวกัน/สินค้าตรงกับรายละเอียด → เตือนต้นทุนซ้ำ
+        ///  • มีบรรทัดล้างรับของ + เลือก "ไม่เคลม VAT" → VAT ถูกรวมเข้าบรรทัด GRNI = GRNI ค้างเศษ
+        /// คืนข้อความเตือน หรือ null (ผ่าน)
+        /// </summary>
+        private string CheckGoodsReceiptLinkWarnings()
+        {
+            try
+            {
+                if (!Take_Time_BangPhra.Purchasing.PurchaseService.HasPurchaseColumns(conn)) return null;
+                DataTable dtDetail = Session["dtDetail"] as DataTable;
+                if (dtDetail == null || dtDetail.Rows.Count == 0) return null;
+                var linked = GetLinkedGoodsReceipts();
+                string msg = null, sig = null;
+
+                if (linked.Count == 0)
+                {
+                    string paidType = DropDownList3.SelectedItem?.Text ?? "";
+                    if (paidType.Contains("เงินเดือน")) return null;
+                    string vendorName = DropDownList1.SelectedItem?.Text ?? "";
+                    string vendorTax = null;
+                    try
+                    {
+                        var dtT = code.DatabaseQuerySafe(conn, "SELECT TOP 1 IDNumber FROM Vendor WHERE ID = @id",
+                            new Dictionary<string, object> { { "@id", DropDownList1.SelectedValue ?? "" } });
+                        if (dtT != null && dtT.Rows.Count > 0) vendorTax = dtT.Rows[0][0]?.ToString();
+                    }
+                    catch { }
+                    var texts = new List<string>();
+                    foreach (DataRow r in dtDetail.Rows) texts.Add(r["Detail"]?.ToString() ?? "");
+                    var matches = Take_Time_BangPhra.Purchasing.PurchaseService.FindUnlinkedMatches(conn, vendorName, vendorTax, texts);
+                    if (matches.Count > 0)
+                    {
+                        sig = "U:" + string.Join(",", matches);
+                        msg = "⚠️ ใบนี้ดูเหมือนค่าสินค้าที่บันทึกรับเข้าสต๊อกแล้ว แต่ยังไม่ได้ผูกการรับของ:\n" + string.Join("\n", matches)
+                            + "\n\nถ้าใช่: เลือกในช่อง \"ค่าสินค้าที่รับเข้าแล้ว\" แล้วกด \"ชำระค่าสินค้าที่รับเข้าแล้ว\" แทนบรรทัดค่าใช้จ่าย (ไม่งั้นต้นทุนซ้ำ + GRNI ค้าง)"
+                            + "\nถ้าไม่ใช่: กดบันทึกอีกครั้งเพื่อยืนยัน";
+                    }
+                }
+                else if (ddlVatClaim.SelectedValue == "0" && decimal.TryParse(TextBox4.Text, out var vatNow) && vatNow > 0)
+                {
+                    sig = "V:" + string.Join(",", linked) + ":" + vatNow.ToString("0.00");
+                    msg = "⚠️ ใบที่ผูกการรับของ แต่เลือก \"ไม่เคลมภาษีซื้อ\": VAT จะถูกรวมเข้าบรรทัดล้างรับของ → GRNI ค้างเศษเท่ายอด VAT"
+                        + "\nถ้าผู้ขายออกใบกำกับเต็มรูปไม่ได้ ควรบันทึกรับของใหม่ด้วยราคารวม VAT (ไม่มี VAT) แทน"
+                        + "\nกดบันทึกอีกครั้งเพื่อยืนยันบันทึกตามนี้";
+                }
+
+                if (msg == null) return null;
+                if ((ViewState["GrniWarnAck"] as string) == sig) return null;   // กดซ้ำ = ยืนยัน
+                ViewState["GrniWarnAck"] = sig;
+                return msg;
+            }
+            catch { return null; }
+        }
+
         protected void Button3_Click(object sender, EventArgs e)
         {
             string command = Request.QueryString["command"];
@@ -456,6 +823,28 @@ namespace Take_Time_BangPhra.Account.Report
 
             // Store original UID for edit mode - to preserve file attachment names
             string originalUid = uid;
+
+            // ใบรับรองแทนใบเสร็จรับเงิน — ตรวจก่อนขั้น void/ลบใบเดิม (โหมดแก้ไข) กันข้อมูลหายเมื่อกรอกไม่ครบ
+            bool isCertInLieu = chkCertInLieu.Checked;
+            if (isCertInLieu)
+            {
+                string cilErr = ValidateCertInLieu();
+                if (cilErr != null)
+                {
+                    ClientScript.RegisterStartupScript(this.GetType(), "cilvalidate", "alert('" + cilErr + "');", true);
+                    return;
+                }
+            }
+
+            // ค่าสินค้าที่รับเข้าสต๊อกแล้วแต่ไม่ได้ผูก = ต้นทุนซ้ำ (Dr สินค้าคงเหลือตอนรับ + Dr ค่าใช้จ่ายตอนจ่าย) → เตือนก่อน
+            // (ตรวจก่อนขั้น void/ลบใบเดิมในโหมดแก้ไข — กดบันทึกซ้ำ = ยืนยันว่าไม่ใช่ค่าสินค้าที่รับเข้าแล้ว)
+            string grniWarn = CheckGoodsReceiptLinkWarnings();
+            if (grniWarn != null)
+            {
+                ClientScript.RegisterStartupScript(this.GetType(), "grniwarn",
+                    "alert('" + grniWarn.Replace("\\", "\\\\").Replace("'", "\\'").Replace("\n", "\\n") + "');", true);
+                return;
+            }
 
             if (command == "edit")
             {
@@ -528,14 +917,19 @@ namespace Take_Time_BangPhra.Account.Report
 
                     var validationResults = new System.Collections.Generic.List<AccountingArithmeticValidator.ValidationResult>();
 
-                    if (vWhtRate > 0)
+                    // WHT auto-calc check (wht == subtotal×rate): ข้ามได้ในโหมด "แก้ไขยอดเงินด้วยตนเอง"
+                    // เพราะผู้ใช้อาจกรอก WHT เองที่ต่างจากสูตร
+                    if (vWhtRate > 0 && !CheckBox1.Checked)
                     {
                         var whtCheck = AccountingArithmeticValidator.ValidateWhtCalculation(vSubtotal, vWhtRate, vWht);
                         if (!whtCheck.IsValid) validationResults.Add(whtCheck);
                     }
 
+                    // สมการยอด (ยอดก่อน VAT + VAT − WHT = สุทธิ) — บังคับ "เสมอ" แม้โหมดแก้ยอดเอง
+                    // กัน checkbox "แก้ไขยอดเงินด้วยตนเอง" กลายเป็นปุ่มปิด validation ทั้งหมด (ข้อมูลบัญชีเพี้ยน)
                     var totalCheck = AccountingArithmeticValidator.ValidateInvoiceTotal(vSubtotal, vVat, vWht, vNet);
-                    if (!totalCheck.IsValid) validationResults.Add(totalCheck);
+                    bool totalInvalid = !totalCheck.IsValid;
+                    if (totalInvalid) validationResults.Add(totalCheck);
 
                     if (validationResults.Count > 0)
                     {
@@ -543,11 +937,14 @@ namespace Take_Time_BangPhra.Account.Report
                         foreach (var r in validationResults)
                             AccountingArithmeticValidator.LogValidationFailure("VOUCHER", txtVoucherNo.Text, r, user);
 
-                        if (AccountingArithmeticValidator.HasBlockingError(validationResults) && !CheckBox1.Checked)
+                        // บล็อกเมื่อสมการยอดไม่ผ่าน (เสมอ) หรือมี blocking error อื่นในโหมดปกติ
+                        bool block = totalInvalid
+                            || (AccountingArithmeticValidator.HasBlockingError(validationResults) && !CheckBox1.Checked);
+                        if (block)
                         {
                             string errMsg = AccountingArithmeticValidator.FormatErrors(validationResults).Replace("'", "\\'").Replace("\n", "\\n");
                             ClientScript.RegisterStartupScript(this.GetType(), "acctvalidate",
-                                $"alert('⚠️ ตรวจสอบความถูกต้องทางบัญชีไม่ผ่าน:\\n\\n{errMsg}\\n\\nกรุณาแก้ไขก่อนบันทึก หรือเลือก \"แทนที่ค่าตรวจสอบ\" เพื่อบันทึกแบบ override');", true);
+                                $"alert('⚠️ ตรวจสอบความถูกต้องทางบัญชีไม่ผ่าน:\\n\\n{errMsg}\\n\\nยอด: ยอดก่อน VAT + VAT − WHT ต้องเท่ากับยอดสุทธิ — กรุณาแก้ไขก่อนบันทึก');", true);
                             return;
                         }
                     }
@@ -591,7 +988,8 @@ namespace Take_Time_BangPhra.Account.Report
                 decimal whtAmount = 0;
                 decimal.TryParse(txtWHTAmount.Text, out whtAmount);
 
-                bool isCredit = chkIsCredit.Checked;
+                // ใบรับรองแทนใบเสร็จ = จ่ายเงินแล้วเสมอ (ไม่มีเครดิต)
+                bool isCredit = chkIsCredit.Checked && !isCertInLieu;
 
                 var paymentInsertParams = new Dictionary<string, object>
                 {
@@ -626,6 +1024,9 @@ namespace Take_Time_BangPhra.Account.Report
                         "VALUES (@ID,@VendorID,@CreatedDate,@TotalAmount,@VatTypeID,@Vat,@TotalAmountExcludeVat,@PaidHow,@PaidType,N'Normal',@CreatedByID,@WHTRate,@WHTAmount,@IsCredit)",
                         paymentInsertParams);
                 }
+
+                if (isCertInLieu)
+                    SaveCertInLieuColumns(docNum);
 
                 // SECURE: Insert payment details with parameterized queries (including per-line category)
                 for(int i = 0;i<dtDetail.Rows.Count;i++)
@@ -667,7 +1068,22 @@ namespace Take_Time_BangPhra.Account.Report
                             fallbackParams);
                     }
                 }
-                string path = System.Configuration.ConfigurationManager.AppSettings["PaymentFolderPath"].ToString();
+
+                // ผูกการรับของ (Product_In.Linked_Voucher_Id / Payment_Status, Account_Payment.Linked_Goods_Receipt)
+                try
+                {
+                    if (command == "edit" && !string.IsNullOrEmpty(id))
+                        Take_Time_BangPhra.Purchasing.PurchaseService.UnlinkVoucher(conn, id);
+                    var linkedBatches = GetLinkedGoodsReceipts();
+                    if (linkedBatches.Count > 0)
+                        Take_Time_BangPhra.Purchasing.PurchaseService.LinkBatchesToVoucher(conn, linkedBatches, docNum, isCredit);
+                }
+                catch (Exception linkEx)
+                {
+                    try { new code().Logs(conn, "Purchase", $"Link goods receipt failed: doc={docNum} {linkEx.Message}", "SYSTEM"); } catch { }
+                }
+
+                string path = AppCfg.Get("PaymentFolderPath").ToString();
                 try
                 {
                     System.IO.Directory.CreateDirectory(path + "\\" + Year);
@@ -799,7 +1215,7 @@ namespace Take_Time_BangPhra.Account.Report
                 dtSignature.Columns.Add("ReceivedName");
                 dtSignature.Columns.Add("Received");
 
-                string Signaturepath = System.Configuration.ConfigurationManager.AppSettings["StaffSignatureFolderPath"]?.ToString() ?? "";
+                string Signaturepath = AppCfg.Get("StaffSignatureFolderPath")?.ToString() ?? "";
 
                 // Get creator name
                 var creatorParams = new Dictionary<string, object> { { "@UserID", Session["UserID"]?.ToString() } };
@@ -929,14 +1345,28 @@ namespace Take_Time_BangPhra.Account.Report
                 }
 
                 // Create asset if checkbox is checked
+                // (ห่อ try/catch + TryParse: ใบสำคัญจ่ายถูกบันทึกไปแล้ว — อย่าให้ asset ล้มเหลว
+                //  ทำทั้งหน้าพังเป็น error แล้วทิ้ง voucher ค้างไม่ sync)
                 if (chkRecordAsset.Checked)
                 {
-                    decimal purchasePrice = decimal.Parse(TextBox6.Text);
-                    int vendorId = Convert.ToInt32(DropDownList1.SelectedValue);
-                    CreateAssetFromPaymentVoucher(docNum, purchasePrice, docDate, vendorId);
+                    try
+                    {
+                        decimal purchasePrice;
+                        int vendorId;
+                        if (decimal.TryParse(TextBox6.Text, out purchasePrice)
+                            && int.TryParse(DropDownList1.SelectedValue, out vendorId))
+                        {
+                            CreateAssetFromPaymentVoucher(docNum, purchasePrice, docDate, vendorId);
+                        }
+                    }
+                    catch (Exception assetEx)
+                    {
+                        try { new code().Logs(conn, "Asset", $"CreateAssetFromPaymentVoucher error: docNum={docNum} {assetEx.Message}", "SYSTEM"); } catch { }
+                    }
                 }
 
                 // Auto-sync voucher to accounting (with per-line expense categories)
+                string syncStatus = "off";   // off=ปิด/ไม่ตั้งค่า, queued=ส่งคิวแล้ว, err=ล้มเหลว
                 try
                 {
                     var config = new Integration.AccountingConfig(conn);
@@ -968,7 +1398,11 @@ namespace Take_Time_BangPhra.Account.Report
                         catch { }
 
                         var sync = new Integration.AccountingSyncService(conn);
-                        string payAccId = sync.LookupPaidHowAccountId(paymentMethod);
+                        // บังคับแหล่งจ่ายเงินจากผังบัญชี NextAcc โดยตรง (ถ้าผู้ใช้เลือก) — เลี่ยง mapping ผิด
+                        // เว้นว่าง = ใช้ mapping ตามวิธีจ่ายเงินเหมือนเดิม
+                        string payAccId = !string.IsNullOrEmpty(ddlPaidHowNexaacc.SelectedValue)
+                            ? ddlPaidHowNexaacc.SelectedValue
+                            : sync.LookupPaidHowAccountId(paymentMethod);
                         string payAccCode = sync.LookupPaidHowAccountCode(paymentMethod);
 
                         // Build per-line expense data
@@ -980,7 +1414,18 @@ namespace Take_Time_BangPhra.Account.Report
                             string lineAccId = hasPerLineCategories ? dtDetail.Rows[i]["NexaaccAccountId"]?.ToString() : null;
                             if (string.IsNullOrEmpty(lineAccId))
                                 lineAccId = sync.LookupPaidTypeAccountId(lineCat);
-                            string lineAccCode = sync.LookupPaidTypeAccountCode(lineCat);
+                            // ผังบัญชีค่าใช้จ่ายที่ผู้ใช้เลือกจาก NextAcc โดยตรง (เก็บไว้ตอนเพิ่มรายการ) มาก่อน mapping
+                            string lineAccCode = dtDetail.Columns.Contains("AccountCode") ? dtDetail.Rows[i]["AccountCode"]?.ToString() : "";
+                            if (string.IsNullOrEmpty(lineAccCode))
+                                lineAccCode = sync.LookupPaidTypeAccountCode(lineCat);
+                            // บรรทัด "ชำระค่าสินค้าที่รับเข้าแล้ว" → บังคับบัญชีล้างรับของ (GRNI/สินค้าคงเหลือ/เจ้าหนี้ ตามโหมดรับของ)
+                            // ไม่ใช่ค่าใช้จ่าย — รวมถึงตอนแก้ไขใบที่โหลดจากฐานข้อมูล (ไม่มีคอลัมน์ AccountCode)
+                            if ((lineCat ?? "").StartsWith(Take_Time_BangPhra.Purchasing.PurchaseService.GrniLinePrefix))
+                            {
+                                var clr = ResolveGoodsReceiptClearingAccount();
+                                if (!string.IsNullOrEmpty(clr.Item2)) lineAccCode = clr.Item2;
+                                if (!string.IsNullOrEmpty(clr.Item1)) lineAccId = clr.Item1;
+                            }
 
                             expenseLines.Add(new Dictionary<string, object>
                             {
@@ -995,7 +1440,34 @@ namespace Take_Time_BangPhra.Account.Report
                         string expAccId = sync.LookupPaidTypeAccountId(expenseCategory);
 
                         bool hasVat = false;
-                        try { hasVat = Convert.ToDecimal(TextBox4.Text) > 0; } catch { }
+                        decimal vatAmt = 0m;
+                        try { vatAmt = Convert.ToDecimal(TextBox4.Text); hasVat = vatAmt > 0; } catch { }
+
+                        // ไม่เคลมภาษีซื้อ (§82/5): รวม VAT เข้าค่าใช้จ่าย — กระจาย VAT เข้ายอดแต่ละบรรทัด
+                        // แล้วส่ง hasInputVat=false/vatAmount=0 → NextAcc Dr ค่าใช้จ่าย = net+VAT ไม่แยกภาษีซื้อ
+                        // (ได้ผลทุก endpoint รวม integration ที่ไม่มี IsVatClaimable per line). WHT คิดบนฐานก่อน VAT คงเดิม
+                        // ใบรับรองแทนใบเสร็จ: ไม่มีใบกำกับภาษี → เคลมภาษีซื้อไม่ได้เสมอ (§82/4) รวม VAT เข้าค่าใช้จ่าย
+                        bool noClaimVat = ddlVatClaim.SelectedValue == "0" || isCertInLieu;
+                        if (noClaimVat && vatAmt > 0 && expenseLines.Count > 0)
+                        {
+                            decimal subtotalForVat = 0m;
+                            foreach (var ln in expenseLines) subtotalForVat += Convert.ToDecimal(ln["amount"]);
+                            if (subtotalForVat > 0)
+                            {
+                                decimal distributed = 0m;
+                                for (int i = 0; i < expenseLines.Count; i++)
+                                {
+                                    decimal lineNet = Convert.ToDecimal(expenseLines[i]["amount"]);
+                                    decimal addVat = (i == expenseLines.Count - 1)
+                                        ? (vatAmt - distributed)
+                                        : Math.Round(vatAmt * (lineNet / subtotalForVat), 2, MidpointRounding.AwayFromZero);
+                                    distributed += addVat;
+                                    expenseLines[i]["amount"] = lineNet + addVat;
+                                }
+                            }
+                            hasVat = false;
+                            vatAmt = 0m;
+                        }
 
                         decimal syncWhtRate = 0;
                         decimal.TryParse(ddlWHTRate.SelectedValue, out syncWhtRate);
@@ -1005,12 +1477,15 @@ namespace Take_Time_BangPhra.Account.Report
                         // Check if payment method is Cash or Bank (for auto-payment recording)
                         bool paidHowIsCashOrBank = sync.IsPaidHowCashOrBank(paymentMethod);
 
-                        sync.EnqueuePaymentVoucher(0, expenseCategory, voucherAmount, paymentMethod, docDate, description, vendorName,
+                        long syncQid = sync.EnqueuePaymentVoucher(0, expenseCategory, voucherAmount, paymentMethod, docDate, description, vendorName,
                             hasInputVat: hasVat, whtRate: syncWhtRate, whtAmount: syncWhtAmount,
                             documentNumber: docNum, paymentAccountId: payAccId, expenseAccountId: expAccId,
                             expenseLines: expenseLines,
                             isCredit: isCredit, autoRecordPayment: paidHowIsCashOrBank && !isCredit,
-                            supplierExternalId: vendorExternalId, supplierTaxId: vendorTaxId);
+                            supplierExternalId: vendorExternalId, supplierTaxId: vendorTaxId,
+                            vatAmount: vatAmt,
+                            certificateInLieu: isCertInLieu ? BuildCertInLieuInfo() : null);
+                        syncStatus = syncQid > 0 ? "queued" : "err";
 
                         // Asset reclassification: DR Fixed Asset / CR Expense
                         if (chkRecordAsset.Checked && voucherAmount > 0)
@@ -1026,12 +1501,15 @@ namespace Take_Time_BangPhra.Account.Report
                 }
                 catch (Exception accEx)
                 {
+                    syncStatus = "err";
                     new code().Logs(conn, "Accounting Sync", $"Voucher auto-sync error (PaymentVoucher): docNum={docNum} {accEx.Message}", "SYSTEM");
                 }
 
-                // Show success message then redirect
-                ClientScript.RegisterStartupScript(this.GetType(), "success",
-                    "alert('✅ บันทึกใบสำคัญจ่ายเรียบร้อยแล้ว'); window.location.href='/Account/PaymentVoucher';", true);
+                // บันทึกสำเร็จ → redirect ฝั่ง server (เชื่อถือได้กว่า alert+window.location ฝั่ง client
+                // ซึ่งเงียบหายถ้า JS error) แล้วแสดง alert ผ่าน ?saved=1 ใน Page_Load (พร้อมสถานะ sync)
+                Response.Redirect("/Account/PaymentVoucher?saved=1&s=" + syncStatus, false);
+                Context.ApplicationInstance.CompleteRequest();
+                return;
             }
             else
             {
@@ -1172,7 +1650,7 @@ namespace Take_Time_BangPhra.Account.Report
                 string searchPattern = fileName.ToString(); // filename ที่ถูก strip แล้ว (เช่น "ใบเสร็จ.pdf")
 
                 // Get payment folder path
-                string basePath = System.Configuration.ConfigurationManager.AppSettings["PaymentFolderPath"]?.ToString();
+                string basePath = AppCfg.Get("PaymentFolderPath")?.ToString();
                 if (string.IsNullOrEmpty(basePath))
                     return "#";
 
@@ -1363,7 +1841,8 @@ namespace Take_Time_BangPhra.Account.Report
                         try
                         {
                             var sync = new Integration.AccountingSyncService(conn);
-                            string url = sync.BuildNexaaccDocumentUrl(nexaaccResponseId, "EXPENSE");
+                            string url = sync.BuildNexaaccDocumentUrl(nexaaccResponseId,
+                                chkCertInLieu.Checked ? "CERTIFICATE_IN_LIEU" : "EXPENSE");
                             if (!string.IsNullOrEmpty(url))
                             {
                                 lnkNextAccDoc.NavigateUrl = url;
@@ -1373,11 +1852,193 @@ namespace Take_Time_BangPhra.Account.Report
                         catch { }
                     }
                 }
+
+                // ปุ่มดู PDF ทางการจาก NextAcc (ใบสำคัญจ่าย / ใบรับรองแทนใบเสร็จ) — ใช้ตัวดึง+cache เดียวกับหน้า CheckPayment
+                bool hasNextAccDoc = !string.IsNullOrEmpty(nexaaccResponseId) && !nexaaccResponseId.StartsWith("SKIPPED");
+                lnkNextAccPdf.Visible = pnlNextAccRef.Visible && hasNextAccDoc;
+                if (pnlNextAccRef.Visible && chkCertInLieu.Checked)
+                    lblNextAccSyncStatus.Text = (lblNextAccSyncStatus.Text + " ใบรับรองแทนใบเสร็จรับเงิน").Trim();
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"LoadNextAccReference Error: {ex.Message}");
             }
+        }
+
+        // ──────────────────────────────────────────────
+        // ใบรับรองแทนใบเสร็จรับเงิน (ผู้รับเงินออกใบเสร็จไม่ได้ — แท็กซี่/แผงลอย/ลูกจ้างรายวัน)
+        // เลือกแล้ว: ใบนี้ sync เป็นเอกสาร NextAcc type 15 "แทน" ใบสำคัญจ่าย/ค่าใช้จ่าย (ไม่ลง GL ซ้ำ),
+        // จ่ายเงินสดเสมอ (ไม่มีเครดิต), VAT รวมเข้าค่าใช้จ่าย (ไม่มีใบกำกับภาษี)
+        // ──────────────────────────────────────────────
+
+        protected void chkCertInLieu_CheckedChanged(object sender, EventArgs e)
+        {
+            ApplyCertInLieuMode();
+        }
+
+        private void ApplyCertInLieuMode()
+        {
+            bool on = chkCertInLieu.Checked;
+            pnlCertInLieu.Visible = on;
+            if (on)
+            {
+                chkIsCredit.Checked = false;
+                if (ddlVatClaim.Items.FindByValue("0") != null)
+                    ddlVatClaim.SelectedValue = "0";
+                if (string.IsNullOrWhiteSpace(txtCilCertifierName.Text) || string.IsNullOrWhiteSpace(txtCilCertifierPosition.Text))
+                    InitCertInLieuDefaults();
+            }
+            chkIsCredit.Enabled = !on;
+            ddlVatClaim.Enabled = !on;
+        }
+
+        /// <summary>ผู้รับรอง = ผู้ใช้ที่ login (+ตำแหน่งจาก Employee_Salary / ค่าตั้ง Nexaacc_Cil_Certifier_Position),
+        /// พยาน/ผู้อนุมัติ = กรรมการ (Admin.IsCEO) — เติมเฉพาะช่องที่ยังว่าง</summary>
+        private void InitCertInLieuDefaults()
+        {
+            try
+            {
+                string adminId = Session["UserID"]?.ToString();
+                if (string.IsNullOrWhiteSpace(txtCilCertifierName.Text) && !string.IsNullOrEmpty(adminId))
+                {
+                    DataTable dtMe = code.DatabaseQuerySafe(conn,
+                        "SELECT TOP 1 FirstName, LastName FROM Admin WHERE ID = @id",
+                        new Dictionary<string, object> { { "@id", adminId } });
+                    if (dtMe != null && dtMe.Rows.Count > 0)
+                        txtCilCertifierName.Text = (dtMe.Rows[0]["FirstName"] + " " + dtMe.Rows[0]["LastName"]).Trim();
+                }
+                if (string.IsNullOrWhiteSpace(txtCilCertifierPosition.Text))
+                    txtCilCertifierPosition.Text = new Integration.AccountingSyncService(conn).GetCertificateInLieuDefaultPosition(adminId);
+                if (string.IsNullOrWhiteSpace(txtCilWitnessName.Text))
+                {
+                    DataTable dtCeo = code.DatabaseQuery(conn, "SELECT TOP 1 FirstName, LastName FROM Admin WHERE IsCEO = 'True'");
+                    if (dtCeo != null && dtCeo.Rows.Count > 0)
+                        txtCilWitnessName.Text = (dtCeo.Rows[0]["FirstName"] + " " + dtCeo.Rows[0]["LastName"]).Trim();
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"InitCertInLieuDefaults Error: {ex.Message}");
+            }
+        }
+
+        /// <summary>โหลดข้อมูลใบรับรองที่บันทึกไว้ (โหมดแก้ไข) — ไม่มีคอลัมน์ (ยังไม่รัน PHASE19_19) = ข้าม</summary>
+        private void LoadCertInLieu(DataRow row)
+        {
+            try
+            {
+                if (row == null || !row.Table.Columns.Contains("Is_Certificate_In_Lieu")
+                    || row["Is_Certificate_In_Lieu"] == DBNull.Value
+                    || !Convert.ToBoolean(row["Is_Certificate_In_Lieu"]))
+                    return;
+
+                chkCertInLieu.Checked = true;
+                string C(string col) => row.Table.Columns.Contains(col) && row[col] != DBNull.Value ? row[col].ToString() : "";
+                txtCilReason.Text = C("Cil_Reason");
+                txtCilPayeeName.Text = C("Cil_Payee_Name");
+                txtCilPayeeAddress.Text = C("Cil_Payee_Address");
+                if (C("Cil_Certifier_Name").Length > 0) txtCilCertifierName.Text = C("Cil_Certifier_Name");
+                if (C("Cil_Certifier_Position").Length > 0) txtCilCertifierPosition.Text = C("Cil_Certifier_Position");
+                if (C("Cil_Witness_Name").Length > 0) txtCilWitnessName.Text = C("Cil_Witness_Name");
+                txtCilWitnessPosition.Text = C("Cil_Witness_Position");
+                ApplyCertInLieuMode();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"LoadCertInLieu Error: {ex.Message}");
+            }
+        }
+
+        /// <summary>คืนข้อความ error (ไม่มี ' ) หรือ null ถ้าผ่าน</summary>
+        private string ValidateCertInLieu()
+        {
+            if (string.IsNullOrWhiteSpace(txtCilReason.Text))
+                return "กรุณาระบุเหตุผลที่ไม่ได้รับใบเสร็จ (ใบรับรองแทนใบเสร็จรับเงิน)";
+            if (string.IsNullOrWhiteSpace(txtCilCertifierName.Text))
+                return "กรุณาระบุชื่อผู้รับรอง (ใบรับรองแทนใบเสร็จรับเงิน)";
+            if ((DropDownList3.SelectedItem?.Text ?? "").Contains("เงินเดือน"))
+                return "ใบจ่ายเงินเดือนออกเป็นใบรับรองแทนใบเสร็จไม่ได้ — กรุณาเอาเครื่องหมายออก";
+            try
+            {
+                var cfg = new Integration.AccountingConfig(conn);
+                if (cfg.IsConfigured && cfg.Enabled && cfg.IsVoucherDocumentMode && !cfg.CanUseCompanyEndpoints)
+                    return "ออกใบรับรองแทนใบเสร็จใน NextAcc ต้องเปิด company endpoint (Nexaacc_Company_Endpoints=1 และตั้ง CompanyId) — ติดต่อผู้ดูแลระบบ";
+            }
+            catch { }
+            return null;
+        }
+
+        private Integration.CertificateInLieuInfo BuildCertInLieuInfo()
+        {
+            return new Integration.CertificateInLieuInfo
+            {
+                Reason = txtCilReason.Text.Trim(),
+                PayeeName = txtCilPayeeName.Text.Trim(),
+                PayeeAddress = txtCilPayeeAddress.Text.Trim(),
+                CertifierName = txtCilCertifierName.Text.Trim(),
+                CertifierPosition = txtCilCertifierPosition.Text.Trim(),
+                WitnessName = txtCilWitnessName.Text.Trim(),
+                WitnessPosition = txtCilWitnessPosition.Text.Trim()
+            };
+        }
+
+        /// <summary>เก็บข้อมูลใบรับรองลง Account_Payment (migration PHASE19_19). ยังไม่รัน migration → log แล้วไปต่อ
+        /// (การ sync ใช้ข้อมูลจาก payload คิว ไม่ได้อ่านคอลัมน์เหล่านี้)</summary>
+        private void SaveCertInLieuColumns(string docNum)
+        {
+            try
+            {
+                var info = BuildCertInLieuInfo();
+                code.DatabaseInsertSafe(conn,
+                    @"UPDATE [dbo].[Account_Payment]
+                      SET Is_Certificate_In_Lieu = 1,
+                          Cil_Reason = @Reason, Cil_Payee_Name = @PayeeName, Cil_Payee_Address = @PayeeAddress,
+                          Cil_Certifier_Name = @CertName, Cil_Certifier_Position = @CertPos,
+                          Cil_Witness_Name = @WitName, Cil_Witness_Position = @WitPos
+                      WHERE ID = @ID",
+                    new Dictionary<string, object>
+                    {
+                        { "@Reason", info.Reason },
+                        { "@PayeeName", string.IsNullOrEmpty(info.PayeeName) ? (object)DBNull.Value : info.PayeeName },
+                        { "@PayeeAddress", string.IsNullOrEmpty(info.PayeeAddress) ? (object)DBNull.Value : info.PayeeAddress },
+                        { "@CertName", info.CertifierName },
+                        { "@CertPos", string.IsNullOrEmpty(info.CertifierPosition) ? (object)DBNull.Value : info.CertifierPosition },
+                        { "@WitName", string.IsNullOrEmpty(info.WitnessName) ? (object)DBNull.Value : info.WitnessName },
+                        { "@WitPos", string.IsNullOrEmpty(info.WitnessPosition) ? (object)DBNull.Value : info.WitnessPosition },
+                        { "@ID", docNum }
+                    });
+            }
+            catch (Exception ex)
+            {
+                try { new code().Logs(conn, "Accounting Sync", $"SaveCertInLieuColumns: doc={docNum} {ex.Message} (รัน PHASE19_Migration_19 แล้วหรือยัง?)", "SYSTEM"); } catch { }
+            }
+        }
+
+        protected void lnkNextAccPdf_Click(object sender, EventArgs e)
+        {
+            string docNum = ViewState["PaymentID"]?.ToString();
+            if (string.IsNullOrEmpty(docNum)) return;
+            string msg;
+            try
+            {
+                Server.ScriptTimeout = 300;
+                var res = System.Threading.Tasks.Task.Run(() =>
+                    new Integration.AccountingSyncService(conn).DownloadVoucherDocumentFromNextAccAsync(docNum, false, false)
+                ).GetAwaiter().GetResult();
+                if (res != null && res.Found && !string.IsNullOrEmpty(res.PdfRelativeUrl))
+                {
+                    Response.Redirect(res.PdfRelativeUrl, false);
+                    Context.ApplicationInstance.CompleteRequest();
+                    return;
+                }
+                msg = res?.Message ?? "ยังไม่พบเอกสารบน NextAcc";
+            }
+            catch (Exception ex)
+            {
+                msg = "ดึง PDF จาก NextAcc ไม่สำเร็จ: " + ex.Message;
+            }
+            string safe = (msg ?? "").Replace("\\", "\\\\").Replace("'", "\\'").Replace("\r", " ").Replace("\n", " ");
+            ClientScript.RegisterStartupScript(this.GetType(), "nextaccpdf", "alert('" + safe + "');", true);
         }
 
         #region Asset Management Integration

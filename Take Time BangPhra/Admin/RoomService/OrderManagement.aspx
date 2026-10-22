@@ -1,4 +1,4 @@
-<%@ Page Title="Order Management" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeFile="OrderManagement.aspx.cs" Inherits="Take_Time_BangPhra.Admin.RoomService.OrderManagement" %>
+﻿<%@ Page Title="Order Management" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeFile="OrderManagement.aspx.cs" Inherits="Take_Time_BangPhra.Admin.RoomService.OrderManagement" %>
 
 <asp:Content ID="Content1" ContentPlaceHolderID="MainContent" runat="server">
     <style>
@@ -413,6 +413,20 @@
             </div>
         </div>
 
+        <!-- ทำเครื่องหมายรับเงินย้อนหลัง (Owner/Admin, แสดงเมื่อเปิดนโยบายเอกสารขาย) — ออเดอร์เงินสด/โอนก่อนเปิดนโยบาย
+             ไม่เคยกด "ยืนยันรับเงินแล้ว" → รายได้ไม่เข้าบัญชี (นโยบายนับเฉพาะ PAID) -->
+        <asp:Panel ID="pnlRsBackfill" runat="server" Visible="false"
+            style="background:#fff8e1;border-left:4px solid #f9a825;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px;">
+            <b><i class="fas fa-history"></i> ทำเครื่องหมายรับเงินย้อนหลัง (ครั้งเดียว)</b>
+            <div style="color:#5d4037;margin:4px 0 8px;">ออเดอร์เงินสด/เงินโอนที่ส่งของแล้วแต่ยังไม่ได้กด "ยืนยันรับเงินแล้ว" ในช่วงวันที่นี้ จะถูกตั้งเป็นรับเงินแล้ว
+                (วันรับเงิน = วันสั่ง) แล้วรายได้จะเข้าบัญชีรอบถัดไปตามนโยบายเอกสารขาย — ใช้เฉพาะออเดอร์ที่เก็บเงินจริงแล้ว</div>
+            <span>ตั้งแต่ <asp:TextBox ID="txtBackfillFrom" runat="server" TextMode="Date" /></span>
+            <span>ถึง <asp:TextBox ID="txtBackfillTo" runat="server" TextMode="Date" /></span>
+            <asp:Button ID="btnBackfillPaid" runat="server" Text="ทำเครื่องหมายรับเงินแล้ว" CssClass="btn-action btn-claim"
+                OnClick="btnBackfillPaid_Click"
+                OnClientClick="return confirm('ยืนยัน: ตั้งออเดอร์เงินสด/โอนที่ยังไม่ยืนยันรับเงินในช่วงนี้เป็น \'รับเงินแล้ว\'?\nรายได้จะถูกส่งเข้าบัญชีรอบถัดไป');" />
+        </asp:Panel>
+
         <!-- Order Layout -->
         <div class="order-layout">
             <!-- Order List -->
@@ -536,10 +550,29 @@
                         </table>
                     </div>
 
+                    <%-- ── เก็บเงินออนไลน์ (โผล่เฉพาะออเดอร์ที่ยังค้างจ่ายและเปิดฟีเจอร์ไว้) ──
+                         ตัวรับเงินฝั่ง ROOMSERVICE มีอยู่แล้วตั้งแต่ต้น แต่ไม่เคยมีหน้าไหน
+                         สร้างลิงก์ให้เลย — ช่องทางนี้จึงตายมาตลอด --%>
+                    <asp:Panel ID="pnlRsPay" runat="server" Visible="false"
+                        style="margin:14px 0;padding:14px;background:#E8F5E9;border-radius:10px;">
+                        <div style="font-weight:600;color:#2E7D32;margin-bottom:8px;">
+                            💳 ให้ลูกค้าจ่ายออนไลน์ (สแกน QR หรือกรอกบัตร)
+                        </div>
+                        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                            <asp:TextBox ID="txtRsPayLink" runat="server" ReadOnly="true"
+                                style="flex:1;min-width:240px;padding:8px 11px;border:1px solid #C8E6C9;border-radius:8px;font-family:monospace;font-size:12.5px;" />
+                            <button type="button" onclick="rsCopy(this)"
+                                style="padding:8px 14px;border:0;border-radius:8px;background:#2E7D32;color:#fff;font-weight:600;cursor:pointer;">คัดลอก</button>
+                        </div>
+                        <div id="rsQr" style="margin-top:10px;"></div>
+                    </asp:Panel>
+
                     <!-- Action Buttons -->
                     <div class="action-area">
                         <asp:Button ID="btnClaim" runat="server" Text=" รับออเดอร์" CssClass="btn-action btn-claim" OnClick="btnClaim_Click" />
                         <asp:Button ID="btnDelivered" runat="server" Text=" จัดส่งแล้ว" CssClass="btn-action btn-delivered" OnClick="btnDelivered_Click" />
+                        <asp:Button ID="btnMarkPaid" runat="server" Text=" ยืนยันรับเงินแล้ว" CssClass="btn-action btn-claim" OnClick="btnMarkPaid_Click"
+                            Visible="false" OnClientClick="return confirm('ยืนยันว่าได้รับเงินของออเดอร์นี้แล้ว (เงินสดเก็บแล้ว / ตรวจสลิปโอนแล้ว)?\nรายได้จะถูกส่งเข้าบัญชีตามนโยบายเอกสารขาย');" />
                         <asp:Button ID="btnCancel" runat="server" Text=" ยกเลิก" CssClass="btn-action btn-cancel" OnClick="btnCancel_Click"
                             OnClientClick="return confirm('ยืนยันยกเลิกออเดอร์นี้?');" />
                     </div>
@@ -740,5 +773,25 @@
             if (checkInterval) clearInterval(checkInterval);
             if (alertInterval) clearInterval(alertInterval);
         };
+    </script>
+
+    <%-- QR + คัดลอกลิงก์จ่ายเงินของออเดอร์ --%>
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+    <script>
+        function rsCopy(btn) {
+            var el = document.getElementById('<%= txtRsPayLink.ClientID %>');
+            if (!el) return;
+            el.select(); el.setSelectionRange(0, 99999);
+            try { document.execCommand('copy'); } catch (e) { }
+            if (navigator.clipboard) { try { navigator.clipboard.writeText(el.value); } catch (e) { } }
+            var old = btn.textContent; btn.textContent = '\u2713 \u0e41\u0e25\u0e49\u0e27';
+            setTimeout(function () { btn.textContent = old; }, 1600);
+        }
+        (function () {
+            var el = document.getElementById('<%= txtRsPayLink.ClientID %>');
+            var box = document.getElementById('rsQr');
+            if (!el || !box || !el.value || typeof QRCode === 'undefined') return;
+            new QRCode(box, { text: el.value, width: 150, height: 150, correctLevel: QRCode.CorrectLevel.M });
+        })();
     </script>
 </asp:Content>

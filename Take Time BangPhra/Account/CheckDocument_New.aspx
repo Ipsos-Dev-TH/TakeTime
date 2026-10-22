@@ -1,4 +1,4 @@
-<%@ Page MaintainScrollPositionOnPostback="true" Title="ตรวจสอบเอกสารและรายได้" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="CheckDocument_New.aspx.cs" Inherits="Take_Time_BangPhra.Account.CheckDocument_New" %>
+﻿<%@ Page MaintainScrollPositionOnPostback="true" Title="ตรวจสอบเอกสารและรายได้" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="CheckDocument_New.aspx.cs" Inherits="Take_Time_BangPhra.Account.CheckDocument_New" %>
 <asp:Content ID="Content1" ContentPlaceHolderID="MainContent" runat="server">
     <link rel="stylesheet" href="/Content/jquery-ui.css">
     <style>
@@ -357,6 +357,10 @@
             <div class="search-row">
                 <asp:Button ID="btnSearch" runat="server" Text="🔍 ค้นหา" CssClass="btn-search" OnClick="btnSearch_Click" />
                 <asp:Button ID="btnExport" runat="server" Text="📄 Export CSV" CssClass="btn-export" OnClick="btnExport_Click" />
+                <asp:Button ID="btnAuditPayments" runat="server" Text="🔍 ตรวจยอดชำระ NextAcc" CssClass="btn-export"
+                    OnClick="btnAuditPayments_Click" CausesValidation="false"
+                    ToolTip="ตรวจทุกใบในช่วงวันที่: รับเงินซ้อน (ชำระเกินยอด) / ค้างชำระ (settle ไม่ครบ)"
+                    OnClientClick="this.disabled=true; this.value='⏳ กำลังตรวจ...';" UseSubmitBehavior="false" />
             </div>
         </div>
 
@@ -452,8 +456,12 @@
             <div style="margin-bottom: 10px;">
                 <asp:CheckBox ID="chkEnableDelete" runat="server" Text="เปิดใช้งานปุ่มลบ (Delete)" />
             </div>
+            <%-- เลขใบเสร็จปลายทางของปุ่ม "ผูกกับใบในระบบ" — ผู้ใช้ยืนยัน/แก้ได้เอง
+                 (ระบบเดาให้ไม่ได้เสมอ: การจองหนึ่งมีใบเสร็จหลายใบ มัดจำ+เช็คเอาท์) --%>
+            <asp:HiddenField ID="hfRelinkTarget" runat="server" />
             <asp:GridView ID="gvDetails" runat="server" CssClass="gridview-custom"
                 AutoGenerateColumns="False" EmptyDataText="ไม่พบข้อมูล"
+                DataKeyNames="ID,Status,IsNextAccOnly,NextAccId,NextAccViewUrl,NextAccDocStatus,Reservation_ID,LocalTwinId"
                 OnRowDeleting="gvDetails_RowDeleting"
                 OnSelectedIndexChanging="gvDetails_SelectedIndexChanging"
                 OnRowCommand="gvDetails_RowCommand"
@@ -477,7 +485,7 @@
                             <%# GetSlipLinkButton(Eval("SlipFileURL"), Eval("HasSlip")) %>
                         </ItemTemplate>
                     </asp:TemplateField>
-                    <asp:BoundField DataField="ID" HeaderText="เลขที่เอกสาร" />
+                    <asp:BoundField DataField="DisplayDoc" HeaderText="เลขที่เอกสาร" />
                     <asp:BoundField DataField="Reservation_ID" HeaderText="รหัสจอง" />
                     <asp:BoundField DataField="Created_Date" HeaderText="วันที่สร้าง" DataFormatString="{0:dd/MM/yyyy HH:mm}" />
                     <asp:BoundField DataField="CustomerName" HeaderText="ชื่อลูกค้า" />
@@ -500,8 +508,82 @@
                                 Visible="false" />
                         </ItemTemplate>
                     </asp:TemplateField>
+                    <asp:TemplateField HeaderText="ส่งแก้ไขขึ้น NextAcc">
+                        <ItemTemplate>
+                            <asp:Button ID="btnFullTaxInvoice" runat="server" Text="🔁 ส่งแก้ไขขึ้น NextAcc"
+                                CommandName="fulltaxinvoice"
+                                CommandArgument='<%# Container.DataItemIndex %>'
+                                CssClass="btn-sync-action" CausesValidation="false"
+                                ToolTip="ส่งข้อมูลปัจจุบันของใบนี้ขึ้น NextAcc อีกครั้ง — ใช้หลังแก้ยอด/รายการ/ข้อมูลลูกค้า และใช้กับเคสลูกค้าขอใบกำกับภาษีย้อนหลัง (ถ้ากรอกเลขผู้เสียภาษี+ที่อยู่แล้วจะออกเป็นใบกำกับเต็มรูปให้เอง)"
+                                OnClientClick="return confirm('ส่งข้อมูลปัจจุบันของใบนี้ขึ้น NextAcc อีกครั้ง?\n\n• ระบบจะพยายามแก้เอกสารเดิมในที่เดิมก่อน (เลขเอกสารคงเดิม)\n• ถ้า NextAcc ไม่ยอม จะยกเลิกใบเดิมแล้วออกใหม่\n• ถ้ากรอกเลขผู้เสียภาษี 13 หลัก + ที่อยู่ลูกค้าแล้ว จะได้ใบกำกับภาษีเต็มรูป');"
+                                UseSubmitBehavior="false" />
+                        </ItemTemplate>
+                    </asp:TemplateField>
+                    <asp:TemplateField HeaderText="อัพเดทไฟล์">
+                        <ItemTemplate>
+                            <asp:Button ID="btnRefreshPdf" runat="server" Text="🔄 ดึงล่าสุด"
+                                CommandName="refreshpdf"
+                                CommandArgument='<%# Container.DataItemIndex %>'
+                                CssClass="btn-sync-action" CausesValidation="false"
+                                ToolTip="ดึง PDF ล่าสุดจาก NextAcc (ข้าม cache)"
+                                OnClientClick="this.disabled=true; this.value='⏳ กำลังดึง...'; "
+                                UseSubmitBehavior="false" />
+                        </ItemTemplate>
+                    </asp:TemplateField>
+                    <asp:TemplateField HeaderText="e-Tax">
+                        <ItemTemplate>
+                            <asp:Button ID="btnSendEtax" runat="server" Text="📧 ส่ง e-Tax"
+                                CommandName="sendetax"
+                                CommandArgument='<%# Container.DataItemIndex %>'
+                                CssClass="btn-sync-action" CausesValidation="false"
+                                ToolTip="ส่งใบกำกับภาษีอิเล็กทรอนิกส์ทางอีเมล (เปิดหน้าตรวจก่อนส่ง)"
+                                Visible="false" />
+                        </ItemTemplate>
+                    </asp:TemplateField>
+                    <asp:TemplateField HeaderText="ดู JE">
+                        <ItemTemplate>
+                            <button type="button" class="btn-sync-action"
+                                title="ดูรายการบัญชี (JE) + เอกสารจาก NextAcc"
+                                onclick='viewJE("<%# Eval("ID") %>")'>🧾 ดู JE</button>
+                        </ItemTemplate>
+                    </asp:TemplateField>
                 </Columns>
             </asp:GridView>
+        </div>
+    </div>
+
+    <!-- JE + เอกสาร Modal -->
+    <style type="text/css">
+        #jeModal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:9999; overflow:auto; }
+        #jeModal .je-box { background:#fff; max-width:900px; margin:32px auto; border-radius:10px; box-shadow:0 10px 40px rgba(0,0,0,.3); overflow:hidden; }
+        #jeModal .je-head { background:#2c3e50; color:#fff; padding:14px 20px; display:flex; justify-content:space-between; align-items:center; }
+        #jeModal .je-head h3 { margin:0; font-size:17px; }
+        #jeModal .je-close { cursor:pointer; font-size:26px; line-height:1; color:#fff; background:none; border:none; }
+        #jeModal .je-body { padding:18px 20px; max-height:72vh; overflow:auto; }
+        #jeModal .je-doc { background:#f8f9fb; border:1px solid #e3e7ee; border-radius:8px; padding:12px 14px; margin-bottom:16px; }
+        #jeModal .je-doc .je-doc-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px 14px; font-size:13px; margin-top:8px; }
+        #jeModal .je-doc .lbl { color:#888; font-size:11px; display:block; }
+        #jeModal .je-je { border:1px solid #e3e7ee; border-radius:8px; margin-bottom:14px; }
+        #jeModal .je-je-head { padding:9px 12px; background:#eef2f7; font-size:13px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px; }
+        #jeModal table.je-lines { width:100%; border-collapse:collapse; font-size:13px; }
+        #jeModal table.je-lines th, #jeModal table.je-lines td { padding:6px 10px; border-top:1px solid #eee; text-align:left; }
+        #jeModal table.je-lines th { background:#fafbfc; color:#666; font-weight:600; }
+        #jeModal table.je-lines td.num, #jeModal table.je-lines th.num { text-align:right; font-variant-numeric:tabular-nums; }
+        #jeModal table.je-lines tfoot td { font-weight:700; border-top:2px solid #ccc; background:#fafbfc; }
+        #jeModal .badge { display:inline-block; padding:1px 8px; border-radius:10px; font-size:11px; font-weight:600; }
+        #jeModal .badge.ok { background:#e7f7ec; color:#1c8b45; }
+        #jeModal .badge.warn { background:#fdecea; color:#c0392b; }
+        #jeModal .badge.rev { background:#f0e9fb; color:#7b4fc0; }
+        #jeModal .badge.gray { background:#eceff3; color:#607080; }
+        #jeModal .je-empty { text-align:center; color:#888; padding:26px; }
+    </style>
+    <div id="jeModal">
+        <div class="je-box">
+            <div class="je-head">
+                <h3 id="jeTitle">รายการบัญชี (JE) + เอกสาร</h3>
+                <button type="button" class="je-close" onclick="closeJE()">&times;</button>
+            </div>
+            <div class="je-body" id="jeBody"></div>
         </div>
     </div>
 
@@ -532,5 +614,107 @@
         function showLoading() {
             document.getElementById('loadingOverlay').style.display = 'flex';
         }
+
+        // ── ดู JE + เอกสาร (ดึงจาก NextAcc) ──
+        function esc(s) {
+            if (s === null || s === undefined) return '';
+            return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+        // ค่าที่ฝังใน onclick="fn('...')" — escape JS-string (\ ') ก่อน แล้ว HTML-attr
+        function jsArg(s) {
+            if (s === null || s === undefined) return '';
+            return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'")
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+        function num(n) {
+            var v = (typeof n === 'number') ? n : parseFloat(n || 0);
+            if (isNaN(v)) v = 0;
+            return v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+        function closeJE() { document.getElementById('jeModal').style.display = 'none'; }
+
+        function viewJE(doc) {
+            var modal = document.getElementById('jeModal');
+            var body = document.getElementById('jeBody');
+            document.getElementById('jeTitle').textContent = 'รายการบัญชี (JE) + เอกสาร — ' + doc;
+            body.innerHTML = '<div class="je-empty">⏳ กำลังดึงข้อมูลจาก NextAcc...</div>';
+            modal.style.display = 'block';
+
+            var url = '<%= ResolveUrl("~/Account/CheckDocument_New") %>?action=viewJE&doc=' + encodeURIComponent(doc) + '&_=' + Date.now();
+            var ctrl = new AbortController();
+            var timer = setTimeout(function () { ctrl.abort(); }, 90000);
+            fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' }, signal: ctrl.signal })
+                .then(function (r) { clearTimeout(timer); return r.json(); })
+                .then(function (d) { body.innerHTML = renderJE(d); })
+                .catch(function (err) {
+                    clearTimeout(timer);
+                    var m = (err && err.name === 'AbortError') ? 'หมดเวลา — NextAcc ไม่ตอบกลับ ลองใหม่อีกครั้ง' : esc(err.message);
+                    body.innerHTML = '<div class="je-empty">⚠ ดึงข้อมูลไม่สำเร็จ: ' + m +
+                        '</div><div style="text-align:center; margin-top:10px;"><button type="button" class="btn-sync-action" onclick="viewJE(\'' + jsArg(doc) + '\')">🔄 ลองใหม่</button></div>';
+                });
+        }
+
+        function renderJE(d) {
+            if (!d || !d.Success) {
+                return '<div class="je-empty">⚠ ' + esc(d ? d.Message : 'ไม่มีข้อมูล') + '</div>';
+            }
+            var html = '';
+
+            // สรุปหัวเอกสาร
+            if (d.HasDocument) {
+                var arWarn = (d.BalanceDue && d.BalanceDue > 0.01);
+                html += '<div class="je-doc"><strong>' + esc(d.DocumentType) + ' — ' + esc(d.DocumentNumber) + '</strong> ';
+                html += '<span class="badge ' + (d.DocumentStatus === 'ยกเลิก' ? 'warn' : 'gray') + '">' + esc(d.DocumentStatus) + '</span>';
+                html += '<div class="je-doc-grid">';
+                html += '<div><span class="lbl">วันที่</span>' + esc(d.DocumentDate) + '</div>';
+                html += '<div><span class="lbl">อ้างอิง</span>' + esc(d.DocumentReference || '-') + '</div>';
+                html += '<div><span class="lbl">ยอดก่อน VAT</span>' + num(d.SubTotal) + '</div>';
+                html += '<div><span class="lbl">VAT</span>' + num(d.VatAmount) + '</div>';
+                html += '<div><span class="lbl">ยอดรวม</span>' + num(d.TotalAmount) + '</div>';
+                html += '<div><span class="lbl">ชำระแล้ว</span>' + num(d.PaidAmount) + '</div>';
+                html += '<div><span class="lbl">คงค้าง</span>' + (arWarn
+                        ? '<span class="badge warn">' + num(d.BalanceDue) + ' (ลูกหนี้ยังเปิด)</span>'
+                        : num(d.BalanceDue)) + '</div>';
+                html += '<div><span class="lbl">รหัสจอง</span>' + esc(d.ReservationId || '-') + '</div>';
+                html += '</div></div>';
+            }
+
+            // JE ทุกใบ
+            if (!d.Journals || d.Journals.length === 0) {
+                html += '<div class="je-empty">ไม่พบรายการบัญชี (JE) ที่ผูกกับใบนี้บน NextAcc' +
+                    (d.SearchedRefs && d.SearchedRefs.length ? '<br/><small>ค้นจาก: ' + esc(d.SearchedRefs.join(', ')) + '</small>' : '') +
+                    '</div>';
+                return html;
+            }
+
+            d.Journals.forEach(function (j) {
+                html += '<div class="je-je"><div class="je-je-head"><span><strong>' + esc(j.EntryNumber || 'JE') + '</strong> · ' + esc(j.Date) +
+                        ' · อ้างอิง ' + esc(j.Reference || '-') + '</span><span>';
+                html += '<span class="badge ' + (j.Status === 'ยกเลิก' ? 'warn' : 'gray') + '">' + esc(j.Status) + '</span> ';
+                if (j.IsReversal) html += '<span class="badge rev">ตัวกลับรายการ</span> ';
+                if (j.IsReversed) html += '<span class="badge rev">ถูกกลับแล้ว</span> ';
+                html += '<span class="badge ' + (j.Balanced ? 'ok' : 'warn') + '">' + (j.Balanced ? 'สมดุล ✓' : 'ไม่สมดุล ✗') + '</span>';
+                html += '</span></div>';
+                if (j.Description) html += '<div style="padding:4px 12px; font-size:12px; color:#777;">' + esc(j.Description) + '</div>';
+                html += '<table class="je-lines"><thead><tr><th>บัญชี</th><th>ชื่อบัญชี</th><th class="num">เดบิต</th><th class="num">เครดิต</th></tr></thead><tbody>';
+                (j.Lines || []).forEach(function (l) {
+                    html += '<tr><td>' + esc(l.AccountCode) + '</td><td>' + esc(l.AccountName) +
+                            (l.Description ? ' <small style="color:#999;">' + esc(l.Description) + '</small>' : '') +
+                            '</td><td class="num">' + (l.Debit > 0 ? num(l.Debit) : '') +
+                            '</td><td class="num">' + (l.Credit > 0 ? num(l.Credit) : '') + '</td></tr>';
+                });
+                html += '</tbody><tfoot><tr><td colspan="2">รวม</td><td class="num">' + num(j.TotalDebit) +
+                        '</td><td class="num">' + num(j.TotalCredit) + '</td></tr></tfoot></table></div>';
+            });
+            return html;
+        }
+
+        // ปิด modal เมื่อคลิกพื้นหลัง / กด Esc
+        document.addEventListener('click', function (e) {
+            if (e.target && e.target.id === 'jeModal') closeJE();
+        });
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') closeJE();
+        });
     </script>
 </asp:Content>

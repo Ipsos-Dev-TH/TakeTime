@@ -16,6 +16,7 @@
         <div class="product-nav">
             <a href="/Product/Default" class="product-nav-item">🛒 ขายสินค้า</a>
             <a href="/Product/In" class="product-nav-item active">📥 นำเข้า</a>
+            <a href="/Product/PurchaseReturn" class="product-nav-item">↩️ คืนผู้ขาย</a>
             <a href="/Product/Stock" class="product-nav-item">📦 สต็อก</a>
             <a href="/Product/SellReport" class="product-nav-item">📊 รายงาน</a>
         </div>
@@ -115,6 +116,76 @@
                     </div>
                 </div>
 
+                <!-- เอกสารซื้อ + การชำระ (PHASE19_31) -->
+                <div style="margin-top: 30px; padding: 16px; border: 1px solid #c8e6c9; border-radius: 8px; background: #f9fdf9;">
+                    <h4 style="margin: 0 0 12px 0; color: #2e7d32;">🧾 เอกสารซื้อและการชำระเงิน</h4>
+                    <asp:Literal ID="litPurchaseInfo" runat="server"></asp:Literal>
+                    <div class="form-row">
+                        <div class="form-group" style="flex: 2;">
+                            <label>ผู้ขาย (เลือกจากทะเบียนผู้ขาย หรือพิมพ์เอง)</label>
+                            <asp:DropDownList ID="ddlSupplierVendor" runat="server" CssClass="form-control" AutoPostBack="true"
+                                OnSelectedIndexChanged="ddlSupplierVendor_SelectedIndexChanged" AppendDataBoundItems="true">
+                                <asp:ListItem Value="" Text="— ไม่เลือก / พิมพ์ชื่อเอง —" />
+                            </asp:DropDownList>
+                        </div>
+                        <div class="form-group" style="flex: 2;">
+                            <label>ชื่อผู้ขาย</label>
+                            <asp:TextBox ID="txtSupplierName" runat="server" CssClass="form-control" MaxLength="200" placeholder="ชื่อร้าน/บริษัทผู้ขาย"></asp:TextBox>
+                        </div>
+                        <div class="form-group">
+                            <label>เลขผู้เสียภาษีผู้ขาย</label>
+                            <asp:TextBox ID="txtSupplierTaxId" runat="server" CssClass="form-control" MaxLength="20" placeholder="13 หลัก"></asp:TextBox>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>เลขที่ใบกำกับ/ใบส่งของ</label>
+                            <asp:TextBox ID="txtSupplierDocNo" runat="server" CssClass="form-control" MaxLength="60"></asp:TextBox>
+                        </div>
+                        <div class="form-group">
+                            <label>วันที่เอกสาร</label>
+                            <asp:TextBox ID="txtSupplierDocDate" runat="server" CssClass="form-control" TextMode="Date"></asp:TextBox>
+                        </div>
+                        <div class="form-group">
+                            <label>ภาษีซื้อ (VAT)</label>
+                            <asp:DropDownList ID="ddlVatMode" runat="server" CssClass="form-control">
+                                <asp:ListItem Value="NONE" Text="ไม่มี VAT (ผู้ขายไม่จด VAT / ใบเสร็จธรรมดา)" Selected="True" />
+                                <asp:ListItem Value="EXCL" Text="ราคาที่กรอกยังไม่รวม VAT — คิด VAT 7%" />
+                                <asp:ListItem Value="INCL" Text="ราคาที่กรอกรวม VAT แล้ว — ถอด VAT 7% ออก" />
+                                <asp:ListItem Value="MANUAL" Text="กรอกยอด VAT เอง (ราคาที่กรอก = ไม่รวม VAT)" />
+                            </asp:DropDownList>
+                        </div>
+                        <div class="form-group">
+                            <label>ยอด VAT (เฉพาะกรอกเอง)</label>
+                            <asp:TextBox ID="txtVatAmount" runat="server" CssClass="form-control" placeholder="0.00"></asp:TextBox>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>สถานะการชำระ</label>
+                            <asp:DropDownList ID="ddlPaymentStatus" runat="server" CssClass="form-control">
+                                <asp:ListItem Value="UNPAID" Text="รับของแล้ว — รอใบแจ้งหนี้/ยังไม่จ่าย" Selected="True" />
+                                <asp:ListItem Value="PAID" Text="จ่ายแล้ว (เงินสด/โอน)" />
+                                <asp:ListItem Value="CREDIT" Text="ซื้อเชื่อ (ตั้งเจ้าหนี้ จ่ายทีหลัง)" />
+                            </asp:DropDownList>
+                        </div>
+                        <div class="form-group">
+                            <label>จ่ายจาก (กรณีจ่ายแล้ว)</label>
+                            <asp:DropDownList ID="ddlPaidHow" runat="server" CssClass="form-control" AppendDataBoundItems="true">
+                                <asp:ListItem Value="" Text="— เลือกแหล่งเงิน —" />
+                            </asp:DropDownList>
+                        </div>
+                        <div class="form-group" style="flex: 2; justify-content: flex-end;">
+                            <asp:CheckBox ID="chkOpenVoucher" runat="server" Checked="true"
+                                Text=" เปิดหน้าใบสำคัญจ่ายต่อทันที (กรอกผู้ขาย/รายการล้างรับของ/VAT ให้แล้ว) — จ่ายแล้วหรือซื้อเชื่อ" />
+                        </div>
+                    </div>
+                    <div style="font-size: 12px; color: #607d8b;">
+                        ราคาต้นทุนต่อชิ้นที่บันทึกเป็นราคาสุทธิไม่รวม VAT เสมอ · ต้นทุนเฉลี่ยของสินค้า (Product.Cost_Price) คำนวณใหม่ทุกครั้งที่รับของ (ถัวเฉลี่ยเคลื่อนที่)
+                        · ค่าสินค้าจ่ายผ่านใบสำคัญจ่ายที่ "ผูกการรับของ" เท่านั้น (ลง Dr GRNI ไม่ใช่ค่าใช้จ่าย — กันต้นทุนซ้ำ)
+                    </div>
+                </div>
+
                 <asp:Panel ID="Panel1" runat="server" Visible="false"></asp:Panel>
             </div>
             <div class="product-card-footer">
@@ -126,6 +197,31 @@
             </div>
         </div>
 
+        <!-- รายการรับของล่าสุด (PHASE19_31) -->
+        <asp:Panel ID="pnlRecentBatches" runat="server" CssClass="product-card" Visible="false">
+            <div class="product-card-header">
+                <h3>🗂️ การรับของล่าสุด</h3>
+            </div>
+            <div class="product-card-body">
+                <div class="table-responsive">
+                    <asp:GridView ID="gvRecentBatches" runat="server" AutoGenerateColumns="False" CssClass="product-table" GridLines="None">
+                        <Columns>
+                            <asp:BoundField DataField="Batch" HeaderText="เลขที่รับของ" />
+                            <asp:BoundField DataField="Received_At" HeaderText="วันที่รับ" DataFormatString="{0:dd/MM/yyyy HH:mm}" />
+                            <asp:BoundField DataField="Supplier_Name" HeaderText="ผู้ขาย" />
+                            <asp:BoundField DataField="Supplier_Doc_No" HeaderText="เลขที่ใบกำกับ" />
+                            <asp:BoundField DataField="Net_Total" HeaderText="ยอดสุทธิ" DataFormatString="{0:N2}" ItemStyle-HorizontalAlign="Right" />
+                            <asp:BoundField DataField="Vat_Amount" HeaderText="VAT" DataFormatString="{0:N2}" ItemStyle-HorizontalAlign="Right" />
+                            <asp:BoundField DataField="Payment_Status" HeaderText="สถานะ" />
+                            <asp:BoundField DataField="Linked_Voucher_Id" HeaderText="ใบสำคัญจ่าย" />
+                            <asp:HyperLinkField Text="💳 ใบสำคัญจ่าย" DataNavigateUrlFields="Batch" DataNavigateUrlFormatString="/Account/PaymentVoucher?grn={0}" />
+                            <asp:HyperLinkField Text="↩️ คืนสินค้า" DataNavigateUrlFields="Batch" DataNavigateUrlFormatString="/Product/PurchaseReturn?batch={0}" />
+                        </Columns>
+                    </asp:GridView>
+                </div>
+            </div>
+        </asp:Panel>
+
         <!-- Info Panel -->
         <div class="alert-panel info">
             <div class="alert-icon">💡</div>
@@ -134,7 +230,9 @@
                 <div class="alert-text">
                     1. ค้นหาสินค้าด้วยชื่อหรือสแกนบาร์โค้ด<br>
                     2. ใส่จำนวนและราคาต้นทุน แล้วกด "เพิ่มรายการ"<br>
-                    3. ตรวจสอบรายการแล้วกด "บันทึกการนำเข้า"
+                    3. กรอกผู้ขาย เลขที่/วันที่ใบกำกับ VAT และสถานะการชำระ แล้วกด "บันทึกการนำเข้า"<br>
+                    4. จ่ายแล้ว/ซื้อเชื่อ → ระบบเปิดหน้าใบสำคัญจ่ายที่ผูกการรับของนี้ให้ (ซื้อเชื่อจ่ายภายหลังที่หน้า "ชำระใบซื้อเชื่อ")<br>
+                    5. คืนของให้ผู้ขาย → ปุ่ม "↩️ คืนสินค้า" ในตารางการรับของล่าสุด
                 </div>
             </div>
         </div>

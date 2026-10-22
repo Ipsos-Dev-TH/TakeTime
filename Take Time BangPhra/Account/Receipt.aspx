@@ -252,7 +252,14 @@
             <tr style="background-color:whitesmoke;">
                 <td class="modal-sm" style="width: 20%;  text-align: right">เลขประจำตัวผู้เสียภาษี:</td>
                 <td>
-                    <asp:TextBox ID="TextBox12" runat="server" Width="60%"></asp:TextBox>
+                    <asp:TextBox ID="TextBox12" runat="server" Width="40%"></asp:TextBox>
+                &nbsp;&nbsp;
+                    <%-- ดึงชื่อจดทะเบียน + ที่อยู่สำนักงานใหญ่จากกรมพัฒนาธุรกิจการค้า (DBD)
+                         ผ่าน NextAcc /api/dbd/juristic/{id} — ผู้ใช้ตรวจแล้วค่อยกดบันทึก --%>
+                    <asp:Button ID="btnDbdLookup" runat="server" Text="🔍 ดึงข้อมูลจากเลขผู้เสียภาษี"
+                        Width="35%" CausesValidation="false" OnClick="btnDbdLookup_Click" />
+                    <div id="divDbdResult" runat="server" visible="false"
+                         style="margin-top:6px; font-size:12px; padding:7px 10px; border-radius:5px;"></div>
                  </td>
               
             </tr>

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Data;
 using System.Data.SqlClient;
 using System.Web.UI;
@@ -17,6 +17,7 @@ namespace Take_Time_BangPhra.Admin
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.CrmCustomer)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             // Initialize connection
             connString = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
             conn = new SqlConnection(connString);

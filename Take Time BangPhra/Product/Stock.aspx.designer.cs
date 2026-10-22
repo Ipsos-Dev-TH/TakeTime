@@ -87,14 +87,6 @@ namespace Take_Time_BangPhra.Product
         /// </remarks>
         protected global::System.Web.UI.WebControls.TextBox TextBox2;
 
-        /// <summary>
-        /// TextBox3 control.
-        /// </summary>
-        /// <remarks>
-        /// Auto-generated field.
-        /// To modify move field declaration from designer file to code-behind file.
-        /// </remarks>
-        protected global::System.Web.UI.WebControls.TextBox TextBox3;
 
         /// <summary>
         /// TextBox4 control.
@@ -128,14 +120,6 @@ namespace Take_Time_BangPhra.Product
         /// </remarks>
         protected global::System.Web.UI.WebControls.GridView GridView1;
 
-        /// <summary>
-        /// Panel1 control.
-        /// </summary>
-        /// <remarks>
-        /// Auto-generated field.
-        /// To modify move field declaration from designer file to code-behind file.
-        /// </remarks>
-        protected global::System.Web.UI.WebControls.Panel Panel1;
 
         /// <summary>
         /// btnClear control.
@@ -159,5 +143,16 @@ namespace Take_Time_BangPhra.Product
         /// To modify move field declaration from designer file to code-behind file.
         /// </remarks>
         protected global::System.Web.UI.WebControls.Literal Literal1;
+        protected global::System.Web.UI.WebControls.Panel pnlStockOutMsg;
+        protected global::System.Web.UI.HtmlControls.HtmlGenericControl divStockOutMsg;
+        protected global::System.Web.UI.WebControls.Literal litStockOutMsg;
+        protected global::System.Web.UI.WebControls.Literal litSchemaWarn;
+        protected global::System.Web.UI.WebControls.DropDownList ddlReason;
+        protected global::System.Web.UI.WebControls.FileUpload fuEvidence;
+        protected global::System.Web.UI.WebControls.HiddenField hfActionNote;
+        protected global::System.Web.UI.WebControls.Panel pnlPending;
+        protected global::System.Web.UI.WebControls.GridView gvPending;
+        protected global::System.Web.UI.WebControls.GridView gvHistory;
+        protected global::System.Web.UI.WebControls.Literal litReasonData;
     }
 }

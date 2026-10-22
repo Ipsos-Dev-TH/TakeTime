@@ -1,4 +1,4 @@
-<%@ Page Title="Guest Dashboard" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="Dashboard.aspx.cs" Inherits="Take_Time_BangPhra.Guest.Dashboard" %>
+﻿<%@ Page Title="Guest Dashboard" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="Dashboard.aspx.cs" Inherits="Take_Time_BangPhra.Guest.Dashboard" %>
 
 <asp:Content ID="Content1" ContentPlaceHolderID="MainContent" runat="server">
     <style>
@@ -509,14 +509,14 @@
 
         <!-- Quick Actions -->
         <div class="quick-actions">
-            <a href="RoomService.aspx" class="quick-action-btn primary">
+            <asp:PlaceHolder ID="phQaRoomService" runat="server"><a href="RoomService.aspx" class="quick-action-btn primary">
                 <i class="fas fa-utensils"></i>
                 <span>สั่งอาหาร</span>
-            </a>
-            <a href="Housekeeping.aspx" class="quick-action-btn success">
+            </a></asp:PlaceHolder>
+            <asp:PlaceHolder ID="phQaHousekeeping" runat="server"><a href="Housekeeping.aspx" class="quick-action-btn success">
                 <i class="fas fa-broom"></i>
                 <span>แม่บ้าน</span>
-            </a>
+            </a></asp:PlaceHolder>
             <a href="Balance.aspx" class="quick-action-btn warning">
                 <i class="fas fa-receipt"></i>
                 <span>ยอดชำระ</span>
@@ -532,14 +532,14 @@
         </div>
 
         <!-- Promo Banner -->
-        <a href="Review.aspx" class="promo-banner">
+        <asp:PlaceHolder ID="phPromoReview" runat="server"><a href="Review.aspx" class="promo-banner">
             <i class="fas fa-gift"></i>
             <div class="promo-text">
                 <h4>รีวิวรับ 100 Points!</h4>
                 <p>แชร์ประสบการณ์ของคุณบน Google</p>
             </div>
             <i class="fas fa-chevron-right arrow"></i>
-        </a>
+        </a></asp:PlaceHolder>
 
         <!-- Stats Grid -->
         <div class="stats-grid">
@@ -572,21 +572,21 @@
         </div>
 
         <div class="services-grid">
-            <a href="RoomService.aspx" class="service-card">
+            <asp:PlaceHolder ID="phSvcRoomService" runat="server"><a href="RoomService.aspx" class="service-card">
                 <div class="service-icon food">
                     <i class="fas fa-utensils"></i>
                 </div>
                 <h3>Room Service</h3>
                 <p>สั่งอาหาร เครื่องดื่ม ส่งถึงห้อง</p>
-            </a>
+            </a></asp:PlaceHolder>
 
-            <a href="Housekeeping.aspx" class="service-card">
+            <asp:PlaceHolder ID="phSvcHousekeeping" runat="server"><a href="Housekeeping.aspx" class="service-card">
                 <div class="service-icon clean">
                     <i class="fas fa-broom"></i>
                 </div>
                 <h3>Housekeeping</h3>
                 <p>ทำความสะอาด ผ้าเช็ดตัว ของใช้</p>
-            </a>
+            </a></asp:PlaceHolder>
 
             <a href="Concierge.aspx" class="service-card">
                 <div class="service-icon concierge">
@@ -604,37 +604,53 @@
                 <p>ตรวจสอบยอดและชำระเงิน</p>
             </a>
 
-            <a href="Activities.aspx" class="service-card">
+            <a href="Amenities.aspx" class="service-card">
+                <div class="service-icon success">
+                    <i class="fas fa-concierge-bell"></i>
+                </div>
+                <h3>เบิกของใช้</h3>
+                <p>ผ้าเช็ดตัว น้ำดื่ม ของใช้เพิ่ม</p>
+            </a>
+
+            <asp:PlaceHolder ID="phSvcActivities" runat="server"><a href="Activities.aspx" class="service-card">
                 <div class="service-icon info">
                     <i class="fas fa-hiking"></i>
                 </div>
                 <h3>Activities</h3>
                 <p>กิจกรรมในและนอกที่พัก</p>
-            </a>
+            </a></asp:PlaceHolder>
 
-            <a href="MyPoints.aspx" class="service-card">
+            <asp:PlaceHolder ID="phSvcActivityBooking" runat="server"><a href="ActivityBooking.aspx" class="service-card">
+                <div class="service-icon primary">
+                    <i class="fas fa-calendar-check"></i>
+                </div>
+                <h3>จองกิจกรรม</h3>
+                <p>จองเวลาใช้บริการ เช่น โต๊ะปิงปอง</p>
+            </a></asp:PlaceHolder>
+
+            <asp:PlaceHolder ID="phSvcPoints" runat="server"><a href="MyPoints.aspx" class="service-card">
                 <div class="service-icon payment">
                     <i class="fas fa-coins"></i>
                 </div>
                 <h3>คะแนน & รางวัล</h3>
                 <p>ดูแต้มสะสมและแลกของรางวัล</p>
-            </a>
+            </a></asp:PlaceHolder>
 
-            <a href="Review.aspx" class="service-card">
+            <asp:PlaceHolder ID="phSvcReview" runat="server"><a href="Review.aspx" class="service-card">
                 <div class="service-icon review">
                     <i class="fas fa-star"></i>
                 </div>
                 <h3>Review & Rewards</h3>
                 <p>รีวิวสะสมแต้มรับรางวัล</p>
-            </a>
+            </a></asp:PlaceHolder>
 
-            <a href="Chat.aspx" class="service-card">
+            <asp:PlaceHolder ID="phSvcChat" runat="server"><a href="Chat.aspx" class="service-card">
                 <div class="service-icon chat">
                     <i class="fas fa-comments"></i>
                 </div>
                 <h3>Chat</h3>
                 <p>สนทนากับ Front Desk</p>
-            </a>
+            </a></asp:PlaceHolder>
         </div>
 
         <!-- Info Section -->
@@ -675,21 +691,21 @@
             <i class="fas fa-home"></i>
             <span>หน้าหลัก</span>
         </a>
-        <a href="RoomService.aspx">
+        <asp:PlaceHolder ID="phBnRoomService" runat="server"><a href="RoomService.aspx">
             <i class="fas fa-utensils"></i>
             <span>สั่งอาหาร</span>
-        </a>
-        <a href="Activities.aspx">
+        </a></asp:PlaceHolder>
+        <asp:PlaceHolder ID="phBnActivities" runat="server"><a href="Activities.aspx">
             <i class="fas fa-hiking"></i>
             <span>กิจกรรม</span>
-        </a>
+        </a></asp:PlaceHolder>
         <a href="Balance.aspx">
             <i class="fas fa-wallet"></i>
             <span>ยอดชำระ</span>
         </a>
-        <a href="Review.aspx">
+        <asp:PlaceHolder ID="phBnReview" runat="server"><a href="Review.aspx">
             <i class="fas fa-star"></i>
             <span>รีวิว</span>
-        </a>
+        </a></asp:PlaceHolder>
     </div>
 </asp:Content>

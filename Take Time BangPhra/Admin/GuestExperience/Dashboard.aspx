@@ -54,27 +54,29 @@
         <!-- Overall Score -->
         <div class="score-section">
             <div class="score-main">
-                <div class="value"><asp:Label ID="lblOverallScore" runat="server" Text="4.5" /></div>
-                <div class="label">Overall Guest Satisfaction</div>
+                <div class="value"><asp:Label ID="lblOverallScore" runat="server" Text="-" /></div>
+                <div class="label">คะแนนเฉลี่ยรีวิวทุกแพลตฟอร์ม (/5, 365 วัน)</div>
+                <div class="label" style="margin-top: 4px;"><asp:Label ID="lblReviewCount" runat="server" Text="" /></div>
             </div>
             <div class="score-breakdown">
                 <div class="score-item">
-                    <div class="value"><asp:Label ID="lblCleanliness" runat="server" Text="4.8" /></div>
+                    <div class="value"><asp:Label ID="lblCleanliness" runat="server" Text="-" /></div>
                     <div class="label">ความสะอาด</div>
                 </div>
                 <div class="score-item">
-                    <div class="value"><asp:Label ID="lblService" runat="server" Text="4.6" /></div>
+                    <div class="value"><asp:Label ID="lblService" runat="server" Text="-" /></div>
                     <div class="label">การบริการ</div>
                 </div>
                 <div class="score-item">
-                    <div class="value"><asp:Label ID="lblValue" runat="server" Text="4.3" /></div>
+                    <div class="value"><asp:Label ID="lblValue" runat="server" Text="-" /></div>
                     <div class="label">ความคุ้มค่า</div>
                 </div>
                 <div class="score-item">
-                    <div class="value"><asp:Label ID="lblLocation" runat="server" Text="4.7" /></div>
+                    <div class="value"><asp:Label ID="lblLocation" runat="server" Text="-" /></div>
                     <div class="label">ทำเล</div>
                 </div>
             </div>
+            <div style="flex-basis: 100%; text-align: center; font-size: 12px; opacity: 0.8;">คะแนนย่อยมาจากรีวิวภายใน (แบบฟอร์มลูกค้าเข้าพัก)</div>
         </div>
 
         <div class="metrics-grid">
@@ -83,12 +85,12 @@
                 <h3><i class="fas fa-clock"></i> Response Metrics</h3>
                 <ul class="metric-list">
                     <li>
-                        <span class="name">เวลาตอบกลับเฉลี่ย</span>
-                        <span class="value"><asp:Label ID="lblAvgResponse" runat="server" Text="5 นาที" /></span>
+                        <span class="name">เวลาตอบรีวิวเฉลี่ย</span>
+                        <span class="value"><asp:Label ID="lblAvgResponse" runat="server" Text="-" /></span>
                     </li>
                     <li>
-                        <span class="name">อัตราการตอบกลับ</span>
-                        <span class="value"><asp:Label ID="lblResponseRate" runat="server" Text="98%" /></span>
+                        <span class="name">อัตราการตอบรีวิว</span>
+                        <span class="value"><asp:Label ID="lblResponseRate" runat="server" Text="-" /></span>
                     </li>
                     <li>
                         <span class="name">ข้อความที่รอตอบ</span>
@@ -96,7 +98,7 @@
                     </li>
                 </ul>
                 <div class="progress-bar">
-                    <div class="fill fill-green" style="width: 98%"></div>
+                    <div class="fill fill-green" id="respBar" runat="server" style="width: 0%"></div>
                 </div>
             </div>
 
@@ -125,25 +127,10 @@
             <!-- Recent Reviews -->
             <div class="metric-card">
                 <h3><i class="fas fa-star"></i> รีวิวล่าสุด</h3>
-                <div class="review-item">
-                    <div class="review-header">
-                        <span class="review-name">คุณสมชาย</span>
-                        <span class="review-rating"><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i></span>
-                    </div>
-                    <div class="review-text">บรรยากาศดีมาก ห้องสะอาด พนักงานใจดี จะกลับมาอีกแน่นอน!</div>
-                    <div class="review-date">2 วันที่แล้ว</div>
-                </div>
-                <div class="review-item">
-                    <div class="review-header">
-                        <span class="review-name">คุณมานี</span>
-                        <span class="review-rating"><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="far fa-star"></i></span>
-                    </div>
-                    <div class="review-text">ที่พักดี แต่อยากให้มีกิจกรรมเพิ่มเติม</div>
-                    <div class="review-date">5 วันที่แล้ว</div>
-                </div>
+                <asp:Literal ID="litRecentReviews" runat="server" Mode="PassThrough" />
                 <div class="action-buttons">
-                    <button class="btn-action btn-primary"><i class="fas fa-eye"></i> ดูทั้งหมด</button>
-                    <button class="btn-action btn-secondary"><i class="fas fa-reply"></i> ตอบกลับ</button>
+                    <a class="btn-action btn-primary" style="text-decoration: none;" href="<%= ResolveUrl("~/Admin/CRM/ReviewAnalytics") %>"><i class="fas fa-eye"></i> ดูทั้งหมด</a>
+                    <a class="btn-action btn-secondary" style="text-decoration: none;" href="<%= ResolveUrl("~/Admin/CRM/ReviewAnalytics") %>#raList"><i class="fas fa-reply"></i> ตอบกลับ</a>
                 </div>
             </div>
         </div>

@@ -15,6 +15,7 @@ using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Web.Script.Serialization;
+using Take_Time_BangPhra.Services.Reviews;
 
 namespace Take_Time_BangPhra.Services
 {
@@ -299,14 +300,36 @@ END", null);
 
         #region 1. Online Review Fetching
 
+        /// <summary>
+        /// รายการแหล่งรีวิว — ApiConfig ถูก mask ความลับ (••••xxxx) ก่อนคืน เพราะหน้าเว็บส่งต่อให้เบราว์เซอร์
+        /// </summary>
         public DataTable GetReviewSources()
         {
-            return _code.DatabaseQuerySafe(_connectionString,
+            var dt = _code.DatabaseQuerySafe(_connectionString,
                 "SELECT * FROM AI_Review_Sources ORDER BY SourceCode", null);
+            if (dt.Columns.Contains("ApiConfig"))
+            {
+                dt.Columns["ApiConfig"].ReadOnly = false;
+                foreach (DataRow r in dt.Rows)
+                    if (r["ApiConfig"] != DBNull.Value)
+                        r["ApiConfig"] = ReviewSourceConfig.MaskedJson(r["ApiConfig"].ToString());
+            }
+            return dt;
         }
 
+        /// <summary>
+        /// บันทึก ApiConfig จากหน้าเว็บ — ความลับที่ยังเป็นค่า mask / เว้นว่าง = คงค่าเดิม, ค่าใหม่ถูกเข้ารหัส
+        /// </summary>
         public void UpdateSourceConfig(string sourceCode, bool enabled, string apiConfig)
         {
+            DataTable dtOld = _code.DatabaseQuerySafe(_connectionString,
+                "SELECT ApiConfig FROM AI_Review_Sources WHERE SourceCode = @Code",
+                new Dictionary<string, object> { { "@Code", sourceCode } });
+            string oldJson = dtOld.Rows.Count > 0 && dtOld.Rows[0]["ApiConfig"] != DBNull.Value ? dtOld.Rows[0]["ApiConfig"].ToString() : null;
+            if (!string.IsNullOrWhiteSpace(apiConfig))
+                apiConfig = ReviewSourceConfig.MergeJsonForSave(oldJson, apiConfig, true);
+            else
+                apiConfig = oldJson;
             _code.DatabaseInsertSafe(_connectionString,
                 @"UPDATE AI_Review_Sources
                   SET IsEnabled = @Enabled, ApiConfig = @Config, Updated_Date = GETDATE()
@@ -347,8 +370,34 @@ END", null);
         }
 
         private int InsertReview(string sourceCode, string platformReviewId, string reviewerName,
-            string reviewerAvatar, double rating, string reviewTitle, string reviewText, DateTime reviewDate)
+            string reviewerAvatar, double rating, string reviewTitle, string reviewText, DateTime reviewDate,
+            string ingestMethod = IngestMethods.AiSearch)
         {
+            // หลังรัน PHASE19_26: บันทึกผ่าน ReviewStore (กันซ้ำด้วย Content_Hash, คะแนน 0 = ไม่รู้ → NULL,
+            // ไม่เก็บรูปผู้รีวิว) — รหัสแบบเก่าที่สร้างจากชื่อ/วันที่/คะแนนไม่ใช่รหัสจริง จึงไม่ใช้เป็น External_Review_Id
+            if (ReviewSourceConfig.SchemaReady(_connectionString))
+            {
+                var src = ReviewSourceConfig.Load(_connectionString, sourceCode);
+                if (src != null)
+                {
+                    bool realId = !string.IsNullOrEmpty(platformReviewId)
+                        && (platformReviewId.StartsWith("fb:") || platformReviewId.StartsWith("yt:") || platformReviewId.StartsWith("pl:"));
+                    var item = new ReviewItem
+                    {
+                        ExternalReviewId = realId ? platformReviewId : null,
+                        ReviewerName = reviewerName,
+                        // ≤ 5 = ดาว /5, 5–10 = คะแนน OTA /10 (เดิมเก็บดิบใน Rating) — 0/ผิดรูป = NULL
+                        RatingRaw = rating > 0 && rating <= 10 ? (decimal?)Convert.ToDecimal(rating) : null,
+                        RatingScale = rating > 0 && rating <= 5 ? (decimal?)5m : (rating > 5 && rating <= 10 ? (decimal?)10m : null),
+                        Title = reviewTitle,
+                        Text = reviewText,
+                        ReviewDate = reviewDate
+                    };
+                    var u = new ReviewStore(_connectionString).Upsert(src, item, ingestMethod);
+                    return u.Outcome == UpsertOutcome.Inserted ? 1 : 0;
+                }
+            }
+
             // Double-check: PlatformReviewId dedup first, then content dedup
             if (!string.IsNullOrEmpty(platformReviewId) && ReviewExistsByPlatformId(platformReviewId))
                 return 0;
@@ -388,8 +437,17 @@ END", null);
         }
 
         // ── Google Reviews ──
+        // หลังรัน PHASE19_26: ใช้ตัวดึงกลาง (PlacesApiAdapter หรือ GoogleBusinessProfileAdapter ตามวิธีที่ตั้งไว้)
+        // — โค้ดด้านล่างคงไว้เป็นทางสำรองสำหรับระบบที่ยังไม่ได้รัน migration
         public Dictionary<string, object> FetchGoogleReviews()
         {
+            if (ReviewSourceConfig.SchemaReady(_connectionString))
+            {
+                var g = ReviewSourceConfig.Load(_connectionString, "GOOGLE");
+                string method = g != null && g.IngestMethod == IngestMethods.GbpApi ? IngestMethods.GbpApi : IngestMethods.PlacesApi;
+                return new ReviewAggregationService(_connectionString).RunSourceNow("GOOGLE", method).ToDictionary();
+            }
+
             int newCount = 0;
             int skipCount = 0;
             var result = new Dictionary<string, object> { { "source", "GOOGLE" } };
@@ -414,7 +472,7 @@ END", null);
                     return result;
                 }
 
-                var apiConfig = _serializer.Deserialize<Dictionary<string, object>>(apiConfigJson);
+                var apiConfig = ReviewSourceConfig.Parse(apiConfigJson);
                 string placeId = apiConfig.ContainsKey("placeId") ? apiConfig["placeId"]?.ToString() : null;
                 string apiKey = apiConfig.ContainsKey("apiKey") ? apiConfig["apiKey"]?.ToString() : null;
 
@@ -463,7 +521,8 @@ END", null);
                             : DateTime.Now;
 
                         // Stable platform ID using epoch timestamp (unique per review)
-                        string platformReviewId = "GOOGLE_" + timeEpoch + "_" + (authorUrl != null ? authorUrl.GetHashCode().ToString() : authorName.GetHashCode().ToString());
+                        // รหัสคงที่ (SHA-256) — string.GetHashCode() ต่างกันระหว่าง 32/64-bit จึงกันซ้ำไม่ได้จริง
+                        string platformReviewId = ReviewText.StableId("pl:", authorUrl ?? authorName ?? "", timeEpoch.ToString());
 
                         int added = InsertReview("GOOGLE", platformReviewId, authorName, profilePhoto,
                             rating, null, text, reviewDate);
@@ -513,7 +572,7 @@ END", null);
                     return result;
                 }
 
-                var apiConfig = _serializer.Deserialize<Dictionary<string, object>>(apiConfigJson);
+                var apiConfig = ReviewSourceConfig.Parse(apiConfigJson);
                 string pageId = apiConfig.ContainsKey("pageId") ? apiConfig["pageId"]?.ToString() : null;
                 string pageAccessToken = apiConfig.ContainsKey("pageAccessToken") ? apiConfig["pageAccessToken"]?.ToString() : null;
 
@@ -584,10 +643,10 @@ END", null);
 
                         // Stable platform ID: use reviewer ID + created_time ISO string
                         string stableKey = (reviewerId ?? reviewerName) + "_" + (createdTime ?? reviewDate.ToString("yyyyMMddHHmmss"));
-                        string platformReviewId = "FB_" + stableKey.GetHashCode();
+                        string platformReviewId = ReviewText.StableId("fb:", stableKey);
 
                         int added = InsertReview("FACEBOOK", platformReviewId, reviewerName, reviewerPhoto,
-                            rating, null, reviewText, reviewDate);
+                            rating, null, reviewText, reviewDate, IngestMethods.Legacy);
                         if (added > 0) newCount++; else skipCount++;
                     }
 
@@ -627,6 +686,11 @@ END", null);
         /// </summary>
         public Dictionary<string, object> FetchOTAReviews(string sourceCode)
         {
+            // หลังรัน PHASE19_26: ย้ายไป UrlFetchAdapter (ตัด script/style ก่อนส่ง AI, ขอคะแนนดิบ+สเกล, งบ token)
+            // ⚠ การดึงหน้าเว็บ OTA ขัดข้อกำหนดของแพลตฟอร์ม — ปุ่มนี้กดเองได้ แต่ตัวตั้งเวลาจะไม่ทำจนกว่าเปิด Review_UrlFetch_Allowed
+            if (ReviewSourceConfig.SchemaReady(_connectionString))
+                return new ReviewAggregationService(_connectionString).RunSourceNow(sourceCode, IngestMethods.UrlFetch).ToDictionary();
+
             int newCount = 0;
             int skipCount = 0;
             var result = new Dictionary<string, object> { { "source", sourceCode } };
@@ -652,7 +716,7 @@ END", null);
                     return result;
                 }
 
-                var apiConfig = _serializer.Deserialize<Dictionary<string, object>>(apiConfigJson);
+                var apiConfig = ReviewSourceConfig.Parse(apiConfigJson);
                 string scrapeUrl = apiConfig.ContainsKey("scrapeUrl") ? apiConfig["scrapeUrl"]?.ToString() : null;
 
                 if (string.IsNullOrEmpty(scrapeUrl))
@@ -662,8 +726,27 @@ END", null);
                     return result;
                 }
 
-                // Fetch the page HTML
-                string html = MakeHttpGetRequest(scrapeUrl);
+                // Fetch the page HTML — scrapeUrl มาจากผู้ใช้ ⇒ ผ่าน ReviewHttp.GetPublic (allow-list + IP สาธารณะ
+                // ทุก hop + ตาม redirect เอง) เหมือน UrlFetchAdapter เพื่อกัน SSRF
+                string html = null;
+                try
+                {
+                    var page = ReviewHttp.GetPublic(scrapeUrl, new Dictionary<string, string>
+                    {
+                        { "User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36" },
+                        { "Accept", "text/html,application/xhtml+xml" },
+                        { "Accept-Language", "th,en;q=0.8" }
+                    });
+                    if (page.Ok) html = page.Body;
+                }
+                catch (ReviewSourceSkippedException sx)
+                {
+                    _code.Logs(_connectionString, "AIReview", "Blocked SSRF attempt: " + sx.Message, "SYSTEM");
+                    result["success"] = false;
+                    result["message"] = sx.Message;
+                    return result;
+                }
+                catch { html = null; }
                 if (string.IsNullOrEmpty(html) || html.Length < 100)
                 {
                     result["success"] = false;
@@ -747,7 +830,7 @@ HTML:
                     if (string.IsNullOrEmpty(reviewText) && string.IsNullOrEmpty(reviewTitle))
                         continue;
 
-                    string platformReviewId = sourceCode + "_" + reviewerName.GetHashCode() + "_" + reviewDate.ToString("yyyyMMdd") + "_" + ((int)rating);
+                    string platformReviewId = ReviewText.StableId(sourceCode + ":", reviewerName ?? "", reviewDate.ToString("yyyyMMdd"), ((int)rating).ToString());
 
                     int added = InsertReview(sourceCode, platformReviewId, reviewerName, null,
                         rating, reviewTitle, reviewText, reviewDate);
@@ -1083,11 +1166,11 @@ HTML:
                         continue;
 
                     // Stable dedup ID based on source + reviewer + date + rating
-                    string platformReviewId = sourceCode + "_IMPORT_" + reviewerName.GetHashCode()
-                        + "_" + reviewDate.ToString("yyyyMMdd") + "_" + ((int)(rating * 10));
+                    string platformReviewId = ReviewText.StableId(sourceCode + "_IMPORT:", reviewerName ?? "",
+                        reviewDate.ToString("yyyyMMdd"), ((int)(rating * 10)).ToString());
 
                     int added = InsertReview(sourceCode, platformReviewId, reviewerName, null,
-                        rating, reviewTitle, reviewText, reviewDate);
+                        rating, reviewTitle, reviewText, reviewDate, IngestMethods.Manual);
                     if (added > 0) newCount++; else skipCount++;
                 }
 
@@ -1196,7 +1279,7 @@ HTML:
                 string json = dt.Rows[0]["ApiConfig"]?.ToString();
                 if (!string.IsNullOrEmpty(json))
                 {
-                    var config = _serializer.Deserialize<Dictionary<string, object>>(json);
+                    var config = ReviewSourceConfig.Parse(json);
                     if (config != null && config.ContainsKey("searchKeyword"))
                         return config["searchKeyword"]?.ToString();
                     if (config != null && config.ContainsKey("hotelName"))
@@ -1234,7 +1317,7 @@ HTML:
 
                 if (!string.IsNullOrEmpty(apiConfigJson))
                 {
-                    var config = _serializer.Deserialize<Dictionary<string, object>>(apiConfigJson);
+                    var config = ReviewSourceConfig.Parse(apiConfigJson);
                     if (config != null && config.ContainsKey("searchUrl"))
                         searchUrl = config["searchUrl"]?.ToString();
                 }
@@ -1312,7 +1395,7 @@ HTML:
 
                 if (!string.IsNullOrEmpty(apiConfigJson))
                 {
-                    var config = _serializer.Deserialize<Dictionary<string, object>>(apiConfigJson);
+                    var config = ReviewSourceConfig.Parse(apiConfigJson);
                     if (config != null && config.ContainsKey("searchUrl"))
                         searchUrl = config["searchUrl"]?.ToString();
                 }
@@ -1390,7 +1473,7 @@ HTML:
 
                 if (!string.IsNullOrEmpty(apiConfigJson))
                 {
-                    var config = _serializer.Deserialize<Dictionary<string, object>>(apiConfigJson);
+                    var config = ReviewSourceConfig.Parse(apiConfigJson);
                     if (config != null)
                     {
                         if (config.ContainsKey("searchUrl"))
@@ -1545,7 +1628,7 @@ HTML:
                             videoDate = parsed;
                     }
 
-                    string platformReviewId = "YT_VIDEO_" + videoId;
+                    string platformReviewId = "yt:" + videoId;
                     string reviewText = videoTitle + "\n" + description;
 
                     int added = InsertReview("YOUTUBE", platformReviewId, channelTitle, null,
@@ -1714,8 +1797,8 @@ HTML:
                 if (string.IsNullOrEmpty(reviewText) && string.IsNullOrEmpty(reviewTitle))
                     continue;
 
-                string platformId = sourceCode + "_" + reviewerName.GetHashCode()
-                    + "_" + reviewDate.ToString("yyyyMMdd") + "_" + ((int)(rating * 10));
+                string platformId = ReviewText.StableId(sourceCode + ":", reviewerName ?? "",
+                    reviewDate.ToString("yyyyMMdd"), ((int)(rating * 10)).ToString());
 
                 results.Add(new ParsedReview
                 {
@@ -1778,25 +1861,27 @@ HTML:
         {
             try
             {
-                if (!IsAllowedUrl(url))
-                    return null;
-                // TLS 1.2 — many sites reject the .NET default (SSL3/TLS1.0)
-                try { ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12; } catch { }
-
-                var request = (HttpWebRequest)WebRequest.Create(url);
-                request.Method = "GET";
-                request.Timeout = 30000;
-                request.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
-                request.Accept = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
-                request.Headers.Add("Accept-Language", "th,en-US;q=0.9,en;q=0.8");
-                request.AllowAutoRedirect = true;
-                request.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
-
-                using (var response = (HttpWebResponse)request.GetResponse())
-                using (var reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
+                // กัน SSRF: ทุก hop (รวม redirect) ต้องผ่าน allow-list และ resolve ได้เฉพาะ IP สาธารณะ — ไม่ตาม redirect อัตโนมัติ
+                var headers = new Dictionary<string, string>
                 {
-                    return reader.ReadToEnd();
+                    { "User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" },
+                    { "Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" },
+                    { "Accept-Language", "th,en-US;q=0.9,en;q=0.8" }
+                };
+                string current = url;
+                for (int hop = 0; hop <= 4; hop++)
+                {
+                    Uri uri;
+                    if (!IsAllowedUrl(current) || !Uri.TryCreate(current, UriKind.Absolute, out uri)
+                        || !ReviewHttp.ResolvesToPublicAddresses(uri.DnsSafeHost))
+                        return null;
+                    var resp = ReviewHttp.Send("GET", current, null, null, headers, 30000, false);
+                    if (!resp.IsRedirect) return resp.Ok ? resp.Body : null;
+                    Uri next;
+                    if (!Uri.TryCreate(uri, resp.Location, out next)) return null;
+                    current = next.AbsoluteUri;
                 }
+                return null;   // redirect มากเกินไป
             }
             catch (WebException)
             {

@@ -57,6 +57,7 @@
         <div class="page-header">
             <h1><i class="fa fa-star"></i> Review Management</h1>
             <p>จัดการรีวิวและคำติชม - Approve, respond to, and analyze guest reviews</p>
+            <p style="margin-top: 10px;"><a href="<%= ResolveUrl("~/Admin/CRM/ReviewAnalytics") %>" style="color: #fff; text-decoration: underline;"><i class="fa fa-pie-chart"></i> วิเคราะห์รีวิวทุกแพลตฟอร์ม</a></p>
         </div>
 
         <asp:Panel ID="pnlAlert" runat="server" Visible="false">
@@ -125,67 +126,78 @@
 
         <asp:Repeater ID="rptReviews" runat="server" OnItemCommand="rptReviews_ItemCommand">
             <ItemTemplate>
+                <%-- Bindings use the real Guest_Reviews columns selected in LoadReviews (old template used
+                     non-existent names such as Overall_Rating / Review_Text and threw on DataBind). --%>
                 <div class="review-card">
                     <div class="review-header">
                         <div>
-                            <h3 style="margin: 0 0 5px 0;">Booking #<%# Eval("Reservation_ID") %></h3>
+                            <h3 style="margin: 0 0 5px 0;">Booking #<%#: Eval("Reservation_ID") %></h3>
                             <div style="color: #666;">
-                                <i class="fa fa-user"></i> <%# Eval("Customer_Name") %> (<%# Eval("Customer_MobilePhone") %>)
-                                | <i class="fa fa-calendar"></i> <%# Eval("Review_Date", "{0:dd MMM yyyy}") %>
+                                <i class="fa fa-user"></i> <%#: Eval("Customer_Name") %> (<%#: Eval("Customer_MobilePhone") %>)
+                                | <i class="fa fa-calendar"></i> <%#: Eval("SubmittedDate", "{0:dd MMM yyyy}") %>
                             </div>
                         </div>
                         <div>
-                            <span class="review-status status-<%# Eval("Status").ToString().ToLower() %>">
-                                <%# Eval("Status") %>
+                            <span class="review-status status-<%#: Convert.ToString(Eval("Status")).ToLower() %>">
+                                <%#: Eval("Status") %>
                             </span>
                         </div>
                     </div>
 
                     <div class="review-ratings">
                         <div class="rating-item">
-                            <div style="font-size: 28px; font-weight: bold; color: #3498db;"><%# Eval("Overall_Rating", "{0:N1}") %></div>
+                            <div style="font-size: 28px; font-weight: bold; color: #5D4037;"><%#: Eval("OverallRating") %></div>
                             <div style="font-size: 12px; color: #666;">Overall</div>
                         </div>
                         <div class="rating-item">
-                            <div><%# GetStars(Eval("Accommodation_Rating")) %></div>
-                            <div style="font-size: 12px; color: #666;">Accommodation</div>
+                            <div><%# GetStars(Eval("CleanlinessRating")) %></div>
+                            <div style="font-size: 12px; color: #666;">ความสะอาด</div>
                         </div>
                         <div class="rating-item">
-                            <div><%# GetStars(Eval("Cleanliness_Rating")) %></div>
-                            <div style="font-size: 12px; color: #666;">Cleanliness</div>
+                            <div><%# GetStars(Eval("ServiceRating")) %></div>
+                            <div style="font-size: 12px; color: #666;">บริการ</div>
                         </div>
                         <div class="rating-item">
-                            <div><%# GetStars(Eval("Staff_Rating")) %></div>
-                            <div style="font-size: 12px; color: #666;">Staff</div>
+                            <div><%# GetStars(Eval("FacilitiesRating")) %></div>
+                            <div style="font-size: 12px; color: #666;">สิ่งอำนวยความสะดวก</div>
                         </div>
                         <div class="rating-item">
-                            <div><%# GetStars(Eval("Value_Rating")) %></div>
-                            <div style="font-size: 12px; color: #666;">Value</div>
+                            <div><%# GetStars(Eval("ValueForMoneyRating")) %></div>
+                            <div style="font-size: 12px; color: #666;">ความคุ้มค่า</div>
                         </div>
                         <div class="rating-item">
-                            <div><%# GetStars(Eval("Location_Rating")) %></div>
-                            <div style="font-size: 12px; color: #666;">Location</div>
+                            <div><%# GetStars(Eval("LocationRating")) %></div>
+                            <div style="font-size: 12px; color: #666;">ทำเล</div>
                         </div>
                     </div>
 
-                    <div style="margin: 15px 0; padding: 15px; background: #f8f9fa; border-radius: 8px;">
-                        <strong>Review:</strong><br />
-                        <%# Eval("Review_Text") %>
-                    </div>
+                    <div style="margin: 15px 0; padding: 15px; background: #f8f9fa; border-radius: 8px; white-space: pre-wrap; word-break: break-word;"><strong>Review:</strong><br /><%#: Eval("ReviewText") %></div>
 
-                    <%# Eval("Management_Response") != null && !string.IsNullOrEmpty(Eval("Management_Response").ToString()) ?
-                        "<div class='response-box'><strong><i class='fa fa-reply'></i> Management Response:</strong><br />" +
-                        Eval("Management_Response") +
-                        "<div style='font-size: 12px; color: #666; margin-top: 8px;'>Responded: " +
-                        (Eval("Response_Date") != DBNull.Value ? Convert.ToDateTime(Eval("Response_Date")).ToString("dd MMM yyyy") : "") +
-                        "</div></div>" : "" %>
+                    <asp:PlaceHolder ID="phResponse" runat="server" Visible='<%# HasText(Eval("ResponseText")) %>'>
+                        <div class="response-box" style="white-space: pre-wrap; word-break: break-word;"><strong><i class="fa fa-reply"></i> Management Response:</strong><br /><%#: Eval("ResponseText") %>
+                            <div style="font-size: 12px; color: #666; margin-top: 8px;">Responded: <%#: Eval("ResponseDate", "{0:dd MMM yyyy}") %></div>
+                        </div>
+                    </asp:PlaceHolder>
 
                     <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e0e0e0;">
-                        <%# Eval("Status").ToString() == "PENDING" ?
-                            "<asp:LinkButton runat='server' CommandName='Approve' CommandArgument='" + Eval("ID") + "' CssClass='btn-approve'><i class='fa fa-check'></i> Approve</asp:LinkButton>" +
-                            "<asp:LinkButton runat='server' CommandName='Reject' CommandArgument='" + Eval("ID") + "' CssClass='btn-reject'><i class='fa fa-times'></i> Reject</asp:LinkButton>" : "" %>
-                        <%# (Eval("Management_Response") == null || string.IsNullOrEmpty(Eval("Management_Response").ToString())) && Eval("Status").ToString() == "APPROVED" ?
-                            "<asp:LinkButton runat='server' CommandName='Respond' CommandArgument='" + Eval("ID") + "' CssClass='btn-respond'><i class='fa fa-reply'></i> Add Response</asp:LinkButton>" : "" %>
+                        <asp:LinkButton ID="btnApprove" runat="server" CommandName="Approve" CommandArgument='<%# Eval("ID") %>' CssClass="btn-approve"
+                            Visible='<%# Convert.ToString(Eval("Status")) == "PENDING" %>'><i class="fa fa-check"></i> Approve</asp:LinkButton>
+                        <asp:LinkButton ID="btnReject" runat="server" CommandName="Reject" CommandArgument='<%# Eval("ID") %>' CssClass="btn-reject"
+                            Visible='<%# Convert.ToString(Eval("Status")) == "PENDING" %>'
+                            OnClientClick="return confirm('ปฏิเสธรีวิวนี้?');"><i class="fa fa-times"></i> Reject</asp:LinkButton>
+                        <asp:PlaceHolder ID="phRespond" runat="server" Visible='<%# Convert.ToString(Eval("Status")) != "REJECTED" %>'>
+                            <details style="margin-top: 10px;">
+                                <summary class="btn-respond" style="display: inline-block; list-style: none;"><i class="fa fa-reply"></i> <%# HasText(Eval("ResponseText")) ? "แก้คำตอบ" : "ตอบกลับ" %></summary>
+                                <div style="margin-top: 10px;">
+                                    <asp:TextBox ID="txtResponse" runat="server" TextMode="MultiLine" Rows="4" MaxLength="4000"
+                                        Text='<%# Convert.ToString(Eval("ResponseText")) %>'
+                                        style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px; font: inherit;"
+                                        placeholder="ข้อความตอบกลับลูกค้า"></asp:TextBox>
+                                    <asp:LinkButton ID="btnRespond" runat="server" CommandName="Respond" CommandArgument='<%# Eval("ID") %>' CssClass="btn-respond"
+                                        style="display: inline-block; margin-top: 8px;"><i class="fa fa-save"></i> บันทึกคำตอบ</asp:LinkButton>
+                                </div>
+                            </details>
+                        </asp:PlaceHolder>
                     </div>
                 </div>
             </ItemTemplate>

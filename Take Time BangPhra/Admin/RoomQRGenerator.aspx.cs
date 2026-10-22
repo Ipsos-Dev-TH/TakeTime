@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Data;
 using System.Web.UI;
 using System.Web.UI.WebControls;
@@ -16,6 +16,7 @@ namespace Take_Time_BangPhra.Admin
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.OpsBooking)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             // Permission check
             if (Session["permission"]?.ToString() != "True" ||
                 (Session["User"]?.ToString() != "Owner" && Session["User"]?.ToString() != "Admin"))

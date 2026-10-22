@@ -167,12 +167,17 @@
             background: white;
             border-radius: 8px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            overflow: hidden;
+            /* ⚠ เดิมเป็น overflow:hidden — ตารางถูกตัดทิ้งที่ขอบจอ เลื่อนดูก็ไม่ได้
+               (ใส่ไว้เพื่อให้มุมโค้งไม่โดนตารางทับ แต่แลกมาด้วยข้อมูลที่อ่านไม่ได้) */
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
         }
 
         .data-table table {
             width: 100%;
             border-collapse: collapse;
+            /* ไม่มี min-width มาก่อน ⇒ คอลัมน์ถูกบีบจนตัวอักษรไทยตกบรรทัดทีละตัว */
+            min-width: 720px;
         }
 
         .data-table th {
@@ -190,6 +195,24 @@
 
         .data-table tr:hover {
             background-color: #f8f9fa;
+        }
+
+        /* บนมือถือใช้พื้นที่ให้เต็ม — กินขอบซ้ายขวาของ padding หน้าออกไป
+           (ตัวตารางเปลี่ยนเป็นการ์ดโดยระบบกลางใน Site.Master) */
+        @media (max-width: 820px) {
+            .data-table {
+                background: transparent;
+                box-shadow: none;
+                border-radius: 0;
+                margin-left: -12px;
+                margin-right: -12px;
+                overflow-x: visible;
+            }
+            .data-table table { min-width: 0; }
+            .filter-row { flex-direction: column; align-items: stretch; }
+            .filter-group { width: 100%; }
+            .btn-group { flex-wrap: wrap; }
+            .btn-group .btn, .btn-group input[type=submit] { flex: 1 1 auto; }
         }
 
         .badge {
@@ -312,19 +335,39 @@
 
         <!-- Tab: Entry Form -->
         <div id="tabEntry" class="tab-content active">
-            <!-- Supervisor Mode -->
-            <asp:Panel ID="pnlSupervisorMode" runat="server" Visible="false" CssClass="supervisor-mode">
-                <h4>&#128101; โหมดหัวหน้างาน - บันทึก OT ให้ลูกน้อง</h4>
-                <div class="form-group">
-                    <label>เลือกพนักงาน:</label>
-                    <asp:DropDownList ID="ddlEmployee" runat="server" CssClass="form-control" style="max-width: 400px;">
-                        <asp:ListItem Value="">-- บันทึก OT ให้ตัวเอง --</asp:ListItem>
-                    </asp:DropDownList>
-                </div>
-            </asp:Panel>
-
             <div class="form-section">
                 <h3>&#128221; บันทึกชั่วโมง OT</h3>
+
+                <%-- ══ "บันทึกให้ใคร" เป็นฟิลด์แรกของฟอร์ม ══
+                     เดิมอยู่ในกล่องสีเหลืองแยกต่างหากเหนือฟอร์ม และค่าตั้งต้นคือ "ให้ตัวเอง"
+                     ⇒ หัวหน้างานตั้งใจลงให้ลูกน้องแต่ลืมเลือก กลายเป็นลงให้ตัวเองบ่อย ๆ
+                     ตอนนี้: อยู่ในฟอร์ม + แถบสรุปชื่อคนที่จะได้ OT เปลี่ยนสีตามที่เลือก --%>
+                <asp:Panel ID="pnlSupervisorMode" runat="server" Visible="false"
+                    CssClass="form-group" style="margin-bottom:18px;">
+                    <label style="font-weight:700; font-size:15px;">
+                        บันทึก OT ให้ใคร <span class="required">*</span>
+                    </label>
+                    <asp:DropDownList ID="ddlEmployee" runat="server" CssClass="form-control"
+                        style="max-width:460px; font-size:15px;"
+                        onchange="otUpdateWhoBanner()">
+                    </asp:DropDownList>
+
+                    <div id="otWhoBanner" style="margin-top:12px; padding:14px 16px; border-radius:10px;
+                         font-size:15.5px; line-height:1.6; border-left:5px solid transparent;">
+                    </div>
+                </asp:Panel>
+
+                <%-- ให้ JS รู้ว่า "ตัวเอง" คือ id ไหน/ชื่ออะไร (ใช้เทียบว่ากำลังลงให้คนอื่นอยู่ไหม) --%>
+                <input type="hidden" id="otSelfAdminId" value="<%= SelfAdminIdJs %>" />
+                <input type="hidden" id="otSelfName" value="<%= SelfNameJs %>" />
+
+                <%-- คนที่ไม่ใช่หัวหน้างานเห็นแค่บรรทัดยืนยันว่าเป็นของตัวเอง --%>
+                <asp:Panel ID="pnlSelfOnly" runat="server" Visible="false"
+                    style="margin-bottom:18px; padding:12px 15px; border-radius:10px;
+                           background:#E3F2FD; color:#1565C0; border-left:5px solid #1E88E5; font-size:15px;">
+                    &#128100; บันทึก OT ของ <b><asp:Literal ID="litSelfName" runat="server" /></b>
+                </asp:Panel>
+
                 <div class="form-row">
                     <div class="form-group">
                         <label>วันที่ทำ OT <span class="required">*</span></label>
@@ -352,7 +395,8 @@
                     <asp:TextBox ID="txtNotes" runat="server" CssClass="form-control" placeholder="หมายเหตุเพิ่มเติม..."></asp:TextBox>
                 </div>
                 <div class="btn-group">
-                    <asp:Button ID="btnSaveOT" runat="server" Text="&#128190; บันทึก OT" CssClass="btn btn-primary" OnClick="btnSaveOT_Click" />
+                    <asp:Button ID="btnSaveOT" runat="server" Text="&#128190; บันทึก OT" CssClass="btn btn-primary"
+                        OnClick="btnSaveOT_Click" OnClientClick="return otConfirmSave();" />
                     <asp:Button ID="btnClear" runat="server" Text="&#128260; ล้างฟอร์ม" CssClass="btn btn-secondary" OnClick="btnClear_Click" CausesValidation="false" />
                 </div>
             </div>
@@ -515,6 +559,76 @@
             if (hdnTab && hdnTab.value) {
                 showTab(hdnTab.value);
             }
+            otUpdateWhoBanner();
         });
+
+        // ══ กัน "ลง OT ให้ลูกน้องแล้วกลายเป็นของตัวเอง" ══
+        // สองชั้น: (1) แถบบอกชื่อคนที่จะได้ OT เปลี่ยนสีตามที่เลือก เห็นตลอดเวลา
+        //          (2) กดบันทึกแล้วถามยืนยันอีกรอบ พร้อมสรุปว่า "ให้ใคร กี่ชั่วโมง วันไหน"
+
+        function otSelfId() {
+            var el = document.getElementById('otSelfAdminId');
+            return el ? el.value : '';
+        }
+
+        function otTargetName() {
+            var ddl = document.getElementById('<%= ddlEmployee.ClientID %>');
+            if (!ddl) {
+                var self = document.getElementById('otSelfName');
+                return { name: self ? self.value : 'ตัวคุณเอง', isSelf: true };
+            }
+            var opt = ddl.options[ddl.selectedIndex];
+            return {
+                name: opt ? opt.text.replace(/^\s*ตัวฉันเอง\s*[—-]\s*/, '') : '',
+                isSelf: ddl.value === otSelfId()
+            };
+        }
+
+        function otUpdateWhoBanner() {
+            var box = document.getElementById('otWhoBanner');
+            if (!box) return;
+            var t = otTargetName();
+            if (t.isSelf) {
+                box.style.background = '#E3F2FD';
+                box.style.color = '#0D47A1';
+                box.style.borderLeftColor = '#1E88E5';
+                box.innerHTML = '&#128100; OT นี้จะเข้าชื่อ <b>' + otEsc(t.name) + '</b> (ตัวคุณเอง)';
+            } else {
+                // สีส้ม = กำลังลงให้คนอื่น ต้องสะดุดตา
+                box.style.background = '#FFF3E0';
+                box.style.color = '#E65100';
+                box.style.borderLeftColor = '#FB8C00';
+                box.innerHTML = '&#128101; OT นี้จะเข้าชื่อ <b>' + otEsc(t.name) + '</b>'
+                    + '<br><small>ไม่ใช่ของคุณ — ตรวจชื่อให้ชัวร์ก่อนบันทึก</small>';
+            }
+        }
+
+        function otEsc(s) {
+            return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        function otConfirmSave() {
+            var d = document.getElementById('<%= txtOTDate.ClientID %>');
+            var h = document.getElementById('<%= txtOTHours.ClientID %>');
+            var r = document.getElementById('<%= ddlOTRate.ClientID %>');
+            var w = document.getElementById('<%= txtWorkDescription.ClientID %>');
+
+            // เช็คขั้นต่ำก่อน จะได้ไม่ต้องถามยืนยันแล้วค่อยไปเด้ง error ที่เซิร์ฟเวอร์
+            if (!d || !d.value) { alert('กรุณาเลือกวันที่ทำ OT'); if (d) d.focus(); return false; }
+            if (!h || !(parseFloat(h.value) > 0)) { alert('กรุณาระบุจำนวนชั่วโมง OT'); if (h) h.focus(); return false; }
+            if (!w || !w.value.trim()) { alert('กรุณาระบุรายละเอียดงานที่ทำ'); if (w) w.focus(); return false; }
+
+            var t = otTargetName();
+            var rateText = r && r.options[r.selectedIndex] ? r.options[r.selectedIndex].text : '';
+
+            var msg = (t.isSelf ? 'บันทึก OT ให้ตัวคุณเอง\n\n' : '⚠ บันทึก OT ให้ "คนอื่น"\n\n')
+                + 'พนักงาน : ' + t.name + '\n'
+                + 'วันที่   : ' + d.value + '\n'
+                + 'ชั่วโมง  : ' + h.value + ' ชม.\n'
+                + 'อัตรา    : ' + rateText + '\n\n'
+                + 'ยืนยันบันทึกตามนี้?';
+
+            return confirm(msg);
+        }
     </script>
 </asp:Content>
