@@ -271,7 +271,7 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
             if (v != null && !vendorData)
             {
                 if (v.Kind == SlipVendorResponse.KindNotFound) r.Notes.Add("SlipOK: ธนาคารไม่พบรายการนี้ / QR หมดอายุ (1011) — สลิปอาจปลอม ตรวจกับบัญชีธนาคาร");
-                else if (v.Kind == SlipVendorResponse.KindPendingBank) r.Notes.Add("SlipOK: ธนาคารยังไม่ยืนยัน (" + v.Code + ") ลองตรวจใหม่อีกครู่");
+                else if (v.Kind == SlipVendorResponse.KindPendingBank) r.Notes.Add("SlipOK: ธนาคารยังไม่ยืนยัน (" + v.Code + ") " + (v.Code == "1010" && !string.IsNullOrEmpty(v.Message) ? v.Message : "ลองตรวจใหม่อีกครู่"));
                 else if (v.Kind == SlipVendorResponse.KindNoQr) r.Notes.Add("SlipOK: ไม่พบ QR สลิปในรูป (" + v.Code + ")");
                 else if (v.Kind == SlipVendorResponse.KindError) r.Notes.Add(v.Message ?? "SlipOK ผิดพลาด");
             }

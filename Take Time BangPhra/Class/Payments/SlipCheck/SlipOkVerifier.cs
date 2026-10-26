@@ -12,7 +12,13 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
     /// <summary>
     /// SlipOK (ระดับที่ 1 — ธนาคารยืนยันยอด/วันเวลา/ผู้รับ) — แพ็กเกจฟรี 100 สลิป/เดือน (นับเองต่อเดือนใน Slip_Verify_Usage)
     ///
-    /// สัญญา API (slipok.com/api-documentation/check-slip — โดเมนถูกบล็อกจาก sandbox จึงยืนยันจากโค้ดสาธารณะที่เรียก API จริง):
+    /// สัญญา API — ยืนยันกับเอกสารทางการ "SlipOK API Guide" v1.13 (28 ก.พ. 2026, ไฟล์ที่เจ้าของส่งมา):
+    ///   Check Slip (หน้า 1-4), Check Slip Quota GET …/{branchId}/quota → data{quota, overQuota, specialQuota, endDate, specialEndDate}
+    ///   (หน้า 5), Quota Calculation: log=true → ส่งซ้ำไม่เสียโควต้า แต่บัญชีผู้รับไม่ตรงเสีย (หน้า 6), Compare Receiver Account:
+    ///   ตัดอักขระที่ไม่ใช่ตัวเลข/x แล้วเทียบรายตำแหน่ง receiver.account.value / receiver.proxy.value / ref1 (หน้า 8),
+    ///   Error 1000-1015 (หน้า 10 — 1015 "ไม่พบข้อมูล Package" เพิ่มใน v1.13), 1010 แนบ data{bankCode, bankName, delay(นาที)} (หน้า 21)
+    ///   และตัวอย่าง #2 (หน้า 14) ตอบ 1007 พร้อมข้อความ "QR Code หมดอายุ หรือ ไม่มีรายการอยู่จริง" เมื่อส่ง data
+    /// (ส่วนล่างนี้คือที่มาเดิมจากโค้ดสาธารณะ — สอดคล้องกับเอกสารทางการ):
     ///   POST https://api.slipok.com/api/line/apikey/{branchId}
     ///   header  x-authorization: {API key}
     ///   body    multipart/form-data: data = ข้อความจาก QR | files = รูปสลิป | url = ลิงก์รูป (อย่างใดอย่างหนึ่ง),
@@ -148,17 +154,31 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
                 case "1012": r.Kind = SlipVendorResponse.KindDuplicate; break;           // ไม่เสียโควต้า (ส่งซ้ำ)
                 case "1013": r.Kind = SlipVendorResponse.KindAmountMismatch; r.Charged = r.HasData; break;
                 case "1014": r.Kind = SlipVendorResponse.KindReceiverMismatch; r.Charged = r.HasData; break;
-                case "1003":
-                case "1004": r.Kind = SlipVendorResponse.KindQuota; break;
+                case "1003":                                                              // แพ็กเกจหมดอายุ
+                case "1004":                                                              // ใช้เกินโควต้า (overQuota)
+                case "1015": r.Kind = SlipVendorResponse.KindQuota; break;               // ไม่พบข้อมูล Package (v1.13)
                 case "1001":
                 case "1002": r.Kind = SlipVendorResponse.KindConfig; break;
-                case "1009":
-                case "1010": r.Kind = SlipVendorResponse.KindPendingBank; break;
+                case "1009": r.Kind = SlipVendorResponse.KindPendingBank; break;         // ธนาคารขัดข้อง ลองใหม่ใน 15 นาที (ไม่เสียโควต้า)
+                case "1010":                                                              // BBL/SCB ต้องรอ {delay} นาทีหลังโอน
+                    r.Kind = SlipVendorResponse.KindPendingBank;
+                    if (data != null)
+                    {
+                        string delay = Str(data, "delay"), bank = Str(data, "bankName");
+                        if (!string.IsNullOrEmpty(delay))
+                            r.Message = "ธนาคาร" + (bank ?? "") + " ให้รอตรวจหลังโอนประมาณ " + delay + " นาที แล้วกดตรวจใหม่";
+                    }
+                    break;
                 case "1011": r.Kind = SlipVendorResponse.KindNotFound; break;
+                case "1007":
+                    // เอกสารใช้ 1007 ทั้ง "รูปไม่มี QR" (หน้า 15) และ "QR หมดอายุ/ไม่มีรายการ" (หน้า 14 — ส่ง data) → แยกด้วยข้อความ
+                    string m7 = r.Message ?? "";
+                    r.Kind = m7.IndexOf("หมดอายุ", StringComparison.Ordinal) >= 0 || m7.IndexOf("ไม่มีรายการ", StringComparison.Ordinal) >= 0
+                        ? SlipVendorResponse.KindNotFound : SlipVendorResponse.KindNoQr;
+                    break;
                 case "1000":
                 case "1005":
                 case "1006":
-                case "1007":
                 case "1008": r.Kind = SlipVendorResponse.KindNoQr; break;
                 default:
                     r.Kind = success && r.HasData ? SlipVendorResponse.KindOk : SlipVendorResponse.KindError;
@@ -236,7 +256,55 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
             return string.IsNullOrWhiteSpace(v) ? null : v.Trim();
         }
 
-        /// <summary>เช็คโควต้าคงเหลือ (GET …/{branchId}/quota — ตาม research §1 / ใช้แสดงในหน้าตั้งค่าเท่านั้น)</summary>
+        /// <summary>ผลโควต้า (SlipOK API Guide v1.13 หน้า 5)</summary>
+        public class QuotaInfo
+        {
+            public bool Ok;
+            public string Error;
+            public int Quota;            // คงเหลือ
+            public int OverQuota;        // ใช้เกิน (อาจมีค่าใช้จ่าย — error 1004)
+            public int SpecialQuota;     // โควต้าพิเศษคงเหลือ
+            public string EndDate;
+            public string SpecialEndDate;
+            public int Remaining => Math.Max(0, Quota) + Math.Max(0, SpecialQuota);
+        }
+
+        /// <summary>อ่าน { success, data:{ quota, overQuota, specialQuota, endDate, specialEndDate } } หรือ { code, message }</summary>
+        public static QuotaInfo ParseQuota(string json)
+        {
+            var q = new QuotaInfo();
+            try
+            {
+                if (string.IsNullOrWhiteSpace(json) || json.TrimStart()[0] != '{') { q.Error = json ?? "ไม่มีคำตอบ"; return q; }
+                var o = new JavaScriptSerializer().DeserializeObject(json) as Dictionary<string, object>;
+                var d = Dict(o, "data");
+                object sv;
+                bool success = o != null && o.TryGetValue("success", out sv) && sv is bool && (bool)sv;
+                if (!success || d == null)
+                {
+                    q.Error = ((Str(o, "code") ?? "") + " " + (Str(o, "message") ?? "")).Trim();
+                    if (q.Error.Length == 0) q.Error = "รูปแบบคำตอบไม่รู้จัก";
+                    return q;
+                }
+                q.Quota = Int(d, "quota");
+                q.OverQuota = Int(d, "overQuota");
+                q.SpecialQuota = Int(d, "specialQuota");
+                q.EndDate = Str(d, "endDate");
+                q.SpecialEndDate = Str(d, "specialEndDate");
+                q.Ok = true;
+            }
+            catch (Exception ex) { q.Error = ex.GetType().Name; }
+            return q;
+        }
+
+        private static int Int(Dictionary<string, object> d, string key)
+        {
+            decimal v;
+            string s = Str(d, key);
+            return !string.IsNullOrEmpty(s) && decimal.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out v) ? (int)v : 0;
+        }
+
+        /// <summary>เช็คโควต้าคงเหลือ (GET …/{branchId}/quota — SlipOK API Guide v1.13 หน้า 5; ไม่เสียโควต้า)</summary>
         public string CheckQuotaRaw()
         {
             if (!IsConfigured) return null;

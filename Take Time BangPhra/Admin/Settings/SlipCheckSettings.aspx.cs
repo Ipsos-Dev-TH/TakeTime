@@ -232,7 +232,23 @@ namespace Take_Time_BangPhra.Admin.Settings
             var v = SlipVerificationService.CreateVendor() as SlipOkVerifier;
             if (v == null || !v.IsConfigured) { Msg(false, "ยังไม่ได้ตั้ง SlipOK Branch ID / API key"); return; }
             string raw = v.CheckQuotaRaw() ?? "-";
-            litMsg.Text = "<div class='sc-alert ok'>คำตอบโควต้าจาก SlipOK:<pre class='sc-raw'>" + HttpUtility.HtmlEncode(raw.Length > 2000 ? raw.Substring(0, 2000) : raw) + "</pre></div>";
+            var q = SlipOkVerifier.ParseQuota(raw);
+            if (!q.Ok)
+            {
+                litMsg.Text = "<div class='sc-alert err'>เช็คโควต้า SlipOK ไม่สำเร็จ: " + HttpUtility.HtmlEncode(q.Error.Length > 300 ? q.Error.Substring(0, 300) : q.Error) + "</div>";
+                return;
+            }
+            // คงเหลือ 0 (รวมโควต้าพิเศษ) → ธงหมดของเดือนนี้ ระบบไปใช้ OCR ในเครื่องทันที (กันใช้เกินโควต้า = error 1004 / อาจมีค่าใช้จ่าย)
+            if (q.Remaining <= 0) SlipVerificationService.MarkQuotaExhausted(SlipOkVerifier.ProviderName);
+            var sbq = new StringBuilder("<div class='sc-alert ").Append(q.Remaining > 0 && q.OverQuota == 0 ? "ok" : "err").Append("'>โควต้า SlipOK คงเหลือ <b>")
+                .Append(q.Quota).Append("</b>");
+            if (q.SpecialQuota > 0 || !string.IsNullOrEmpty(q.SpecialEndDate))
+                sbq.Append(" · โควต้าพิเศษ ").Append(q.SpecialQuota).Append(string.IsNullOrEmpty(q.SpecialEndDate) ? "" : " (หมดอายุ " + HttpUtility.HtmlEncode(q.SpecialEndDate) + ")");
+            if (!string.IsNullOrEmpty(q.EndDate)) sbq.Append(" · แพ็กเกจหมดอายุ ").Append(HttpUtility.HtmlEncode(q.EndDate));
+            if (q.OverQuota > 0) sbq.Append("<br>⚠ ใช้เกินโควต้าแล้ว ").Append(q.OverQuota).Append(" ครั้ง — ตรวจค่าใช้จ่ายในแพ็กเกจ SlipOK");
+            if (q.Remaining <= 0) sbq.Append("<br>ตั้งธง \"โควต้าหมด\" ของเดือนนี้แล้ว — ระบบจะอ่านยอดจากรูปในเครื่องแทน");
+            litMsg.Text = sbq.Append("</div>").ToString();
+            RenderStatus();
         }
 
         protected void btnTest_Click(object sender, EventArgs e)

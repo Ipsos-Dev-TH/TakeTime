@@ -434,7 +434,8 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    หมด/ใช้ไม่ได้ = อ่านตัวเลขยอดโอนจากรูปเอง → มีปัญหา = **ข้ามการตรวจ** (UNVERIFIED_BYPASS ใช้ยอดที่ลง ติดธงในแถวสลิป). โค้ด `Class/Payments/SlipCheck/`:
    `SlipVerificationService` (Inspect=ข้อเท็จจริงของรูป cache ตาม SHA-256 60 นาที → Evaluate=เทียบยอด/ซ้ำ/ผู้รับ → Decide=ไป/หยุด/พักรอพนักงาน → SaveResult),
    `SlipOkVerifier` (`POST https://api.slipok.com/api/line/apikey/{branch}` header `x-authorization`, multipart `data`=QR payload (หรือ `files`), `log=true`,
-   ไม่ส่ง `amount`; รหัส 1003/1004 โควต้า → ธง `Slip_Verify_Usage.Exhausted`, 1012/1013/1014 แนบ data; นับโควต้าเองรายเดือน),
+   ไม่ส่ง `amount`; รหัส 1003/1004/1015 โควต้า/แพ็กเกจ → ธง `Slip_Verify_Usage.Exhausted`, 1012/1013/1014 แนบ data, 1010 = รอ `data.delay` นาที, 1007+"หมดอายุ/ไม่มีรายการ" = NotFound;
+   นับโควต้าเองรายเดือน; ปุ่มเช็คโควต้า `GET …/quota` → `ParseQuota` (quota+specialQuota = 0 → ธงหมด; overQuota>0 เตือน) — ยืนยันกับ **SlipOK API Guide v1.13 (28 ก.พ. 2026)**),
    `SlipQrDecoder` (ZXing.Net 0.16.11 `lib\net47\zxing.dll` + TLV mini-QR ธปท.: ธนาคาร+transRef+CRC16 — ไม่มี DLL = คืน null),
    `LocalSlipAmountReader` (**tesseract.exe ผ่าน Process** ไม่ใช่ P/Invoke — native crash ไม่ล้ม w3wp, timeout kill ได้; heuristic คะแนนบรรทัด
    "จำนวนเงิน/Amount" ทดสอบกับสลิปจริง SCB + KBank/KTB/BBL/PromptPay จำลอง; ซ่อม ฿→8 เฉพาะเทียบยอดที่ลง). ผลอ่านจาก OCR ไม่ใช่ข้อมูลธนาคาร.
