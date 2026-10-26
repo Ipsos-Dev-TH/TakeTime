@@ -101,7 +101,13 @@
         preview: function (cfg) {
             var file = d.getElementById(cfg.fileId), box = d.getElementById(cfg.amountId), out = d.getElementById(cfg.badgeId);
             if (!file || !box || !w.FormData || !w.fetch) return;
+            // หน้าที่ย่อรูปก่อน (data-sf-compress="1" — SlipFirst.prepare) ส่ง event sliplock:go เมื่อใส่รูปที่ย่อแล้วลงช่องไฟล์
             file.addEventListener('change', function () {
+                if (file.getAttribute('data-sf-compress') === '1' && file.files && file.files.length) return;
+                run();
+            });
+            file.addEventListener('sliplock:go', function () { run(); });
+            function run() {
                 if (!file.files || !file.files.length) {
                     setLocked(box, false);
                     box.removeAttribute('data-slip-value');
@@ -131,7 +137,7 @@
                     badge(out, 'ตรวจสลิปไม่ได้ตอนนี้ — กรอกยอดตามสลิป (ระบบตรวจซ้ำตอนบันทึก)', 'warn');
                     emit(file, 'sliplock:error', null);
                 });
-            });
+            }
         }
     };
 

@@ -447,6 +447,58 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
             catch { return false; }
         }
 
+        // ── รับเงินช่องทางโอน/QR โดยไม่มีสลิป (หน้า MakePayment, CLAUDE.md ข้อ 18) ──
+
+        /// <summary>ธงในหมายเหตุรายการรับเงิน — ค้นหา/กรองรายการที่ต้องตรวจย้อนหลังได้</summary>
+        public const string NoSlipFlag = "[ไม่มีสลิป — รอตรวจ]";
+
+        /// <summary>Owner เสมอ · Admin ที่มีสิทธิ์การเงิน/บัญชี (FIN_RECEIPT / SYS_ACCOUNTING / FIN_REPORT) · พนักงานทั่วไปไม่ได้</summary>
+        public static bool CanRecordWithoutSlip()
+        {
+            try
+            {
+                string role = HttpContext.Current?.Session?["User"]?.ToString() ?? "";
+                if (string.Equals(role, "Owner", StringComparison.OrdinalIgnoreCase)) return true;
+                return string.Equals(role, "Admin", StringComparison.OrdinalIgnoreCase)
+                    && (Perm.CanAccess(Perm.FinReceipt) || Perm.CanAccess(Perm.SysAccounting) || Perm.CanAccess(Perm.FinReport));
+            }
+            catch { return false; }
+        }
+
+        /// <summary>
+        /// บันทึกตรวจสอบเมื่อรับเงินช่องทางโอนโดยไม่มีสลิป: Logs + Slip_Verify_Log (สถานะ NO_SLIP) + Telegram (กันถี่ 1 ครั้ง/ผู้ใช้/10 นาที — ส่วนที่ถูกกันยังอยู่ใน log)
+        /// </summary>
+        public static void RecordNoSlipPayment(int reservationId, decimal amount, string method, string reason, string receiptId)
+        {
+            string user = CurrentUserName();
+            try
+            {
+                Log("NO_SLIP: การจอง " + reservationId + " รับ " + amount.ToString("N2") + " (" + (method ?? "-") + ") ใบเสร็จ " + (receiptId ?? "-")
+                    + " — ไม่มีสลิป เหตุผล: " + (reason ?? "-") + " · โดย " + user);
+                TryLog(new SlipVerifyContext { SourceType = "RESERVATION", SourceId = reservationId, User = user },
+                    new SlipVerifyResult
+                    {
+                        Status = "NO_SLIP",
+                        Source = SlipVerifySource.None,
+                        ExpectedAmount = amount,
+                        Message = "รับเงินโดยไม่มีสลิป — " + (reason ?? "") + (string.IsNullOrEmpty(receiptId) ? "" : " · ใบเสร็จ " + receiptId)
+                    }, true);
+            }
+            catch { }
+            try
+            {
+                string key = "slipnoslip:" + user;
+                if (HttpRuntime.Cache[key] != null) return;
+                HttpRuntime.Cache.Insert(key, DateTime.Now, null, DateTime.UtcNow.AddMinutes(10), Cache.NoSlidingExpiration);
+                Notify.Send(Notify.Ev.PaymentOnline, "📝 <b>รับเงินช่องทางโอนโดยไม่มีสลิป</b> " + amount.ToString("N2") + " บาท"
+                    + "\nการจอง #" + reservationId + (string.IsNullOrEmpty(receiptId) ? "" : " · ใบเสร็จ " + HttpUtility.HtmlEncode(receiptId))
+                    + "\nช่องทาง: " + HttpUtility.HtmlEncode(method ?? "-")
+                    + "\nเหตุผล: " + HttpUtility.HtmlEncode(reason ?? "-") + " (โดย " + HttpUtility.HtmlEncode(user) + ")"
+                    + "\nกรุณาตรวจยอดเข้าบัญชีธนาคาร");
+            }
+            catch { }
+        }
+
         public static string CurrentUserName()
         {
             try

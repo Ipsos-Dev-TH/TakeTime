@@ -2,7 +2,7 @@
 <%@ Register assembly="Microsoft.ReportViewer.WebForms" namespace="Microsoft.Reporting.WebForms" tagprefix="rsweb" %>
 <asp:Content ID="Content1" ContentPlaceHolderID="MainContent" runat="server">
     <%-- สลิปก่อนยอด (CLAUDE.md ข้อ 18): คลาส .sf-* เท่านั้น — ไม่ใช้ = ไม่มีผลกับหน้า --%>
-    <link id="slipFirstCss" rel="stylesheet" href="<%= ResolveUrl("~/Content/slip-first.css?v=1") %>" />
+    <link id="slipFirstCss" rel="stylesheet" href="<%= ResolveUrl("~/Content/slip-first.css?v=2") %>" />
     <style>
     /* GridView Row Selection Styles */
 .accom-row {
@@ -488,6 +488,7 @@
         .rv-sf-filebox .sf-drop { margin-top: 2px; }
         /* ป้ายล็อกยอดในผลตรวจซ้ำกับกล่อง "ยอดที่รับ" — สคริปต์ทำงานแล้วเหลือที่เดียว */
         #rvStepPay.rv-sf-js .slip-lock-badge { display: none; }
+        #rvStepPay[data-sf="reading"] #rvSfCard, #rvStepPay[data-sf="wait"] #rvSfCard { display: none; }
     </style>
 
     <script>
@@ -1078,10 +1079,11 @@
 
                     <%-- 🔎 ผลตรวจสลิป (PHASE19_34) — แสดงหลังกดอัปโหลด และเมื่อด่านก่อนออกใบเสร็จหยุด --%>
                     <asp:Panel ID="pnlSlipCheck" runat="server" Visible="false">
-                        <asp:Literal ID="litSlipCheck" runat="server" />
+                        <%-- rvSfCard: ผลตรวจแบบ async (API/SlipCheck.ashx) เขียนการ์ดเดียวกันลงตรงนี้ --%>
+                        <div id="rvSfCard"><asp:Literal ID="litSlipCheck" runat="server" /></div>
                         <div id="divSlipStaffOpts" runat="server" visible="false" style="font-size:13px; line-height:2; max-width:560px;">
                             <asp:Button ID="btnSlipUseAmount" runat="server" Text="ใช้ยอดตามสลิป" OnClick="btnSlipUseAmount_Click" CausesValidation="false" CssClass="reservation-button" />
-                            <br /><asp:CheckBox ID="chkSlipAllocate" runat="server" Text=" แบ่งสลิปนี้ใช้กับหลายการจอง (โอนรวมครั้งเดียว — ยอดที่เหลือใช้กับการจองอื่นได้)" />
+                            <span id="rvSfOptAlloc"><br /><asp:CheckBox ID="chkSlipAllocate" runat="server" Text=" แบ่งสลิปนี้ใช้กับหลายการจอง (โอนรวมครั้งเดียว — ยอดที่เหลือใช้กับการจองอื่นได้)" /></span>
                             <span id="spanSlipOverride" runat="server">
                                 <br /><asp:CheckBox ID="chkSlipOverride" runat="server" Text=" ยืนยันใช้สลิปนี้แม้ตรวจไม่ผ่าน (Owner/Admin)" />
                                 <asp:TextBox ID="txtSlipOverrideReason" runat="server" CssClass="rounded-textbox" Width="280px" MaxLength="500" placeholder="เหตุผล (บังคับ) เช่น ตรวจในแอปธนาคารแล้ว" />
@@ -1680,7 +1682,7 @@
                         var sa = num(sfAmt.value), smd = RV.cur ? RV.cur.minDep : 0;
                         if (sa <= 0) miss.push({ t: 'กรอกยอดเงินตามสลิป', e: sfAmt });
                         else if (smd > 0 && sa < smd * 0.8)
-                            miss.push({ t: 'ยอดในสลิปต่ำกว่ามัดจำขั้นต่ำ ฿' + baht0(smd) + ' — ติดต่อเจ้าหน้าที่', e: sfAmt });
+                            miss.push({ t: 'ยอดรวมจากสลิปต่ำกว่ามัดจำขั้นต่ำ ฿' + baht0(smd) + ' — โอนส่วนที่ขาดแล้วแนบสลิปเพิ่ม หรือติดต่อเจ้าหน้าที่', e: sfAmt });
                     }
                 } else if (el(RV.ids.rowSlip)) {
                     // โอนเงินเอง: ยอดโอน + สลิป (ช่องทางชำระออนไลน์ไม่มีแถวนี้ — ไปจ่ายต่อหลังยืนยัน)
@@ -1779,8 +1781,9 @@
         })();
     </script>
 
-    <%-- ── 🧾 สลิปก่อนยอด (CLAUDE.md ข้อ 18): เลือกวิธี → ยอดที่ต้องโอน → แนบสลิป (อ่านทันที) → เห็นยอด → ยืนยัน ──
-         ทำงานเฉพาะเมื่อ #rvStepPay มี data-sf · ยอดที่บันทึกบังคับตามสลิปที่เซิร์ฟเวอร์ (RunSlipGate) เสมอ — ตรงนี้คือหน้าตาล้วน (ES5) --%>
+    <%-- ── 🧾 สลิปก่อนยอด (CLAUDE.md ข้อ 18): เลือกวิธี → ยอดที่ต้องโอน → แนบสลิป (ย่อรูป + ตรวจแบบ async) → เห็นยอด → ยืนยัน ──
+         ทำงานเฉพาะเมื่อ #rvStepPay มี data-sf · ยอดที่บันทึกบังคับตามสลิปที่เซิร์ฟเวอร์ (RunSlipGate ตรวจจากไฟล์ที่ API เก็บไว้) เสมอ
+         ตรวจแบบ async ไม่ได้ (เบราว์เซอร์เก่า/API ปิด/หน้าเก่า) = กดปุ่มอัปโหลดเดิมให้ (postback — ส่งรูปที่ย่อแล้วถ้าทำได้) · ES5 --%>
     <script>
         (function () {
             function start() {
@@ -1790,13 +1793,41 @@
                 if (!st || !window.SlipFirst) return;   // ปิดฟีเจอร์ / สคริปต์กลางโหลดไม่ได้ = หน้าตาเดิม
                 function A(n) { return root.getAttribute('data-sf-' + n) || ''; }
                 function byId(id) { return id ? document.getElementById(id) : null; }
+                function numv(s) { var n = parseFloat(String(s === undefined || s === null ? '' : s).replace(/,/g, '')); return isNaN(n) ? 0 : n; }
+                function r2(n) { return Math.round(n * 100) / 100; }
+                function amtText(v) { v = r2(v); return Math.round(v) === v ? String(v) : v.toFixed(2); }
+                function esc(s) { return String(s === undefined || s === null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+                function fire(elm, type) {
+                    if (!elm) return;
+                    var ev;
+                    try { ev = new Event(type, { bubbles: true }); } catch (e) { ev = document.createEvent('HTMLEvents'); ev.initEvent(type, true, false); }
+                    elm.dispatchEvent(ev);
+                }
                 var amt = byId(A('amt')), file = byId(A('file')), upBtn = byId(A('up')), img = byId(A('img')),
-                    phone = byId(A('phone')), slot = document.getElementById('rvSfRevealSlot');
-                var cust = A('cust') === '1', mode = A('mode');
+                    phone = byId(A('phone')), slot = document.getElementById('rvSfRevealSlot'), ddl = byId(A('ddl')),
+                    card = document.getElementById('rvSfCard');
+                var cust = A('cust') === '1', mode = A('mode'), api = A('api'), nonce = A('nonce');
+                var fixed = A('fixed') === '1';
+                var canAsync = !!(api && nonce && window.fetch && window.FormData && window.Promise);
+                var MAXB = 8 * 1024 * 1024;
                 root.className += ' rv-sf-js';
-                if (upBtn) upBtn.style.display = 'none';      // อัปโหลดให้เองทันทีที่เลือกไฟล์
+                if (upBtn) upBtn.style.display = 'none';      // อัปโหลด/ตรวจให้เองทันทีที่เลือกไฟล์
                 if (img) img.style.display = 'none';          // รูปสลิปไปอยู่ในกล่องแนบสลิป
-                if (st === 'pick') return;
+
+                // ── พนักงานยังไม่เลือกวิธีชำระ: ปุ่มลัด (วิธีล่าสุดมาก่อน) → เลือกใน dropdown เดิม (AutoPostBack) ──
+                if (st === 'pick') {
+                    var chips = root.querySelectorAll('[data-sf-pick]');
+                    for (var ci = 0; ci < chips.length; ci++) {
+                        chips[ci].addEventListener('click', function () {
+                            if (!ddl) return;
+                            ddl.value = this.getAttribute('data-sf-pick');
+                            this.className += ' is-busy';
+                            this.setAttribute('aria-busy', 'true');
+                            fire(ddl, 'change');
+                        }, false);
+                    }
+                    return;
+                }
 
                 function steps(onIdx, err) {
                     var li = document.querySelectorAll('#rvSfSteps li');
@@ -1805,10 +1836,18 @@
                         if (i === onIdx) li[i].setAttribute('aria-current', 'step'); else li[i].removeAttribute('aria-current');
                     }
                 }
+                function setState(s) { st = s; root.setAttribute('data-sf', s); }
+
+                // ── สลิปเติมยอด (ลูกค้า): สลิปแรกต่ำกว่ามัดจำขั้นต่ำ → โอนส่วนที่ขาด + แนบสลิปเพิ่ม ──
+                var topups = [];
+                try { topups = JSON.parse(A('topups') || '[]') || []; } catch (eT) { topups = []; }
+                var slot1 = 0;                                   // ยอดล็อกของสลิปใบแรก
+                var maxSlots = numv(A('maxslots')) || 3;
+                var tuBusy = false, tuMsg = '', tuTone = '';
 
                 var read = st === 'locked' || st === 'edit' || st === 'stop';
                 var dz = file ? SlipFirst.dropzone({
-                    input: file,
+                    input: file, rawMaxMB: 30,
                     texts: cust ? null : { title: 'แนบสลิปที่ลูกค้าโอน', sub: 'ถ่ายรูป / เลือกรูป / ลากไฟล์มาวาง — ระบบอ่านยอดให้ทันที' },
                     thumb: read ? (A('thumb') || null) : null,
                     fileName: read ? 'สลิปที่แนบ' : '',
@@ -1822,101 +1861,345 @@
                             if (window.rvShowError) window.rvShowError(phone.id, 'กรอกเบอร์โทรศัพท์ก่อนแนบสลิป');
                             return;
                         }
-                        if (!upBtn) { z.setState('picked', 'เลือกสลิปแล้ว — กดยืนยันได้เลย', 'ok'); return; }
-                        root.setAttribute('data-sf', 'reading');
+                        if (!upBtn && !canAsync) { z.setState('picked', 'เลือกสลิปแล้ว — กดยืนยันได้เลย', 'ok'); return; }
+                        setState('reading');
                         z.setState('reading', '', null);
                         steps(2, false);
                         window.rvSlipUploading = true;
-                        setTimeout(function () { upBtn.click(); }, 60);
+                        topups = []; slot1 = 0;
+                        if (canAsync) checkAsync(f, z); else postback(null);
                     }
                 }) : null;
                 if (!dz && file) return;
 
-                if (st === 'stop') { steps(1, true); return; }
-                if (st === 'wait' || !amt || !slot) return;
-
-                // ── ยอดที่รับ: ย้ายช่องยอดเดิม (ชื่อฟอร์มเดิม → เซิร์ฟเวอร์อ่านได้เหมือนเดิม) มาใต้ผลอ่านสลิป ──
-                var locked = st === 'locked' && amt.getAttribute('data-slip-locked') === '1';
-                var fixed = A('fixed') === '1';
-                var box = document.createElement('div');
-                box.id = 'rvSfReveal';
-                box.className = 'sf-reveal ' + (locked || fixed ? 'is-locked' : 'is-edit');
-                var head = document.createElement('div');
-                head.className = 'sf-reveal-h';
-                var title = document.createElement('b');
-                title.textContent = mode === 'reserve' ? (cust ? 'ยอดที่โอน (ตามสลิป)' : 'ยอดที่รับ (ตามสลิป)') : 'ยอดที่รับครั้งนี้ (ตามสลิป)';
-                var chip = document.createElement('span');
-                chip.className = 'sf-chip ' + (locked ? 'ok' : 'warn');
-                chip.textContent = locked ? '🔒 ล็อกตามสลิป' : fixed ? 'ยอดค้างที่ต้องรับ' : '✏️ กรอกให้ตรงสลิป';
-                head.appendChild(title);
-                head.appendChild(chip);
-                var line = document.createElement('div');
-                line.className = 'sf-amount';
-                var unit = document.createElement('span');
-                unit.textContent = 'บาท';
-                amt.parentNode.removeChild(amt);
-                line.appendChild(amt);
-                line.appendChild(unit);
-                var hint = document.createElement('div');
-                hint.className = 'sf-hint';
-                hint.id = 'rvSfHint';
-                hint.textContent = locked
-                    ? 'ยอดนี้มาจากสลิป แก้ไม่ได้ — ถ้าไม่ถูกต้อง แตะ "เปลี่ยนสลิป" แล้วแนบใบที่ถูกต้อง'
-                    : (A('hint') || 'ระบบอ่านยอดจากสลิปไม่ชัดเจน — กรอกยอดให้ตรงกับสลิป' + (cust ? ' เจ้าหน้าที่จะตรวจอีกครั้ง' : ''));
-                var out = document.createElement('div');
-                out.className = 'sf-outcome';
-                out.id = 'rvSfOutcome';
-                out.setAttribute('aria-live', 'polite');
-                box.appendChild(head);
-                box.appendChild(line);
-                box.appendChild(hint);
-                box.appendChild(out);
-                slot.appendChild(box);
-                amt.style.display = '';
-                amt.style.marginLeft = '0';
-                amt.setAttribute('inputmode', 'decimal');
-                amt.setAttribute('aria-describedby', 'rvSfHint rvSfOutcome');
-                amt.setAttribute('aria-label', title.textContent);
-                if (!locked && !fixed) {
-                    var v0 = String(amt.value || '').replace(/\s/g, '');
-                    if (v0 === '0' || isNaN(parseFloat(v0))) amt.value = '';
-                    amt.setAttribute('placeholder', '0.00');
+                function form(slotN, action) {
+                    var fd = new FormData();
+                    fd.append('nonce', nonce);
+                    fd.append('phone', phone ? phone.value : '');
+                    fd.append('method', ddl ? ddl.value : '');
+                    fd.append('slot', String(slotN));
+                    fd.append('action', action || 'check');
+                    fd.append('typed', '0');
+                    var cur = window.RV && RV.cur && RV.cur.total > 0 ? RV.cur : null;
+                    fd.append('total', cur ? String(cur.total) : A('total'));
+                    return fd;
                 }
-                steps(locked ? 3 : 2, false);
+                function post(f, compressed, slotN) {
+                    var fd = form(slotN, 'check');
+                    fd.append('cmp', compressed ? '1' : '0');
+                    fd.append('file', f, f.name || 'slip.jpg');
+                    return SlipFirst.send(api, fd, 60000);
+                }
+                // ย่อรูป → ส่ง · รูปย่อแล้ว QR หาย (ตัวอ่าน QR พร้อม) หรืออ่านยอดไม่ได้โดยไม่มีผลธนาคาร → ส่งรูปเดิมซ้ำหนึ่งครั้ง
+                function sendSlip(f, slotN) {
+                    return SlipFirst.prepare(f).then(function (p) {
+                        return post(p.file, p.compressed, slotN).then(function (j) {
+                            var retry = j && j.ok && p.compressed && f.size <= MAXB && j.state !== 'stop'
+                                && !j.vendor && ((j.qrReady && !j.qr) || j.state === 'edit');   // ธนาคารตอบแล้ว = ไม่ส่งซ้ำ (โควต้า/1012)
+                            if (!retry) return { j: j, p: p };
+                            return post(f, false, slotN).then(function (j2) { return { j: j2 && j2.ok ? j2 : j, p: p }; });
+                        });
+                    });
+                }
+                function checkAsync(f, z) {
+                    sendSlip(f, 1).then(function (o) {
+                        var j = o.j;
+                        window.rvSlipUploading = false;
+                        if (j && j.ok) { try { file.value = ''; } catch (e0) { } applyResult(j, true); return; }
+                        if (j && (j.code === 'input' || j.code === 'rate')) {
+                            setState('wait');
+                            z.setState('picked', '', 'warn');
+                            z.setError(j.msg || 'ตรวจสลิปไม่ได้ — ลองอีกครั้ง');
+                            steps(1, true);
+                            if (j.field === 'phone' && phone && window.rvShowError) window.rvShowError(phone.id, j.msg);
+                            try { file.value = ''; } catch (e1) { }
+                            return;
+                        }
+                        postback(o.p);    // API ใช้ไม่ได้ (ปิด/หน้าเก่า/ขัดข้อง) → ทางเดิม
+                    }, function () { window.rvSlipUploading = false; postback(null); });
+                }
+                function postback(p) {
+                    if (!upBtn) { setState('wait'); if (dz) dz.setState('picked', 'เลือกสลิปแล้ว — กดยืนยันได้เลย', 'ok'); return; }
+                    if (p && p.compressed) SlipFirst.setInputFile(file, p.file);   // ส่งรูปที่ย่อแล้ว (เร็ว + ไม่ชนเพดานขนาดคำขอ)
+                    setState('reading');
+                    window.rvSlipUploading = true;
+                    setTimeout(function () { upBtn.click(); }, 60);
+                }
 
-                function numv(s) { var n = parseFloat(String(s || '').replace(/,/g, '')); return isNaN(n) ? 0 : n; }
-                window.rvSfUpdate = function () {
+                // ── ตัวเลือกพนักงาน (แบ่งสลิป / override) — เซิร์ฟเวอร์ตัดสินซ้ำตอนบันทึก ──
+                function toggle(elm, on) { if (elm) elm.style.display = on ? '' : 'none'; }
+                function staffOpts(o) {
+                    var box = byId(A('opts'));
+                    if (!box) return;
+                    if (!o || !o.show) { box.style.display = 'none'; return; }
+                    box.style.display = '';
+                    toggle(byId(A('useamt')), o.useAmount);
+                    toggle(document.getElementById('rvSfOptAlloc'), o.allocate);
+                    toggle(byId(A('optov')), o.override);
+                }
+                function lockAmt(v) {
+                    if (!amt) return;
+                    var t = amtText(v);
+                    amt.value = t;
+                    if (window.SlipLock) SlipLock.setLocked(amt, true, t);
+                    else { amt.setAttribute('data-slip-locked', '1'); amt.setAttribute('data-slip-value', t); amt.setAttribute('readonly', 'readonly'); }
+                    var chk = byId(A('alloc'));
+                    if (chk && window.SlipLock && !chk.getAttribute('data-sf-bound')) { chk.setAttribute('data-sf-bound', '1'); SlipLock.bindAllocate(amt.id, chk.id); }
+                }
+                function unlockAmt() {
+                    if (!amt) return;
+                    if (window.SlipLock) SlipLock.setLocked(amt, false);
+                    else { amt.removeAttribute('data-slip-locked'); amt.removeAttribute('readonly'); }
+                    amt.removeAttribute('data-slip-value');
+                }
+                function sumSlips() {
+                    var s = slot1;
+                    for (var i = 0; i < topups.length; i++) s += numv(topups[i].amount);
+                    return r2(s);
+                }
+
+                // ── กล่อง "ยอดที่รับ": ย้ายช่องยอดเดิม (ชื่อฟอร์มเดิม → เซิร์ฟเวอร์อ่านได้เหมือนเดิม) มาใต้ผลอ่านสลิป ──
+                var box = null, chip, hint, out, title, tu;
+                function buildReveal(locked, hintText, fresh) {
+                    if (!amt || !slot) return;
+                    if (!box) {
+                        box = document.createElement('div');
+                        box.id = 'rvSfReveal';
+                        var head = document.createElement('div');
+                        head.className = 'sf-reveal-h';
+                        title = document.createElement('b');
+                        title.textContent = mode === 'reserve' ? (cust ? 'ยอดที่โอน (ตามสลิป)' : 'ยอดที่รับ (ตามสลิป)') : 'ยอดที่รับครั้งนี้ (ตามสลิป)';
+                        chip = document.createElement('span');
+                        head.appendChild(title);
+                        head.appendChild(chip);
+                        var line = document.createElement('div');
+                        line.className = 'sf-amount';
+                        var unit = document.createElement('span');
+                        unit.textContent = 'บาท';
+                        amt.parentNode.removeChild(amt);
+                        line.appendChild(amt);
+                        line.appendChild(unit);
+                        hint = document.createElement('div');
+                        hint.className = 'sf-hint';
+                        hint.id = 'rvSfHint';
+                        out = document.createElement('div');
+                        out.className = 'sf-outcome';
+                        out.id = 'rvSfOutcome';
+                        out.setAttribute('aria-live', 'polite');
+                        tu = document.createElement('div');
+                        tu.id = 'rvSfTopUp';
+                        box.appendChild(head);
+                        box.appendChild(line);
+                        box.appendChild(hint);
+                        box.appendChild(out);
+                        box.appendChild(tu);
+                        slot.appendChild(box);
+                        amt.style.display = '';
+                        amt.style.marginLeft = '0';
+                        amt.setAttribute('inputmode', 'decimal');
+                        amt.setAttribute('aria-describedby', 'rvSfHint rvSfOutcome');
+                        amt.setAttribute('aria-label', title.textContent);
+                        amt.addEventListener('input', update, false);
+                        amt.addEventListener('change', update, false);
+                    }
+                    box.style.display = '';
+                    box.className = 'sf-reveal ' + (locked || fixed ? 'is-locked' : 'is-edit');
+                    chip.className = 'sf-chip ' + (locked ? 'ok' : 'warn');
+                    chip.textContent = locked ? '🔒 ล็อกตามสลิป' : fixed ? 'ยอดค้างที่ต้องรับ' : '✏️ กรอกให้ตรงสลิป';
+                    hint.textContent = locked
+                        ? (topups.length ? 'ยอดรวมจากสลิปทุกใบ แก้ไม่ได้ — เปลี่ยน/ลบสลิปได้ด้านล่าง' : 'ยอดนี้มาจากสลิป แก้ไม่ได้ — ถ้าไม่ถูกต้อง แตะ "เปลี่ยนสลิป" แล้วแนบใบที่ถูกต้อง')
+                        : (hintText || 'ระบบอ่านยอดจากสลิปไม่ชัดเจน — กรอกยอดให้ตรงกับสลิป' + (cust ? ' เจ้าหน้าที่จะตรวจอีกครั้ง' : ''));
+                    if (!locked && !fixed) {
+                        var v0 = String(amt.value || '').replace(/\s/g, '');
+                        if (v0 === '0' || isNaN(parseFloat(v0))) amt.value = '';
+                        amt.setAttribute('placeholder', '0.00');
+                    }
+                    steps(locked ? 3 : 2, false);
+                    update();
+                    if (fresh) {
+                        box.className += ' sf-flash';
+                        var show = function () {
+                            try {
+                                var r = box.getBoundingClientRect();
+                                if (r.top < 0 || r.bottom > (window.innerHeight || 800)) box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            } catch (e) { }
+                            if (!locked && !fixed) { try { amt.focus({ preventScroll: true }); } catch (e2) { } }
+                        };
+                        // MaintainScrollPositionOnPostback คืนตำแหน่งเดิมตอน load → เลื่อนหลังจากนั้น
+                        if (document.readyState === 'complete') setTimeout(show, 150);
+                        else window.addEventListener('load', function () { setTimeout(show, 200); });
+                    }
+                }
+                function hideReveal() { if (box) box.style.display = 'none'; }
+
+                function update() {
+                    if (!out || !amt) return;
                     var cur = window.RV && RV.cur && RV.cur.total > 0 ? RV.cur : null;
                     var due = A('due');
+                    var minDep = cur ? cur.minDep : numv(A('min'));
                     var o = SlipFirst.outcome({
                         amount: numv(amt.value),
                         total: cur ? cur.total : numv(A('total')),
-                        minDep: cur ? cur.minDep : numv(A('min')),
+                        minDep: minDep,
                         due: due === '' ? NaN : numv(due),
                         mode: mode,
                         customer: cust,
-                        minRule: 0.8
+                        minRule: 0.8,
+                        topUp: cust && mode === 'reserve' && slot1 > 0
                     });
                     out.className = 'sf-outcome' + (o.cls ? ' ' + o.cls : '');
                     out.innerHTML = o.html;
-                };
-                amt.addEventListener('input', window.rvSfUpdate, false);
-                amt.addEventListener('change', window.rvSfUpdate, false);
-                window.rvSfUpdate();
-
-                if (A('fresh') === '1') {
-                    box.className += ' sf-flash';
-                    var show = function () {
-                        try {
-                            var r = box.getBoundingClientRect();
-                            if (r.top < 0 || r.bottom > (window.innerHeight || 800)) box.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        } catch (e) { }
-                        if (!locked && !fixed) { try { amt.focus({ preventScroll: true }); } catch (e2) { } }
-                    };
-                    // MaintainScrollPositionOnPostback คืนตำแหน่งเดิมตอน load → เลื่อนหลังจากนั้น
-                    if (document.readyState === 'complete') setTimeout(show, 150);
-                    else window.addEventListener('load', function () { setTimeout(show, 200); });
+                    renderTopUp(minDep);
                 }
+                window.rvSfUpdate = update;
+
+                function renderTopUp(minDep) {
+                    if (!tu) return;
+                    if (!(cust && mode === 'reserve' && slot1 > 0 && st === 'locked')) { tu.className = ''; tu.innerHTML = ''; return; }
+                    var sum = sumSlips(), short = minDep > 0 ? r2(minDep - sum) : 0;
+                    var below = minDep > 0 && sum < minDep * 0.8 - 0.009;
+                    if (!below && !topups.length && !tuMsg) { tu.className = ''; tu.innerHTML = ''; return; }
+                    var M = SlipFirst.money, h = '';
+                    h += '<div class="sf-topup-h">' + (below
+                        ? 'ยอดรวมจากสลิป <b>฿' + M(sum) + '</b> · มัดจำขั้นต่ำ <b>฿' + M(minDep) + '</b> · <b class="sf-short">ขาดอีก ฿' + M(Math.max(0, short)) + '</b>'
+                        : '✅ ยอดรวมจากสลิป <b>฿' + M(sum) + '</b> ถึงมัดจำขั้นต่ำแล้ว') + '</div>';
+                    var list = [{ slot: 1, amount: slot1, thumb: A('thumb') }].concat(topups);
+                    if (list.length > 1) {
+                        h += '<ul class="sf-slips">';
+                        for (var i = 0; i < list.length; i++) {
+                            h += '<li>' + (list[i].thumb ? '<img alt="" src="' + esc(list[i].thumb) + '">' : '') + '<span>สลิปใบที่ ' + list[i].slot + '</span><b>฿' + M(numv(list[i].amount)) + '</b>'
+                                + (list[i].slot > 1 ? '<button type="button" class="sf-rm" data-sf-rm="' + list[i].slot + '" aria-label="ลบสลิปใบที่ ' + list[i].slot + '">ลบ</button>' : '') + '</li>';
+                        }
+                        h += '</ul>';
+                    }
+                    if (tuMsg) h += '<div class="sf-topup-msg ' + esc(tuTone) + '" role="status">' + esc(tuMsg) + '</div>';
+                    if (below) {
+                        if (list.length < maxSlots && canAsync) {
+                            h += '<div class="sf-topup-act">'
+                                + '<button type="button" class="sf-copy" data-sf-copy="' + amtText(Math.max(0, short)) + '" aria-label="คัดลอกยอดที่ขาด">คัดลอกยอดที่ขาด ฿' + M(Math.max(0, short)) + '</button>'
+                                + '<button type="button" class="sf-topup-add"' + (tuBusy ? ' disabled aria-busy="true"' : '') + '>' + (tuBusy ? '⏳ กำลังตรวจสลิปเพิ่ม…' : '➕ แนบสลิปเพิ่ม') + '</button></div>'
+                                + '<div class="sf-note">โอนส่วนที่ขาดเข้าบัญชีเดิม (<a href="#rvSfSteps" class="sf-link">ดูบัญชี/QR ด้านบน</a>) แล้วแนบสลิปใบใหม่ — ระบบอ่านยอดและรวมให้เอง (สูงสุด ' + maxSlots + ' ใบ)</div>';
+                        } else {
+                            h += '<div class="sf-note">แนบสลิปครบ ' + maxSlots + ' ใบแล้ว — กรุณาติดต่อเจ้าหน้าที่</div>';
+                        }
+                        var ct = A('contact');
+                        if (ct) h += '<div class="sf-topup-or">หรือติดต่อเจ้าหน้าที่</div>' + ct;
+                    }
+                    tu.className = 'sf-topup' + (below ? ' is-short' : ' is-ok');
+                    tu.innerHTML = h;
+                }
+
+                // ไฟล์ของสลิปเติมยอด: ช่องไฟล์แยกที่ไม่มี name (ไม่ส่งไปกับฟอร์ม) — ส่งผ่าน API เท่านั้น
+                var tuInput = document.createElement('input');
+                tuInput.type = 'file';
+                tuInput.accept = 'image/*';
+                tuInput.className = 'sf-sr';
+                tuInput.setAttribute('aria-hidden', 'true');
+                tuInput.tabIndex = -1;
+                root.appendChild(tuInput);
+                function nextSlot() {
+                    for (var s = 2; s <= maxSlots; s++) {
+                        var used = false;
+                        for (var i = 0; i < topups.length; i++) if (numv(topups[i].slot) === s) used = true;
+                        if (!used) return s;
+                    }
+                    return 0;
+                }
+                function takeSlips(j) {
+                    if (!j || !j.slips) return;
+                    var t = [];
+                    for (var i = 0; i < j.slips.length; i++) if (numv(j.slips[i].slot) >= 2) t.push(j.slips[i]);
+                    topups = t;
+                }
+                function afterSlips() {
+                    lockAmt(sumSlips());
+                    if (hint && st === 'locked') hint.textContent = topups.length ? 'ยอดรวมจากสลิปทุกใบ แก้ไม่ได้ — เปลี่ยน/ลบสลิปได้ด้านล่าง' : 'ยอดนี้มาจากสลิป แก้ไม่ได้ — ถ้าไม่ถูกต้อง แตะ "เปลี่ยนสลิป" แล้วแนบใบที่ถูกต้อง';
+                    update();
+                    fire(amt, 'input');   // ด่านฝั่งเบราว์เซอร์ (สิ่งที่ยังขาด) คำนวณใหม่
+                }
+                tuInput.addEventListener('change', function () {
+                    var f = tuInput.files && tuInput.files.length ? tuInput.files[0] : null;
+                    if (!f) return;
+                    var s = nextSlot();
+                    if (!s) return;
+                    tuBusy = true; tuMsg = ''; update();
+                    window.rvSlipUploading = true;
+                    sendSlip(f, s).then(function (o) {
+                        var j = o.j;
+                        tuBusy = false;
+                        window.rvSlipUploading = false;
+                        try { tuInput.value = ''; } catch (e0) { }
+                        if (j && j.ok) {
+                            takeSlips(j);
+                            tuMsg = j.state === 'stop' ? (j.msg || 'สลิปใบนี้ใช้ไม่ได้') : (j.msg || '');
+                            tuTone = j.state === 'stop' ? 'err' : (j.tone || 'ok');
+                        } else {
+                            tuMsg = (j && j.msg) || 'ตรวจสลิปเพิ่มไม่ได้ตอนนี้ — ลองอีกครั้ง หรือติดต่อเจ้าหน้าที่';
+                            tuTone = 'err';
+                        }
+                        afterSlips();
+                    }, function () { tuBusy = false; window.rvSlipUploading = false; tuMsg = 'ตรวจสลิปเพิ่มไม่ได้ตอนนี้ — ลองอีกครั้ง'; tuTone = 'err'; update(); });
+                }, false);
+                root.addEventListener('click', function (e) {
+                    var t = e.target;
+                    while (t && t !== root && !(t.className && (/\bsf-topup-add\b/.test(t.className) || /\bsf-rm\b/.test(t.className) || /\bsf-link\b/.test(t.className)))) t = t.parentNode;
+                    if (!t || t === root) return;
+                    e.preventDefault();
+                    if (/\bsf-link\b/.test(t.className)) {
+                        var g = document.getElementById('rvSfSteps');
+                        var det = root.querySelector('details.sf-guide');
+                        if (det) det.open = true;
+                        if (g) try { g.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e1) { }
+                        return;
+                    }
+                    if (/\bsf-topup-add\b/.test(t.className)) { if (!tuBusy) tuInput.click(); return; }
+                    var n = numv(t.getAttribute('data-sf-rm'));
+                    if (!(n >= 2)) return;
+                    var fd = form(n, 'remove');
+                    tuBusy = true; update();
+                    SlipFirst.send(api, fd, 30000).then(function (j) {
+                        tuBusy = false;
+                        if (j && j.ok) { takeSlips(j); tuMsg = 'ลบสลิปใบที่ ' + n + ' แล้ว'; tuTone = 'ok'; }
+                        else { tuMsg = 'ลบไม่สำเร็จ — ลองอีกครั้ง'; tuTone = 'err'; }
+                        afterSlips();
+                    });
+                }, false);
+
+                // ── ผลอ่านสลิป (async หรือจาก postback) → สถานะหน้า + ช่องยอด ──
+                function applyResult(j, fresh) {
+                    var s = j.state || 'edit';
+                    setState(s);
+                    if (dz) dz.setState('done', j.msg || '', j.tone || null);
+                    if (card) {
+                        card.innerHTML = j.cardHtml || '';
+                        if (card.parentNode) card.parentNode.style.display = '';
+                    }
+                    if (j.thumb) root.setAttribute('data-sf-thumb', j.thumb);
+                    staffOpts(j.opts);
+                    if (s === 'stop') { steps(1, true); hideReveal(); unlockAmt(); fire(amt, 'input'); return; }
+                    if (j.locked && j.amountText) {
+                        slot1 = numv(j.amountText);
+                        takeSlips(j);
+                        lockAmt(sumSlips());
+                    } else {
+                        slot1 = 0;
+                        unlockAmt();
+                        if (amt && !fixed) amt.value = '';
+                    }
+                    buildReveal(!!j.locked, j.hint, fresh);
+                    fire(amt, 'input');
+                }
+
+                if (st === 'stop') { steps(1, true); return; }
+                if (st === 'wait' || !amt || !slot) return;
+
+                // หน้าโหลดมาพร้อมผล (postback/อ่านซ้ำจากไฟล์ที่เก็บไว้)
+                var lockedNow = st === 'locked' && amt.getAttribute('data-slip-locked') === '1';
+                if (lockedNow) {
+                    slot1 = numv(amt.getAttribute('data-slip-value') || amt.value);
+                    if (topups.length) lockAmt(sumSlips());
+                }
+                buildReveal(lockedNow, A('hint'), A('fresh') === '1');
             }
             if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
             else start();

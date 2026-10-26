@@ -283,7 +283,17 @@
                 <label class="form-label">อัพโหลดสลิปการโอนเงิน (JPG, PNG, PDF เท่านั้น, ไม่เกิน 5MB)</label>
                 <asp:FileUpload ID="fuPaymentSlip" runat="server" CssClass="form-control" />
                 <small class="mp-slip-note" style="color: #7f8c8d;">หมายเหตุ: หากชำระผ่านโอนเงิน กรุณาอัพโหลดสลิปเพื่อยืนยันการชำระเงิน</small>
-                <a href="#" id="mpSfManual" class="mp-sf-manual" style="display:none;">ไม่มีสลิป? กรอกยอดเอง</a>
+                <%-- ไม่มีสลิป (ช่องทางโอน/QR): เฉพาะ Owner / Admin ที่มีสิทธิ์การเงิน — ต้องมีเหตุผล · บันทึกตรวจสอบ + ติดธง + แจ้งเจ้าของ
+                     (เซิร์ฟเวอร์ตรวจสิทธิ์/เหตุผลซ้ำใน btnSubmit_Click · คนอื่นไม่เห็นลิงก์และบันทึกช่องทางโอนโดยไม่มีสลิปไม่ได้) --%>
+                <asp:Panel ID="pnlNoSlip" runat="server" Visible="false">
+                    <a href="#" id="mpSfManual" class="mp-sf-manual" style="display:none;">ไม่มีสลิป? บันทึกยอดเองพร้อมเหตุผล (Owner/Admin)</a>
+                    <div id="mpNoSlipBox" class="sf-noslip" style="display:none;">
+                        <label for="<%= txtNoSlipReason.ClientID %>">เหตุผลที่ไม่มีสลิป (บังคับ อย่างน้อย 10 ตัวอักษร)</label>
+                        <asp:TextBox ID="txtNoSlipReason" runat="server" TextMode="MultiLine" Rows="2" MaxLength="500"
+                            placeholder="เช่น ลูกค้าโอนผ่านตู้ ATM ไม่มีสลิป — ตรวจยอดเข้าบัญชีในแอปธนาคารแล้ว" />
+                        <small>ระบบบันทึกชื่อผู้บันทึกและเหตุผล ติดธง "ไม่มีสลิป — รอตรวจ" ในรายการรับเงิน และแจ้งเตือนเจ้าของ</small>
+                    </div>
+                </asp:Panel>
             </div>
 
             <div class="form-group" id="mpNotesGroup">
@@ -303,7 +313,7 @@
         </div>
 
         <%-- 🧾 สลิปก่อนยอด — คลาส .sf-* (ไม่ใช้ = ไม่มีผล) --%>
-        <link id="slipFirstCss" rel="stylesheet" href="<%= ResolveUrl("~/Content/slip-first.css?v=1") %>" />
+        <link id="slipFirstCss" rel="stylesheet" href="<%= ResolveUrl("~/Content/slip-first.css?v=2") %>" />
         <style>
             #mpForm { --sf-accent: #3498db; --sf-accent-dark: #2c3e50; --sf-soft: #eaf3fb; --sf-line: #d6e4f0; }
             #mpForm.mp-sf { display: flex; flex-direction: column; }
@@ -320,7 +330,7 @@
             #mpForm[data-sf="locked"] #mpAmountGroup .form-control { font-size: 20px; font-weight: 700; }
             #mpForm:not([data-sf]) #mpSfGuide { display: none !important; }
         </style>
-        <script src="<%= ResolveUrl("~/Scripts/slip-first.js?v=1") %>"></script>
+        <script src="<%= ResolveUrl("~/Scripts/slip-first.js?v=2") %>"></script>
         <script>
             (function () {
                 var cfg = <%= SlipFirstJs %>;
@@ -347,10 +357,26 @@
                               + '<button type="button" class="sf-copy" data-sf-copy="' + (Math.round(cfg.due) === cfg.due ? String(cfg.due) : cfg.due.toFixed(2)) + '" aria-label="คัดลอกยอดคงเหลือ">คัดลอก</button></div></div>'
                             : '');
 
+                    // ย่อรูปก่อนตรวจ/บันทึก (SlipFirst.prepare — QR/ยอดอ่านได้เท่ารูปเดิม) แล้วใส่กลับลงช่องไฟล์ → ตรวจ (sliplock:go) และบันทึกส่งรูปเล็ก
+                    var prepping = false;
+                    if (window.Promise) file.setAttribute('data-sf-compress', '1');
                     var dz = SlipFirst.dropzone({
-                        input: file, accept: 'image+pdf', maxMB: 5,
+                        input: file, accept: 'image+pdf', maxMB: 5, rawMaxMB: 30,
                         texts: { title: 'แนบสลิปที่ลูกค้าโอน', sub: 'ถ่ายรูป / เลือกรูป / ลากไฟล์มาวาง — ระบบอ่านยอดให้ทันที' },
-                        onPick: function () { manualOn = false; }
+                        onPick: function (f) {
+                            manualOn = false;
+                            if (file.getAttribute('data-sf-compress') !== '1') return;
+                            prepping = true;
+                            read = 'reading'; apply();
+                            if (dz) dz.setState('reading', '', null);
+                            SlipFirst.prepare(f).then(function (p) {
+                                prepping = false;
+                                if (p.compressed) SlipFirst.setInputFile(file, p.file);
+                                var ev;
+                                try { ev = new CustomEvent('sliplock:go'); } catch (e0) { ev = document.createEvent('CustomEvent'); ev.initCustomEvent('sliplock:go', false, false, null); }
+                                file.dispatchEvent(ev);
+                            });
+                        }
                     });
 
                     function steps(onIdx) {
@@ -390,13 +416,30 @@
                         if (dz) dz.setState(read ? 'done' : 'empty', read ? '✏️ ตรวจสลิปไม่ได้ตอนนี้ — กรอกยอดตามสลิป' : '', read ? 'warn' : null);
                         apply();
                     });
-                    if (manual) manual.onclick = function () { manualOn = true; apply(); try { amt.focus(); } catch (x) { } return false; };
+                    // ไม่มีสลิป: ลิงก์มีเฉพาะ Owner/Admin สิทธิ์การเงิน (pnlNoSlip) → เปิดช่องยอด + ช่องเหตุผล (บังคับ)
+                    var noSlipBox = document.getElementById('mpNoSlipBox');
+                    var noSlipReason = document.getElementById('<%= txtNoSlipReason.ClientID %>');
+                    if (manual) manual.onclick = function () {
+                        manualOn = true;
+                        try { file.value = ''; } catch (x0) { }
+                        if (dz) dz.setState('empty', '', null);
+                        apply();
+                        if (noSlipBox) noSlipBox.style.display = '';
+                        try { (noSlipReason || amt).focus(); } catch (x) { }
+                        return false;
+                    };
+                    file.addEventListener('change', function () { if (noSlipBox && file.files && file.files.length) noSlipBox.style.display = 'none'; });
                     ddl.addEventListener('change', apply);
                     amt.addEventListener('input', upd);
                     window.mpSfBlocks = function () {
                         var st = form.getAttribute('data-sf');
-                        if (st === 'reading') { if (dz) dz.setError('รอระบบตรวจสลิปสักครู่'); return true; }
-                        if (st === 'wait') { if (dz) dz.setError('แนบสลิปก่อน — ระบบจะอ่านยอดให้ (หรือแตะ "ไม่มีสลิป? กรอกยอดเอง")'); return true; }
+                        if (st === 'reading' || prepping) { if (dz) dz.setError('รอระบบตรวจสลิปสักครู่'); return true; }
+                        if (st === 'wait') { if (dz) dz.setError('แนบสลิปก่อน — ระบบจะอ่านยอดให้' + (manual ? ' (หรือแตะ "ไม่มีสลิป?" ด้านล่าง)' : '')); return true; }
+                        if (manualOn && noSlipReason && String(noSlipReason.value || '').replace(/^\s+|\s+$/g, '').length < 10) {
+                            if (noSlipBox) noSlipBox.style.display = '';
+                            try { noSlipReason.focus(); } catch (x2) { }
+                            return true;
+                        }
                         return false;
                     };
                     apply();
