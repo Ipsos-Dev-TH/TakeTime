@@ -57,7 +57,7 @@ namespace Take_Time_BangPhra.API
                     ).GetAwaiter().GetResult();
                     if (pdf != null && pdf.Found && !string.IsNullOrEmpty(pdf.PdfRelativeUrl))
                     {
-                        context.Response.Redirect(pdf.PdfRelativeUrl, false);
+                        context.Response.Redirect(pdf.PdfRelativeUrl + VersionQuery(pdf.PdfLocalPath), false);
                         context.ApplicationInstance.CompleteRequest();
                         return;
                     }
@@ -84,7 +84,7 @@ namespace Take_Time_BangPhra.API
                             if (File.Exists(full))
                             {
                                 string rel = $"/Documents/Receipt/{created.Year}/{month}/{name}";
-                                context.Response.Redirect(rel, false);
+                                context.Response.Redirect(rel + VersionQuery(full), false);
                                 context.ApplicationInstance.CompleteRequest();
                                 return;
                             }
@@ -96,6 +96,22 @@ namespace Take_Time_BangPhra.API
 
             context.Response.StatusCode = 404;
             context.Response.Write("document not found");
+        }
+
+        /// <summary>
+        /// "?v={เวลาแก้ไฟล์}" ต่อท้ายปลายทาง redirect — ไฟล์ PDF เป็น static URL เดิมทุกครั้ง (เลขใบ+UID ไม่เปลี่ยน
+        /// หลังแก้ใบ) ⇒ browser ใช้ cache แบบ heuristic เสิร์ฟไฟล์รุ่นก่อนแก้ทั้งที่บนดิสก์เป็นรุ่นใหม่แล้ว
+        /// (cache-buster "_=" ของหน้าแก้ไขอยู่บน .ashx นี้ ไม่ได้ส่งต่อไปถึงไฟล์) — เคส REC261024001
+        /// </summary>
+        private static string VersionQuery(string localPath)
+        {
+            try
+            {
+                if (!string.IsNullOrEmpty(localPath) && File.Exists(localPath))
+                    return "?v=" + File.GetLastWriteTimeUtc(localPath).Ticks;
+            }
+            catch { }
+            return "";
         }
 
         public bool IsReusable => false;

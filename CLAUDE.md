@@ -478,6 +478,15 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
      เก็บใน `Accounting_Reconcile_Finding` · รายคืน `ReconcileRecentReservationsIfDue` (Global.asax; `Nexaacc_Reconcile_Nightly/Days/Max/Hour`) ·
      ตรวจสุขภาพข้อ 10 · Telegram ผ่าน `NotifyQueueHealthIfNeeded` (พบใหม่) · log อายุ 180 วัน + ไม่ลบแถวที่ผลตรวจที่ยังเปิดอ้างถึง.
    - ข้อจำกัด: int_ void ไม่ GET-verify (ไม่มี company endpoint) · JV `…-CSDEPADJ-{doc8}` ของเอกสารกำพร้าไม่ถูกกลับอัตโนมัติ · ต้อง build+test บน Windows.
+20. **ยอดหักมัดจำค้างหลังแก้ใบ (ต.ค. 2026 — เคส #149366 / REC261024001 "หักมัดจำ 4,700 > มัดจำจริง 1,500" แก้ใบแล้ว Retry ยังล้ม):**
+   ยอดหักใน `ProcessReceiptDocument` = payload `depositApplied` → (0) `Account_Receipt.Deposit_Applied_Amount` → ถ้ามีบรรทัดติดลบ
+   `ReconcileDepositApplied` ใช้บรรทัด (+persist เมื่อยังไม่โพสต์). ใบที่ **ไม่มีบรรทัดติดลบแล้ว** เดิมคืนค่าที่เก็บไว้ (รุ่นก่อนแก้) และ
+   `Receipt.aspx` ไม่แตะคอลัมน์นี้ ⇒ ค้างถาวร. แก้: `DiscardStaleDepositApplied` (ProcessReceiptDocument + BuildCorrectedReceiptInvoice/Journal)
+   — ยอดหัก > มูลค่าบรรทัดบวกของใบ และไม่มีบรรทัดติดลบ = ค่าค้าง → 0 (+ล้างคอลัมน์/`ClearDepositConsumed` เมื่อ GL ยังไม่โพสต์) ·
+   `RealignDepositAppliedToLines` เรียกจาก `Receipt.aspx` **หลัง** `EnqueueVoidReceipt` (VOID จับ depositAppliedPosted ก่อน) ตั้งคอลัมน์ = ผลรวม
+   บรรทัดติดลบที่เหลือ · `DepositExceedsPaidMessage` บอกที่มา (บรรทัด/คอลัมน์/payload) + วิธีแก้ตามที่มา · ดู PDF: `ViewReceiptDoc.ashx` ต่อ
+   `?v={mtime}` กัน browser cache ไฟล์รุ่นก่อนแก้ + Receipt.aspx log ตอน render PDF ล้ม (เดิมกลืนเงียบ). Retry หน้าเอกสาร = enqueue ใหม่จาก DB
+   (มี CREATE COMPLETED → `ResyncSingleReceipt` ตามข้อ 19); แก้ใบ = `TryRefreshQueuePayload` แทน payload แถว FAILED เดิม.
 
 ## Queue resilience (ส.ค. 2026 — หลังเคส NextAcc ล่มทั้งแอป)
 

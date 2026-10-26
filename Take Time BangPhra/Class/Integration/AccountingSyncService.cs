@@ -9185,13 +9185,22 @@ namespace Take_Time_BangPhra.Integration
                 // → ถ้า deposit รับรู้ VAT ไปแล้ว แต่ใบเสร็จนี้ไม่ split VAT จะทำให้ VAT รับรู้ไม่ครบ
                 bool hasVat = LookupBusinessHasVat();
                 decimal depositApplied = p.ContainsKey("depositApplied") ? Convert.ToDecimal(p["depositApplied"]) : 0m;
+                string depSource = depositApplied > 0 ? "payload" : null;   // ที่มาของยอดหัก — ใช้ในข้อความ error
                 if (depositApplied <= 0)
+                {
                     depositApplied = LookupDepositAppliedFromReceipt(receiptNumber);
+                    if (depositApplied > 0) depSource = "column";
+                }
 
                 // Auto-build line breakdown จาก Account_Receipt_Detail
                 // ถ้าไม่พบ → fallback เป็น single line ตาม revenueType
                 decimal depositFromLines;
                 var lines = LookupReceiptLinesEx(receiptNumber, reservationId, totalAmount, revenueType, out depositFromLines);
+                // ยอดหักค้างจากรุ่นก่อนแก้ใบ (เกินมูลค่าทั้งใบ + ไม่มีบรรทัดติดลบแล้ว) → 0 — กัน FAILED ถาวร (#149366)
+                depositApplied = DiscardStaleDepositApplied(receiptNumber, reservationId, depositApplied, depositFromLines, lines,
+                    DescribeDepositAppliedSource(depSource, depositFromLines),
+                    persist: !ReceiptGlAlreadyPosted(receiptNumber), caller: "ProcessReceiptDocument");
+                if (depositFromLines > 0.005m) depSource = "lines";
 
                 // ── มัดจำจริง vs prepaid ที่โรงแรมไม่ได้รับ (OTA/จ่ายที่อื่น) ──────────────────────
                 // negative line ("ส่วนลด" ชดเชยมัดจำ) หรือ Deposit_Applied_Amount = "มัดจำจริง" (ต้อง gross-up
@@ -9356,7 +9365,8 @@ namespace Take_Time_BangPhra.Integration
                             int enq = EnqueueUnsyncedDeposits(reservationId, customerName);
                             // ไม่มีใบมัดจำเหลือให้ sync เลย = ไม่ใช่ปัญหา "รอ sync" — ยอดหักเกินมัดจำที่รับจริง
                             if (enq == 0 && !csDep.PendingSync && (csDep.UnsyncedReceipts == null || csDep.UnsyncedReceipts.Count == 0))
-                                throw new Exception(DepositExceedsPaidMessage(reservationId, receiptNumber, csDep.BookedAmount, depositApplied));
+                                throw new Exception(DepositExceedsPaidMessage(reservationId, receiptNumber, csDep.BookedAmount, depositApplied,
+                                    DescribeDepositAppliedSource(depSource, depositFromLines)));
                             throw new Exception(
                                 $"เช็คเอาท์ #{reservationId} (ใบเดียว): ใบมัดจำยังไม่ขึ้น NextAcc (booked {csDep.BookedAmount:N2}, " +
                                 $"ต้องหักมัดจำ {depositApplied:N2}) → auto-enqueue {enq} ใบให้ sync ก่อน — settle หักมัดจำรอบถัดไป receipt={receiptNumber}");
@@ -9527,7 +9537,8 @@ namespace Take_Time_BangPhra.Integration
                             int enq = EnqueueUnsyncedDeposits(reservationId, customerName);
                             // ไม่มีใบมัดจำเหลือให้ sync เลย = ไม่ใช่ปัญหา "รอ sync" — ยอดหักเกินมัดจำที่รับจริง
                             if (enq == 0 && !depState.PendingSync && (depState.UnsyncedReceipts == null || depState.UnsyncedReceipts.Count == 0))
-                                throw new Exception(DepositExceedsPaidMessage(reservationId, receiptNumber, depState.BookedAmount, depositApplied));
+                                throw new Exception(DepositExceedsPaidMessage(reservationId, receiptNumber, depState.BookedAmount, depositApplied,
+                                    DescribeDepositAppliedSource(depSource, depositFromLines)));
                             throw new Exception(
                                 $"เช็คเอาท์การจอง #{reservationId}: ใบมัดจำยังไม่ขึ้น NextAcc (booked {depState.BookedAmount:N2}, " +
                                 $"ต้องหักมัดจำ {depositApplied:N2}) → auto-enqueue ใบมัดจำ {enq} ใบให้ sync ก่อน — settle หักมัดจำรอบถัดไป" +
@@ -10113,12 +10124,28 @@ namespace Take_Time_BangPhra.Integration
         ///     ซึ่งออกใบเสร็จแยกไปแล้ว (ระบบนับทุกบรรทัดติดลบเป็นการหักมัดจำ)
         ///   • บรรทัดมัดจำถูกขยายยอดผิด (เคส REC260919007: −2,000 กลายเป็น −2,180)
         /// </summary>
-        private static string DepositExceedsPaidMessage(int reservationId, string receiptNumber, decimal booked, decimal needed)
+        private static string DepositExceedsPaidMessage(int reservationId, string receiptNumber, decimal booked, decimal needed,
+            string neededSource = null)
         {
+            // บอกที่มาของตัวเลขทั้งสองฝั่ง + วิธีแก้ตามที่มา — เดิมบอกให้ "ตรวจบรรทัดติดลบ" เสมอ ทั้งที่บางครั้ง
+            // ใบไม่มีบรรทัดติดลบแล้ว (ยอดมาจากคอลัมน์ที่ค้างจากรุ่นก่อนแก้ — เคส #149366 แก้ใบแล้ว retry ยังล้ม)
+            bool fromLines = neededSource != null && neededSource.StartsWith("บรรทัด", StringComparison.Ordinal);
+            string fix = fromLines
+                ? "วิธีแก้: เปิดใบเสร็จ (Account/Receipt) ตรวจบรรทัดติดลบ — บรรทัดหักมัดจำต้องเท่ามัดจำจริง " +
+                  $"({booked:N2}); ถ้ามีบรรทัด 'ส่วนลด' แทนเงินที่ออกใบเสร็จแยกไปแล้ว ให้ลบบรรทัดนั้นแล้วแก้ยอดห้อง/บริการแทน " +
+                  "บันทึก แล้วค่อยกด Retry"
+                : (neededSource == null
+                    ? "วิธีแก้: เปิดใบเสร็จ ตรวจบรรทัดติดลบ — บรรทัดหักมัดจำต้องเท่ามัดจำจริง; ถ้ามีบรรทัด 'ส่วนลด' " +
+                      "แทนเงินที่ออกใบเสร็จแยกไปแล้ว ให้แก้ยอดห้อง/บริการแทน แล้วค่อยกด Retry"
+                    : "วิธีแก้: ใบไม่มีบรรทัดหักมัดจำแล้ว แต่ยอดหักค้างจากรุ่นก่อนแก้ใบ — เปิดใบเสร็จแล้วกด \"บันทึก\" อีกครั้ง " +
+                      "(ระบบตั้งยอดหักใหม่ตามบรรทัด) หรือกด Retry ที่หน้าเอกสาร (ระบบตัดยอดที่เกินมูลค่าใบให้เอง); " +
+                      "ถ้าใบนี้ควรหักมัดจำจริง ให้ใส่บรรทัดหักมัดจำติดลบเท่ามัดจำจริง");
             return $"เช็คเอาท์การจอง #{reservationId}: ยอดหักมัดจำในใบ {needed:N2} มากกว่ามัดจำที่รับจริงทั้งหมด {booked:N2} " +
                    $"(ต่าง {needed - booked:N2}) — ไม่ใช่เรื่องรอ sync (ใบมัดจำขึ้น NextAcc ครบแล้ว) retry ซ้ำไม่หาย. " +
-                   "วิธีแก้: เปิดใบเสร็จ ตรวจบรรทัดติดลบ — บรรทัดหักมัดจำต้องเท่ามัดจำจริง; ถ้ามีบรรทัด 'ส่วนลด' " +
-                   "แทนเงินที่ออกใบเสร็จแยกไปแล้ว ให้แก้ยอดห้อง/บริการแทน แล้วค่อยกด Retry " +
+                   (neededSource != null
+                       ? $"ที่มา: ยอดหัก = {neededSource}; มัดจำจริง = ผลรวมใบมัดจำ (IsDeposit=1) ที่ขึ้น NextAcc แล้ว. "
+                       : "") +
+                   fix + " " +
                    $"receipt={receiptNumber}";
         }
 
@@ -11068,6 +11095,102 @@ namespace Take_Time_BangPhra.Integration
                     new Dictionary<string, object> { { "@amt", amount }, { "@num", receiptNumber } });
             }
             catch { }
+        }
+
+        /// <summary>
+        /// ยอดหักมัดจำ "ค้างจากรุ่นก่อนแก้ใบ" — ใบไม่มีบรรทัดติดลบแล้ว แต่ค่าเก่า (payload/คอลัมน์) ยังมากกว่ามูลค่าทั้งใบ
+        ///
+        /// เคสจริง REC261024001 / การจอง #149366 (ต.ค. 2569): ใบเช็คเอาท์รุ่นหนึ่งมีบรรทัดติดลบรวม 4,700
+        /// → ReconcileDepositApplied เขียน Deposit_Applied_Amount = 4,700 (ใบยังไม่ขึ้น NextAcc จึง persist)
+        /// → พนักงานแก้ใบเหลือ "หมูกระทะ 900" บรรทัดเดียว (Receipt.aspx ไม่แตะคอลัมน์นี้) → ReconcileDepositApplied
+        /// คืนค่าที่เก็บไว้เมื่อไม่มีบรรทัดติดลบ ⇒ ทุก Retry ยังหักมัดจำ 4,700 &gt; มัดจำจริง 1,500 → FAILED ถาวร
+        ///
+        /// กฎ: ยอดหักมัดจำต้องไม่เกินมูลค่าบรรทัดบวกของใบเอง — เกิน = ค่าค้างแน่นอน → 0 (ใบไม่มีการหักมัดจำแล้ว)
+        /// ไม่เกิน = คงเดิม (ใบรุ่นเก่าที่หักมัดจำผ่านคอลัมน์อย่างเดียวยังใช้ได้; การลบบรรทัดหักมัดจำในหน้าแก้ไข
+        /// ถูกจัดการที่ต้นทางโดย RealignDepositAppliedToLines)
+        /// </summary>
+        /// <param name="persist">true = เขียน 0 ลง DB + ล้างมาร์คใบมัดจำที่ใบนี้จองไว้ (เฉพาะเมื่อ NextAcc ยังไม่มี GL ของใบ)</param>
+        private decimal DiscardStaleDepositApplied(string receiptNumber, int reservationId, decimal depositApplied,
+            decimal depositFromLines, List<AccountingDataMapper.ReceiptLineSpec> lines, string source, bool persist, string caller)
+        {
+            if (depositApplied <= 0.005m || depositFromLines > 0.005m || lines == null || lines.Count == 0)
+                return depositApplied;
+            decimal gross = lines.Sum(l => l.Amount);
+            if (depositApplied <= gross + 0.01m) return depositApplied;
+
+            _code.Logs(_connectionString, "AccountingSync",
+                $"⚠ {caller}: receipt={receiptNumber} #{reservationId} ยอดหักมัดจำ {depositApplied:N2} (จาก {source}) " +
+                $"มากกว่ามูลค่าทั้งใบ {gross:N2} และใบไม่มีบรรทัดติดลบแล้ว = ค่าค้างจากรุ่นก่อนแก้ใบ → ไม่หักมัดจำ (ใช้ 0)" +
+                (persist ? " + ล้าง Deposit_Applied_Amount/มาร์คใบมัดจำ" : " (ร่าง request — ยังไม่เขียน DB)"), "SYSTEM");
+            if (persist)
+            {
+                PersistDepositApplied(receiptNumber, 0m);
+                ClearDepositConsumed(reservationId, receiptNumber);
+            }
+            return 0m;
+        }
+
+        /// <summary>
+        /// หลังแก้ใบเสร็จ (Account/Receipt.aspx): ตั้ง Deposit_Applied_Amount ให้เท่า "บรรทัดติดลบที่เหลือในใบ"
+        /// — ลบบรรทัดหักมัดจำออก = 0 (+ ปลดมาร์คใบมัดจำที่ใบนี้จองไว้ ให้ใบเช็คเอาท์ใบอื่นหักได้)
+        ///
+        /// ⚠ ต้องเรียก "หลัง" EnqueueVoidReceipt ของใบเดิม: VOID จับยอดที่ลงไว้จริง (depositAppliedPosted)
+        ///   จากคอลัมน์นี้ตอน enqueue — ถ้าตั้งก่อน VOID จะกลับรายการมัดจำผิดยอด
+        /// ใบที่ไม่มีบรรทัดเลย / ใบมัดจำเอง → ไม่แตะ. คืนยอดใหม่ (−1 = ไม่ได้เปลี่ยน/อ่านไม่ได้)
+        /// </summary>
+        public decimal RealignDepositAppliedToLines(string receiptNumber)
+        {
+            if (string.IsNullOrEmpty(receiptNumber)) return -1m;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 R.Reservation_ID, ISNULL(R.Deposit_Applied_Amount, 0) AS Stored,
+                             CASE WHEN R.IsDeposit = 1 THEN 1 ELSE 0 END AS IsDep,
+                             (SELECT COUNT(*) FROM Account_Receipt_Detail D WHERE D.Receipt_ID = R.ID) AS LineCount,
+                             ISNULL((SELECT SUM(-D.Price_Amount) FROM Account_Receipt_Detail D
+                                      WHERE D.Receipt_ID = R.ID AND D.Price_Amount < 0), 0) AS FromLines
+                      FROM Account_Receipt R WHERE R.ID = @num",
+                    new Dictionary<string, object> { { "@num", receiptNumber } });
+                if (dt == null || dt.Rows.Count == 0) return -1m;
+                var r = dt.Rows[0];
+                if (Convert.ToInt32(r["IsDep"]) == 1 || Convert.ToInt32(r["LineCount"]) == 0) return -1m;
+                decimal stored = Convert.ToDecimal(r["Stored"]);
+                decimal fromLines = Convert.ToDecimal(r["FromLines"]);
+                if (Math.Abs(stored - fromLines) <= 0.005m) return -1m;
+
+                _code.DatabaseInsertSafe(_connectionString,
+                    "UPDATE Account_Receipt SET Deposit_Applied_Amount = @amt, " +
+                    "UseDeposit = CASE WHEN @amt > 0 THEN 'True' ELSE 'False' END WHERE ID = @num",
+                    new Dictionary<string, object> { { "@amt", fromLines }, { "@num", receiptNumber } });
+                int resId = r["Reservation_ID"] != DBNull.Value ? Convert.ToInt32(r["Reservation_ID"]) : 0;
+                if (fromLines <= 0.005m) ClearDepositConsumed(resId, receiptNumber);
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"RealignDepositAppliedToLines: receipt={receiptNumber} #{resId} แก้ใบแล้ว → ยอดหักมัดจำ {stored:N2} → {fromLines:N2} " +
+                    $"(ตามบรรทัดติดลบที่เหลือในใบ{(fromLines <= 0.005m ? " — ไม่มีแล้ว ปลดมาร์คใบมัดจำ" : "")})", "SYSTEM");
+                return fromLines;
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"RealignDepositAppliedToLines failed receipt={receiptNumber}: {ex.Message}", "SYSTEM");
+                return -1m;
+            }
+        }
+
+        /// <summary>คำอธิบาย "ที่มาของยอดหักมัดจำ" สำหรับข้อความ error (บรรทัด / คอลัมน์ / payload)</summary>
+        private static string DescribeDepositAppliedSource(string source, decimal depositFromLines)
+        {
+            switch (source)
+            {
+                case "lines":
+                    return $"บรรทัดติดลบในใบ (Account_Receipt_Detail รวม {depositFromLines:N2})";
+                case "payload":
+                    return "payload ของคิว (depositApplied ตอน enqueue — ใบไม่มีบรรทัดติดลบ)";
+                case "column":
+                    return "คอลัมน์ Account_Receipt.Deposit_Applied_Amount (ค่าที่เก็บไว้ — ใบไม่มีบรรทัดติดลบ)";
+                default:
+                    return "ไม่ทราบ";
+            }
         }
 
         /// <summary>
@@ -16182,6 +16305,9 @@ namespace Take_Time_BangPhra.Integration
                     decimal netReceived = totalAmount;   // ยอดรับจริงก่อน gross-up (ใช้เมื่อด่านมัดจำซ้ำบล็อก)
                     decimal depositFromLines;
                     var lines = LookupReceiptLinesEx(receiptNumber, reservationId, totalAmount, revenueType, out depositFromLines);
+                    // ยอดหักค้างจากรุ่นก่อนแก้ใบ (เหมือน ProcessReceiptDocument) — ร่าง request ยังไม่เขียน DB
+                    depositApplied = DiscardStaleDepositApplied(receiptNumber, reservationId, depositApplied, depositFromLines, lines,
+                        "payload/Deposit_Applied_Amount", persist: false, caller: "BuildCorrectedReceiptInvoice");
                     // OTA/prepaid gate (เหมือน ProcessReceiptDocument): ยอดหัก = "มัดจำจริง" ก็ต่อเมื่อมีใบมัดจำ
                     // (IsDeposit=1). ไม่มี → prepaid ที่โรงแรมไม่ได้รับ (OTA) → book เฉพาะยอดสุทธิ ไม่ gross-up ไม่กลับมัดจำ
                     if ((depositApplied > 0.005m || depositFromLines > 0.005m)
@@ -16339,6 +16465,11 @@ namespace Take_Time_BangPhra.Integration
                 decimal netReceived = totalAmount;   // ยอดรับจริงก่อน gross-up (ใช้เมื่อด่านมัดจำซ้ำบล็อก)
                 decimal depositFromLines;
                 var lines = LookupReceiptLinesEx(receiptNumber, reservationId, totalAmount, revenueType, out depositFromLines);
+                // ยอดหักค้างจากรุ่นก่อนแก้ใบ → 0 และให้ผู้เรียก persist 0 เมื่อแก้ JE สำเร็จ
+                decimal depBeforeStale = depositApplied;
+                depositApplied = DiscardStaleDepositApplied(receiptNumber, reservationId, depositApplied, depositFromLines, lines,
+                    "payload/Deposit_Applied_Amount", persist: false, caller: "BuildCorrectedReceiptJournal");
+                if (depBeforeStale > 0.005m && depositApplied <= 0.005m) builtDepositApplied = 0m;
                 // OTA/prepaid gate — เหมือน ProcessReceiptDocument / BuildCorrectedReceiptInvoice
                 // (เดิมตกหล่นเฉพาะตัวนี้ ⇒ repost แบบ JE ของการจอง OTA ลง Dr ADVANCE_DEPOSIT ทั้งที่ไม่เคย
                 //  รับมัดจำ → บัญชีมัดจำติดลบ และสลับค่ากับเส้น CREATE ไปมา)
