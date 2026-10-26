@@ -2139,6 +2139,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                 // ── 9) ใบลดหนี้ / คืนเงินลูกค้า (PHASE19_33): ตาราง, ROOM_AR, แหล่งเงินคืน, ร่างค้างอนุมัติ, คิวล้ม, คืนเงินเกตเวย์ที่ยังไม่มีใบลดหนี้ ─────
                 Integration.CreditNoteGuards.AppendHealthIssues(ConnStr, haveCoa, add);
 
+                // ── 10) ตัวตรวจเทียบเอกสาร NextAcc ↔ ใบเสร็จ (PHASE19_35): เอกสารซ้ำ/กำพร้า/void ค้าง ที่ยังไม่ปิด ─────
+                AppendReconcileHealthIssues(add);
+
                 return new Dictionary<string, object>
                 {
                     { "success", true },
@@ -2151,6 +2154,81 @@ namespace Take_Time_BangPhra.Admin.Settings
             catch (Exception ex)
             {
                 return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        /// <summary>ข้อ 10 ของตรวจสุขภาพ: ผลตรวจเทียบเอกสาร NextAcc ที่ยังเปิด (Accounting_Reconcile_Finding) + สถานะงานรายคืน
+        /// + คิว VOID ที่ล้ม/ถูกยกเลิก (เอกสารเดิมอาจยังใช้งาน = เสี่ยงซ้ำ). ไม่มีตาราง = แนะนำรัน migration</summary>
+        private void AppendReconcileHealthIssues(Action<string, string, string> add)
+        {
+            try
+            {
+                var cfg = new Integration.AccountingConfig(ConnStr);
+                var t = _code.DatabaseQuerySafe(ConnStr,
+                    "SELECT CASE WHEN OBJECT_ID(N'dbo.Accounting_Reconcile_Finding', N'U') IS NULL THEN 0 ELSE 1 END", null);
+                bool haveTable = t != null && t.Rows.Count > 0 && Convert.ToInt32(t.Rows[0][0]) == 1;
+                if (!haveTable)
+                {
+                    add("warn", "ยังไม่ได้รัน PHASE19_35 (กันเอกสารซ้ำ + ตัวตรวจเทียบ)",
+                        "รัน Database/PHASE19_Migration_35_NextAcc_Doc_Integrity.sql — เพิ่มตารางเก็บผลตรวจเทียบเอกสาร NextAcc ↔ ใบเสร็จ, " +
+                        "ผูก Nexaacc_Doc_Id ย้อนหลังจากคิว (รวม SUPERSEDED), เปิดงานตรวจรายคืน และยืดอายุ log เป็น 180 วัน");
+                }
+                else
+                {
+                    var f = _code.DatabaseQuerySafe(ConnStr,
+                        @"SELECT TOP 15 Reservation_ID, Finding_Type, ISNULL(Receipt_Number, '') AS Rn, ISNULL(Nexaacc_Doc_Number, '') AS DocNo,
+                                 ISNULL(Amount, 0) AS Amt, First_Seen
+                          FROM Accounting_Reconcile_Finding WHERE Resolved_At IS NULL
+                          ORDER BY CASE WHEN Finding_Type IN ('ORPHAN_SUPERSEDED', 'DUPLICATE', 'VOID_STUCK') THEN 0 ELSE 1 END, First_Seen DESC", null);
+                    var c = _code.DatabaseQuerySafe(ConnStr,
+                        "SELECT COUNT(*) AS N, COUNT(DISTINCT Reservation_ID) AS R FROM Accounting_Reconcile_Finding WHERE Resolved_At IS NULL", null);
+                    int n = c != null && c.Rows.Count > 0 ? Convert.ToInt32(c.Rows[0]["N"]) : 0;
+                    int rr = c != null && c.Rows.Count > 0 ? Convert.ToInt32(c.Rows[0]["R"]) : 0;
+                    if (n > 0 && f != null)
+                    {
+                        var lines = new List<string>();
+                        foreach (DataRow r in f.Rows)
+                            lines.Add($"การจอง #{r["Reservation_ID"]} · {r["Finding_Type"]}"
+                                + (r["DocNo"].ToString().Length > 0 ? $" · {r["DocNo"]}" : "")
+                                + (r["Rn"].ToString().Length > 0 ? $" · ใบ {r["Rn"]}" : "")
+                                + $" · {Convert.ToDecimal(r["Amt"]):N2} · พบ {Convert.ToDateTime(r["First_Seen"]):dd/MM/yyyy}");
+                        add("error", $"เอกสาร NextAcc ไม่ตรงกับใบเสร็จ {n} จุด ({rr} การจอง)",
+                            string.Join("\n", lines) + (n > lines.Count ? $"\n… และอีก {n - lines.Count} จุด" : "") +
+                            "\n\nวิธีแก้: หน้าตารางจอง → ปุ่ม NextAcc ของการจองนั้น → ส่วน \"เอกสารบน NextAcc ที่ไม่ผูกใบเสร็จ\" → ตรวจกับสลิป/ใบเสร็จ " +
+                            "แล้วกด \"ยกเลิกเอกสารนี้\" (ระบบยืนยัน Voided ก่อนจบ) · ส่ง e-Tax/ยื่นภาษีแล้ว = ออกใบลดหนี้ (Account/CreditNotes)");
+                    }
+                    if (!cfg.ReconcileNightlyEnabled)
+                        add("warn", "ตัวตรวจเทียบรายคืนปิดอยู่",
+                            "ตั้ง Nexaacc_Reconcile_Nightly = 1 เพื่อให้ระบบตรวจการจองที่มีใบเสร็จใน " + cfg.ReconcileDays + " วันล่าสุดทุกคืน แล้วแจ้ง Telegram เมื่อพบใหม่");
+                    else
+                    {
+                        string last = cfg.GetConfigValue("Nexaacc_Reconcile_LastRun", "");
+                        DateTime ld;
+                        if (!DateTime.TryParseExact(last, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture,
+                                System.Globalization.DateTimeStyles.None, out ld) || (DateTime.Today - ld.Date).TotalDays > 2)
+                            add("warn", "ตัวตรวจเทียบรายคืนไม่ได้รันมากกว่า 2 วัน",
+                                $"รันล่าสุด: {(string.IsNullOrEmpty(last) ? "ไม่เคย" : last)} (ตั้งเวลาเริ่ม {cfg.ReconcileHour}:00) — ตรวจว่า timer ของแอปยังเดิน (ข้อ 8) และ company endpoints เปิดอยู่");
+                    }
+                }
+
+                // คิว VOID ใบเสร็จที่ล้มถาวร/ถูกยกเลิก — เอกสารเดิมยังใช้งาน ถ้ามีคนสร้างใหม่ = ซ้ำ
+                var v = _code.DatabaseQuerySafe(ConnStr,
+                    @"SELECT TOP 10 ID, Status, LEFT(ISNULL(Error_Message, ''), 160) AS Er FROM Accounting_Sync_Queue
+                      WHERE Action_Type = 'VOID_RECEIPT'
+                        AND (Status = 'CANCELLED' OR (Status = 'FAILED' AND Retry_Count >= Max_Retries))
+                        AND Created_Date >= DATEADD(DAY, -90, GETDATE())
+                      ORDER BY ID DESC", null);
+                if (v != null && v.Rows.Count > 0)
+                {
+                    var lines = new List<string>();
+                    foreach (DataRow r in v.Rows) lines.Add($"คิว #{r["ID"]} {r["Status"]} {r["Er"]}");
+                    add("warn", $"คำสั่งยกเลิกเอกสารใบเสร็จที่ไม่สำเร็จ ({v.Rows.Count} รายการใน 90 วัน)",
+                        string.Join("\n", lines) + "\n\nเอกสารเดิมบน NextAcc อาจยังใช้งานอยู่ — ตรวจในหน้าตารางจอง (ตัวตรวจเทียบ) ก่อนกด Resync/สร้างใหม่");
+                }
+            }
+            catch (Exception ex)
+            {
+                add("warn", "ตรวจผลตรวจเทียบเอกสาร NextAcc ไม่ได้", ex.Message);
             }
         }
 

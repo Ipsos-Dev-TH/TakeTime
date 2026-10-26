@@ -149,6 +149,11 @@ namespace Take_Time_BangPhra
                 }
                 catch (Exception rvx) { System.Diagnostics.Trace.TraceError($"RevenuePosting timer error: {rvx.Message}"); }
 
+                // ตัวตรวจเทียบเอกสาร NextAcc ↔ ใบเสร็จ รายคืน (PHASE19_35) — วันละครั้งหลัง Nexaacc_Reconcile_Hour, รันเบื้องหลัง
+                // ไม่บล็อก tick · no-op ถ้าปิดสวิตช์ Nexaacc_Reconcile_Nightly / ไม่มี company endpoint
+                try { syncService.ReconcileRecentReservationsIfDue(); }
+                catch (Exception rcx) { System.Diagnostics.Trace.TraceError($"Reconcile nightly timer error: {rcx.Message}"); }
+
                 // ดึงจำนวนสต๊อกที่ปรับฝั่ง NextAcc เองกลับเข้า TakeTime (ขากลับ) — no-op ถ้า config ปิด
                 try { syncService.PullNextAccStockMovementsIfDue().Wait(TimeSpan.FromMinutes(2)); }
                 catch (Exception sex) { System.Diagnostics.Trace.TraceError($"StockQtyPull timer error: {(sex.InnerException ?? sex).Message}"); }

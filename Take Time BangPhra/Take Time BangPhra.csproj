@@ -965,6 +965,7 @@
     <Compile Include="Class\Integration\SalesDocumentPolicy.cs" />
     <Compile Include="Class\Integration\ChannelSalesPostingService.cs" />
     <Compile Include="Class\Integration\AccountingSyncService.CreditNote.cs" />
+    <Compile Include="Class\Integration\AccountingSyncService.Reconcile.cs" />
     <Compile Include="Class\Integration\CreditNoteModels.cs" />
     <Compile Include="Class\Accounting\CreditNoteService.cs" />
     <Compile Include="Class\Integration\AccountingApiClient.cs" />

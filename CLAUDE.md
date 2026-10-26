@@ -453,6 +453,30 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    ตั้งค่า: `Admin/Settings/SlipCheckSettings` (สถานะ/โควต้าเดือนนี้/บัญชีรับเงิน/ทดสอบด้วยสลิป). **Deploy:** NuGet restore ZXing.Net 0.16.11; ติดตั้ง Tesseract 5
    (UB Mannheim, เลือกภาษา Thai) ที่ `C:\Program Files\Tesseract-OCR` หรือวาง `tesseract.exe`+DLL ที่ `~/App_Data/tesseract` และ `tha/eng.traineddata`
    (tessdata_fast) ที่ `~/App_Data/tessdata`; App Pool identity ต้อง execute ได้ + เขียน `%TEMP%`; VC++ 2015-2022 x64 (ตัวติดตั้งใส่ให้). ไม่มีอะไรเลย = ข้ามการตรวจ.
+19. **กันเอกสารซ้ำ + ตัวตรวจเทียบ (ต.ค. 2026, PHASE19_35 — เคส #149286: REC-…0001/0002 + TIV-…0002/0003 ซ้อน ไม่มีใบถูก void):**
+   - **แนบไฟล์:** `LookupReceiptAttachmentFiles` = PDF ของใบเอง (`{เลขใบ}[_uid].pdf` โฟลเดอร์ปี/เดือนของ `Created_Date` ±1) + สลิป
+     `Payment_Slips.Account_Receipt_ID = ใบนี้` (สลิประดับการจองเฉพาะเมื่อการจองมีใบเดียว) — ใช้ทั้ง sync และ "📎 ไฟล์" ในหน้าต่างการจอง.
+   - **ไม่สร้างซ้ำ:** `LookupKnownDocIdsForReceipt` (Nexaacc_Doc_Id + คิว CREATE **COMPLETED+SUPERSEDED**) · `EnsureRevenueDocCreatedApprovedAsync`
+     marker เลย APR = หาเอกสารเดิม (ไม่เจอเลย = `ArgumentException` ให้คนตรวจ, เจอแต่ถูก void/404 ทั้งหมด = สร้างใหม่) · ก่อนสร้างทุกครั้ง
+     (`GuardNoActivePriorDocAsync`, ทั้ง TaxInvoice และ Receipt/มัดจำ) เอกสารเดิมยังใช้งาน = draft ใช้ต่อ / โพสต์แล้ว = หยุด · ผูก `Nexaacc_Doc_Id` ทันทีหลังสร้าง.
+   - **Retry/Sync หน้าเอกสาร** (CheckDocument_New/CheckDocument) ใบที่มี CREATE COMPLETED → `ResyncSingleReceipt` (ไม่ PrepareResync+Enqueue) ·
+     `PrepareResync` โหมด DOCUMENT enqueue VOID ใบเสร็จด้วย (สมมติฐาน ReplaceExistingForSource ใช้ไม่ได้กับ company /document) · `enqueueVoid:false` เมื่อรู้ว่าเอกสารหายแล้ว.
+   - **Repost fallback:** ใส่แค่ VOID (`recreateFromQueueId`) → `ProcessVoidReceipt` **GET ยืนยัน Voided/404** (`RequireDocumentVoidedAsync`; ไม่กลืน
+     Posted/Draft/409 อีก — `IsVoidBlockedByRule`) แล้ว `AfterVerifiedReceiptVoid` จึง supersede+reset marker+CREATE ใหม่ (idempotent, ผลสั้น ≤100 ตัว).
+   - **ล้างทั้งหมด:** void ทุกใบจาก `GET document/by-booking/RES-{id}` (DocumentController.cs:515-521, non-void) ∪ id ที่รู้ · ยืนยันรายใบ ·
+     reset marker เฉพาะใบเสร็จที่ไม่เหลือเอกสารใช้งาน · ข้าม OTA/e-Tax ถึง RD · รายงานรายเอกสาร.
+   - **Idempotency-Key** (NextAcc `IdempotencyMiddleware.cs:47-145`: 8-128 ตัว, แยก caller+method+path, replay 2xx 24 ชม., 409+Retry-After ระหว่างทำ):
+     ทุก POST สร้าง (`AccountingApiClient.CreateRouteRegex`: /document, /document/payments, refund/realize/apply-deposit, convert, /integration/* creates
+     รวม multipart, ocr create-document, payroll runs/import, stock adjust) คีย์ `TT-{เลขใบ}-q{queueId}[-g{#VOIDสำเร็จ}][-x{docหาย}]-{route}-{sha256(body)}`
+     (ตั้งต่อแถวคิวใน ProcessQueueCoreAsync — คิวใบลดหนี้ได้ด้วยอัตโนมัติ; นอกคิว = คีย์สุ่มต่อการเรียก) · 409 in-flight = รอแล้วยิงคีย์เดิม ·
+     `Nexaacc_Idempotency_Keys=0` → ไม่ส่งหัว **และไม่ยิงซ้ำเอง** ตอน timeout/เน็ตหลุด/502/504.
+   - **ตัวตรวจเทียบ** (`AccountingSyncService.Reconcile.cs`): NextAcc (by-booking ∪ ช่วงวันที่ Reference RES-{id} ∪ GET ตัวชี้) vs Account_Receipt ทุกสถานะ +
+     คิว CREATE/VOID ทุกสถานะ → MATCHED / ORPHAN_SUPERSEDED / ORPHAN_DELETED_LOCAL / ORPHAN_OTHER_BOOKING? / UNKNOWN_NEXTACC_ONLY · ธงใบ DUPLICATE /
+     VOID_STUCK / AMOUNT_MISMATCH / MISSING_ON_NEXTACC · การจอง DEPOSIT_MISMATCH. แสดงในหน้าต่าง NextAcc ของการจอง (ReserveTable) ส่วน
+     "เอกสารบน NextAcc ที่ไม่ผูกใบเสร็จ" + ปุ่ม `voidNaDoc` → `EnqueueVoidOrphanNextAccDoc` (ห้ามตัวชี้ใบที่ใช้งาน/เอกสารการจองอื่น/e-Tax ถึง RD → ใบลดหนี้).
+     เก็บใน `Accounting_Reconcile_Finding` · รายคืน `ReconcileRecentReservationsIfDue` (Global.asax; `Nexaacc_Reconcile_Nightly/Days/Max/Hour`) ·
+     ตรวจสุขภาพข้อ 10 · Telegram ผ่าน `NotifyQueueHealthIfNeeded` (พบใหม่) · log อายุ 180 วัน + ไม่ลบแถวที่ผลตรวจที่ยังเปิดอ้างถึง.
+   - ข้อจำกัด: int_ void ไม่ GET-verify (ไม่มี company endpoint) · JV `…-CSDEPADJ-{doc8}` ของเอกสารกำพร้าไม่ถูกกลับอัตโนมัติ · ต้อง build+test บน Windows.
 
 ## Queue resilience (ส.ค. 2026 — หลังเคส NextAcc ล่มทั้งแอป)
 

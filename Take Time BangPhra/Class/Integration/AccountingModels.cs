@@ -332,6 +332,31 @@ namespace Take_Time_BangPhra.Integration
         public string TaxInvoiceTitleNotice { get; set; }
         /// <summary>ธง "ผู้ซื้อไม่ประสงค์รับใบกำกับภาษี" ที่ NextAcc เก็บไว้บนใบ (JSON <c>buyerDeclinedTaxInvoice</c>)</summary>
         public bool BuyerDeclinedTaxInvoice { get; set; }
+
+        // ── ฟิลด์สำหรับตัวตรวจเทียบเอกสาร (PHASE19_35) — NextAcc DocumentDtos.cs:625-818 DocumentResponse ──
+        /// <summary>ผู้ซื้อ/ผู้ติดต่อ (JSON <c>contact</c> = ContactBrief(Id, Name, TaxId, BranchCode) DocumentDtos.cs:632,1268)</summary>
+        public NexaaccContactBrief Contact { get; set; }
+        /// <summary>เลขจองที่ผูก (JSON <c>bookingNumber</c>, DocumentDtos.cs:813) — TakeTime ส่ง "RES-{id}"</summary>
+        public string BookingNumber { get; set; }
+        /// <summary>ใบรับเงินมัดจำ (JSON <c>isDeposit</c>, DocumentDtos.cs:791)</summary>
+        public bool IsDeposit { get; set; }
+        /// <summary>ยอดมัดจำที่หักในใบนี้ (JSON <c>depositAppliedAmount</c>, DocumentDtos.cs:820) — ยอดขายเต็ม, รับสุทธิ = Total − นี้</summary>
+        public decimal DepositAppliedAmount { get; set; }
+        /// <summary>ยอดมัดจำที่คืนแล้ว (JSON <c>depositRefundedAmount</c>, DocumentDtos.cs:809)</summary>
+        public decimal DepositRefundedAmount { get; set; }
+        /// <summary>สถานะ e-Tax (JSON <c>etaxStatus</c> สตริงของ enum EtaxStatus: Generated/Signed/Submitted/Accepted/
+        /// Rejected/Error/Voided — AllEnums.cs:1305-1314; DocumentDtos.cs:650). Submitted/Accepted = ถึงกรมสรรพากรแล้ว
+        /// → NextAcc ปฏิเสธการยกเลิก (DocumentService.cs:9564-9570 RD-ETAX-REACHED-VOID) ต้องออกใบลดหนี้</summary>
+        public string EtaxStatus { get; set; }
+    }
+
+    /// <summary>NextAcc ContactBrief(Id, Name, TaxId, BranchCode) — DocumentDtos.cs:1268</summary>
+    public class NexaaccContactBrief
+    {
+        public Guid Id { get; set; }
+        public string Name { get; set; }
+        public string TaxId { get; set; }
+        public string BranchCode { get; set; }
     }
 
     // ──────────────────────────────────────────────

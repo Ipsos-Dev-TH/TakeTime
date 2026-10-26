@@ -84,9 +84,32 @@ namespace Take_Time_BangPhra.Integration
         public int StuckProcessingMinutes =>
             int.TryParse(GetConfig("Nexaacc_Stuck_Processing_Min", "15"), out var v) && v >= 5 ? v : 15;
 
-        /// <summary>เก็บ Accounting_Sync_Log ย้อนหลังกี่วัน (default 90; 0 = ไม่ลบ)</summary>
+        /// <summary>เก็บ Accounting_Sync_Log ย้อนหลังกี่วัน (default 180; 0 = ไม่ลบ) — เดิม 90 วันสั้นกว่ารอบที่
+        /// ปัญหาเอกสารซ้ำถูกพบจริง (เคส #149286: log ของใบมัดจำ ส.ค. จะหายกลาง พ.ย.) PHASE19_35 ยก 90 → 180 ·
+        /// แถวที่ผลตรวจเทียบยังไม่ปิดอ้างถึงไม่ถูกลบไม่ว่าอายุเท่าไร (PurgeOldSyncLogsIfDue)</summary>
         public int SyncLogRetentionDays =>
-            int.TryParse(GetConfig("Nexaacc_SyncLog_Retention_Days", "90"), out var v) && v >= 0 ? v : 90;
+            int.TryParse(GetConfig("Nexaacc_SyncLog_Retention_Days", "180"), out var v) && v >= 0 ? v : 180;
+
+        /// <summary>ส่งหัว <c>Idempotency-Key</c> กับทุก POST ที่ "สร้าง" รายการบน NextAcc (default เปิด) —
+        /// NextAcc <c>Middleware/IdempotencyMiddleware.cs:47-145</c>: คีย์ 8-128 ตัว, แยกตามผู้เรียก+method+path,
+        /// เก็บผล 2xx 24 ชม. แล้ว replay, ยิงซ้ำระหว่างทำงานได้ 409 + Retry-After. ปิด (0) = ไม่ส่งหัว และ
+        /// **ไม่ยิงซ้ำอัตโนมัติ** เมื่อ POST สร้างเอกสาร timeout/เน็ตหลุด (กันเอกสารซ้ำ)</summary>
+        public bool IdempotencyKeysEnabled => GetConfig("Nexaacc_Idempotency_Keys", "1") == "1";
+
+        /// <summary>ตัวตรวจเทียบเอกสาร NextAcc ↔ ใบเสร็จ รายคืน (PHASE19_35 seed '1'; ไม่มีค่า = ปิด)</summary>
+        public bool ReconcileNightlyEnabled => GetConfig("Nexaacc_Reconcile_Nightly", "0") == "1";
+
+        /// <summary>ตรวจย้อนหลังกี่วัน (การจองที่มีใบเสร็จสร้างในช่วงนี้) default 14</summary>
+        public int ReconcileDays =>
+            int.TryParse(GetConfig("Nexaacc_Reconcile_Days", "14"), out var v) && v > 0 && v <= 120 ? v : 14;
+
+        /// <summary>ตรวจได้มากสุดกี่การจองต่อคืน (แต่ละการจอง = 1 call by-booking) default 150</summary>
+        public int ReconcileMaxReservations =>
+            int.TryParse(GetConfig("Nexaacc_Reconcile_Max", "150"), out var v) && v > 0 && v <= 1000 ? v : 150;
+
+        /// <summary>ชั่วโมงที่เริ่มตรวจรายคืน (0-23, default 3 = ตีสาม)</summary>
+        public int ReconcileHour =>
+            int.TryParse(GetConfig("Nexaacc_Reconcile_Hour", "3"), out var v) && v >= 0 && v <= 23 ? v : 3;
 
         /// <summary>
         /// ขายเงินสด B2B ให้ออก **เอกสารใบเดียว** ผ่าน company /document

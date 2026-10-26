@@ -920,6 +920,7 @@
         // ══ จัดการบัญชี NextAcc ราย "การจอง" ══
         var naCurrentResId = 0;
         var naPageUrl = '<%= ResolveUrl("~/ReserveTable") %>';
+        var naCreditNotesUrl = '<%= ResolveUrl("~/Account/CreditNotes") %>';
         var naBusy = false;   // กันกดซ้ำ/ทำหลาย action พร้อมกัน
 
         // fetch + timeout (AbortController) กัน UI ค้างถาวรถ้า server ไม่ตอบ
@@ -1021,6 +1022,7 @@
                      + '📥 ดึงใบเสร็จกลับจาก NextAcc</button>'
                      + '<div style="font-size:12px; color:#666; margin-top:6px;">ถ้าเอกสารของการจองนี้เคยถูกลบในระบบ แล้วถูก "กู้คืนจากยกเลิก" บน NextAcc — ปุ่มนี้จะกู้ใบเสร็จ+มัดจำกลับเข้าการจองให้จากประวัติ sync</div>'
                      + '</div></div>'
+                     + naRenderRecon(d)
                      + '<div id="naActionResult" style="margin-top:6px;">' + (naLastResult || '') + '</div>';
 
             html += '<div style="overflow-x:auto;"><table class="table table-condensed table-bordered" style="font-size:13px;">';
@@ -1054,8 +1056,125 @@
             });
             html += '</tbody></table></div>';
 
+            html += naRenderRecon(d);
             html += '<div id="naActionResult" style="margin-top:6px;">' + (naLastResult || '') + '</div>';
             return html;
+        }
+
+        // ── ตัวตรวจเทียบเอกสาร NextAcc ↔ ใบเสร็จ (PHASE19_35) ──
+        var naRecClassLabel = {
+            'MATCHED': ['ผูกใบเสร็จแล้ว', '#28a745', '#e7f7ec'],
+            'ORPHAN_SUPERSEDED': ['รุ่นเก่า — ถูกแทนแล้วแต่ยังไม่ถูกยกเลิก', '#c0392b', '#fdecea'],
+            'ORPHAN_DELETED_LOCAL': ['ใบเสร็จถูกลบ/ยกเลิกในระบบแล้ว', '#c0392b', '#fdecea'],
+            'ORPHAN_OTHER_BOOKING?': ['อาจเป็นของการจองอื่น', '#8a6d3b', '#fcf8e3'],
+            'UNKNOWN_NEXTACC_ONLY': ['ไม่ทราบที่มา (มีบน NextAcc อย่างเดียว)', '#8a6d3b', '#fcf8e3']
+        };
+        var naRecFlagLabel = {
+            'DUPLICATE': 'เอกสารซ้ำ', 'VOID_STUCK': 'ยกเลิกเอกสารเดิมไม่สำเร็จ',
+            'AMOUNT_MISMATCH': 'ยอดไม่ตรง', 'MISSING_ON_NEXTACC': 'ไม่มีเอกสารใช้งานบน NextAcc'
+        };
+        function naRecBadge(cls) {
+            var c = naRecClassLabel[cls] || [cls, '#777', '#eee'];
+            return '<span style="display:inline-block; padding:1px 7px; border-radius:10px; font-size:11px; font-weight:600; color:'
+                + c[1] + '; background:' + c[2] + ';">' + naEsc(c[0]) + '</span>';
+        }
+        function naRenderRecon(d) {
+            if (!d) return '';
+            if (d.ReconcileError)
+                return '<div class="alert alert-warning" style="margin-top:12px;">⚠ ตรวจเทียบเอกสาร NextAcc ไม่สำเร็จ: ' + naEsc(d.ReconcileError) + '</div>';
+            var r = d.Reconciliation;
+            if (!r) return '';
+            if (!r.Success)
+                return '<div class="alert alert-warning" style="margin-top:12px;">⚠ ตรวจเทียบเอกสาร NextAcc: ' + naEsc(r.Message) + '</div>';
+            var ok = r.IssueCount === 0;
+            var html = '<div style="margin-top:14px; border-top:2px solid #2c3e50; padding-top:8px;">';
+            html += '<div style="font-weight:700; font-size:14px; margin-bottom:6px;">🧾 ตรวจเทียบเอกสาร NextAcc ↔ ใบเสร็จ '
+                 + '<small style="font-weight:400; color:#777;">(' + naEsc(r.CheckedAt) + ')</small></div>';
+            html += '<div class="alert ' + (ok ? 'alert-success' : 'alert-warning') + '" style="padding:6px 10px; margin-bottom:8px;">'
+                 + (ok ? '✅ ' : '⚠ ') + naEsc(r.Message) + '</div>';
+            html += '<div style="font-size:13px; margin-bottom:4px;">มัดจำบน NextAcc <b>' + naNum(r.NaDepositTotal) + '</b>'
+                 + ' · ใบมัดจำในระบบ <b>' + naNum(r.LocalDepositTotal) + '</b>'
+                 + ' · ยอดรับในการจอง <b>' + naNum(r.ReservationDeposit) + '</b>'
+                 + (r.UnlinkedSlips > 0 ? ' · สลิปที่ยังไม่ผูกใบเสร็จ <b>' + r.UnlinkedSlips + '</b>' : '') + '</div>';
+            (r.BookingFlags || []).forEach(function (f) {
+                html += '<div style="color:#c0392b; font-size:13px;">⚠ ' + naEsc(f) + '</div>';
+            });
+
+            var flagged = (r.Receipts || []).filter(function (x) { return x.Flags && x.Flags.length; });
+            if (flagged.length) {
+                html += '<div style="font-weight:600; margin:8px 0 4px;">ใบเสร็จที่มีปัญหา</div><ul style="font-size:13px; padding-left:18px; margin-bottom:6px;">';
+                flagged.forEach(function (x) {
+                    html += '<li><b>' + naEsc(x.ReceiptNumber) + '</b> — '
+                         + x.Flags.map(function (f) { return '<span style="color:#c0392b;">' + naEsc(naRecFlagLabel[f] || f) + '</span>'; }).join(', ')
+                         + (x.Detail ? ' <small style="color:#666;">(' + naEsc(x.Detail) + ')</small>' : '') + '</li>';
+                });
+                html += '</ul>';
+            }
+
+            var orphans = (r.Docs || []).filter(function (x) { return x.Class !== 'MATCHED' || x.VoidStuck; });
+            html += '<div style="font-weight:600; margin:8px 0 4px;">เอกสารบน NextAcc ที่ไม่ผูกใบเสร็จ (' + orphans.length + ')</div>';
+            if (!orphans.length) {
+                html += '<div style="color:#777; font-size:13px;">— ไม่มี —</div>';
+            } else {
+                html += '<div style="overflow-x:auto;"><table class="table table-condensed table-bordered" style="font-size:12px; margin-bottom:6px;">'
+                     + '<thead><tr style="background:#fdecea;"><th>เลขที่ NextAcc</th><th>ประเภท</th><th>วันที่</th><th style="text-align:right;">ยอด</th>'
+                     + '<th>ผู้ซื้อ</th><th>สาเหตุที่ตรวจพบ</th><th>จัดการ</th></tr></thead><tbody>';
+                orphans.forEach(function (x) {
+                    html += '<tr><td>' + naEsc(x.Number || x.Id) + (x.Status ? '<br/><small>' + naEsc(x.Status) + '</small>' : '') + '</td>'
+                         + '<td>' + naEsc(x.DocTypeLabel || '-') + (x.IsDeposit ? ' (มัดจำ)' : '') + '</td>'
+                         + '<td>' + naEsc(x.Date) + '</td>'
+                         + '<td style="text-align:right;">' + naNum(x.Total) + '</td>'
+                         + '<td>' + naEsc(x.Contact || '-') + '</td>'
+                         + '<td>' + naRecBadge(x.Class) + '<br/><small style="color:#555;">' + naEsc(x.Detail || '') + '</small></td><td style="white-space:nowrap;">';
+                    if (x.CanVoid) {
+                        html += '<button type="button" class="btn btn-danger btn-xs" onclick="naVoidNaDoc(\'' + naJsArg(x.Id) + '\', \''
+                             + naJsArg(x.Number || '') + '\', \'' + naJsArg(x.Total) + '\', \'' + naJsArg(x.VoidWarning || '') + '\')" '
+                             + 'title="ยกเลิกเอกสารนี้บน NextAcc (ผ่านคิว — ยืนยันสถานะ Voided ก่อนจบ)">🚫 ยกเลิกเอกสารนี้</button>';
+                        if (x.VoidWarning) html += '<br/><small style="color:#8a6d3b;">' + naEsc(x.VoidWarning) + '</small>';
+                    } else if (x.Class !== 'MATCHED') {
+                        html += '<small style="color:#c0392b;">' + naEsc(x.VoidWarning || 'ยกเลิกจากหน้านี้ไม่ได้') + '</small><br/>'
+                             + '<a class="btn btn-default btn-xs" href="' + naCreditNotesUrl + '" target="_blank">↪ ใบลดหนี้</a>';
+                    } else {
+                        html += '<small style="color:#777;">ใช้ปุ่มของใบเสร็จด้านบน</small>';
+                    }
+                    html += '</td></tr>';
+                });
+                html += '</tbody></table></div>';
+            }
+
+            if (r.Docs && r.Docs.length) {
+                html += '<details style="margin-top:4px; font-size:12px;"><summary>เอกสารทั้งหมดบน NextAcc ของการจองนี้ (' + r.Docs.length + ')</summary>'
+                     + '<table class="table table-condensed" style="font-size:12px; margin:4px 0;">';
+                r.Docs.forEach(function (x) {
+                    html += '<tr><td>' + naEsc(x.Number || x.Id) + '</td><td>' + naEsc(x.DocTypeLabel || '') + '</td><td>' + naEsc(x.Date) + '</td>'
+                         + '<td style="text-align:right;">' + naNum(x.Total) + '</td><td>' + naEsc(x.ReceiptNumber || '-') + '</td><td>' + naRecBadge(x.Class) + '</td></tr>';
+                });
+                html += '</table></details>';
+            }
+            (r.Notes || []).forEach(function (n) { html += '<div style="color:#999; font-size:11px;">' + naEsc(n) + '</div>'; });
+            html += '</div>';
+            return html;
+        }
+
+        function naVoidNaDoc(docId, docNo, total, warn) {
+            if (naBusy) return;
+            if (naRefreshTimer) { clearTimeout(naRefreshTimer); naRefreshTimer = null; }
+            var msg = '🚫 ยกเลิก (void) เอกสาร ' + (docNo || docId) + ' (' + naNum(total) + ') บน NextAcc?\n\n'
+                + 'เอกสารนี้ไม่ผูกใบเสร็จใดในระบบ (ตัวตรวจเทียบพบว่าเป็นเอกสารซ้ำ/กำพร้า)\n'
+                + '• ใบเสร็จในระบบและเอกสารปัจจุบันของแต่ละใบไม่ถูกแตะ\n'
+                + '• ระบบยืนยันสถานะ Voided จาก NextAcc ก่อนจบงาน\n'
+                + '• ตรวจก่อนว่าไม่ใช่เงินจริงของการจองอื่น/มัดจำเพิ่ม (เทียบกับสลิป)\n'
+                + (warn ? '\n⚠ ' + warn + '\n' : '')
+                + '\nเลขเอกสารที่ใช้ไปแล้วจะไม่กลับมา';
+            if (!confirm(msg)) return;
+            naSetBusy(true, 'กำลังเข้าคิวยกเลิกเอกสาร ' + (docNo || '') + '...');
+            naFetch(naPageUrl + '?naAction=voidNaDoc&resId=' + naCurrentResId + '&docId=' + encodeURIComponent(docId) + '&_=' + Date.now(), 60000)
+                .then(function (d) {
+                    naSetBusy(false);
+                    naShowResult(d.Success, d.Message);
+                    if (d.Success) naScheduleRefresh(4000);
+                })
+                .catch(function (err) { naSetBusy(false); naShowResult(false, err.message); });
         }
 
         function naShowResult(ok, msg) {
