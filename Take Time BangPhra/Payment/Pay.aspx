@@ -163,6 +163,33 @@
 
         </asp:Panel>
     </div>
+
+    <%-- 🧾 สลิปก่อนยอด (CLAUDE.md ข้อ 18): กล่องแนบสลิปแบบเดียวกับหน้าจอง (แตะ/ถ่ายรูป/ลากวาง + รูปตัวอย่าง)
+         ยอดของหน้านี้ตายตัว — ระบบตรวจสลิปตอนกดยืนยัน (EvaluateCustomerSlip) เหมือนเดิม · สคริปต์โหลดไม่ได้ = ช่องไฟล์เดิม --%>
+    <link id="slipFirstCss" rel="stylesheet" href="<%= ResolveUrl("~/Content/slip-first.css?v=1") %>" />
+    <style>
+        .sf-root, .card { --sf-accent: #1b7a4b; --sf-accent-dark: #21302a; --sf-soft: #eef6f1; --sf-line: #dfe6e2; }
+        .field .sf-drop { margin-top: 4px; }
+    </style>
+    <script src="<%= ResolveUrl("~/Scripts/slip-first.js?v=1") %>"></script>
+    <script>
+        (function () {
+            function start() {
+                var file = document.getElementById('<%= fuSlip.ClientID %>');
+                if (!file || !window.SlipFirst) return;
+                var dz = SlipFirst.dropzone({
+                    input: file, accept: 'image+pdf', maxMB: 8,
+                    texts: { title: 'แตะเพื่อแนบสลิปการโอน', sub: 'ถ่ายรูป หรือเลือกรูปสลิปจากเครื่อง' },
+                    onPick: function (f, z) { z.setState('done', '✅ เลือกสลิปแล้ว — กด "ยืนยันการชำระเงิน"', 'ok'); }
+                });
+                var btn = document.getElementById('<%= btnManualConfirm.ClientID %>');
+                if (btn && dz) btn.addEventListener('click', function () {
+                    if (file.files && file.files.length) dz.setState('reading', '', null);
+                }, false);
+            }
+            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
+        })();
+    </script>
 </form>
 </body>
 </html>

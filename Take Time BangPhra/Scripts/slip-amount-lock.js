@@ -61,6 +61,17 @@
         el.style.display = html ? '' : 'none';
     }
 
+    // แจ้งหน้าที่ใช้ (เช่น สลิปก่อนยอด) ว่ากำลังตรวจ/ได้ผล/ตรวจไม่ได้ — event บนช่องไฟล์: sliplock:start / sliplock:result / sliplock:error
+    function emit(target, name, detail) {
+        if (!target) return;
+        var ev;
+        try { ev = new CustomEvent(name, { detail: detail }); }
+        catch (e0) {
+            try { ev = d.createEvent('CustomEvent'); ev.initCustomEvent(name, false, false, detail); } catch (e1) { return; }
+        }
+        try { target.dispatchEvent(ev); } catch (e2) { }
+    }
+
     function esc(s) {
         return String(s === undefined || s === null ? '' : s)
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -95,14 +106,17 @@
                     setLocked(box, false);
                     box.removeAttribute('data-slip-value');
                     badge(out, '', '');
+                    emit(file, 'sliplock:error', null);
                     return;
                 }
                 var fd = new FormData();
                 fd.append('slipPreviewFile', file.files[0]);
                 badge(out, '⏳ กำลังอ่านยอดจากสลิป…', 'wait');
+                emit(file, 'sliplock:start', null);
                 fetch(cfg.url || w.location.href, {
                     method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Slip-Preview': '1' }
                 }).then(function (r) { return r.json(); }).then(function (j) {
+                    emit(file, 'sliplock:result', j || null);
                     if (!j || !j.active) { badge(out, '', ''); return; }
                     if (j.locked) {
                         box.value = j.amountText;
@@ -115,6 +129,7 @@
                     }
                 }).catch(function () {
                     badge(out, 'ตรวจสลิปไม่ได้ตอนนี้ — กรอกยอดตามสลิป (ระบบตรวจซ้ำตอนบันทึก)', 'warn');
+                    emit(file, 'sliplock:error', null);
                 });
             });
         }

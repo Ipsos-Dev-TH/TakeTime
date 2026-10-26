@@ -1522,6 +1522,12 @@ namespace Take_Time_BangPhra
                 }
                 catch { }
 
+                // 🧾 สลิปก่อนยอด: เลือกไฟล์สลิปแล้วกดยืนยันเลย (ยังไม่ได้อ่าน) → อ่านสลิปก่อน เติม/ล็อกยอด (ด่านเดิมตรวจซ้ำครบ)
+                if (!SlipFirstPreSubmit(command))
+                {
+                    return;
+                }
+
                 // 📜 ลูกค้าจองเอง: ต้องติ๊กยอมรับนโยบาย + ช่องทางออนไลน์ที่เลือกต้องยังเปิดอยู่
                 // (ตรวจฝั่ง server เสมอ ไม่เชื่อสถานะปุ่มบนหน้าเว็บ)
                 if (command == "reserve" && !ValidateCustomerBookingGate())
@@ -6405,7 +6411,9 @@ namespace Take_Time_BangPhra
                 if (!string.IsNullOrWhiteSpace(instructions))
                     sb.Append("<div>").Append(BookingPolicy.ToHtml(instructions)).Append("</div>");
                 else
-                    sb.Append("<div>โอนยอดมัดจำ (ดูยอดในขั้น \"สรุปยอด\") เข้าบัญชีนี้ แล้ว<b>ระบุยอดที่โอนและแนบสลิป</b>ด้านล่าง</div>");
+                    sb.Append(Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.AmountLockActive
+                        ? "<div>โอนยอดมัดจำหรือเต็มจำนวนเข้าบัญชีนี้ แล้ว<b>แนบสลิป</b>ด้านล่าง — ระบบอ่านยอดจากสลิปให้เอง</div>"
+                        : "<div>โอนยอดมัดจำ (ดูยอดในขั้น \"สรุปยอด\") เข้าบัญชีนี้ แล้ว<b>ระบุยอดที่โอนและแนบสลิป</b>ด้านล่าง</div>");
                 if (!string.IsNullOrWhiteSpace(conditions))
                 {
                     sb.Append("<div style=\"margin-top:6px;\"><b>เงื่อนไข</b><br/>")
@@ -6548,6 +6556,26 @@ namespace Take_Time_BangPhra
                     int.TryParse((Label2.Text ?? "").Trim(), out minDepIn);
                     if (depIn <= 0m || (minDepIn > 0 && depIn < minDepIn * 0.8m))
                     {
+                        // สลิปก่อนยอด: ช่องยอดซ่อนจนกว่าจะอ่านสลิป / ล็อกตามสลิป → บอกสิ่งที่ลูกค้าทำได้จริง
+                        string sfGate = SlipFirstState();
+                        if (sfGate == SfWait)
+                        {
+                            ShowUserError("depositMin", "กรุณาแนบสลิปการโอนเงิน — ระบบจะอ่านยอดจากสลิปให้เอง", FileUpload1);
+                            return false;
+                        }
+                        if (sfGate == SfStop)
+                        {
+                            ShowUserError("depositMin", "สลิปที่แนบใช้ไม่ได้ — แนบสลิปใบอื่น หรือเลือกวิธีชำระแบบอื่น"
+                                + Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.CustomerContactText(), FileUpload1);
+                            return false;
+                        }
+                        if (sfGate == SfLocked && depIn > 0m)
+                        {
+                            ShowUserError("depositMin", "ยอดในสลิป ฿" + depIn.ToString("N2") + " ต่ำกว่ามัดจำขั้นต่ำ ฿" + minDepIn.ToString("N0")
+                                + " จึงยังยืนยันการจองไม่ได้ — กรุณาติดต่อเจ้าหน้าที่"
+                                + Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.CustomerContactText(), TextBox5);
+                            return false;
+                        }
                         ShowUserError("depositMin",
                             "กรุณาระบุยอดเงินที่โอน — อย่างน้อยยอดมัดจำขั้นต่ำ ฿" + minDepIn.ToString("N0")
                             + " (หรือโอนเต็มจำนวนก็ได้)",
@@ -6704,6 +6732,15 @@ namespace Take_Time_BangPhra
                     Image1.Attributes["data-uploaded"] = "1";
             }
             catch { }
+
+            // 🧾 สลิปก่อนยอด (CLAUDE.md ข้อ 18) — ส่วนแสดงผล: ล้มแล้วหน้าตาเดิม
+            try { PrepareSlipFirstUi(); }
+            catch (Exception sfEx)
+            {
+                _sfAttrs = "";
+                try { if (litSlipFirstGuide != null) litSlipFirstGuide.Text = ""; } catch { }
+                try { code2.Logs(conn, "Reserve - SlipFirst UI", sfEx.Message, "SYSTEM"); } catch { }
+            }
 
             try
             {
@@ -7788,7 +7825,7 @@ namespace Take_Time_BangPhra
         {
             try
             {
-                if (r == null) { pnlSlipCheck.Visible = false; return; }
+                if (r == null) { pnlSlipCheck.Visible = false; SetSlipFirstResult(null, null, null, null); return; }
                 pnlSlipCheck.Visible = true;
                 string command = Request.QueryString["command"] ?? "";
                 var lk = r.AmountLock ?? _slipLock;
@@ -7824,7 +7861,18 @@ namespace Take_Time_BangPhra
                             + "เจ้าหน้าที่จะตรวจสอบและยืนยันการจองให้"
                             + (!lk.Locked && lk.HintAmount.HasValue ? " (ระบบอ่านได้ประมาณ " + lk.HintAmount.Value.ToString("N2") + " บาท)" : "");
                     litSlipCheck.Text = "<div class='rv-hint' style='margin:6px 0;white-space:pre-line;'>" + HttpUtility.HtmlEncode(cmsg) + "</div>"
-                        + (reason == null || !blocked ? lk.ToHtml() : "");
+                        + (reason == null || !blocked ? lk.ToHtml() : "")
+                        // สลิปก่อนยอด: การ์ดหยุดมีปุ่มโทร/LINE ให้กดติดต่อได้ทันที
+                        + (blocked ? Take_Time_BangPhra.Payments.SlipCheck.SlipAmountLockUi.ContactButtonsHtml() : "");
+                    SetSlipFirstResult(
+                        blocked ? SfStop : (lk.Locked ? SfLocked : SfEdit),
+                        blocked
+                            ? (r.Status == Take_Time_BangPhra.Payments.SlipCheck.SlipVerifyStatus.Duplicate ? "⛔ สลิปนี้ถูกใช้ชำระไปแล้ว" : "⛔ ตรวจสลิปไม่ผ่าน — กรุณาติดต่อเจ้าหน้าที่")
+                            : reason == null
+                                ? (r.BankConfirmed ? "✅ ธนาคารยืนยันยอดแล้ว" : "✅ อ่านยอดจากสลิปแล้ว")
+                                : (lk.Locked ? "⚠️ ตรวจอัตโนมัติไม่ผ่าน — เจ้าหน้าที่จะตรวจให้" : "✏️ อ่านยอดไม่ชัด — กรอกยอดตามสลิป"),
+                        blocked ? "err" : reason == null ? "ok" : "warn",
+                        !lk.Locked && lk.HintAmount.HasValue ? "ระบบอ่านได้ประมาณ " + lk.HintAmount.Value.ToString("N2") + " บาท — ตรวจให้ตรงสลิปก่อนยืนยัน" : null);
                     divSlipStaffOpts.Visible = false;
                     btnSlipUseAmount.Visible = false;
                     ViewState["SlipAmt"] = r.Amount.HasValue ? (object)r.Amount.Value : null;
@@ -7840,6 +7888,7 @@ namespace Take_Time_BangPhra
                             ? "⚠️ ยอดในสลิป " + r.Amount.Value.ToString("N2") + " บาท ไม่ตรงกับยอดที่กรอก — กรุณาแก้ยอดให้ตรงสลิป (หรือกดยืนยัน เจ้าหน้าที่จะตรวจให้)"
                             : "ℹ️ ได้รับสลิปแล้ว — เจ้าหน้าที่จะตรวจสอบและยืนยันการจองให้";
                     litSlipCheck.Text = "<div class='rv-hint' style='margin:6px 0;'>" + HttpUtility.HtmlEncode(msg) + "</div>";
+                    SetSlipFirstResult(SfEdit, "ℹ️ ได้รับสลิปแล้ว", "warn", null);
                     divSlipStaffOpts.Visible = false;
                     ViewState["SlipAmt"] = r.Amount.HasValue ? (object)r.Amount.Value : null;
                     btnSlipUseAmount.Visible = false;
@@ -7872,6 +7921,20 @@ namespace Take_Time_BangPhra
                 if (splitRemainder && r.AllocationRemaining.HasValue)
                     litSlipCheck.Text += "<div class='slip-lock-msg warn'>✏️ สลิปนี้แบ่งใช้กับการจองอื่นแล้ว — กรอกยอดของการจองนี้ไม่เกินยอดคงเหลือ "
                         + r.AllocationRemaining.Value.ToString("N2") + " บาท</div>";
+                // สลิปก่อนยอด (หน้าจอง): จำผลไว้ให้หน้าเปิดช่องยอดตามผล — ซ้ำ (ไม่มียอดคงเหลือให้แบ่ง) = หยุด
+                bool dupStop = r.Status == Take_Time_BangPhra.Payments.SlipCheck.SlipVerifyStatus.Duplicate && !splitRemainder;
+                bool lockedNow = locked && !splitRemainder;
+                SetSlipFirstResult(
+                    dupStop ? SfStop : lockedNow ? SfLocked : SfEdit,
+                    dupStop ? "⛔ สลิปนี้ถูกใช้ชำระไปแล้ว — แนบสลิปใบอื่น"
+                        : splitRemainder ? "✏️ สลิปนี้แบ่งใช้แล้ว — กรอกยอดส่วนของการจองนี้"
+                        : problem ? "⚠️ ตรวจพบปัญหา — ดูรายละเอียดใต้รูปสลิป"
+                        : lockedNow ? (lk.Source == Take_Time_BangPhra.Payments.SlipCheck.SlipVerifySource.SlipOk
+                            ? "✅ ธนาคารยืนยันยอดแล้ว" : "✅ อ่านยอดจากสลิปแล้ว (" + lk.Confidence + "%)")
+                        : "✏️ อ่านยอดไม่ชัด — ตรวจ/กรอกยอดตามสลิป",
+                    dupStop ? "err" : problem || !lockedNow ? "warn" : "ok",
+                    !lockedNow && lk != null && lk.HintAmount.HasValue
+                        ? "ระบบอ่านได้ประมาณ " + lk.HintAmount.Value.ToString("N2") + " บาท — ตรวจให้ตรงสลิป" : null);
             }
             catch { }
         }
@@ -7894,7 +7957,11 @@ namespace Take_Time_BangPhra
                 }
                 ShowSlipCheck(VerifyPendingSlip(command, expected));
             }
-            catch { }
+            catch
+            {
+                // ตรวจไม่ได้ = ข้ามการตรวจ (นโยบายเดิม) → สลิปก่อนยอด: เปิดช่องให้กรอกยอดตามสลิปเอง
+                try { if (SfTempSlipExists()) SetSlipFirstResult(SfEdit, "✏️ ตรวจสลิปอัตโนมัติไม่ได้ตอนนี้ — กรอกยอดตามสลิป", "warn", null); } catch { }
+            }
         }
 
         /// <summary>
@@ -8113,7 +8180,9 @@ namespace Take_Time_BangPhra
                         PreviewSlipCheck();
 
                         // ✅ Show success message (ลูกค้า: ข้อความสีเขียวใต้ช่องสลิป ไม่ใช่ alert)
-                        if (IsCustomerReserveMode)
+                        // สลิปก่อนยอด: ผลอ่านสลิปแสดงในกล่องสลิป/ช่องยอดแล้ว — ไม่ต้องมีข้อความ/alert ซ้ำ
+                        if (SlipFirstState().Length > 0) { }
+                        else if (IsCustomerReserveMode)
                         {
                             ClientScript.RegisterStartupScript(this.GetType(), "uploadSuccess",
                                 "if (window.rvShowOk) { rvShowOk('" + HttpUtility.JavaScriptStringEncode(FileUpload1.ClientID)
@@ -8581,6 +8650,9 @@ namespace Take_Time_BangPhra
 
             // ลูกค้าจองเอง: สลับรายละเอียดตามช่องทาง (โอน → QR+สลิป / บัตร → ไปหน้าชำระเงิน)
             ApplyCustomerChannelUi();
+
+            // สลิปก่อนยอด: มีสลิปค้างและยังเป็นการโอน → อ่านซ้ำตามช่องทางใหม่ (ผลอยู่ใน cache ไม่เสียโควต้า)
+            SlipFirstAfterMethodChange();
         }
 
         protected void CheckBox3_CheckedChanged(object sender, EventArgs e)

@@ -463,6 +463,16 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
      ตรวจไม่ผ่าน (อ่านไม่ได้/ไม่มั่นใจ/ยอดไม่ตรง/ไม่ใช่สลิป/NO_QR/NOT_FOUND/ผู้รับผิด/ขัดข้อง) → `CONTACT_ADMIN` ไม่รับ (จองห้อง = ไม่บันทึกการจอง, Pay/กิจกรรม/รูมเซอร์วิส =
      ไม่สร้างรายการ; เก็บไฟล์ + log + Telegram กันถี่) · `ALLOW_MANUAL` รับเป็นรอพนักงานตรวจ (`Customer_Manual_Amount`); สลิปซ้ำ = ไม่รับเสมอ. ผู้รับ QR ร้านค้า:
      `SlipVerify_Receiver_Biller_Ids`/`_Merchant_Ids` เทียบ proxy BILLERID/ref1-3/toMerchantId (`MatchesBillerOrMerchant`).
+   - **หน้าจอง: อัปโหลดสลิปก่อนเห็นช่องยอด:** `Reserve.aspx.SlipFirst.cs` — เมื่อ `AmountLockActive` + ช่องทาง `IsTransferPaidHow` (กฎเดียวกับ
+     `RunSlipGate`; ไม่ใช่เงินสด/เกตเวย์/PayNow/`02`) `#rvStepPay` ได้ `data-sf` = pick|wait|locked|edit|stop (`SlipFirstState`: ผลล่าสุดจาก
+     `ShowSlipCheck` → `SetSlipFirstResult` ใน ViewState `rvSfState` + ไฟล์ชั่วคราวยังอยู่) → ขั้นย่อย 1-4 + การ์ด "โอนเงินตามยอดนี้" (มัดจำขั้นต่ำ/
+     เต็มจำนวน หรือยอดค้าง + บัญชีจาก `LoadReceiverAccounts` + ปุ่มคัดลอก; พนักงานเปิด QR ได้) → `Scripts/slip-first.js` + `Content/slip-first.css`
+     ห่อ FileUpload1 เป็นกล่องแตะ/ถ่ายรูป/ลากวาง แล้วกด Button3 ให้เอง ("กำลังตรวจสลิป…") → ช่องยอด (TextBox5 จอง / TextBox10 แก้ไข-เช็คอิน) ย้ายมา
+     `#rvSfRevealSlot`: ล็อก / กรอกเอง (คำใบ้ HintAmount) / หยุด (ซ้ำ, ลูกค้า CONTACT_ADMIN + ปุ่มโทร/LINE `SlipAmountLockUi.ContactButtonsHtml`)
+     + ผลก่อนยืนยัน (`SlipFirst.outcome`: รับมัดจำ/คงเหลือ · ชำระครบ · รับเกิน · ต่ำกว่ามัดจำขั้นต่ำ — ลูกค้าบล็อก, พนักงานเตือน). กดยืนยันโดยยังไม่อ่าน
+     (ไม่มี JS) → `SlipFirstPreSubmit` อ่านก่อน (ล็อก = ไปต่อ, กรอกเอง/หยุด = หยุดให้ดู); เปลี่ยนวิธีชำระ = อ่านซ้ำจาก cache / ไม่ใช่โอนแล้วปลดล็อก.
+     ด่านเซิร์ฟเวอร์ไม่เปลี่ยน. `MakePayment` ลำดับ วิธี→สลิป→ยอด (AJAX preview ส่ง event `sliplock:start|result|error`, ลิงก์ "ไม่มีสลิป? กรอกยอดเอง")
+     · `Pay.aspx` กล่องแนบสลิปแบบเดียวกัน. ไม่มี data-sf / สคริปต์โหลดไม่ได้ = หน้าตาเดิม. ต้องทดสอบบน Windows.
 19. **กันเอกสารซ้ำ + ตัวตรวจเทียบ (ต.ค. 2026, PHASE19_35 — เคส #149286: REC-…0001/0002 + TIV-…0002/0003 ซ้อน ไม่มีใบถูก void):**
    - **แนบไฟล์:** `LookupReceiptAttachmentFiles` = PDF ของใบเอง (`{เลขใบ}[_uid].pdf` โฟลเดอร์ปี/เดือนของ `Created_Date` ±1) + สลิป
      `Payment_Slips.Account_Receipt_ID = ใบนี้` (สลิประดับการจองเฉพาะเมื่อการจองมีใบเดียว) — ใช้ทั้ง sync และ "📎 ไฟล์" ในหน้าต่างการจอง.

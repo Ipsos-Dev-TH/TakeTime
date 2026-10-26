@@ -1,0 +1,199 @@
+/* ============================================================================
+   สลิปก่อนยอด (CLAUDE.md ข้อ 18 — หน้าจอง: อัปโหลดสลิปก่อนเห็นช่องยอด)
+   ใช้ร่วม: Reserve.aspx (จอง/แก้ไข/เช็คอิน), Payment/MakePayment.aspx, Payment/Pay.aspx
+   สีหลักปรับต่อหน้าได้ด้วยตัวแปร --sf-accent / --sf-accent-dark / --sf-soft บนกล่องแม่
+   ============================================================================ */
+.sf-root {
+    --sf-accent: #8D6E63;
+    --sf-accent-dark: #5D4037;
+    --sf-soft: #EFEBE9;
+    --sf-line: #D7CCC8;
+    --sf-ok: #2E7D32;
+    --sf-ok-bg: #E8F5E9;
+    --sf-warn: #E65100;
+    --sf-warn-bg: #FFF8E1;
+    --sf-err: #B71C1C;
+    --sf-err-bg: #FFEBEE;
+}
+
+.sf-sr {
+    position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important;
+    margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important;
+}
+
+/* ── ขั้นตอนย่อย 1-4 ── */
+.sf-steps {
+    list-style: none; margin: 4px 0 12px; padding: 0; display: flex; gap: 4px; counter-reset: sfstep;
+    font-size: 13px; line-height: 1.35;
+}
+.sf-steps li {
+    flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; text-align: center;
+    color: #A1887F; position: relative; padding-top: 2px;
+}
+.sf-steps li::before {
+    counter-increment: sfstep; content: counter(sfstep);
+    width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+    background: #fff; border: 2px solid var(--sf-line, #D7CCC8); color: #A1887F; font-weight: 700; margin-bottom: 4px;
+    position: relative; z-index: 1;
+}
+.sf-steps li + li::after {
+    content: ""; position: absolute; top: 15px; right: 50%; width: 100%; height: 2px; background: var(--sf-line, #D7CCC8); z-index: 0;
+}
+.sf-steps li.is-done { color: var(--sf-ok, #2E7D32); }
+.sf-steps li.is-done::before { content: "✓"; background: var(--sf-ok, #2E7D32); border-color: var(--sf-ok, #2E7D32); color: #fff; }
+.sf-steps li.is-done + li::after, .sf-steps li.is-done::after { background: var(--sf-ok, #2E7D32); }
+.sf-steps li.is-on { color: var(--sf-accent-dark, #5D4037); font-weight: 700; }
+.sf-steps li.is-on::before { background: var(--sf-accent, #8D6E63); border-color: var(--sf-accent, #8D6E63); color: #fff; }
+.sf-steps li.is-err { color: var(--sf-err, #B71C1C); font-weight: 700; }
+.sf-steps li.is-err::before { content: "!"; background: var(--sf-err, #B71C1C); border-color: var(--sf-err, #B71C1C); color: #fff; }
+
+/* ── การ์ดแนะนำ "ยอดที่ต้องโอน + โอนเข้าบัญชีไหน" ── */
+.sf-guide {
+    background: #fff; border: 1px solid var(--sf-line, #D7CCC8); border-radius: 12px; padding: 12px 14px;
+    max-width: 560px; line-height: 1.6; color: var(--sf-accent-dark, #5D4037);
+}
+.sf-guide-h { font-weight: 700; margin: 0 0 6px; font-size: 15px; }
+.sf-guide-sub { font-size: 13px; color: #8D6E63; margin: 4px 0 0; }
+.sf-line {
+    display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; padding: 8px 0;
+    border-bottom: 1px dashed var(--sf-soft, #EFEBE9);
+}
+.sf-line:last-child { border-bottom: 0; }
+.sf-line-l { flex: 1 1 150px; min-width: 0; }
+.sf-line-l small { display: block; color: #A1887F; font-size: 12.5px; }
+.sf-line-v { font-weight: 700; font-size: 17px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.sf-line-v.sf-mono { font-family: Consolas, 'Courier New', monospace; font-size: 16px; letter-spacing: .5px; }
+.sf-copy {
+    min-height: 36px; min-width: 64px; padding: 6px 12px; border-radius: 18px; border: 1px solid var(--sf-accent, #8D6E63);
+    background: #fff; color: var(--sf-accent-dark, #5D4037); cursor: pointer; font: inherit; font-size: 13px; line-height: 1.2;
+}
+.sf-copy:hover, .sf-copy:focus-visible { background: var(--sf-soft, #EFEBE9); }
+.sf-copy.is-copied { background: var(--sf-ok, #2E7D32); border-color: var(--sf-ok, #2E7D32); color: #fff; }
+.sf-guide details { margin-top: 8px; }
+.sf-guide summary { cursor: pointer; min-height: 36px; display: flex; align-items: center; color: var(--sf-accent-dark, #5D4037); font-weight: 600; }
+.sf-guide .sf-qr { display: block; max-width: 220px; width: 100%; margin: 8px 0; border: 1px solid var(--sf-line, #D7CCC8); border-radius: 8px; }
+.sf-note { font-size: 13.5px; color: #8D6E63; line-height: 1.55; }
+
+/* ── กล่องแนบสลิป (แตะ/ถ่ายรูป/ลากวาง) ── */
+.sf-drop {
+    position: relative; max-width: 560px; border: 2px dashed var(--sf-accent, #8D6E63); border-radius: 14px; background: #fff;
+    transition: border-color .15s, background-color .15s; overflow: hidden;
+}
+.sf-drop.is-over { background: var(--sf-soft, #EFEBE9); border-style: solid; }
+.sf-drop:focus-within { box-shadow: 0 0 0 3px rgba(141, 110, 99, .3); }
+.sf-drop-main {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; text-align: center;
+    min-height: 132px; padding: 16px; cursor: pointer; color: var(--sf-accent-dark, #5D4037); margin: 0;
+    font-weight: normal;
+}
+.sf-drop-icon {
+    width: 48px; height: 48px; border-radius: 50%; background: var(--sf-soft, #EFEBE9); display: inline-flex;
+    align-items: center; justify-content: center; font-size: 24px; margin-bottom: 4px;
+}
+.sf-drop-t { font-weight: 700; font-size: 16px; }
+.sf-drop-s { font-size: 13px; color: #8D6E63; }
+.sf-drop input[type="file"] {
+    position: absolute !important; width: 1px !important; height: 1px !important; min-height: 0 !important; opacity: 0 !important;
+    overflow: hidden !important; left: 0 !important; top: 0 !important; padding: 0 !important; margin: 0 !important; border: 0 !important;
+}
+.sf-drop-prev { display: none; align-items: center; gap: 12px; padding: 12px; }
+.sf-thumb {
+    width: 84px; height: 112px; object-fit: cover; border-radius: 8px; border: 1px solid var(--sf-line, #D7CCC8); background: var(--sf-soft, #EFEBE9);
+    flex: 0 0 84px;
+}
+.sf-thumb-pdf { display: inline-flex; align-items: center; justify-content: center; font-size: 28px; }
+.sf-prev-info { flex: 1 1 auto; min-width: 0; line-height: 1.5; }
+.sf-prev-name { font-size: 13px; color: #8D6E63; word-break: break-all; }
+.sf-prev-status { font-weight: 700; }
+.sf-change {
+    margin-top: 6px; min-height: 40px; padding: 6px 14px; border-radius: 20px; border: 1px solid var(--sf-accent, #8D6E63);
+    background: #fff; color: var(--sf-accent-dark, #5D4037); cursor: pointer; font: inherit; font-size: 14px;
+}
+.sf-drop-busy {
+    display: none; position: absolute; left: 0; top: 0; right: 0; bottom: 0; background: rgba(255, 255, 255, .92);
+    flex-direction: column; align-items: center; justify-content: center; gap: 4px; text-align: center; padding: 12px;
+    color: var(--sf-accent-dark, #5D4037);
+}
+.sf-drop-busy small { color: #8D6E63; }
+.sf-spin {
+    width: 34px; height: 34px; border-radius: 50%; border: 4px solid var(--sf-soft, #EFEBE9); border-top-color: var(--sf-accent, #8D6E63);
+    animation: sfSpin .9s linear infinite; margin-bottom: 4px;
+}
+@keyframes sfSpin { to { transform: rotate(360deg); } }
+.sf-drop[data-state="picked"] .sf-drop-main,
+.sf-drop[data-state="reading"] .sf-drop-main,
+.sf-drop[data-state="done"] .sf-drop-main { display: none; }
+.sf-drop[data-state="picked"] .sf-drop-prev,
+.sf-drop[data-state="reading"] .sf-drop-prev,
+.sf-drop[data-state="done"] .sf-drop-prev { display: flex; }
+.sf-drop[data-state="reading"] .sf-drop-busy { display: flex; }
+.sf-drop[data-state="reading"], .sf-drop[data-state="done"], .sf-drop[data-state="picked"] { border-style: solid; }
+.sf-drop[data-tone="ok"] { border-color: var(--sf-ok, #2E7D32); }
+.sf-drop[data-tone="warn"] { border-color: var(--sf-warn, #E65100); }
+.sf-drop[data-tone="err"] { border-color: var(--sf-err, #B71C1C); }
+.sf-drop[data-tone="ok"] .sf-prev-status { color: var(--sf-ok, #2E7D32); }
+.sf-drop[data-tone="warn"] .sf-prev-status { color: var(--sf-warn, #E65100); }
+.sf-drop[data-tone="err"] .sf-prev-status { color: var(--sf-err, #B71C1C); }
+.sf-drop-err { color: var(--sf-err, #B71C1C); font-size: 13.5px; padding: 0 12px 10px; display: none; }
+.sf-drop-err.is-on { display: block; }
+
+/* ── ยอดที่รับ (โผล่หลังอ่านสลิป) ── */
+.sf-reveal {
+    max-width: 560px; background: #fff; border: 2px solid var(--sf-line, #D7CCC8); border-radius: 12px; padding: 12px 14px;
+    animation: sfIn .25s ease-out;
+}
+.sf-reveal.is-locked { border-color: var(--sf-ok, #2E7D32); background: #FAFDF9; }
+.sf-reveal.is-edit { border-color: var(--sf-warn, #E65100); background: #FFFDF6; }
+.sf-reveal-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.sf-reveal-h b { font-size: 15px; color: var(--sf-accent-dark, #5D4037); }
+.sf-chip { display: inline-flex; align-items: center; gap: 4px; border-radius: 14px; padding: 3px 10px; font-size: 12.5px; font-weight: 600; }
+.sf-chip.ok { background: var(--sf-ok-bg, #E8F5E9); color: var(--sf-ok, #2E7D32); }
+.sf-chip.warn { background: var(--sf-warn-bg, #FFF8E1); color: var(--sf-warn, #E65100); }
+.sf-amount { display: flex; align-items: center; gap: 8px; }
+.sf-amount input {
+    font-size: 22px !important; font-weight: 700; min-height: 52px; width: 220px !important; max-width: 100%;
+    margin: 0 !important; font-variant-numeric: tabular-nums; min-width: 0; flex: 0 1 auto;
+}
+.sf-amount span { font-weight: 600; }
+.sf-hint { font-size: 13px; color: #8D6E63; margin-top: 6px; line-height: 1.5; }
+@keyframes sfIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.sf-flash { animation: sfFlash 1.2s ease-out 1; }
+@keyframes sfFlash { 0% { box-shadow: 0 0 0 0 rgba(46, 125, 50, .45); } 100% { box-shadow: 0 0 0 14px rgba(46, 125, 50, 0); } }
+
+/* ── ผลลัพธ์ก่อนยืนยัน ── */
+.sf-outcome { margin-top: 10px; border-radius: 10px; padding: 10px 12px; line-height: 1.6; font-size: 14.5px; }
+.sf-outcome:empty { display: none; }
+.sf-outcome.ok { background: var(--sf-ok-bg, #E8F5E9); color: #1B5E20; }
+.sf-outcome.warn { background: var(--sf-warn-bg, #FFF8E1); color: #8D3B00; }
+.sf-outcome.err { background: var(--sf-err-bg, #FFEBEE); color: var(--sf-err, #B71C1C); }
+.sf-outcome b { white-space: nowrap; }
+.sf-outcome .sf-o-row { display: flex; justify-content: space-between; gap: 10px; }
+.sf-outcome .sf-o-note { font-size: 13px; margin-top: 4px; opacity: .9; }
+
+/* ── การ์ดหยุด (สลิปใช้ไม่ได้) ── */
+.sf-stop {
+    max-width: 560px; border-radius: 12px; padding: 12px 14px; background: var(--sf-err-bg, #FFEBEE); color: var(--sf-err, #B71C1C);
+    border: 1px solid #EF9A9A; line-height: 1.6; margin-top: 8px;
+}
+.sf-stop b { display: block; font-size: 15px; margin-bottom: 2px; }
+.sf-contact { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.sf-contact a {
+    display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 8px 16px; border-radius: 22px; text-decoration: none;
+    background: #fff; color: var(--sf-accent-dark, #5D4037); border: 1px solid var(--sf-line, #D7CCC8); font-weight: 600;
+}
+.sf-contact a.sf-line-btn { background: #06C755; color: #fff; border-color: #06C755; }
+
+@media (max-width: 600px) {
+    .sf-steps { font-size: 12px; }
+    .sf-steps li::before { width: 26px; height: 26px; }
+    .sf-steps li + li::after { top: 14px; }
+    .sf-line-v { font-size: 16px; }
+    .sf-line { gap: 4px 10px; }
+    .sf-line-l { flex-basis: 100%; }          /* มือถือ: ชื่อบรรทัดบน · ยอด/เลขบัญชี + ปุ่มคัดลอกบรรทัดล่าง (ไม่ตกบรรทัดแปลก ๆ) */
+    .sf-line-v { flex: 1 1 auto; min-width: 0; }
+    .sf-amount input { width: 100% !important; }
+    .sf-drop-main { min-height: 120px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .sf-reveal, .sf-flash, .sf-spin { animation: none !important; }
+}
