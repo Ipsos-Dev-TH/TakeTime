@@ -734,7 +734,7 @@ namespace Take_Time_BangPhra.Integration
         {
             int days = ConfigInt("Nexaacc_Integrity_Days", 14, 1, 120);
             int max = ConfigInt("Nexaacc_Integrity_Max", 400, 10, 5000);
-            int filingDay = ConfigInt("Nexaacc_Vat_Filing_Day", 15, 1, 28);
+            int filingDay = ConfigInt("Nexaacc_Vat_Filing_Day", 23, 1, 28);
             DateTime scanStart = DateTime.Now;
             var counts = new Dictionary<string, int>(StringComparer.Ordinal);
             bool tableOk = true;

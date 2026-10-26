@@ -527,7 +527,7 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    - **ตัวตรวจใบเสร็จ** (`ReceiptPreflight.cs` บริสุทธิ์ + `.Data.cs`): กฎ R01 บรรทัด=หัว · R02 VAT (หน้าเว็บเท่านั้น) · R03 ยอด≤0 (EnqueueReceipt log ชัด) · R04 หักมัดจำ ≤
      ใบมัดจำที่รับจริง (#149366 4,700 vs 1,500 = Block/HardFail) · R05 "ส่วนลด" ไม่ระบุชนิด · R06 บรรทัดมัดจำคัดลอกซ้ำ · R07 ใบมัดจำ · R08 §86/4 เมื่อขอ e-Tax ·
      R09 แหล่งเงิน/R10 mapping (CONFIG ไม่บล็อกหน้าร้าน) · R11/R20 แก้ใบที่มีเอกสาร/ใบลดหนี้/เปลี่ยนเลข · R12 งวดปิด/ยื่น ภ.พ.30 (cache `Accounting_Nexaacc_Period_Status`
-     จาก `fiscal-periods` + `tax?taxType=VAT` รายชั่วโมง; ไม่มี cache = เตือนตาม `Nexaacc_Vat_Filing_Day` 15) · R16 ทศนิยม · R17 ผู้ซื้อ. ใช้ที่: `EnqueueReceipt`
+     จาก `fiscal-periods` + `tax?taxType=VAT` รายชั่วโมง; ไม่มี cache = เตือนตาม `Nexaacc_Vat_Filing_Day` 23 = e-Filing ตามที่เจ้าของเลือก) · R16 ทศนิยม · R17 ผู้ซื้อ. ใช้ที่: `EnqueueReceipt`
      (`ApplyEnqueuePreflight` — พัก = FAILED+Retry_Count=Max), `ProcessReceiptDocument` ด่านแรก, หน้า `Account/Receipt` (ก่อนเขียน DB), เช็คอิน Reserve
      (`CheckinReceiptPreflightOk` ก่อน `createReceipt` 3 จุด), สแกนรายคืน. WARN: หน้าเตือน/บันทึกได้ คิวพักเฉพาะ HardFail · BLOCK: หน้าหยุดปัญหาข้อมูล — Owner หรือ Admin
      ที่มี SYS_ACCOUNTING/FIN_REPORT ยืนยันข้ามด้วยเหตุผล ≥10 ตัว (Receipt: ช่อง `txtEditReason`; เช็คอิน: prompt → `pfOverrideReason`) บันทึก OVERRIDE/BLOCKED.

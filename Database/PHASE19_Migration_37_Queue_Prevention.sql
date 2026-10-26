@@ -11,7 +11,7 @@
 -- 3) Account_Receipt_Edit_Log — ประวัติแก้ใบ/ยืนยันข้าม/ถูกบล็อก (ก่อน/หลัง JSON + เหตุผล + ผลตรวจ + ทางที่ส่งบัญชี)
 -- 4) Accounting_Nexaacc_Period_Status — cache งวดบัญชี/เดือนภาษีที่ยื่นแล้วจาก NextAcc (worker refresh รายชั่วโมง)
 -- 5) ค่าตั้ง: Nexaacc_Preflight_Mode = WARN (เตือน ไม่บล็อก — เปลี่ยนเป็น BLOCK ได้ที่หน้า Accounting Integration → คิว)
---    Nexaacc_Payload_Rebuild=1, Nexaacc_Wait_Max_Hours=48, Nexaacc_Transient_MaxRetries=10, Nexaacc_Vat_Filing_Day=15,
+--    Nexaacc_Payload_Rebuild=1, Nexaacc_Wait_Max_Hours=48, Nexaacc_Transient_MaxRetries=10, Nexaacc_Vat_Filing_Day=23,
 --    Nexaacc_Integrity_Hour=2, Nexaacc_Integrity_Days=14, Nexaacc_Integrity_Max=400
 -- 6) จำแนกแถวที่ตายค้างอยู่แล้วตามข้อความ (ไม่เปลี่ยนสถานะ) — ให้หน้าคิวแสดงชนิด/ตัวกรองได้ทันที
 --
@@ -105,7 +105,7 @@ BEGIN
       (N'Nexaacc_Payload_Rebuild', N'1', N'หยิบแถวคิวใบเสร็จแล้วสร้าง payload ใหม่จากข้อมูลใบปัจจุบัน (Retry ไม่ส่ง snapshot เก่า) · 0 = ปิด'),
       (N'Nexaacc_Wait_Max_Hours', N'48', N'แถวที่ "รอ" รายการอื่น (ใบมัดจำ/ใบต้นทาง) รอได้นานสุดกี่ชั่วโมงก่อนตั้งเป็นล้ม'),
       (N'Nexaacc_Transient_MaxRetries', N'10', N'จำนวน retry ของปัญหาชั่วคราว (เครือข่าย/หมดเวลา/429) — ถอยหลังถึง 6 ชม.'),
-      (N'Nexaacc_Vat_Filing_Day', N'15', N'วันกำหนดยื่น ภ.พ.30 (15 = กระดาษ, 23 = e-Filing) — ตรวจรายคืนเตือนใบเดือนก่อนที่ยังไม่ขึ้น NextAcc'),
+      (N'Nexaacc_Vat_Filing_Day', N'23', N'วันกำหนดยื่น ภ.พ.30 (15 = กระดาษ, 23 = e-Filing) — ตรวจรายคืนเตือนใบเดือนก่อนที่ยังไม่ขึ้น NextAcc'),
       (N'Nexaacc_Integrity_Hour', N'2', N'ชั่วโมงที่เริ่มตรวจความถูกต้องรายคืน (ไม่เรียก API)'),
       (N'Nexaacc_Integrity_Days', N'14', N'ตรวจรายคืนย้อนหลังกี่วัน'),
       (N'Nexaacc_Integrity_Max', N'400', N'ตรวจรายคืนสูงสุดกี่ใบ/การจอง');

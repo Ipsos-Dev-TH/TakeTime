@@ -323,7 +323,7 @@ namespace Take_Time_BangPhra.Integration
                     if (usesDeposit && (!mapper.TryGetAccountId("ADVANCE_DEPOSIT", out g2) || g2 == Guid.Empty))
                         f.MissingOptionalMappings.Add("ADVANCE_DEPOSIT");
                     int fd;
-                    f.VatFilingDay = int.TryParse(cfg.GetConfigValue("Nexaacc_Vat_Filing_Day", "15"), out fd) && fd >= 1 && fd <= 28 ? fd : 15;
+                    f.VatFilingDay = int.TryParse(cfg.GetConfigValue("Nexaacc_Vat_Filing_Day", "23"), out fd) && fd >= 1 && fd <= 28 ? fd : 23;
                 }
             }
             catch { }
