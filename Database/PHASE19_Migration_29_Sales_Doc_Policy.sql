@@ -133,19 +133,25 @@ BEGIN
     SELECT @rollupOn = ConfigValue FROM dbo.Accounting_Integration_Config WHERE ConfigKey = 'Nexaacc_PosDailyRollup';
     IF ISNULL(@rollupOn, '0') <> '1'
     BEGIN
+        -- dynamic SQL: SQL Server compile ทั้ง batch ก่อนรัน — อ้างคอลัมน์ที่ยังไม่มี (ยังไม่รัน PHASE18_01) แบบ static
+        -- จะ error "Invalid column name" แม้อยู่ใน IF COL_LENGTH(...) IS NOT NULL
         DECLARE @n INT;
+        EXEC sp_executesql N'
         UPDATE dbo.Product_Out
-           SET Pos_Rollup_Ref = N'LEGACY'
+           SET Pos_Rollup_Ref = N''LEGACY''
          WHERE Pos_Rollup_Ref IS NULL
-           AND Remark = N'ขาย'
-           AND (Account_Receipt_ID = '0' OR Account_Receipt_ID IS NULL)
+           AND Remark = N''ขาย''
+           AND (Account_Receipt_ID = ''0'' OR Account_Receipt_ID IS NULL)
            AND CAST(DateTime_Out AS DATE) < CAST(GETDATE() AS DATE);
-        SET @n = @@ROWCOUNT;
+        SET @cnt = @@ROWCOUNT;', N'@cnt INT OUTPUT', @cnt = @n OUTPUT;
         PRINT N'ทำเครื่องหมาย LEGACY ให้แถวขายเก่าที่ไม่เคยลงบัญชี ' + CAST(@n AS NVARCHAR(20)) + N' แถว (นโยบายมีผลตั้งแต่วันนี้)';
     END
     ELSE
         PRINT N'Nexaacc_PosDailyRollup = 1 อยู่แล้ว — แถวค้างรวบตามเดิม (ไม่แตะ)';
 END
+GO
+IF OBJECT_ID('dbo.Product_Out', 'U') IS NOT NULL AND COL_LENGTH('dbo.Product_Out', 'Pos_Rollup_Ref') IS NULL
+    PRINT N'⚠ ยังไม่มีคอลัมน์ Product_Out.Pos_Rollup_Ref — รัน PHASE18_Migration_01 (POS daily roll-up) ก่อน แล้วรันไฟล์นี้ซ้ำ (รันซ้ำได้)';
 GO
 
 PRINT '';
