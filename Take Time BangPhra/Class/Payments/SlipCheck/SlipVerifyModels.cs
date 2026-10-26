@@ -123,6 +123,7 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
         public SlipVendorResponse Vendor;     // null = ไม่ได้เรียก SlipOK (ปิด/ไม่มีคีย์/โควต้าหมด)
         public string VendorSkipReason;
         public string OcrText;                // ข้อความจาก OCR ในเครื่อง (null = ไม่ได้อ่าน)
+        public LocalSlipAmountReader.SlipOcrResult OcrResult;   // ผลรอบ 1+2 (กรอบ/โหวต) — ตัดสินซ้ำได้ทุกยอดที่ลง
         public string OcrError;
         public bool OcrAttempted;
         public DateTime InspectedAt = DateTime.Now;

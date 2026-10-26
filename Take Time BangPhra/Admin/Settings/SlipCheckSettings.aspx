@@ -25,7 +25,7 @@
         table.sc-t th { background:#f5f7f9; padding:8px; text-align:left; border-bottom:2px solid #e3e9ed; }
         table.sc-t td { padding:6px 8px; border-bottom:1px solid #f0f3f5; vertical-align:middle; }
         table.sc-t input { width:100%; padding:5px 7px; border:1.5px solid #dbe2e7; border-radius:7px; font-size:13px; box-sizing:border-box; }
-        pre.sc-raw { background:#f7f9fa; padding:10px; border-radius:8px; font-size:12px; white-space:pre-wrap; word-break:break-all; max-height:240px; overflow:auto; }
+        pre.sc-raw { background:#f7f9fa; padding:10px; border-radius:8px; font-size:12px; white-space:pre-wrap; word-break:break-all; max-height:420px; overflow:auto; }
         @media (max-width: 640px) {
             .sc-wrap { padding: 8px 4px 24px; }
             .sc-row { grid-template-columns: 1fr; }

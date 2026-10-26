@@ -273,9 +273,19 @@ namespace Take_Time_BangPhra.Admin.Settings
                 : insp.Vendor.Kind + " code=" + (insp.Vendor.Code ?? "-") + " " + (insp.Vendor.Message ?? "") + " (" + insp.Vendor.ElapsedMs + " ms)"));
             sb.Append("\nOCR ในเครื่อง: ").Append(HttpUtility.HtmlEncode(!insp.OcrAttempted ? "ไม่ได้ใช้ (SlipOK ได้ยอดแล้ว)"
                 : (insp.OcrText != null ? "อ่านได้ " + insp.OcrText.Length + " ตัวอักษร" : "ล้ม — " + insp.OcrError)));
-            if (!string.IsNullOrEmpty(insp.OcrText))
+            if (insp.OcrResult != null)
+            {
+                // รายละเอียดสำหรับแอดมิน: ข้อความแต่ละรอบ, ป้าย, ผู้สมัคร, ROI, โหวต (ตัดสินด้วยยอดทดสอบที่กรอก)
+                string diag = insp.OcrResult.Diagnostics(expected);
+                sb.Append("\n──────── OCR ในเครื่อง: รอบ/ROI/โหวต ────────\n").Append(HttpUtility.HtmlEncode(diag.Length > 6000 ? diag.Substring(0, 6000) : diag));
+            }
+            else if (!string.IsNullOrEmpty(insp.OcrText))
                 sb.Append("\n──────── ข้อความ OCR ────────\n").Append(HttpUtility.HtmlEncode(insp.OcrText.Length > 1500 ? insp.OcrText.Substring(0, 1500) : insp.OcrText));
             sb.Append("</pre>");
+            if (insp.OcrResult != null && insp.OcrResult.MontagePng != null && insp.OcrResult.MontagePng.Length < 400000)
+                sb.Append("<div class='sub' style='margin-top:8px'>ภาพ ROI ที่ส่งอ่านรอบ 2 (บน = เทา, ล่าง = ขาวดำ ของแต่ละกรอบ)</div>")
+                  .Append("<img alt='ROI' style='max-width:100%;border:1px solid #dde;border-radius:6px;background:#fff' src='data:image/png;base64,")
+                  .Append(Convert.ToBase64String(insp.OcrResult.MontagePng)).Append("' />");
             litTest.Text = sb.ToString();
             RenderStatus();
         }
