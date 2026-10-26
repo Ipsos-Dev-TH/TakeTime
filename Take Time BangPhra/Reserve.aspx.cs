@@ -3184,13 +3184,17 @@ namespace Take_Time_BangPhra
                                                         dtReserve.Rows[ri]["Number"] = (ri + 1).ToString();
                                                 }
                                                 if (prepaidRemain > 0.005m)
+                                                {
                                                     dtReserve.Rows.Add(dtReserve.Rows.Count + 1, "", "1", "17", "ส่วนลด", "1", "ครั้ง", prepaidRemain * -1, prepaidRemain * -1);
+                                                    TagLineKind(dtReserve, CheckinRemainKind(id, prepaidRemain));   // จ่ายล่วงหน้าที่อื่น — ไม่ใช่หักมัดจำ
+                                                }
                                                 id = Request.QueryString["id"];
                                                 if (CheckBox4.Checked == false)
                                                 {
                                                     // 🏨 Add product charges to receipt
                                                     AddProductChargesToReceipt(Convert.ToInt32(id), dtReserve);
 
+                                                    if (!CheckinReceiptPreflightOk(id, dtReserve, paymentAmount, docCreatedDate)) { checkinBlocked = true; return; }
                                                     string receiptId = createReceipt(id, Convert.ToDouble(paymentAmount), dtReserve, IsDeposit, docCreatedDate, CheckBox5.Checked);
 
                                                     // ✅ Enqueue to accounting sync (async, non-blocking)
@@ -3294,8 +3298,11 @@ namespace Take_Time_BangPhra
                                                     DataTable dtDepositDetail = reservationDA.GetReceiptDetails(dtfindDeposit.Rows[j]["ID"].ToString());
                                                     for (int k = 0; k < dtDepositDetail.Rows.Count; k++)
                                                     {
-                                                        DepositAmount += Convert.ToDecimal(dtDepositDetail.Rows[0]["Price_Amount"].ToString());
-                                                        dtReserve.Rows.Add(dtReserve.Rows.Count + 1, "", dtDepositDetail.Rows[0]["ProductType_ID"].ToString(), dtDepositDetail.Rows[0]["Product_ID"].ToString(), dtDepositDetail.Rows[0]["Product_Data"].ToString(), dtDepositDetail.Rows[0]["Product_Amount"].ToString(), dtDepositDetail.Rows[0]["Product_Unit"].ToString(), Convert.ToDecimal(dtDepositDetail.Rows[0]["Price_PerPeice"].ToString()) * -1, Convert.ToDecimal(dtDepositDetail.Rows[0]["Price_Amount"].ToString()) * -1);
+                                                        // แถวที่ k (เดิมอ่าน Rows[0] ทุกรอบ → ใบมัดจำหลายบรรทัดถูกคัดลอกบรรทัดแรกซ้ำ)
+                                                        DataRow dk = dtDepositDetail.Rows[k];
+                                                        DepositAmount += Convert.ToDecimal(dk["Price_Amount"].ToString());
+                                                        dtReserve.Rows.Add(dtReserve.Rows.Count + 1, "", dk["ProductType_ID"].ToString(), dk["Product_ID"].ToString(), dk["Product_Data"].ToString(), dk["Product_Amount"].ToString(), dk["Product_Unit"].ToString(), Convert.ToDecimal(dk["Price_PerPeice"].ToString()) * -1, Convert.ToDecimal(dk["Price_Amount"].ToString()) * -1);
+                                                        TagLineKind(dtReserve, Integration.ReceiptLineKinds.DepositDeduction);
                                                     }
                                                 }
 
@@ -3309,6 +3316,7 @@ namespace Take_Time_BangPhra
                                                         // 🏨 Add product charges to receipt
                                                         AddProductChargesToReceipt(Convert.ToInt32(id), dtReserve);
 
+                                                        if (!CheckinReceiptPreflightOk(id, dtReserve, paymentAmount, docCreatedDate)) { checkinBlocked = true; return; }
                                                         string receiptId = createReceipt(id, Convert.ToDouble(paymentAmount), dtReserve, IsDeposit, docCreatedDate, CheckBox5.Checked);
 
                                                         // ✅ Enqueue to accounting sync (async, non-blocking)
@@ -3409,12 +3417,15 @@ namespace Take_Time_BangPhra
                                                     // 🆕 Use manual payment amount from TextBox10
                                                     decimal remain = Convert.ToDecimal(TextBox5.Text) - (DepositAmount);
                                                     dtReserve.Rows.Add(dtReserve.Rows.Count + 1, "", "1", "17", "ส่วนลด", "1", "ครั้ง", remain * -1, remain * -1);
+                                                    // ส่วนต่าง "มัดจำในการจอง − ใบมัดจำ" = เงินที่รับด้วยใบอื่น/จ่ายที่อื่น — ไม่ใช่หักมัดจำ (เคส #149366: 4,700 − 1,500)
+                                                    if (remain > 0) TagLineKind(dtReserve, CheckinRemainKind(id, remain));
                                                     id = Request.QueryString["id"];
                                                     if (CheckBox4.Checked == false)
                                                     {
                                                         // 🏨 Add product charges to receipt
                                                         AddProductChargesToReceipt(Convert.ToInt32(id), dtReserve);
 
+                                                        if (!CheckinReceiptPreflightOk(id, dtReserve, paymentAmount, docCreatedDate)) { checkinBlocked = true; return; }
                                                         string receiptId = createReceipt(id, Convert.ToDouble(paymentAmount), dtReserve, IsDeposit, docCreatedDate, CheckBox5.Checked);
 
                                                         // ✅ Enqueue to accounting sync (async, non-blocking)
@@ -4754,6 +4765,56 @@ namespace Take_Time_BangPhra
         // ✨ MIGRATED: cleantext() has been replaced with ValidationHelper.CleanText()
         // See ValidationHelper class in Take_Time_BangPhra.Class namespace
 
+        // ── PHASE19_37: ชนิดบรรทัดติดลบที่หน้าเช็คอินสร้าง (หักมัดจำ / ปรับยอดส่วนต่างมัดจำ) + ตรวจก่อนบันทึก ──────────
+        // createReceipt เขียนลง Account_Receipt_Detail.Line_Kind → ระบบบัญชีไม่ต้องเดาว่า "ติดลบทุกบรรทัด = หักมัดจำ"
+        private readonly Dictionary<DataRow, string> _pfLineKinds = new Dictionary<DataRow, string>();
+
+        private void TagLineKind(DataTable dt, string kind)
+        {
+            if (dt != null && dt.Rows.Count > 0 && !string.IsNullOrEmpty(kind)) _pfLineKinds[dt.Rows[dt.Rows.Count - 1]] = kind;
+        }
+
+        /// <summary>ส่วนต่างมัดจำตอนเช็คอิน = "ปรับยอด" ได้เมื่อรู้ว่าเงินก้อนนั้นรับด้วยใบเสร็จอื่นแล้ว หรือเป็นการจอง OTA (จ่ายผ่านช่องทาง) —
+        /// ไม่งั้นไม่ระบุชนิด (กฎเดิม) ให้ตัวตรวจก่อนส่งฟ้องคนตรวจ (กันรายได้ของเงินที่ไม่เคยออกใบหายเงียบ)</summary>
+        private string CheckinRemainKind(string resId, decimal remain)
+        {
+            try
+            {
+                var dt = code2.DatabaseQuerySafe(conn,
+                    @"SELECT ISNULL((SELECT SUM(Total_Amount) FROM Account_Receipt WHERE Reservation_ID = @r AND ISNULL(IsDeposit, 0) = 0
+                                      AND (Status = 'Normal' OR Status IS NULL)), 0) AS Other,
+                             ISNULL((SELECT TOP 1 OTA_Channel FROM Reservation WHERE ID = @r), N'') AS Ota",
+                    new Dictionary<string, object> { { "@r", resId } });
+                if (dt != null && dt.Rows.Count > 0
+                    && (Convert.ToDecimal(dt.Rows[0]["Other"]) + 0.01m >= remain || (dt.Rows[0]["Ota"]?.ToString() ?? "").Trim().Length > 0))
+                    return Integration.ReceiptLineKinds.Adjustment;
+            }
+            catch { }
+            return null;
+        }
+
+        /// <summary>ตรวจร่างใบเช็คอินก่อนบันทึก (กฎชุดเดียวกับคิว) — false = หยุด (ลงข้อความ/ช่องยืนยันข้ามให้แล้ว)</summary>
+        private bool CheckinReceiptPreflightOk(string resId, DataTable dtReserve, decimal paymentAmount, DateTime docDate)
+        {
+            try
+            {
+                int rid;
+                int.TryParse(resId, out rid);
+                var draft = new Integration.ReceiptDraft
+                {
+                    ReservationId = rid, Total = paymentAmount, HeaderVatKnown = false, LinesWillBeRescaled = true,
+                    Date = docDate, PaidType = DropDownList2.SelectedItem?.Text, EtaxRequested = CheckBox5.Checked,
+                    BuyerFromForm = true, BuyerTaxId = TextBox9.Text, BuyerAddress = TextBox8.Text,
+                    Lines = Integration.ReceiptPreflight.LinesFromTable(dtReserve, r => { string k; return _pfLineKinds.TryGetValue(r, out k) ? k : null; })
+                };
+                string warn;
+                Integration.PreflightResult pr;
+                return Integration.ReceiptPreflightPage.Gate(this, conn, draft, Integration.PreflightContext.CheckIn,
+                    Request.Form[Integration.ReceiptPreflightPage.OverrideField], Button1.ClientID, out warn, out pr);
+            }
+            catch { return true; }   // ตัวตรวจพังต้องไม่หยุดหน้าร้าน
+        }
+
         public string createReceipt(string Reservation_ID, double Total_Amount,DataTable dtReserve,bool IsDeposit,DateTime docDate,bool etax)
         {
             // Safety: ตรวจสอบว่าชำระครบแล้ว → ต้องไม่เป็นมัดจำ
@@ -4981,6 +5042,9 @@ namespace Take_Time_BangPhra
                             "VALUES (@Number, @ReceiptID, @ProductTypeID, @ProductID," +
                             "@ProductData, @ProductAmount, @ProductUnit, @PricePerPiece, @PriceAmount)",
                             detailParams);
+                        string lineKind;
+                        if (calculatedAmount < 0 && _pfLineKinds.TryGetValue(dtReserve.Rows[i], out lineKind))
+                            Integration.ReceiptPreflight.SaveLineKind(conn, ReceiptID, dtReserve.Rows[i]["Number"].ToString(), lineKind);   // PHASE19_37
                     }
 
                     // ตรวจสอบว่ายอดรวมตรงกัน

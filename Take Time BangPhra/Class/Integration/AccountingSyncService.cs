@@ -743,7 +743,17 @@ namespace Take_Time_BangPhra.Integration
             decimal depositApplied = 0, string customerPhone = null)
         {
             if (!_config.IsConfigured) return -1;
-            if (totalAmount <= 0) return -1;  // กันใบเสร็จยอด 0/ติดลบ ไม่ให้เข้า queue (จะ fail ที่ processor)
+            RefreshPreventionSwitch();
+            if (totalAmount <= 0)
+            {
+                // กันใบเสร็จยอด 0/ติดลบ ไม่ให้เข้า queue (จะ fail ที่ processor) — PHASE19_37: บอกชัด ไม่ทิ้งเงียบ
+                // (ตรวจรายคืนจับต่อ: ใบยอด ≤ 0 ที่การจองมีมัดจำแต่ไม่มีรายการตัดมัดจำ = ZERO_TOTAL)
+                if (QueueErrors.Enabled)
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"EnqueueReceipt: receipt={receiptNumber} #{reservationId} ยอด {totalAmount:N2} ≤ 0 → ไม่ส่งเข้า NextAcc " +
+                        (isDeposit ? "(ใบมัดจำยอด 0 — ตรวจยอด)" : "(ถ้ามัดจำครอบคลุมทั้งหมด มัดจำต้องถูกตัดด้วยรายการเช็คเอาท์ CLEAR_DEPOSIT_AT_CHECKOUT)"), "SYSTEM");
+                return -1;
+            }
 
             var payload = new Dictionary<string, object>
             {
@@ -773,7 +783,10 @@ namespace Take_Time_BangPhra.Integration
             if (existing > 0)
             {
                 if (TryRefreshQueuePayload(existing, payload, $"CREATE_RECEIPT_DOCUMENT receipt={receiptNumber}"))
+                {
+                    ApplyEnqueuePreflight(existing, receiptNumber);   // PHASE19_37: แก้ใบ = ตรวจใหม่ (ผ่าน = PENDING / ไม่ผ่าน = พักพร้อมเหตุ)
                     return existing;
+                }
 
                 // PROCESSING = กำลังยิงอยู่ แก้ payload ไม่ได้ → ถ้าข้อมูลเหมือนเดิมก็จบ
                 // ต่างกัน = ผู้ใช้แก้จริง ต้องเข้าคิวใหม่ (edit flow มี VOID นำหน้าอยู่แล้ว)
@@ -806,6 +819,8 @@ namespace Take_Time_BangPhra.Integration
             }
 
             long queued = InsertQueue("RECEIPT", reservationId, "CREATE_RECEIPT_DOCUMENT", payload);
+            SupersedeOlderReceiptCreates(queued, receiptNumber);   // PHASE19_37: แถวเก่าที่ยังไม่ส่งของใบเดียวกัน = ถูกแทน
+            ApplyEnqueuePreflight(queued, receiptNumber);         // PHASE19_37: ตรวจก่อนส่ง (กฎชุดเดียวกับหน้าเว็บ/worker)
             // ตรวจสลิป (PHASE19_34): สลิปที่ผูกใบนี้ยังไม่ผ่าน (ไม่ตรง/ซ้ำ/ผู้รับผิด ไม่มี override) → AWAITING_SLIP (worker ข้ามเอง)
             Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.HoldQueueIfSlipBlocked(_connectionString, queued, receiptNumber);
             return queued;
@@ -2528,7 +2543,7 @@ namespace Take_Time_BangPhra.Integration
                     || FindAnyStockQueueEntry("STOCK_OUT_REASON_JOURNAL", AccountingDataMapper.LegacyStockOutRef(rowId), out st, out resp) > 0)
                 {
                     if (st == "PROCESSING")
-                        throw new Exception($"StockOutReverse {refStr}: คิวลงบัญชีต้นฉบับ ({createRef}) กำลังทำงาน — รอให้เสร็จแล้ว retry");
+                        throw QueueErrors.Wait($"StockOutReverse {refStr}: คิวลงบัญชีต้นฉบับ ({createRef}) กำลังทำงาน — รอให้เสร็จแล้ว retry");
                     if (st == "COMPLETED") Guid.TryParse(resp ?? "", out jid);
                     // PENDING/FAILED: ตัวสร้างจะเห็น Is_Reversed=1 แล้วข้ามเอง (ReadStockOutRowState) → ไม่มีอะไรให้กลับ
                 }
@@ -2711,7 +2726,7 @@ namespace Take_Time_BangPhra.Integration
             {
                 // ยังไม่ map → sync product master ก่อน แล้ว retry รอบหน้า
                 EnqueueProductSync(productId);
-                throw new Exception($"StockQtyPush: product {productId} ยังไม่ map กับ NextAcc — enqueue product sync แล้ว retry");
+                throw QueueErrors.Wait($"StockQtyPush: product {productId} ยังไม่ map กับ NextAcc — enqueue product sync แล้ว retry", null, 10);
             }
 
             var req = new StockAdjustmentRequest
@@ -5055,6 +5070,10 @@ namespace Take_Time_BangPhra.Integration
                 return 0;
             }
 
+            // PHASE19_37: เปิด/ปิดการจำแนกชนิดปัญหาตามโหมดตัวตรวจ + cache งวดบัญชี/เดือนภาษี (รายชั่วโมง)
+            RefreshPreventionSwitch();
+            try { await RefreshPeriodStatusIfDueAsync().ConfigureAwait(false); } catch { }
+
             // Cleanup orphaned PROCESSING items — worker ตายกลางคัน/timeout ให้กลับเป็น PENDING
             // ⚠ ต้องวัดจาก Processing_Started (เวลาที่เริ่มยิง) ไม่ใช่ Created_Date:
             //   ของเดิมใช้ Created_Date → รายการที่สร้างไว้นานแล้วและ "กำลังยิงอยู่จริง ๆ" จะถูก
@@ -5162,6 +5181,17 @@ namespace Take_Time_BangPhra.Integration
                         catch { }
                         continue;
                     }
+
+                    // PHASE19_37: ยิงจากข้อมูลใบ "ปัจจุบัน" ไม่ใช่ snapshot ตอนเข้าคิว (ยอด/VAT/แหล่งเงิน/ผู้ซื้อ/ยอดหักมัดจำ)
+                    bool receiptGone;
+                    payload = RebuildReceiptPayloadAtClaim(queueId, payload, out receiptGone);
+                    if (receiptGone)
+                    {
+                        UpdateQueueStatus(queueId, "COMPLETED",
+                            "ข้าม: ใบเสร็จถูกลบ/ยกเลิกก่อนส่ง NextAcc และยังไม่เคยมีเอกสาร — ไม่มีอะไรให้สร้าง", "SKIPPED_RECEIPT_GONE");
+                        processed++;
+                        continue;
+                    }
                 }
 
                 // Idempotency-Key ของ POST สร้างรายการทุกตัวในรายการนี้ผูกกับ "แถวคิวนี้" (retry แถวเดิม = คีย์เดิม →
@@ -5227,6 +5257,12 @@ namespace Take_Time_BangPhra.Integration
                     UpdateQueueStatus(queueId, "FAILED", parseMsg, null);
                     IncrementRetry(queueId, _config.MaxRetries);   // ตรึงไว้ ไม่ให้ retry อัตโนมัติ
                     _code.Logs(_connectionString, "AccountingSync", parseMsg, "SYSTEM");
+                    if (QueueErrors.Enabled)
+                    {
+                        PinDead(queueId);
+                        MarkQueueIssue(queueId, SyncIssueClass.Duplicate, "RESPONSE_UNREADABLE", null);
+                        PinPayloadNoRebuild(queueId, payload);   // Retry ภายหลังต้องยิง body/คีย์เดิม (NextAcc replay ไม่สร้างซ้ำ)
+                    }
                 }
                 catch (ServerUnavailableException ex)
                 {
@@ -5238,12 +5274,30 @@ namespace Take_Time_BangPhra.Integration
                     _code.Logs(_connectionString, "AccountingSync",
                         $"ProcessQueueAsync halted: NextAcc application is unavailable — รายการที่เหลือคง PENDING ไว้รอรอบถัดไป. {ex.Message}", "SYSTEM");
                 }
+                catch (QueueWaitException wx)
+                {
+                    // PHASE19_37: รอรายการอื่น (ใบมัดจำ/ใบต้นทาง/ขารับ) — ไม่นับ retry, ตื่นเมื่อรายการนั้นสำเร็จ
+                    HandleQueueWait(queueId, actionType, wx);
+                }
+                catch (ArgumentException ex) when (ex is IQueueIssue && QueueErrors.Enabled)
+                {
+                    // PHASE19_37: ข้อมูล/ตั้งค่า/นโยบาย — retry ไม่ช่วย: พักพร้อมชนิด/กฎ/ลิงก์แก้ (ตั้งค่า กลับเข้าคิวเองเมื่อบันทึก mapping)
+                    HandleQueueIssue(queueId, actionType, payload, (IQueueIssue)ex, ex.Message);
+                }
                 catch (ArgumentException ex)
                 {
                     string errorDetail = $"Queue #{queueId} [{actionType}] validation error: {ex.Message}";
                     UpdateQueueStatus(queueId, "FAILED", errorDetail, null);
                     IncrementRetry(queueId, _config.MaxRetries);
                     _code.Logs(_connectionString, "AccountingSync", errorDetail, "SYSTEM");
+                    if (QueueErrors.Enabled)
+                    {
+                        PinDead(queueId);
+                        var av = ApiErrorClassifier.ClassifyMessage(ex.Message);
+                        var cls = av.Class == SyncIssueClass.Unknown || av.Class == SyncIssueClass.Transient ? SyncIssueClass.Data : av.Class;
+                        MarkQueueIssue(queueId, cls, av.Rule ?? "VALIDATION",
+                            ReceiptPreflight.BuildFixUrl(_connectionString, av.FixKind ?? "EDIT_RECEIPT", ReceiptNumberOfPayload(payload)));
+                    }
                 }
                 catch (AccountingApiException ex)
                 {
@@ -5268,6 +5322,33 @@ namespace Take_Time_BangPhra.Integration
 
                     string hint = BuildApiErrorHint(bodyReadable);
                     string errorDetail = $"Queue #{queueId} [{actionType}] API {ex.StatusCode}: {bodyReadable}{hint}";
+                    if (QueueErrors.Enabled)
+                    {
+                        // PHASE19_37: จำแนกจาก ruleCode ก่อน แล้วค่อยข้อความ (ApiErrorClassifier)
+                        var av = ApiErrorClassifier.Classify(ex.StatusCode, bodyReadable);
+                        // 5xx ที่ถึงจุดนี้ (ไม่ใช่ล่มทั้งแอป) = POST สร้างที่ไม่มีคีย์กันซ้ำ/คำตอบไม่ชัด → อาจสร้างไปแล้ว ห้ามยิงซ้ำเอง
+                        if (ex.StatusCode >= 500)
+                            av = new IssueVerdict(SyncIssueClass.Duplicate, av.Rule ?? ("HTTP_" + ex.StatusCode), "NEXTACC");
+                        string rnApi = ReceiptNumberOfPayload(payload);
+                        if (av.Class == SyncIssueClass.Transient)
+                        {
+                            int rc = Convert.ToInt32(row["Retry_Count"]) + 1;
+                            EnsureTransientBudget(queueId);
+                            IncrementRetry(queueId, rc);
+                            UpdateQueueStatus(queueId, "FAILED", errorDetail + "\n↻ จะลองใหม่อัตโนมัติ", null);
+                            MarkQueueIssue(queueId, av.Class, av.Rule, null);
+                        }
+                        else
+                        {
+                            UpdateQueueStatus(queueId, "FAILED", errorDetail, null);
+                            IncrementRetry(queueId, _config.MaxRetries);
+                            PinDead(queueId);
+                            MarkQueueIssue(queueId, av.Class, av.Rule, ReceiptPreflight.BuildFixUrl(_connectionString, av.FixKind, rnApi));
+                            NotifyImmediateIssue(queueId, av.Class, av.Rule, rnApi, bodyReadable);
+                        }
+                        _code.Logs(_connectionString, "AccountingSync", errorDetail, "SYSTEM");
+                        continue;
+                    }
                     UpdateQueueStatus(queueId, "FAILED", errorDetail, null);
                     IncrementRetry(queueId, _config.MaxRetries);
                     _code.Logs(_connectionString, "AccountingSync", errorDetail, "SYSTEM");
@@ -5297,9 +5378,26 @@ namespace Take_Time_BangPhra.Integration
                     else
                     {
                         string errorDetail = $"Queue #{queueId} [{actionType}] error: {ex.Message}{BuildApiErrorHint(ex.Message)}";
-                        int retryCount = Convert.ToInt32(row["Retry_Count"]) + 1;
-                        IncrementRetry(queueId, retryCount);
-                        UpdateQueueStatus(queueId, "FAILED", errorDetail, null);
+                        var gv = QueueErrors.Enabled ? ApiErrorClassifier.ClassifyMessage(ex.Message)
+                                                     : new IssueVerdict(SyncIssueClass.Unknown, null, null);
+                        if (QueueErrors.Enabled && gv.Class != SyncIssueClass.Transient && gv.Class != SyncIssueClass.Unknown)
+                        {
+                            // ข้อความที่ห่อ error ของ NextAcc ไว้ (เช่น §86/4, ไม่พบผังบัญชี, งวดปิด) — retry ไม่ช่วย
+                            string rnG = ReceiptNumberOfPayload(payload);
+                            UpdateQueueStatus(queueId, "FAILED", errorDetail, null);
+                            IncrementRetry(queueId, _config.MaxRetries);
+                            PinDead(queueId);
+                            MarkQueueIssue(queueId, gv.Class, gv.Rule, ReceiptPreflight.BuildFixUrl(_connectionString, gv.FixKind, rnG));
+                            NotifyImmediateIssue(queueId, gv.Class, gv.Rule, rnG, ex.Message);
+                        }
+                        else
+                        {
+                            int retryCount = Convert.ToInt32(row["Retry_Count"]) + 1;
+                            if (QueueErrors.Enabled && gv.Class == SyncIssueClass.Transient) EnsureTransientBudget(queueId);
+                            IncrementRetry(queueId, retryCount);
+                            UpdateQueueStatus(queueId, "FAILED", errorDetail, null);
+                            if (QueueErrors.Enabled) MarkQueueIssue(queueId, gv.Class, gv.Rule, null);
+                        }
                         _code.Logs(_connectionString, "AccountingSync", errorDetail, "SYSTEM");
                     }
                 }
@@ -5402,16 +5500,19 @@ namespace Take_Time_BangPhra.Integration
                 int dead = dt.Rows[0]["Dead"] != DBNull.Value ? Convert.ToInt32(dt.Rows[0]["Dead"]) : 0;
                 int stale = dt.Rows[0]["Stale"] != DBNull.Value ? Convert.ToInt32(dt.Rows[0]["Stale"]) : 0;
                 // ผลตรวจเทียบเอกสาร NextAcc (PHASE19_35) ที่ "พบใหม่" ในรอบเตือนนี้ + ที่ยังเปิดทั้งหมด
-                int recNew = 0, recOpen = 0;
+                int recNew = 0, recOpen = 0, locNew = 0, locOpen = 0;
                 string recSample = null;
                 try
                 {
                     var rf = _code.DatabaseQuerySafe(_connectionString,
                         @"IF OBJECT_ID(N'dbo.Accounting_Reconcile_Finding', N'U') IS NOT NULL
-                          SELECT SUM(CASE WHEN First_Seen >= DATEADD(HOUR, -@h, GETDATE()) THEN 1 ELSE 0 END) AS NewN,
-                                 COUNT(*) AS OpenN,
+                          SELECT SUM(CASE WHEN First_Seen >= DATEADD(HOUR, -@h, GETDATE()) AND Finding_Key NOT LIKE N'LOC:%' THEN 1 ELSE 0 END) AS NewN,
+                                 SUM(CASE WHEN Finding_Key NOT LIKE N'LOC:%' THEN 1 ELSE 0 END) AS OpenN,
                                  (SELECT TOP 1 N'#' + CAST(Reservation_ID AS NVARCHAR(20)) + N' ' + Finding_Type
-                                    FROM dbo.Accounting_Reconcile_Finding WHERE Resolved_At IS NULL ORDER BY First_Seen DESC) AS Sample
+                                    FROM dbo.Accounting_Reconcile_Finding WHERE Resolved_At IS NULL AND Finding_Key NOT LIKE N'LOC:%'
+                                    ORDER BY First_Seen DESC) AS Sample,
+                                 SUM(CASE WHEN First_Seen >= DATEADD(HOUR, -@h, GETDATE()) AND Finding_Key LIKE N'LOC:%' THEN 1 ELSE 0 END) AS LocNewN,
+                                 SUM(CASE WHEN Finding_Key LIKE N'LOC:%' THEN 1 ELSE 0 END) AS LocOpenN
                             FROM dbo.Accounting_Reconcile_Finding WHERE Resolved_At IS NULL",
                         new Dictionary<string, object> { { "@h", Math.Max(1, _config.QueueAlertHours) } });
                     if (rf != null && rf.Rows.Count > 0)
@@ -5419,10 +5520,13 @@ namespace Take_Time_BangPhra.Integration
                         recNew = rf.Rows[0]["NewN"] != DBNull.Value ? Convert.ToInt32(rf.Rows[0]["NewN"]) : 0;
                         recOpen = rf.Rows[0]["OpenN"] != DBNull.Value ? Convert.ToInt32(rf.Rows[0]["OpenN"]) : 0;
                         recSample = rf.Rows[0]["Sample"] == DBNull.Value ? null : rf.Rows[0]["Sample"]?.ToString();
+                        locNew = rf.Columns.Contains("LocNewN") && rf.Rows[0]["LocNewN"] != DBNull.Value ? Convert.ToInt32(rf.Rows[0]["LocNewN"]) : 0;
+                        locOpen = rf.Columns.Contains("LocOpenN") && rf.Rows[0]["LocOpenN"] != DBNull.Value ? Convert.ToInt32(rf.Rows[0]["LocOpenN"]) : 0;
                     }
                 }
                 catch { /* ยังไม่รัน PHASE19_35 */ }
-                if (dead == 0 && stale == 0 && !serverDown && recNew == 0) return;
+                if (dead == 0 && stale == 0 && !serverDown && recNew == 0 && locNew == 0) return;
+                string classDigest = QueueClassDigest();   // PHASE19_37: แยกตามชนิดปัญหา (ใครต้องทำอะไร)
 
                 var sb = new System.Text.StringBuilder();
                 sb.AppendLine("<b>⚠️ คิวบัญชี NextAcc ต้องตรวจสอบ</b>");
@@ -5430,7 +5534,13 @@ namespace Take_Time_BangPhra.Integration
                 if (serverDown)
                     sb.AppendLine("🔴 <b>NextAcc ไม่พร้อมใช้งาน</b> — เซิร์ฟเวอร์ตอบ error ระดับแอป\n     ระบบพักการยิงชั่วคราวและจะยิงต่อเองเมื่อกลับมา");
                 if (dead > 0)
-                    sb.AppendLine($"❌ <b>ล้มเหลวจนหมด retry:</b> {dead} รายการ (ต้องกด Retry เอง)");
+                    sb.AppendLine($"❌ <b>ล้มเหลวจนหมด retry:</b> {dead} รายการ" + (classDigest == null ? " (ต้องกด Retry เอง)" : ""));
+                if (!string.IsNullOrEmpty(classDigest))
+                    sb.AppendLine("   แยกตามชนิด: " + System.Net.WebUtility.HtmlEncode(classDigest)
+                        + "\n     🟧 แก้ข้อมูล = แก้ใบแล้วบันทึก (เข้าคิวเอง) · 🟪 ตั้งค่า = แก้ mapping (เข้าคิวเอง) · 🟦 รอ = รายการอื่นก่อน · 🟥 ใบลดหนี้");
+                if (locNew > 0)
+                    sb.AppendLine($"🔍 <b>ตรวจรายคืน (ยอด/มัดจำ/ใบไม่เข้าคิว/ก่อนยื่น ภ.พ.30) พบใหม่:</b> {locNew} · ค้าง {locOpen}"
+                        + "\n     ดู: Admin → ตั้งค่า → NextAcc → 🩺 ตรวจสุขภาพ (ข้อ 11)");
                 if (stale > 0)
                     sb.AppendLine($"🕐 <b>ค้างคิวเกิน 6 ชม.:</b> {stale} รายการ");
                 if (recNew > 0)
@@ -6378,12 +6488,19 @@ namespace Take_Time_BangPhra.Integration
                 // ต้องถูก resync เป็น "ใบเสร็จมัดจำ" ก่อน) — กัน 21712 ติดลบ + รายได้/VAT ซ้ำ
                 var depState = VerifyDepositBookedOnNextAcc(reservationId);
                 if (depState.PendingSync)
-                    throw new Exception($"SettleReceipt: ใบมัดจำของการจอง #{reservationId} กำลังรอ sync/อนุมัติ — เลื่อนไปรอบถัดไป");
+                    throw QueueErrors.Wait($"SettleReceipt: ใบมัดจำของการจอง #{reservationId} กำลังรอ sync/อนุมัติ — เลื่อนไปรอบถัดไป",
+                        FindUnsentDepositCreate(reservationId));
                 if (depState.AnyDeposit && depState.BookedAmount + 0.01m < depositApplied)
-                    throw new Exception(
+                {
+                    string settleMsg =
                         $"SettleReceipt: มัดจำที่ booked บน NextAcc มี {depState.BookedAmount:N2} แต่ใบนี้จะตัด {depositApplied:N2} — " +
                         $"กรุณากด Retry ใบมัดจำของการจอง #{reservationId} ให้เป็น 'ใบเสร็จมัดจำ' (ตั้งเงินรับล่วงหน้า) ก่อน แล้วใบนี้จะ settle ต่ออัตโนมัติ" +
-                        (depState.UnsyncedReceipts.Count > 0 ? $" [ใบมัดจำ: {string.Join(", ", depState.UnsyncedReceipts)}]" : ""));
+                        (depState.UnsyncedReceipts.Count > 0 ? $" [ใบมัดจำ: {string.Join(", ", depState.UnsyncedReceipts)}]" : "");
+                    // PHASE19_37: ยังมีใบมัดจำรอ sync = รอ (ไม่นับ retry) · ไม่มีแล้ว = เดิม
+                    if (depState.UnsyncedReceipts.Count > 0)
+                        throw QueueErrors.Wait(settleMsg, FindUnsentDepositCreate(reservationId));
+                    throw new Exception(settleMsg);
+                }
 
                 // ✅ ทางหลัก (company endpoints): ตัดมัดจำเป็น "document payment" ของใบกำกับ
                 //    (OverridePaymentAccountId = เงินรับล่วงหน้า → Dr ADVANCE / Cr ลูกหนี้) —
@@ -8636,7 +8753,7 @@ namespace Take_Time_BangPhra.Integration
                 // 3) ใบเสร็จต้องอยู่ใน NextAcc จริง (ยังไม่ void) — ไม่งั้น Cr เงินสดจะไม่มีคู่
                 string syncState;
                 if (!IsReceiptSyncedForOtaReclass(receiptId, out syncState))
-                    throw new Exception($"OTA_CASH_RECLASS: ใบเสร็จ {receiptId} — {syncState} → ยังไม่กลับรายการเงินสด (จะลองใหม่เมื่อใบเสร็จเข้า NextAcc)");
+                    throw QueueErrors.Wait($"OTA_CASH_RECLASS: ใบเสร็จ {receiptId} — {syncState} → ยังไม่กลับรายการเงินสด (จะลองใหม่เมื่อใบเสร็จเข้า NextAcc)", null, 15);
 
                 // บัญชีเงินสด/ธนาคาร: ใช้ค่าที่ส่งไปจริงตอนสร้างใบเสร็จ (payload คิว) ก่อน → ข้อมูลหัวใบเสร็จ
                 string paymentMethod = null, paymentAccountId = null;
@@ -8709,7 +8826,7 @@ namespace Take_Time_BangPhra.Integration
                 bool inPosted = FindRecentCompletedEntry("SECURITY_DEPOSIT", "SECURITY_DEPOSIT_JOURNAL", "refKey", inRef, 315360000) > 0
                                 || await JournalExistsByReferenceAsync(inRef);
                 if (!inPosted)
-                    throw new Exception($"SECURITY_DEPOSIT_JOURNAL {reference}: รอขารับเงินประกัน {inRef} โพสต์ก่อน (จะลองใหม่อัตโนมัติ)");
+                    throw QueueErrors.Wait($"SECURITY_DEPOSIT_JOURNAL {reference}: รอขารับเงินประกัน {inRef} โพสต์ก่อน (จะลองใหม่อัตโนมัติ)", null, 15);
             }
 
             // บัญชีธนาคาร = แหล่งเงินของช่องทางรับโอน (Account_Paid_How.Nexaacc_AccountId) — อ่านสด (แก้ mapping แล้ว Retry ได้)
@@ -8984,6 +9101,9 @@ namespace Take_Time_BangPhra.Integration
             if (_config.IsReceiptDocumentMode && IsWalkInSalesDocPayload(p))
                 return await ProcessWalkInSalesDocumentAsync(p);
 
+            // PHASE19_37: ด่านตรวจก่อนส่ง (กฎชุดเดียวกับหน้าเว็บ/ตอนเข้าคิว) — ข้อมูลผิด/ตั้งค่า/นโยบาย พักทันทีไม่ยิง NextAcc
+            PreflightReceiptInWorker(p.ContainsKey("receiptNumber") ? p["receiptNumber"]?.ToString() : null);
+
             var totalAmount = Convert.ToDecimal(p["totalAmount"]);
             if (totalAmount <= 0)
                 throw new ArgumentException($"Cannot create receipt document: totalAmount is {totalAmount} (must be > 0). Reservation #{p["reservationId"]}");
@@ -9081,7 +9201,7 @@ namespace Take_Time_BangPhra.Integration
                 if (declaredBuyer != null && HasFullBuyerTaxData(declaredBuyer)
                     && !string.Equals(declaredBuyer.ExternalId ?? "", customerContact?.ExternalId ?? "", StringComparison.Ordinal))
                 {
-                    throw new Exception(
+                    throw QueueErrors.Data("A8_BUYER_MISMATCH",
                         $"หยุดออกเอกสารกันผิดชื่อ: ใบเสร็จ {receiptNumber} ระบุผู้ซื้อเป็น "
                         + $"\"{declaredBuyer.Name}\" ({declaredBuyer.Phone}) เลขภาษี {declaredBuyer.TaxId} "
                         + $"แต่ระบบกำลังจะออกเอกสารในนาม \"{customerContact?.Name ?? "-"}\" ({customerContact?.Phone ?? "-"}) "
@@ -9365,11 +9485,14 @@ namespace Take_Time_BangPhra.Integration
                             int enq = EnqueueUnsyncedDeposits(reservationId, customerName);
                             // ไม่มีใบมัดจำเหลือให้ sync เลย = ไม่ใช่ปัญหา "รอ sync" — ยอดหักเกินมัดจำที่รับจริง
                             if (enq == 0 && !csDep.PendingSync && (csDep.UnsyncedReceipts == null || csDep.UnsyncedReceipts.Count == 0))
-                                throw new Exception(DepositExceedsPaidMessage(reservationId, receiptNumber, csDep.BookedAmount, depositApplied,
-                                    DescribeDepositAppliedSource(depSource, depositFromLines)));
-                            throw new Exception(
+                                throw QueueErrors.Data("R04", DepositExceedsPaidMessage(reservationId, receiptNumber, csDep.BookedAmount, depositApplied,
+                                    DescribeDepositAppliedSource(depSource, depositFromLines)), "EDIT_RECEIPT",
+                                    ReceiptPreflight.ReceiptEditUrl(_connectionString, receiptNumber));
+                            // PHASE19_37: รอใบมัดจำขึ้น NextAcc (ไม่นับ retry, ตื่นทันทีเมื่อคิวใบมัดจำสำเร็จ)
+                            throw QueueErrors.Wait(
                                 $"เช็คเอาท์ #{reservationId} (ใบเดียว): ใบมัดจำยังไม่ขึ้น NextAcc (booked {csDep.BookedAmount:N2}, " +
-                                $"ต้องหักมัดจำ {depositApplied:N2}) → auto-enqueue {enq} ใบให้ sync ก่อน — settle หักมัดจำรอบถัดไป receipt={receiptNumber}");
+                                $"ต้องหักมัดจำ {depositApplied:N2}) → auto-enqueue {enq} ใบให้ sync ก่อน — settle หักมัดจำรอบถัดไป receipt={receiptNumber}",
+                                FindUnsentDepositCreate(reservationId));
                         }
                         // !AnyDeposit = ไม่มีใบมัดจำเอกสาร (legacy/ยอดยกมา) → JV กลับกับ 21510 ยกมา (log ด้านล่าง)
                     }
@@ -9537,13 +9660,16 @@ namespace Take_Time_BangPhra.Integration
                             int enq = EnqueueUnsyncedDeposits(reservationId, customerName);
                             // ไม่มีใบมัดจำเหลือให้ sync เลย = ไม่ใช่ปัญหา "รอ sync" — ยอดหักเกินมัดจำที่รับจริง
                             if (enq == 0 && !depState.PendingSync && (depState.UnsyncedReceipts == null || depState.UnsyncedReceipts.Count == 0))
-                                throw new Exception(DepositExceedsPaidMessage(reservationId, receiptNumber, depState.BookedAmount, depositApplied,
-                                    DescribeDepositAppliedSource(depSource, depositFromLines)));
-                            throw new Exception(
+                                throw QueueErrors.Data("R04", DepositExceedsPaidMessage(reservationId, receiptNumber, depState.BookedAmount, depositApplied,
+                                    DescribeDepositAppliedSource(depSource, depositFromLines)), "EDIT_RECEIPT",
+                                    ReceiptPreflight.ReceiptEditUrl(_connectionString, receiptNumber));
+                            // PHASE19_37: รอใบมัดจำขึ้น NextAcc (ไม่นับ retry, ตื่นทันทีเมื่อคิวใบมัดจำสำเร็จ)
+                            throw QueueErrors.Wait(
                                 $"เช็คเอาท์การจอง #{reservationId}: ใบมัดจำยังไม่ขึ้น NextAcc (booked {depState.BookedAmount:N2}, " +
                                 $"ต้องหักมัดจำ {depositApplied:N2}) → auto-enqueue ใบมัดจำ {enq} ใบให้ sync ก่อน — settle หักมัดจำรอบถัดไป" +
                                 (depState.UnsyncedReceipts.Count > 0 ? $" [ใบมัดจำ: {string.Join(", ", depState.UnsyncedReceipts)}]" : "") +
-                                $" receipt={receiptNumber}");
+                                $" receipt={receiptNumber}",
+                                FindUnsentDepositCreate(reservationId));
                         }
 
                         else if (booked)
@@ -9770,9 +9896,11 @@ namespace Take_Time_BangPhra.Integration
             try
             {
                 if (string.IsNullOrEmpty(receiptNumber)) return null;
+                // PHASE19_37: อ่านชนิดบรรทัด (Line_Kind) ถ้ามีคอลัมน์ — ไม่มี = กฎเดิม
+                bool hasKind = ReceiptPreflight.LineKindReady(_connectionString);
                 var dt = _code.DatabaseQuerySafe(_connectionString,
                     @"SELECT D.ProductType_ID, D.Product_ID, D.Product_Data, D.Product_Amount,
-                             D.Price_PerPeice, D.Price_Amount, D.Product_Unit
+                             D.Price_PerPeice, D.Price_Amount, D.Product_Unit" + (hasKind ? ", D.Line_Kind" : "") + @"
                       FROM Account_Receipt_Detail D
                       INNER JOIN Account_Receipt R ON R.ID = D.Receipt_ID
                       WHERE R.ID = @num
@@ -9783,6 +9911,7 @@ namespace Take_Time_BangPhra.Integration
 
                 var lines = new List<AccountingDataMapper.ReceiptLineSpec>();
                 decimal sum = 0;
+                decimal revenueReduction = 0m;   // ส่วนลด/ปรับยอด (Line_Kind DISCOUNT/ADJUSTMENT) — ลดรายได้ ไม่ใช่หักมัดจำ
                 foreach (DataRow row in dt.Rows)
                 {
                     decimal qty = row["Product_Amount"] != DBNull.Value ? Convert.ToDecimal(row["Product_Amount"]) : 1m;
@@ -9792,11 +9921,17 @@ namespace Take_Time_BangPhra.Integration
 
                     sum += amt;
 
-                    // Negative line = deposit application (UI workaround). อย่าส่งเข้า lines ของ mapper
-                    // เพราะจะทำให้ VAT proration ผิด — แยกออกเป็น depositApplied แทน
+                    // Negative line: ตัวจำแนกเดียวกับตัวตรวจก่อนส่ง (ReceiptLineClassifier) — Line_Kind ว่าง = กฎเดิม "หักมัดจำ"
+                    // หักมัดจำ: อย่าส่งเข้า lines ของ mapper เพราะจะทำให้ VAT proration ผิด — แยกออกเป็น depositApplied แทน
                     if (amt < 0)
                     {
-                        depositFromNegativeLines += -amt;
+                        string kind = hasKind && row.Table.Columns.Contains("Line_Kind") && row["Line_Kind"] != DBNull.Value
+                            ? row["Line_Kind"].ToString() : null;
+                        var role = ReceiptLineClassifier.Classify(amt, kind);
+                        if (role == ReceiptLineRole.Discount || role == ReceiptLineRole.Adjustment)
+                            revenueReduction += -amt;
+                        else
+                            depositFromNegativeLines += -amt;
                         continue;
                     }
 
@@ -9817,6 +9952,27 @@ namespace Take_Time_BangPhra.Integration
                 }
 
                 if (lines.Count == 0) return null;
+
+                // ส่วนลด/ปรับยอด (ไม่ใช่มัดจำ) → กระจายลดรายได้ตามสัดส่วนบรรทัด (ยอดสุทธิ = เงินที่ใบนี้รับจริง + มัดจำที่หัก)
+                if (revenueReduction > 0.005m)
+                {
+                    var pl = lines.Select(l => new ProratableLine { Quantity = l.Quantity, Amount = l.Amount, Tag = l }).ToList();
+                    decimal applied = ReceiptLineClassifier.ProrateReduction(pl, revenueReduction);
+                    foreach (var x in pl)
+                    {
+                        var spec = (AccountingDataMapper.ReceiptLineSpec)x.Tag;
+                        if (x.Quantity != spec.Quantity)
+                            spec.Description = (spec.Description ?? "") + $" ({spec.Quantity:0.##} {spec.Unit})";
+                        spec.Quantity = x.Quantity;
+                        spec.Amount = x.Amount;
+                        spec.UnitPrice = x.Quantity > 0 ? Math.Round(x.Amount / x.Quantity, 2) : x.Amount;
+                    }
+                    lines.RemoveAll(l => l.Amount <= 0m);
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"LookupReceiptLines: receipt={receiptNumber} ส่วนลด/ปรับยอด {revenueReduction:N2} (Line_Kind) → ลดรายได้ตามสัดส่วนบรรทัด {applied:N2} (ไม่นับเป็นหักมัดจำ)",
+                        "SYSTEM");
+                    if (lines.Count == 0) return null;
+                }
 
                 // Sanity check: line sum (รวม negatives) ควรใกล้เคียง totalAmount
                 if (Math.Abs(sum - totalAmount) > 0.05m)
@@ -11143,12 +11299,15 @@ namespace Take_Time_BangPhra.Integration
             if (string.IsNullOrEmpty(receiptNumber)) return -1m;
             try
             {
+                // PHASE19_37: บรรทัดติดลบที่ระบุชนิดเป็นส่วนลด/ปรับยอด ไม่ใช่หักมัดจำ (ตัวจำแนกเดียวกับ LookupReceiptLinesEx)
+                string kindFilter = ReceiptPreflight.LineKindReady(_connectionString)
+                    ? " AND (D.Line_Kind IS NULL OR D.Line_Kind NOT IN ('DISCOUNT','ADJUSTMENT'))" : "";
                 var dt = _code.DatabaseQuerySafe(_connectionString,
                     @"SELECT TOP 1 R.Reservation_ID, ISNULL(R.Deposit_Applied_Amount, 0) AS Stored,
                              CASE WHEN R.IsDeposit = 1 THEN 1 ELSE 0 END AS IsDep,
                              (SELECT COUNT(*) FROM Account_Receipt_Detail D WHERE D.Receipt_ID = R.ID) AS LineCount,
                              ISNULL((SELECT SUM(-D.Price_Amount) FROM Account_Receipt_Detail D
-                                      WHERE D.Receipt_ID = R.ID AND D.Price_Amount < 0), 0) AS FromLines
+                                      WHERE D.Receipt_ID = R.ID AND D.Price_Amount < 0" + kindFilter + @"), 0) AS FromLines
                       FROM Account_Receipt R WHERE R.ID = @num",
                     new Dictionary<string, object> { { "@num", receiptNumber } });
                 if (dt == null || dt.Rows.Count == 0) return -1m;
@@ -11939,8 +12098,9 @@ namespace Take_Time_BangPhra.Integration
             if (depChk.PendingSync)
             {
                 // ใบมัดจำยังรอ sync/รออนุมัติบน NextAcc → ยังไม่ตัด ให้ queue retry (FIFO จะสร้าง/อนุมัติก่อน)
-                throw new Exception(
-                    $"ProcessDepositClearing: มัดจำของ Booking #{reservationId} ยังรอ sync/อนุมัติบน NextAcc — เลื่อนไปตัดรอบถัดไป");
+                throw QueueErrors.Wait(
+                    $"ProcessDepositClearing: มัดจำของ Booking #{reservationId} ยังรอ sync/อนุมัติบน NextAcc — เลื่อนไปตัดรอบถัดไป",
+                    FindUnsentDepositCreate(reservationId));
             }
             if (depChk.AnyDeposit && depChk.BookedAmount + 0.01m < depositAmount)
             {
@@ -14139,16 +14299,18 @@ namespace Take_Time_BangPhra.Integration
             try
             {
                 var dt = _code.DatabaseQuerySafe(_connectionString,
+                    // PHASE19_37: รวมแถวที่พักรอตรวจสลิป (AWAITING_SLIP) — แก้ใบ = รีเฟรชแถวที่พักอยู่ ไม่ใส่แถวซ้ำ
                     @"SELECT TOP 1 ID, Status FROM Accounting_Sync_Queue
                       WHERE Entity_Type = @entityType AND Action_Type = @actionType
-                        AND Status IN ('PENDING', 'PROCESSING', 'FAILED')
+                        AND (Status IN ('PENDING', 'PROCESSING', 'FAILED') OR (@slip = 1 AND Status = 'AWAITING_SLIP'))
                         AND Payload LIKE @pattern
                       ORDER BY ID DESC",
                     new Dictionary<string, object>
                     {
                         { "@entityType", entityType },
                         { "@actionType", actionType },
-                        { "@pattern", $"%\"{payloadKey}\":\"{payloadValue}\"%"}
+                        { "@pattern", $"%\"{payloadKey}\":\"{payloadValue}\"%"},
+                        { "@slip", QueueErrors.Enabled ? 1 : 0 }
                     });
                 if (dt?.Rows.Count > 0)
                 {
@@ -14176,14 +14338,16 @@ namespace Take_Time_BangPhra.Integration
             {
                 CaptureOperatorUser(payload);   // ให้ X-Acting-User ตรงกับคนที่กดบันทึกครั้งล่าสุด
                 string json = _serializer.Serialize(payload);
+                // AWAITING_SLIP (PHASE19_34) = พักรอตรวจสลิป: รับข้อมูลใหม่ได้แต่คงสถานะพัก (ปล่อยเมื่อสลิปผ่าน/override)
                 var dt = _code.DatabaseQuerySafe(_connectionString,
                     @"UPDATE Accounting_Sync_Queue
-                      SET Payload = @p, Status = 'PENDING', Retry_Count = 0,
-                          Next_Retry_Date = NULL, Error_Message = NULL
-                      WHERE ID = @id AND Status IN ('PENDING', 'FAILED');
+                      SET Payload = @p, Status = CASE WHEN Status = 'AWAITING_SLIP' THEN 'AWAITING_SLIP' ELSE 'PENDING' END,
+                          Retry_Count = 0, Next_Retry_Date = NULL, Error_Message = NULL
+                      WHERE ID = @id AND Status IN ('PENDING', 'FAILED', 'AWAITING_SLIP');
                       SELECT @@ROWCOUNT AS N;",
                     new Dictionary<string, object> { { "@id", queueId }, { "@p", json } });
                 bool ok = dt != null && dt.Rows.Count > 0 && Convert.ToInt32(dt.Rows[0]["N"]) > 0;
+                if (ok) ResetQueueWaitClock(queueId);
                 if (ok)
                     _code.Logs(_connectionString, "AccountingSync",
                         $"Queue #{queueId} [{logWhat}]: อัปเดต payload ด้วยข้อมูลล่าสุดจากการบันทึกครั้งนี้ (ไม่สร้างรายการซ้ำ)", "SYSTEM");
@@ -14398,6 +14562,9 @@ namespace Take_Time_BangPhra.Integration
                   WHERE ID = @id",
                 parameters);
 
+            // PHASE19_37: สำเร็จ → ปลุกแถวที่ "รอ" รายการนี้ (ใบเช็คเอาท์ที่รอใบมัดจำ ฯลฯ) ให้หยิบในรอบถัดไปทันที
+            if (status == "COMPLETED") WakeWaitersOf(queueId);
+
             // CREATE ใบเสร็จสำเร็จ → บันทึกคู่ลงบนใบเสร็จเลย (จุดเดียวที่ทุกเส้นทางผ่าน)
             if (status == "COMPLETED" && !string.IsNullOrEmpty(nexaaccResponseId))
             {
@@ -14421,8 +14588,11 @@ namespace Take_Time_BangPhra.Integration
 
         private void IncrementRetry(long queueId, int currentRetryCount)
         {
-            // Exponential backoff: 30s, 2m, 8m, 30m, 2h
-            int[] backoffSeconds = { 30, 120, 480, 1800, 7200 };
+            // Exponential backoff: 30s, 2m, 8m, 30m, 2h (PHASE19_37 เปิด: +4h, 6h สำหรับโควตา retry ชั่วคราวที่ขยาย —
+            // NextAcc ขัดข้องไม่กี่ชั่วโมงก็หายเองโดยไม่มีใครต้องกด)
+            int[] backoffSeconds = QueueErrors.Enabled
+                ? new[] { 30, 120, 480, 1800, 7200, 14400, 21600 }
+                : new[] { 30, 120, 480, 1800, 7200 };
             int delayIndex = Math.Min(currentRetryCount - 1, backoffSeconds.Length - 1);
             int delaySec = delayIndex >= 0 ? backoffSeconds[delayIndex] : 30;
 
@@ -14490,6 +14660,7 @@ namespace Take_Time_BangPhra.Integration
                   SET Status = 'PENDING', Retry_Count = 0, Next_Retry_Date = NULL, Error_Message = NULL
                   WHERE ID = @id AND Status NOT IN ('PROCESSING', 'COMPLETED', 'SUPERSEDED', 'CANCELLED')",
                 parameters);
+            if (n > 0) ResetQueueWaitClock(queueId);
             return n > 0;
         }
 

@@ -386,6 +386,12 @@
                  <td class="modal-sm" style="width: 20%; text-align: right">&nbsp;</td>
                 <td>
                     &nbsp;<asp:Button ID="Button2" runat="server" Text="เพิ่ม" Width="75px" OnClick="Button2_Click" />
+                    &nbsp;<asp:DropDownList ID="ddlLineKind" runat="server" ToolTip="ชนิดของบรรทัดติดลบ — ระบบบัญชีใช้แยก 'หักมัดจำ' ออกจาก 'ส่วนลด/ปรับยอด'">
+                        <asp:ListItem Value="" Text="บรรทัดติดลบ: ไม่ระบุ (= หักมัดจำ)" />
+                        <asp:ListItem Value="DEPOSIT_DEDUCTION" Text="บรรทัดติดลบ: หักมัดจำ" />
+                        <asp:ListItem Value="DISCOUNT" Text="บรรทัดติดลบ: ส่วนลด" />
+                        <asp:ListItem Value="ADJUSTMENT" Text="บรรทัดติดลบ: ปรับยอด/ชำระที่อื่นแล้ว" />
+                    </asp:DropDownList>
                  </td>
             
             </tr>
@@ -403,6 +409,7 @@
                              <asp:BoundField DataField="Product_Unit" HeaderText="หน่วย" />
                              <asp:BoundField DataField="Price_PerPeice" HeaderText="ราคาต่อหน่วย" />
                              <asp:BoundField DataField="Price_Amount" HeaderText="จำนวนเงินรวม" />
+                             <asp:BoundField DataField="Line_Kind" HeaderText="ชนิดบรรทัดติดลบ" />
                              <asp:CommandField ShowDeleteButton="True" ButtonType="Button" />
                          </Columns>
                      </asp:GridView>
@@ -449,6 +456,8 @@
             <tr>
                  <td class="modal-sm" style="width: 20%; text-align: right">&nbsp;</td>
                 <td>
+                    &nbsp;<asp:TextBox ID="txtEditReason" runat="server" Width="45%" MaxLength="500"
+                        placeholder="เหตุผลการแก้ไข / ยืนยันข้ามการตรวจ (จำเป็นเมื่อแก้ยอด มัดจำ วันที่ แหล่งเงิน)"></asp:TextBox>
                     &nbsp;<asp:Button ID="Button3" runat="server" Text="บันทึก" Width="100px" Height="33px" OnClick="Button3_Click" />
                  </td>
             </tr>

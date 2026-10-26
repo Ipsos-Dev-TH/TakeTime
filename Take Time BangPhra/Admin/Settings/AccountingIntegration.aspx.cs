@@ -308,12 +308,100 @@ namespace Take_Time_BangPhra.Admin.Settings
                 case "lineDailyLog":
                     result = GetDailyLineLog();
                     break;
+                // ── PHASE19_37 กันคิวค้าง ──
+                case "recheckItem":
+                    result = RecheckQueueItem();
+                    break;
+                case "setPreflightMode":
+                    result = SetPreflightMode();
+                    break;
+                case "preflightScan":
+                    result = RunPreflightScan();
+                    break;
+                case "integrityScan":
+                    result = RunIntegrityScanNow();
+                    break;
                 default:
                     result = new Dictionary<string, object> { { "success", false }, { "message", "Unknown action" } };
                     break;
             }
 
+            AfterConfigChangeRequeue(action, result);
             WriteJson(result);
+        }
+
+        /// <summary>PHASE19_37: แก้ mapping/แหล่งเงิน/Sync บัญชี สำเร็จ (หรือตรวจสุขภาพแล้วไม่มีข้อผิดพลาด) → แถวที่พักเพราะ "ตั้งค่า" กลับเข้าคิวเอง</summary>
+        private void AfterConfigChangeRequeue(string action, Dictionary<string, object> result)
+        {
+            try
+            {
+                var acts = new HashSet<string> { "updateMapping", "updatePaidHowAccount", "updatePaidTypeAccount", "syncAccounts",
+                                                 "syncWallets", "saveGatewayPaidHow", "saveOtaChannelMap", "healthCheck" };
+                if (result == null || !acts.Contains(action ?? "")) return;
+                object ok;
+                if (!result.TryGetValue("success", out ok) || !(ok is bool) || !(bool)ok) return;
+                if (action == "healthCheck")
+                {
+                    object iss;
+                    var list = result.TryGetValue("issues", out iss) ? iss as List<Dictionary<string, object>> : null;
+                    if (list != null && list.Any(i => i.ContainsKey("level") && (i["level"] as string) == "error")) return;
+                }
+                int n = new Integration.AccountingSyncService(ConnStr).RequeueConfigHeld();
+                if (n > 0 && result.ContainsKey("message"))
+                    result["message"] = (result["message"]?.ToString() ?? "") + $" · ↻ คืนรายการที่พักเพราะการตั้งค่า {n} รายการเข้าคิว";
+                else if (n > 0) result["requeued"] = n;
+            }
+            catch { }
+        }
+
+        private Dictionary<string, object> RecheckQueueItem()
+        {
+            long queueId;
+            long.TryParse(Request.QueryString["queueId"] ?? "0", out queueId);
+            if (queueId <= 0) return new Dictionary<string, object> { { "success", false }, { "message", "ไม่พบรายการคิว" } };
+            if (Session["User"]?.ToString() != "Owner" && IsSensitiveQueueItem(queueId))
+                return new Dictionary<string, object> { { "success", false }, { "message", "ไม่มีสิทธิ์ดำเนินการกับรายการเงินเดือน" } };
+            var r = new Integration.AccountingSyncService(ConnStr).RecheckQueueItem(queueId);
+            return new Dictionary<string, object> { { "success", r.requeued }, { "message", r.message } };
+        }
+
+        /// <summary>โหมดตัวตรวจก่อนส่ง OFF | WARN | BLOCK — Owner หรือ Admin ที่มีสิทธิ์บัญชี (บันทึกผู้เปลี่ยนใน Logs)</summary>
+        private Dictionary<string, object> SetPreflightMode()
+        {
+            if (!Integration.ReceiptPreflight.CanOverrideCurrentUser())
+                return new Dictionary<string, object> { { "success", false }, { "message", "เฉพาะ Owner / Admin ที่มีสิทธิ์บัญชี" } };
+            string mode = (Request.QueryString["mode"] ?? "").Trim().ToUpperInvariant();
+            if (mode != "OFF" && mode != "WARN" && mode != "BLOCK")
+                return new Dictionary<string, object> { { "success", false }, { "message", "โหมดต้องเป็น OFF / WARN / BLOCK" } };
+            var cfg = new Integration.AccountingConfig(ConnStr);
+            string cur = cfg.GetConfigValue("Nexaacc_Preflight_Mode", "OFF");
+            cfg.SetConfig("Nexaacc_Preflight_Mode", mode);
+            string who = Session["UserName"]?.ToString() ?? Session["User"]?.ToString() ?? "?";
+            _code.Logs(ConnStr, "AccountingConfig", $"โหมดตัวตรวจก่อนส่ง Nexaacc_Preflight_Mode {cur} → {mode} โดย {who}", who);
+            string note = Integration.ReceiptPreflight.QueueSchemaReady(ConnStr) ? "" : " (⚠ ยังไม่ได้รัน PHASE19_37 — มีผลหลังรัน migration)";
+            return new Dictionary<string, object> { { "success", true }, { "message", $"ตั้งโหมดตัวตรวจก่อนส่ง = {mode}{note}" } };
+        }
+
+        private Dictionary<string, object> RunPreflightScan()
+        {
+            int days;
+            if (!int.TryParse(Request.QueryString["days"] ?? "30", out days) || days < 1) days = 30;
+            if (days > 120) days = 120;
+            var r = new Integration.AccountingSyncService(ConnStr).PreflightScan(days);
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"ตรวจใบเสร็จย้อนหลัง {days} วัน: {r.scanned} ใบ (ไม่ยิง NextAcc)");
+            if (r.byRule.Count == 0) sb.AppendLine("ไม่พบปัญหาตามกฎ");
+            foreach (var kv in r.byRule.OrderByDescending(x => x.Value)) sb.AppendLine($"  {kv.Key}: {kv.Value} ใบ");
+            if (r.samples.Count > 0) { sb.AppendLine(); sb.AppendLine("ตัวอย่าง:"); foreach (var s in r.samples) sb.AppendLine("  " + s); }
+            return new Dictionary<string, object> { { "success", true }, { "message", sb.ToString() } };
+        }
+
+        private Dictionary<string, object> RunIntegrityScanNow()
+        {
+            if (!Integration.ReceiptPreflight.CanOverrideCurrentUser())
+                return new Dictionary<string, object> { { "success", false }, { "message", "เฉพาะ Owner / Admin ที่มีสิทธิ์บัญชี" } };
+            string s = new Integration.AccountingSyncService(ConnStr).RunLocalIntegrityScan();
+            return new Dictionary<string, object> { { "success", true }, { "message", s } };
         }
 
         private void HandlePost()
@@ -372,6 +460,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                     break;
             }
 
+            AfterConfigChangeRequeue(action, result);
             WriteJson(result);
         }
 
@@ -1141,7 +1230,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                       FROM Accounting_Sync_Queue
                       GROUP BY Status", null);
 
-                int pending = 0, processing = 0, completed = 0, failed = 0;
+                int pending = 0, processing = 0, completed = 0, failed = 0, awaitingSlip = 0;
                 if (summary != null)
                 {
                     foreach (DataRow row in summary.Rows)
@@ -1154,18 +1243,42 @@ namespace Take_Time_BangPhra.Admin.Settings
                             case "PROCESSING": processing = cnt; break;
                             case "COMPLETED": completed = cnt; break;
                             case "FAILED": failed = cnt; break;
+                            case "AWAITING_SLIP": awaitingSlip = cnt; break;   // PHASE19_34 พักรอตรวจสลิป
                         }
                     }
+                }
+
+                // PHASE19_37: ชนิดปัญหารายแถว (ไม่มีคอลัมน์ = ไม่แสดง)
+                bool hasIssueCols = Integration.ReceiptPreflight.QueueSchemaReady(ConnStr);
+                var classCounts = new Dictionary<string, object>();
+                if (hasIssueCols)
+                {
+                    try
+                    {
+                        var cc = _code.DatabaseQuerySafe(ConnStr,
+                            @"SELECT Error_Class, COUNT(*) AS N FROM Accounting_Sync_Queue
+                              WHERE Error_Class IS NOT NULL AND (Status = 'FAILED' OR (Status = 'PENDING' AND Error_Class = 'WAIT'))
+                              GROUP BY Error_Class", null);
+                        if (cc != null) foreach (DataRow r in cc.Rows) classCounts[r["Error_Class"].ToString()] = Convert.ToInt32(r["N"]);
+                    }
+                    catch { }
                 }
 
                 // Build WHERE clause for status filter
                 string whereClause = "";
                 var queryParams = new Dictionary<string, object>();
-                var validStatuses = new HashSet<string> { "PENDING", "PROCESSING", "COMPLETED", "FAILED" };
+                var validStatuses = new HashSet<string> { "PENDING", "PROCESSING", "COMPLETED", "FAILED", "AWAITING_SLIP" };
+                string classFilter = (Request.QueryString["cls"] ?? "").Trim().ToUpperInvariant();
                 if (!string.IsNullOrEmpty(statusFilter) && validStatuses.Contains(statusFilter.ToUpper()))
                 {
                     whereClause = "WHERE Status = @statusFilter";
                     queryParams["@statusFilter"] = statusFilter.ToUpper();
+                }
+                else if (hasIssueCols && Integration.QueueErrors.Parse(classFilter) != null)
+                {
+                    // ชนิดปัญหาที่ยังเปิดอยู่ (ล้ม/รอ)
+                    whereClause = "WHERE Error_Class = @cls AND (Status = 'FAILED' OR (Status = 'PENDING' AND Error_Class = 'WAIT'))";
+                    queryParams["@cls"] = classFilter;
                 }
 
                 // Get total count for pagination
@@ -1185,6 +1298,11 @@ namespace Take_Time_BangPhra.Admin.Settings
                 };
                 if (queryParams.ContainsKey("@statusFilter"))
                     itemParams["@statusFilter"] = queryParams["@statusFilter"];
+                if (queryParams.ContainsKey("@cls"))
+                    itemParams["@cls"] = queryParams["@cls"];
+                string issueCols = hasIssueCols
+                    ? ", Error_Class, Error_Rule, Fix_Url, Depends_On_Queue_Id, Wait_Since"
+                    : ", CAST(NULL AS NVARCHAR(20)) AS Error_Class, CAST(NULL AS NVARCHAR(40)) AS Error_Rule, CAST(NULL AS NVARCHAR(400)) AS Fix_Url, CAST(NULL AS BIGINT) AS Depends_On_Queue_Id, CAST(NULL AS DATETIME) AS Wait_Since";
 
                 // Detect optional doc-cache columns (PHASE12 Migration 14)
                 DataTable colCheck = _code.DatabaseQuerySafe(ConnStr,
@@ -1210,7 +1328,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                 DataTable items = _code.DatabaseQuerySafe(ConnStr,
                     $@"SELECT ID, Entity_Type, Entity_ID, Action_Type, Status,
                               Retry_Count, Max_Retries, Error_Message, Created_Date, Payload,
-                              Nexaacc_Response_Id{docCacheCols}{verifyCols}
+                              Nexaacc_Response_Id{docCacheCols}{verifyCols}{issueCols}
                        FROM Accounting_Sync_Queue
                        {whereClause}
                        ORDER BY Created_Date DESC
@@ -1298,6 +1416,12 @@ namespace Take_Time_BangPhra.Admin.Settings
                             { "nexaaccUrl", mask ? "" : nexaaccUrl },
                             { "verifyStatus", mask ? "" : (row.Table.Columns.Contains("Verify_Status") && row["Verify_Status"] != DBNull.Value ? row["Verify_Status"].ToString() : "") },
                             { "verifyDetail", mask ? "" : (row.Table.Columns.Contains("Verify_Detail") && row["Verify_Detail"] != DBNull.Value ? row["Verify_Detail"].ToString() : "") },
+                            // PHASE19_37: ชนิดปัญหา / กฎ / ลิงก์ "แก้ที่นี่" / รายการที่รอ
+                            { "errorClass", row["Error_Class"] == DBNull.Value ? "" : row["Error_Class"].ToString() },
+                            { "errorRule", mask || row["Error_Rule"] == DBNull.Value ? "" : row["Error_Rule"].ToString() },
+                            { "fixUrl", mask || row["Fix_Url"] == DBNull.Value ? "" : row["Fix_Url"].ToString() },
+                            { "dependsOn", row["Depends_On_Queue_Id"] == DBNull.Value ? 0L : ToLongSafe(row["Depends_On_Queue_Id"]) },
+                            { "waitSince", row["Wait_Since"] == DBNull.Value ? "" : Convert.ToDateTime(row["Wait_Since"]).ToString("dd/MM HH:mm") },
                             // ⚠ ใช้ mask ไม่ใช่ isSensitive: หน้าเว็บซ่อน "ปุ่มทั้งแถว" เมื่อค่านี้เป็น true
                             //   เดิมส่ง isSensitive → แถวเงินเดือนไม่มีปุ่ม Retry/Log **แม้แต่เจ้าของระบบ**
                             //   ทั้งที่การปกปิดควรซ่อน "ข้อมูล" จากคนที่ไม่มีสิทธิ์ ไม่ใช่ริบ "เครื่องมือ"
@@ -1334,6 +1458,10 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "processing", processing },
                     { "completed", completed },
                     { "failed", failed },
+                    { "awaitingSlip", awaitingSlip },
+                    { "classCounts", classCounts },
+                    { "hasIssueCols", hasIssueCols },
+                    { "preflightMode", Integration.ReceiptPreflight.CurrentMode(ConnStr).ToString().ToUpperInvariant() },
                     { "items", itemList },
                     { "page", page },
                     { "pageSize", pageSize },
@@ -2142,6 +2270,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                 // ── 10) ตัวตรวจเทียบเอกสาร NextAcc ↔ ใบเสร็จ (PHASE19_35): เอกสารซ้ำ/กำพร้า/void ค้าง ที่ยังไม่ปิด ─────
                 AppendReconcileHealthIssues(add);
 
+                // ── 11) ตัวตรวจก่อนส่ง/ชนิดปัญหาคิว (PHASE19_37): โหมด, รายการค้างรายชนิด, ตัวชี้วัด 14 วัน, ผลตรวจรายคืน ─────
+                Integration.AccountingSyncService.AppendQueuePreventionHealth(ConnStr, add);
+
                 return new Dictionary<string, object>
                 {
                     { "success", true },
@@ -2178,10 +2309,11 @@ namespace Take_Time_BangPhra.Admin.Settings
                     var f = _code.DatabaseQuerySafe(ConnStr,
                         @"SELECT TOP 15 Reservation_ID, Finding_Type, ISNULL(Receipt_Number, '') AS Rn, ISNULL(Nexaacc_Doc_Number, '') AS DocNo,
                                  ISNULL(Amount, 0) AS Amt, First_Seen
-                          FROM Accounting_Reconcile_Finding WHERE Resolved_At IS NULL
+                          FROM Accounting_Reconcile_Finding WHERE Resolved_At IS NULL AND Finding_Key NOT LIKE N'LOC:%'
                           ORDER BY CASE WHEN Finding_Type IN ('ORPHAN_SUPERSEDED', 'DUPLICATE', 'VOID_STUCK') THEN 0 ELSE 1 END, First_Seen DESC", null);
+                    // คีย์ LOC: = ผลตรวจรายคืนแบบไม่เรียก API (PHASE19_37) — แสดงในข้อ 11
                     var c = _code.DatabaseQuerySafe(ConnStr,
-                        "SELECT COUNT(*) AS N, COUNT(DISTINCT Reservation_ID) AS R FROM Accounting_Reconcile_Finding WHERE Resolved_At IS NULL", null);
+                        "SELECT COUNT(*) AS N, COUNT(DISTINCT Reservation_ID) AS R FROM Accounting_Reconcile_Finding WHERE Resolved_At IS NULL AND Finding_Key NOT LIKE N'LOC:%'", null);
                     int n = c != null && c.Rows.Count > 0 ? Convert.ToInt32(c.Rows[0]["N"]) : 0;
                     int rr = c != null && c.Rows.Count > 0 ? Convert.ToInt32(c.Rows[0]["R"]) : 0;
                     if (n > 0 && f != null)

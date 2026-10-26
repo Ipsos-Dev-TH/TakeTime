@@ -650,8 +650,9 @@ namespace Take_Time_BangPhra.Integration
                     notIn = " AND Finding_Key NOT IN (" + string.Join(",", names) + ")";
                 }
                 _code.DatabaseInsertSafe(_connectionString,
+                    // คีย์ LOC: = ผลตรวจรายคืนแบบไม่เรียก API (PHASE19_37) — ปิดโดยตัวตรวจนั้นเอง ไม่ใช่ตัวตรวจเทียบนี้
                     @"UPDATE Accounting_Reconcile_Finding SET Resolved_At = GETDATE(), Resolved_Note = N'ไม่พบในการตรวจเทียบล่าสุด'
-                      WHERE Reservation_ID = @r AND Resolved_At IS NULL" + notIn, prm);
+                      WHERE Reservation_ID = @r AND Resolved_At IS NULL AND Finding_Key NOT LIKE N'LOC:%'" + notIn, prm);
             }
             catch (Exception ex)
             {

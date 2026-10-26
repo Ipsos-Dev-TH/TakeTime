@@ -1220,6 +1220,23 @@
                 <div class="queue-stat" onclick="filterByStatus('PROCESSING')" id="qsProcessingCard"><div class="num num-processing" id="qsProcessing">-</div><div class="lbl">Processing</div></div>
                 <div class="queue-stat" onclick="filterByStatus('COMPLETED')" id="qsCompletedCard"><div class="num num-completed" id="qsCompleted">-</div><div class="lbl">Completed</div></div>
                 <div class="queue-stat" onclick="filterByStatus('FAILED')" id="qsFailedCard"><div class="num num-failed" id="qsFailed">-</div><div class="lbl">Failed</div></div>
+                <div class="queue-stat" onclick="filterByStatus('AWAITING_SLIP')" id="qsSlipCard" title="พักรอตรวจสลิป (PHASE19_34) — ปล่อยเมื่อสลิปผ่าน/อนุมัติ"><div class="num" id="qsSlip" style="color:#8E24AA;">-</div><div class="lbl">รอตรวจสลิป</div></div>
+            </div>
+
+            <!-- PHASE19_37: ชนิดปัญหา (ใครต้องทำอะไร) + โหมดตัวตรวจก่อนส่ง -->
+            <div id="queueClassBar" style="display:none; margin:6px 0 10px; font-size:12.5px;"></div>
+            <div id="preflightBar" style="display:none; margin:0 0 12px; padding:8px 10px; border:1px solid #e5e7eb; border-radius:6px; background:#fafafa; font-size:12.5px;">
+                <b>ตัวตรวจก่อนส่ง:</b>
+                <select id="pfModeSel" style="padding:3px 6px;" onchange="this.dataset.touched='1'">
+                    <option value="OFF">OFF — ปิด (เดิม)</option>
+                    <option value="WARN">WARN — เตือน ไม่บล็อก</option>
+                    <option value="BLOCK">BLOCK — บล็อกปัญหาข้อมูลที่หน้าเว็บ</option>
+                </select>
+                <button type="button" class="btn-default" style="padding:3px 10px;" onclick="savePreflightMode()">บันทึกโหมด</button>
+                <button type="button" class="btn-default" style="padding:3px 10px;" onclick="runPreflightScan()" title="ตรวจใบเสร็จย้อนหลังด้วยกฎ (ไม่ยิง NextAcc) — ใช้ดูก่อนเปลี่ยนเป็น BLOCK">🔎 สแกนย้อนหลัง 30 วัน</button>
+                <button type="button" class="btn-default" style="padding:3px 10px;" onclick="runIntegrityScan()" title="ตรวจยอด/มัดจำ/ใบไม่เข้าคิว/ใบค้างก่อนยื่น ภ.พ.30 (ปกติรันเองทุกคืน)">🧮 ตรวจรายคืนตอนนี้</button>
+                <span style="color:#888;">ปัญหาตั้งค่าไม่บล็อกหน้าร้านทุกโหมด — พักคิวแล้วกลับเข้าคิวเองเมื่อบันทึก mapping</span>
+                <div id="pfResult" style="margin-top:6px;"></div>
             </div>
 
             <div class="queue-toolbar">
@@ -1452,12 +1469,13 @@
 
     <script>
         var pageUrl = '<%= ResolveUrl("~/Admin/Settings/AccountingIntegration") %>';
-        var queueState = { page: 1, pageSize: 20, status: '', totalPages: 1 };
+        var queueState = { page: 1, pageSize: 20, status: '', cls: '', totalPages: 1 };
 
         document.addEventListener('DOMContentLoaded', function () {
             loadConfigData();
             loadQueueData();
             preloadNexaaccAccounts();
+            focusFromQuery();
             document.getElementById('cfgSyncMode').addEventListener('change', updateJourneyMap);
             document.getElementById('cfgReceiptSyncMode').addEventListener('change', updateJourneyMap);
             document.getElementById('cfgVoucherSyncMode').addEventListener('change', updateJourneyMap);
@@ -2315,9 +2333,137 @@
 
         function filterByStatus(status) {
             queueState.status = status;
+            queueState.cls = '';
             queueState.page = 1;
             updateFilterUI();
             loadQueueData();
+        }
+
+        // ── PHASE19_37: ชนิดปัญหาของแถวคิว ──
+        var QCLS = {
+            DATA:      { icon: '🟧', label: 'แก้ข้อมูล', bg: '#FFF3E0', fg: '#E65100' },
+            CONFIG:    { icon: '🟪', label: 'ตั้งค่า', bg: '#F3E5F5', fg: '#6A1B9A' },
+            WAIT:      { icon: '🟦', label: 'รอ', bg: '#E3F2FD', fg: '#1565C0' },
+            POLICY:    { icon: '🟥', label: 'ต้องใบลดหนี้', bg: '#FFEBEE', fg: '#C62828' },
+            DUPLICATE: { icon: '⬛', label: 'ตรวจบน NextAcc', bg: '#ECEFF1', fg: '#263238' },
+            TRANSIENT: { icon: '⬜', label: 'ลองใหม่อัตโนมัติ', bg: '#FAFAFA', fg: '#555' },
+            UNKNOWN:   { icon: '❔', label: 'ไม่ทราบสาเหตุ', bg: '#FAFAFA', fg: '#555' }
+        };
+
+        function filterByClass(cls) {
+            queueState.cls = (queueState.cls === cls) ? '' : cls;
+            queueState.status = '';
+            queueState.page = 1;
+            updateFilterUI();
+            loadQueueData();
+        }
+
+        function renderClassBar(data) {
+            var bar = document.getElementById('queueClassBar');
+            var pf = document.getElementById('preflightBar');
+            if (!bar || !pf) return;
+            if (!data.hasIssueCols) { bar.style.display = 'none'; pf.style.display = 'none'; return; }
+            pf.style.display = 'block';
+            var sel = document.getElementById('pfModeSel');
+            if (sel && data.preflightMode && !sel.dataset.touched) sel.value = data.preflightMode;
+            var cc = data.classCounts || {};
+            var html = '<span style="color:#666;">ค้างตามชนิด: </span>';
+            var any = false;
+            ['DATA', 'CONFIG', 'WAIT', 'POLICY', 'DUPLICATE', 'TRANSIENT', 'UNKNOWN'].forEach(function (k) {
+                var n = cc[k] || 0;
+                if (!n && queueState.cls !== k) return;
+                any = true;
+                var m = QCLS[k];
+                var on = queueState.cls === k;
+                html += '<span onclick="filterByClass(\'' + k + '\')" style="cursor:pointer; display:inline-block; margin:2px 4px; padding:3px 9px; border-radius:12px;'
+                      + ' background:' + m.bg + '; color:' + m.fg + ';' + (on ? ' outline:2px solid ' + m.fg + ';' : '') + '">'
+                      + m.icon + ' ' + m.label + ' <b>' + n + '</b></span>';
+            });
+            if (!any) html += '<span style="color:#2E7D32;">ไม่มีรายการที่ต้องมีคนแก้ ✅</span>';
+            bar.innerHTML = html;
+            bar.style.display = 'block';
+        }
+
+        function classBadge(item) {
+            var c = item.errorClass;
+            if (!c || !QCLS[c]) return '';
+            var m = QCLS[c];
+            var open = item.status === 'FAILED' || (item.status === 'PENDING' && c === 'WAIT');
+            if (!open) return '<div style="font-size:10.5px; color:#999;" title="ชนิดปัญหาที่เคยเกิดกับรายการนี้">เคย: ' + m.label + '</div>';
+            var t = m.icon + ' ' + m.label + (item.errorRule ? ' · ' + escapeHtml(item.errorRule) : '');
+            if (c === 'WAIT' && item.dependsOn) t += ' #' + item.dependsOn;
+            return '<div style="margin-top:3px;"><span style="font-size:11px; padding:2px 7px; border-radius:10px; background:' + m.bg + '; color:' + m.fg + ';"'
+                 + (item.waitSince ? ' title="รอตั้งแต่ ' + escapeHtml(item.waitSince) + '"' : '') + '>' + t + '</span></div>';
+        }
+
+        function fixHereLink(item) {
+            var c = item.errorClass;
+            var open = item.status === 'FAILED' || (item.status === 'PENDING' && c === 'WAIT');
+            if (!open || item.sensitive) return '';
+            if (item.fixUrl && /^\/[A-Za-z]/.test(item.fixUrl))
+                return '<a href="' + escapeHtml(item.fixUrl) + '" target="_blank" class="btn-primary" style="padding:4px 10px; font-size:11px; text-decoration:none; display:inline-block; margin:1px 0;" title="เปิดหน้าที่ต้องแก้">🛠 แก้ที่นี่</a> ';
+            if (c === 'WAIT' && item.dependsOn)
+                return '<button type="button" class="btn-default" style="padding:4px 10px; font-size:11px;" onclick="showItemLogs(' + item.dependsOn + ')" title="ดูรายการที่รอ">รอ #' + item.dependsOn + '</button> ';
+            if (c === 'DUPLICATE' && item.nexaaccUrl)
+                return '<a href="' + item.nexaaccUrl + '" target="_blank" class="btn-default" style="padding:4px 10px; font-size:11px;">ตรวจบน NextAcc</a> ';
+            return '';
+        }
+
+        function recheckItem(queueId) {
+            fetch(pageUrl + '?action=recheckItem&queueId=' + queueId + '&_=' + Date.now())
+                .then(function (r) { return r.json(); })
+                .then(function (data) { alert(data.message || (data.success ? 'คืนเข้าคิวแล้ว' : 'ยังไม่ผ่าน')); loadQueueData(); })
+                .catch(function (err) { alert(err.message); });
+        }
+
+        function savePreflightMode() {
+            var sel = document.getElementById('pfModeSel');
+            var el = document.getElementById('pfResult');
+            var mode = sel ? sel.value : '';
+            if (mode === 'BLOCK' && !confirm('เปลี่ยนเป็น BLOCK: หน้าเช็คอิน/ใบเสร็จจะหยุดบันทึกเมื่อพบปัญหาข้อมูล\n(Owner / Admin บัญชี ยืนยันข้ามได้พร้อมเหตุผล)\n\nแนะนำให้กด "สแกนย้อนหลัง" ดูผลก่อน — ยืนยัน?')) return;
+            fetch(pageUrl + '?action=setPreflightMode&mode=' + encodeURIComponent(mode) + '&_=' + Date.now())
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    el.innerHTML = '<div class="test-result ' + (data.success ? 'success' : 'error') + '" style="display:block;">' + escapeHtml(data.message) + '</div>';
+                    loadQueueData();
+                })
+                .catch(function (err) { el.innerHTML = '<div class="test-result error" style="display:block;">' + escapeHtml(err.message) + '</div>'; });
+        }
+
+        function runPfAction(action, label) {
+            var el = document.getElementById('pfResult');
+            el.innerHTML = '<div class="test-result loading">' + label + '...</div>';
+            fetch(pageUrl + '?action=' + action + '&_=' + Date.now())
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    el.innerHTML = '<pre style="white-space:pre-wrap; word-break:break-word; font-size:11.5px; max-height:320px; overflow:auto; margin:0; padding:8px; border-radius:5px; '
+                                 + (data.success ? 'background:#F4F8FD; border:1px solid #BBDEFB;' : 'background:#FFF5F5; border:1px solid #FFCDD2;') + '">' + escapeHtml(data.message) + '</pre>';
+                })
+                .catch(function (err) { el.innerHTML = '<div class="test-result error" style="display:block;">' + escapeHtml(err.message) + '</div>'; });
+        }
+        function runPreflightScan() { runPfAction('preflightScan&days=30', 'กำลังสแกน'); }
+        function runIntegrityScan() { runPfAction('integrityScan', 'กำลังตรวจ'); }
+
+        // ลิงก์ "แก้ที่นี่" ของคิว: ?focus=mapping&key=ROOM_REVENUE / ?focus=paidHow → เลื่อนไปหัวข้อนั้น + ไฮไลต์
+        function focusFromQuery() {
+            try {
+                var q = new URLSearchParams(window.location.search);
+                var f = q.get('focus');
+                if (!f) return;
+                var target = f === 'paidHow' ? document.getElementById('paidHowTable') : document.getElementById('mappingTable');
+                if (!target) return;
+                setTimeout(function () {
+                    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    target.style.outline = '3px solid #FFB300';
+                    var key = q.get('key');
+                    if (key) {
+                        var rows = target.querySelectorAll('tr');
+                        for (var i = 0; i < rows.length; i++) {
+                            if ((rows[i].textContent || '').indexOf(key) >= 0) { rows[i].style.background = '#FFF8E1'; rows[i].scrollIntoView({ block: 'center' }); break; }
+                        }
+                    }
+                }, 1500);
+            } catch (e) { }
         }
 
         function changePageSize() {
@@ -2335,11 +2481,11 @@
         function updateFilterUI() {
             var cards = {
                 '': 'qsAll', 'PENDING': 'qsPendingCard', 'PROCESSING': 'qsProcessingCard',
-                'COMPLETED': 'qsCompletedCard', 'FAILED': 'qsFailedCard'
+                'COMPLETED': 'qsCompletedCard', 'FAILED': 'qsFailedCard', 'AWAITING_SLIP': 'qsSlipCard'
             };
             for (var key in cards) {
                 var el = document.getElementById(cards[key]);
-                if (el) el.className = 'queue-stat' + (queueState.status === key ? ' active' : '');
+                if (el) el.className = 'queue-stat' + (queueState.status === key && !(key === '' && queueState.cls) ? ' active' : '');
             }
         }
 
@@ -2347,17 +2493,21 @@
             var url = pageUrl + '?action=queueData&page=' + queueState.page
                 + '&pageSize=' + queueState.pageSize
                 + (queueState.status ? '&status=' + queueState.status : '')
+                + (queueState.cls ? '&cls=' + queueState.cls : '')
                 + '&_=' + Date.now();
 
             fetch(url)
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
-                    var total = (data.pending || 0) + (data.processing || 0) + (data.completed || 0) + (data.failed || 0);
+                    var total = (data.pending || 0) + (data.processing || 0) + (data.completed || 0) + (data.failed || 0) + (data.awaitingSlip || 0);
                     document.getElementById('qsTotal').textContent = total;
                     document.getElementById('qsPending').textContent = data.pending || 0;
                     document.getElementById('qsProcessing').textContent = data.processing || 0;
                     document.getElementById('qsCompleted').textContent = data.completed || 0;
                     document.getElementById('qsFailed').textContent = data.failed || 0;
+                    var slipEl = document.getElementById('qsSlip');
+                    if (slipEl) slipEl.textContent = data.awaitingSlip || 0;
+                    renderClassBar(data);
 
                     queueState.page = data.page || 1;
                     queueState.totalPages = data.totalPages || 1;
@@ -2399,13 +2549,14 @@
                 var statusClass = item.status === 'COMPLETED' ? 'status-connected' :
                                   item.status === 'FAILED' ? 'status-error' :
                                   item.status === 'PROCESSING' ? 'status-testing' : 'status-not-configured';
+                var openCls = (item.status === 'FAILED' || (item.status === 'PENDING' && item.errorClass === 'WAIT')) ? item.errorClass : '';
                 var rowStyle = item.sensitive ? ' style="background:#f9f3ff; opacity:0.85;"' : '';
                 html += '<tr' + rowStyle + '>';
                 html += '<td><input type="checkbox" class="queue-check" value="' + item.id + '" onchange="updateSelectedCount()" /></td>';
                 html += '<td>' + item.id + '</td>';
                 html += '<td>' + item.entityType + ' #' + item.entityId + '</td>';
                 html += '<td>' + item.actionType + '</td>';
-                html += '<td><span class="status-badge ' + statusClass + '">' + item.status + '</span></td>';
+                html += '<td><span class="status-badge ' + statusClass + '">' + item.status + '</span>' + classBadge(item) + '</td>';
                 // NextAcc Document column
                 html += '<td>';
                 if (item.nexaaccDocNumber) {
@@ -2442,8 +2593,16 @@
                 if (item.sensitive) {
                     html += '<span style="font-size:11px; color:#999;">🔒</span>';
                 } else {
-                    if (item.status === 'FAILED') {
+                    html += fixHereLink(item);
+                    if (item.status === 'FAILED' && openCls === 'DATA') {
+                        // ข้อมูลผิด: Retry เปล่าไม่ช่วย → ตรวจซ้ำ (คืนเข้าคิวเฉพาะเมื่อผ่าน)
+                        html += '<button type="button" class="btn-primary" style="padding:4px 10px; font-size:11px;" onclick="recheckItem(' + item.id + ')" title="ตรวจข้อมูลใบใหม่ — ผ่านแล้วคืนเข้าคิว">ตรวจซ้ำ</button> ';
+                    } else if (item.status === 'FAILED' && (openCls === 'CONFIG' || openCls === 'POLICY')) {
+                        // ตั้งค่า: กลับเข้าคิวเองเมื่อบันทึก mapping · นโยบาย: ต้องใบลดหนี้ — Retry ซ่อนไว้ (Owner ยังกดได้จากปุ่ม ↻ ยิงใหม่)
+                    } else if (item.status === 'FAILED') {
                         html += '<button type="button" class="btn-primary" style="padding:4px 10px; font-size:11px;" onclick="retryItem(' + item.id + ')" title="Retry"><i class="fas fa-redo"></i></button> ';
+                    } else if (item.status === 'PENDING' && openCls === 'WAIT') {
+                        html += '<button type="button" class="btn-default" style="padding:4px 10px; font-size:11px;" onclick="retryItem(' + item.id + ')" title="ไม่รอรอบตรวจถัดไป — ลองตอนนี้">ตรวจตอนนี้</button> ';
                     }
                     if (item.status === 'COMPLETED' || item.status === 'FAILED') {
                         html += '<button type="button" class="btn-warning" style="padding:4px 10px; font-size:11px;" onclick="resyncItem(' + item.id + ')" title="ยิง API ใหม่ (ลบผลเดิม)"><i class="fas fa-sync-alt"></i></button> ';

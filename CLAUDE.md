@@ -496,6 +496,43 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    บรรทัดติดลบที่เหลือ · `DepositExceedsPaidMessage` บอกที่มา (บรรทัด/คอลัมน์/payload) + วิธีแก้ตามที่มา · ดู PDF: `ViewReceiptDoc.ashx` ต่อ
    `?v={mtime}` กัน browser cache ไฟล์รุ่นก่อนแก้ + Receipt.aspx log ตอน render PDF ล้ม (เดิมกลืนเงียบ). Retry หน้าเอกสาร = enqueue ใหม่จาก DB
    (มี CREATE COMPLETED → `ResyncSingleReceipt` ตามข้อ 19); แก้ใบ = `TryRefreshQueuePayload` แทน payload แถว FAILED เดิม.
+21. **กันคิวค้าง/ล้ม (ต.ค. 2026, PHASE19_37, `Nexaacc_Preflight_Mode` OFF|WARN|BLOCK — seed WARN; ไม่มีคอลัมน์/OFF = เดิมทุกอย่าง):**
+   - **ชนิดปัญหารายแถว** (`Class/Integration/QueueErrors.cs`): `Error_Class` DATA/CONFIG/WAIT/TRANSIENT/POLICY/DUPLICATE/UNKNOWN + `Error_Rule`/`Fix_Url`/
+     `Wait_Since`/`Depends_On_Queue_Id`. `QueueData/Config/PolicyException : ArgumentException` (catch เดิม = ตายทันที), `QueueWaitException` (จับก่อน
+     `catch (Exception)`) → PENDING ไม่นับ retry, `Next_Retry_Date`+N, ตื่นเมื่อแถวที่รอ COMPLETED (`WakeWaitersOf` ใน `UpdateQueueStatus`), เกิน
+     `Nexaacc_Wait_Max_Hours` (48)/ตัวที่รอตายถาวร → FAILED. ตัวช่วย `QueueErrors.Data/Config/Wait()` คืน `Exception` ธรรมดาเมื่อปิด. แปลงจุดโยน: หักมัดจำเกิน
+     (`DepositExceedsPaidMessage`) = DATA R04 · ใบมัดจำยังไม่ขึ้น/รอ sync (2 เส้นเช็คเอาท์, SettleReceipt, DepositClearing) = WAIT ผูกแถวมัดจำ · ผู้ซื้อผิดชื่อ = DATA ·
+     mapping ว่าง (`AccountingDataMapper.GetAccountId/GetAccountCode`) = CONFIG · รอใบต้นทาง/JE ใบลดหนี้, stock reverse/qty, OTA reclass, เงินประกัน OUT = WAIT.
+     API error: `ApiErrorClassifier` ใช้ `data.ruleCode` ก่อน (NextAcc `ExceptionMiddleware.cs:191-198`; RD-ETAX-REACHED-VOID `DocumentService.cs:9570`,
+     RD-50TWI-FILED `:9549`, PP36-CHANGE-AFTER-REMIT `Pp36Lifecycle.cs:54`, SETTLEMENT-ARTIFACT-VOID `:9544`, WHT-INCOME-TYPE `:475`) แล้วข้อความ (86/4,
+     ไม่พบผังบัญชี, งวดปิด `JournalEntryBuilder.cs:140`, ยื่น ภ.พ.30 `IntegrationService.cs:3505`, มัดจำถูกตัดแล้ว `DocumentService.cs:6084`). 408/429/409-idempotency
+     = TRANSIENT (`Nexaacc_Transient_MaxRetries` 10, backoff ถึง 6 ชม.); 5xx ที่ไม่ใช่ล่มทั้งแอป = DUPLICATE (อาจสร้างแล้ว). CONFIG กลับเข้าคิวเอง
+     (`RequeueConfigHeld`) หลัง updateMapping/PaidHow/PaidType/syncAccounts/syncWallets/gateway/OTA map และตรวจสุขภาพที่ไม่มี error.
+   - **ตัวตรวจใบเสร็จ** (`ReceiptPreflight.cs` บริสุทธิ์ + `.Data.cs`): กฎ R01 บรรทัด=หัว · R02 VAT (หน้าเว็บเท่านั้น) · R03 ยอด≤0 (EnqueueReceipt log ชัด) · R04 หักมัดจำ ≤
+     ใบมัดจำที่รับจริง (#149366 4,700 vs 1,500 = Block/HardFail) · R05 "ส่วนลด" ไม่ระบุชนิด · R06 บรรทัดมัดจำคัดลอกซ้ำ · R07 ใบมัดจำ · R08 §86/4 เมื่อขอ e-Tax ·
+     R09 แหล่งเงิน/R10 mapping (CONFIG ไม่บล็อกหน้าร้าน) · R11/R20 แก้ใบที่มีเอกสาร/ใบลดหนี้/เปลี่ยนเลข · R12 งวดปิด/ยื่น ภ.พ.30 (cache `Accounting_Nexaacc_Period_Status`
+     จาก `fiscal-periods` + `tax?taxType=VAT` รายชั่วโมง; ไม่มี cache = เตือนตาม `Nexaacc_Vat_Filing_Day` 15) · R16 ทศนิยม · R17 ผู้ซื้อ. ใช้ที่: `EnqueueReceipt`
+     (`ApplyEnqueuePreflight` — พัก = FAILED+Retry_Count=Max), `ProcessReceiptDocument` ด่านแรก, หน้า `Account/Receipt` (ก่อนเขียน DB), เช็คอิน Reserve
+     (`CheckinReceiptPreflightOk` ก่อน `createReceipt` 3 จุด), สแกนรายคืน. WARN: หน้าเตือน/บันทึกได้ คิวพักเฉพาะ HardFail · BLOCK: หน้าหยุดปัญหาข้อมูล — Owner หรือ Admin
+     ที่มี SYS_ACCOUNTING/FIN_REPORT ยืนยันข้ามด้วยเหตุผล ≥10 ตัว (Receipt: ช่อง `txtEditReason`; เช็คอิน: prompt → `pfOverrideReason`) บันทึก OVERRIDE/BLOCKED.
+     นโยบายข้ามไม่ได้.
+   - **Line_Kind** (`Account_Receipt_Detail`, DEPOSIT_DEDUCTION|DISCOUNT|ADJUSTMENT; NULL = กฎเดิม): `ReceiptLineClassifier` ตัวเดียวกับ `LookupReceiptLinesEx`
+     (DISCOUNT/ADJUSTMENT กระจายลดรายได้ตามสัดส่วน ไม่นับหักมัดจำ) + `RealignDepositAppliedToLines`. เช็คอิน: บรรทัดคัดลอกใบมัดจำ = DEPOSIT_DEDUCTION (แก้บั๊ก
+     `Rows[0]` คัดลอกบรรทัดแรกซ้ำ), "ส่วนลด" ส่วนต่างมัดจำ = ADJUSTMENT เฉพาะเมื่อรับด้วยใบอื่นครบ/การจอง OTA ไม่งั้นว่าง (ให้ R04/R05 ฟ้องคน). หน้าใบเสร็จคงชนิดข้ามการแก้ +
+     dropdown `ddlLineKind`.
+   - **Retry จาก DB**: หยิบแถว CREATE → `RebuildReceiptPayloadAtClaim` (ยอด/VAT/วันที่/มัดจำ/แหล่งเงิน/เบอร์ผู้ซื้อ/ยอดหัก; ข้าม `noRebuild` ที่ปักเมื่ออ่านคำตอบไม่ได้,
+     walk-in, `Nexaacc_Payload_Rebuild=0`); ใบยกเลิก/REC… ไม่พบ + ไม่มีเอกสาร → COMPLETED `SKIPPED_RECEIPT_GONE`. แถว CREATE ใหม่ → แถวเก่าที่ยังไม่ส่ง SUPERSEDED;
+     `FindUnsentEntry` รวม AWAITING_SLIP (รีเฟรชคงสถานะพัก). แก้ใบหน้า Receipt → `OnReceiptEdited`: ไม่มีเอกสาร NextAcc = รีเฟรชคิว (ไม่ใส่ VOID เปล่า, เปลี่ยนเลข = แถวเลขเดิม
+     SUPERSEDED) · มีเอกสาร = VOID→CREATE เดิม · ยอดหักมัดจำ realign หลัง VOID เสมอ. การแก้ที่มีนัยทางบัญชี (หักมัดจำ/ยอด>1฿/ย้ายเดือน/แหล่งเงิน/เลขใบ/ผู้ซื้อหลังมีเอกสาร)
+     ต้องมีเหตุผล → `Account_Receipt_Edit_Log` (ก่อน/หลัง JSON, ผลตรวจ, ทางที่ส่ง).
+   - **หน้าคิว**: ป้ายชนิด + กรองชนิด (`cls=`) + การ์ด AWAITING_SLIP, ปุ่ม "🛠 แก้ที่นี่" (`Fix_Url`: แก้ใบ / `?focus=mapping&key=` / `?focus=paidHow` / ใบลดหนี้), DATA = "ตรวจซ้ำ"
+     (`recheckItem` คืนเข้าคิวเมื่อผ่าน), CONFIG/POLICY ซ่อน Retry, WAIT = "ตรวจตอนนี้"; แถบโหมดตัวตรวจ (`setPreflightMode`, Owner/Admin บัญชี) + `preflightScan` + `integrityScan`.
+   - **รายคืน** (`RunLocalIntegrityScanIfDue` Global.asax, `Nexaacc_Integrity_Hour/Days/Max`, ไม่เรียก API) → `Accounting_Reconcile_Finding` คีย์ `LOC:` (ตัวตรวจเทียบข้อ 19
+     ไม่ปิดคีย์นี้): PREFLIGHT_BLOCK · NOT_ENQUEUED · ZERO_TOTAL (ไม่มี CLEAR_DEPOSIT_AT_CHECKOUT) · DEPOSIT_LEDGER (Reservation.Deposit ≠ ใบมัดจำ) · BALANCE_VS_RECEIPTS ·
+     QUEUE_STUCK · PRE_FILING_GAP (ใบเดือนก่อนยังไม่ขึ้น; Telegram เมื่อเหลือ ≤5 วันถึงวันยื่น) + DATA ที่ผ่านแล้วคืนเข้าคิว. Telegram รอบ 6 ชม. แยกชนิด + แจ้งทันทีเมื่อ POLICY/
+     DATA ของใบเสร็จ (กันซ้ำรายแถว ≤1 ข้อความ/10 นาที). ตรวจสุขภาพข้อ 11: โหมด, ค้างรายชนิด, ผ่านรอบแรก 14 วัน (เป้า ≥95%), หายเอง, ต้องมีคนแก้, บล็อก/ยืนยันข้าม.
+   - ยังไม่ทำ (P2): ป้ายชนิดใน CheckDocument_New/ReserveTable, ตัวตรวจใบสำคัญจ่าย/ใบลดหนี้/เงินเดือน, ตารางตัวชี้วัดรายวัน, resync in-place ตอนแก้ใบที่มีเอกสาร,
+     NextAcc `/document/validate`. ต้อง build+test บน Windows.
 
 ## Queue resilience (ส.ค. 2026 — หลังเคส NextAcc ล่มทั้งแอป)
 

@@ -402,6 +402,16 @@ namespace Take_Time_BangPhra.Account.Report
         protected global::System.Web.UI.WebControls.Button Button3;
 
         /// <summary>
+        /// txtEditReason control (PHASE19_37 — เหตุผลการแก้ใบ / ยืนยันข้ามการตรวจก่อนส่ง).
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtEditReason;
+
+        /// <summary>
+        /// ddlLineKind control (PHASE19_37 — ชนิดบรรทัดติดลบ: หักมัดจำ / ส่วนลด / ปรับยอด).
+        /// </summary>
+        protected global::System.Web.UI.WebControls.DropDownList ddlLineKind;
+
+        /// <summary>
         /// ReportViewer2 control.
         /// </summary>
         /// <remarks>
