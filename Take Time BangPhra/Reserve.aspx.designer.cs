@@ -519,6 +519,15 @@ namespace Take_Time_BangPhra
         protected global::System.Web.UI.WebControls.Literal litChannelInfo;
 
         /// <summary>
+        /// litSlipFirstGuide control (สลิปก่อนยอด — ขั้นตอนย่อย + ยอด/บัญชีที่ต้องโอน).
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Literal litSlipFirstGuide;
+
+        /// <summary>
         /// pnlPolicySection control.
         /// </summary>
         /// <remarks>

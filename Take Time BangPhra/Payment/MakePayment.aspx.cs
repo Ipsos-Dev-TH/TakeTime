@@ -32,6 +32,7 @@ namespace Take_Time_BangPhra.Payment
             {
                 decimal? dueForPreview = null;
                 try { int rid0 = GetReservationId(); if (rid0 > 0) dueForPreview = paymentDataAccess.GetRemainingBalance(rid0); } catch { }
+                _sfDue = dueForPreview;
                 if (Payments.SlipCheck.SlipAmountLockUi.TryHandlePreview(Context, dueForPreview)) return;
                 Payments.SlipCheck.SlipAmountLockUi.BindPreview(this, fuPaymentSlip, txtPaymentAmount, "mpSlipLockMsg");
             }
@@ -41,6 +42,32 @@ namespace Take_Time_BangPhra.Payment
                 LoadPaymentMethods();
                 LoadReservationData();
                 LoadPaymentHistory();
+            }
+        }
+
+        private decimal? _sfDue;
+
+        /// <summary>
+        /// สลิปก่อนยอด (CLAUDE.md ข้อ 18): ค่าตั้งให้สคริปต์หน้า — ช่องทางโอน/QR (กฎเดียวกับด่านบันทึก IsTransferPaidHow) + ยอดคงเหลือ
+        /// ปิดยอดล็อกตามสลิป/ไม่มี PHASE19_34 = {"on":false} → ลำดับและหน้าตาเดิม · เซิร์ฟเวอร์ยังบังคับยอดสลิปตอนบันทึกเหมือนเดิม
+        /// </summary>
+        public string SlipFirstJs
+        {
+            get
+            {
+                try
+                {
+                    if (!Payments.SlipCheck.SlipVerificationService.AmountLockActive) return "{\"on\":false}";
+                    var ids = new System.Collections.Generic.List<string>();
+                    foreach (ListItem it in ddlPaymentMethod.Items)
+                    {
+                        if (string.IsNullOrEmpty(it.Value)) continue;
+                        if (Payments.SlipCheck.SlipVerificationService.IsTransferPaidHow(it.Value, it.Text)) ids.Add(it.Value);
+                    }
+                    decimal due = _sfDue.HasValue && _sfDue.Value > 0m ? decimal.Round(_sfDue.Value, 2) : 0m;
+                    return new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(new { on = ids.Count > 0, transfer = ids, due = due });
+                }
+                catch { return "{\"on\":false}"; }
             }
         }
 

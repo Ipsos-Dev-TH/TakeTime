@@ -31,7 +31,7 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
             {
                 var cs = page.ClientScript;
                 if (!cs.IsClientScriptIncludeRegistered(typeof(SlipAmountLockUi), "slipLockJs"))
-                    cs.RegisterClientScriptInclude(typeof(SlipAmountLockUi), "slipLockJs", page.ResolveUrl("~/Scripts/slip-amount-lock.js?v=36"));
+                    cs.RegisterClientScriptInclude(typeof(SlipAmountLockUi), "slipLockJs", page.ResolveUrl("~/Scripts/slip-amount-lock.js?v=37"));
                 if (!cs.IsStartupScriptRegistered(typeof(SlipAmountLockUi), "slipLockCss"))
                     cs.RegisterStartupScript(typeof(SlipAmountLockUi), "slipLockCss",
                         "(function(){if(document.getElementById('slipLockCss'))return;var s=document.createElement('style');s.id='slipLockCss';s.appendChild(document.createTextNode("
@@ -41,6 +41,55 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
         }
 
         public static string AmountText(decimal v) => v.ToString("0.##", CultureInfo.InvariantCulture);
+
+        /// <summary>
+        /// สลิปก่อนยอด (หน้าจอง/รับชำระ): ใส่ Content/slip-first.css + Scripts/slip-first.js (ครั้งเดียวต่อหน้า)
+        /// css ใส่ผ่านสคริปต์เพราะหน้าที่ใช้มาสเตอร์ไม่มี head ของตัวเอง — ไม่มีไฟล์/สคริปต์ปิด = หน้าตาเดิม (ไม่มีกล่องลากวาง)
+        /// </summary>
+        public static void RegisterSlipFirst(Page page)
+        {
+            if (page == null) return;
+            try
+            {
+                var cs = page.ClientScript;
+                if (!cs.IsClientScriptIncludeRegistered(typeof(SlipAmountLockUi), "slipFirstJs"))
+                    cs.RegisterClientScriptInclude(typeof(SlipAmountLockUi), "slipFirstJs", page.ResolveUrl("~/Scripts/slip-first.js?v=1"));
+                if (!cs.IsClientScriptBlockRegistered(typeof(SlipAmountLockUi), "slipFirstCss"))
+                    cs.RegisterClientScriptBlock(typeof(SlipAmountLockUi), "slipFirstCss",
+                        "(function(){if(document.getElementById('slipFirstCss'))return;var l=document.createElement('link');l.id='slipFirstCss';l.rel='stylesheet';l.href='"
+                        + HttpUtility.JavaScriptStringEncode(page.ResolveUrl("~/Content/slip-first.css?v=1")) + "';document.getElementsByTagName('head')[0].appendChild(l);})();", true);
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// ปุ่มติดต่อเจ้าหน้าที่ (โทร / LINE) จากข้อความ CustomerContactText — ใช้ในการ์ด "สลิปใช้ไม่ได้" ของลูกค้า
+        /// ไม่พบเบอร์/LINE = คืนข้อความติดต่อแบบเดิม (ว่างได้)
+        /// </summary>
+        public static string ContactButtonsHtml()
+        {
+            string text = "";
+            try { text = SlipVerificationService.CustomerContactText() ?? ""; } catch { }
+            text = text.Trim();
+            if (text.Length == 0) return "";
+            var sb = new System.Text.StringBuilder();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(text, @"(?<!\d)0\d[\d\- ]{7,11}\d"))
+            {
+                string digits = System.Text.RegularExpressions.Regex.Replace(m.Value, @"\D", "");
+                if (digits.Length < 9 || digits.Length > 10 || !seen.Add(digits)) continue;
+                sb.Append("<a href=\"tel:").Append(digits).Append("\">📞 โทร ").Append(HttpUtility.HtmlEncode(m.Value.Trim())).Append("</a>");
+            }
+            foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(text, @"@[A-Za-z0-9_.\-]{2,40}"))
+            {
+                if (!seen.Add(m.Value)) continue;
+                sb.Append("<a class=\"sf-line-btn\" href=\"https://line.me/R/ti/p/").Append(HttpUtility.UrlEncode(m.Value))
+                  .Append("\" target=\"_blank\" rel=\"noopener\">💬 LINE ").Append(HttpUtility.HtmlEncode(m.Value)).Append("</a>");
+            }
+            if (sb.Length == 0)
+                return "<div class=\"sf-note\" style=\"margin-top:6px;white-space:pre-line;\">" + HttpUtility.HtmlEncode(text) + "</div>";
+            return "<div class=\"sf-contact\">" + sb + "</div>";
+        }
 
         /// <summary>
         /// ล็อก (ใส่ยอดสลิป + readonly + data-slip-locked) หรือปลดล็อก (เฉพาะที่ตัวช่วยนี้ล็อกไว้ — readonly เดิมของหน้าไม่แตะ)

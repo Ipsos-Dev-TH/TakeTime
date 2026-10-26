@@ -1,6 +1,8 @@
 ﻿<%@ Page MaintainScrollPositionOnPostback="true" Async="True" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="Reserve.aspx.cs" Inherits="Take_Time_BangPhra.Reserve" EnableEventValidation="false" %>
 <%@ Register assembly="Microsoft.ReportViewer.WebForms" namespace="Microsoft.Reporting.WebForms" tagprefix="rsweb" %>
 <asp:Content ID="Content1" ContentPlaceHolderID="MainContent" runat="server">
+    <%-- สลิปก่อนยอด (CLAUDE.md ข้อ 18): คลาส .sf-* เท่านั้น — ไม่ใช้ = ไม่มีผลกับหน้า --%>
+    <link id="slipFirstCss" rel="stylesheet" href="<%= ResolveUrl("~/Content/slip-first.css?v=1") %>" />
     <style>
     /* GridView Row Selection Styles */
 .accom-row {
@@ -463,6 +465,29 @@
             .mycheckbox label { display: inline-block; padding: 10px 0; }
             .rv-gate-hint li a { display: inline-block; padding: 8px 0; }
         }
+
+        /* ══════════ สลิปก่อนยอด (CLAUDE.md ข้อ 18) — มีผลเฉพาะเมื่อ #rvStepPay มี data-sf (เซิร์ฟเวอร์ใส่ให้) ══════════
+           ไม่มี data-sf = ปิดฟีเจอร์/เงินสด/เกตเวย์ → หน้าตาเดิมทุกอย่าง · คอมโพเนนต์กลางอยู่ที่ Content/slip-first.css */
+        #rvStepPay:not([data-sf]) .rv-sf-guiderow { display: none; }
+        .rv-sf-guide { margin: 2px 0 4px; max-width: 560px; }
+        #rvStepPay[data-sf] .rv-slip-legacy { display: none !important; }
+        #rvStepPay[data-sf-mode="reserve"][data-sf="pick"] .rv-sf-sliprow { display: none !important; }
+        #rvStepPay[data-sf="pick"] .rv-sf-filebox,
+        #rvStepPay[data-sf="pick"] .rv-sf-amt,
+        #rvStepPay[data-sf="wait"] .rv-sf-amt,
+        #rvStepPay[data-sf="reading"] .rv-sf-amt,
+        #rvStepPay[data-sf="stop"] .rv-sf-amt { display: none !important; }
+        #rvStepPay[data-sf-mode="reserve"][data-sf="pick"] #rvAmountRow,
+        #rvStepPay[data-sf-mode="reserve"][data-sf="wait"] #rvAmountRow,
+        #rvStepPay[data-sf-mode="reserve"][data-sf="reading"] #rvAmountRow,
+        #rvStepPay[data-sf-mode="reserve"][data-sf="stop"] #rvAmountRow,
+        #rvStepPay.rv-sf-js[data-sf-mode="reserve"] #rvAmountRow { display: none !important; }
+        #rvStepPay[data-sf="reading"] #rvSfReveal { display: none; }
+        #rvSfRevealSlot:empty { display: none; }
+        #rvSfRevealSlot { margin-top: 10px; }
+        .rv-sf-filebox .sf-drop { margin-top: 2px; }
+        /* ป้ายล็อกยอดในผลตรวจซ้ำกับกล่อง "ยอดที่รับ" — สคริปต์ทำงานแล้วเหลือที่เดียว */
+        #rvStepPay.rv-sf-js .slip-lock-badge { display: none; }
     </style>
 
     <script>
@@ -472,6 +497,11 @@
         function preventDoubleSubmit() {
             // ลูกค้าจองเอง: ยังกรอก/ติ๊กไม่ครบ → บอกว่าขาดอะไร + พาไปที่ช่องนั้น (server ตรวจซ้ำทุกข้อเสมอ)
             if (window.RV && RV.cust && typeof rvGateBlocks === 'function' && rvGateBlocks()) {
+                return false;
+            }
+
+            // กำลังส่งสลิปไปตรวจ (สลิปก่อนยอด) — รอผลก่อน ไม่งั้นยอดยังไม่มา
+            if (window.rvSlipUploading) {
                 return false;
             }
 
@@ -513,7 +543,7 @@
         <div class="rv-intro">
             <b>ขั้นตอนการจอง</b> <span class="rv-muted">(How to book)</span>
             <div class="rv-chips">
-                <span>ห้องพัก/วันที่</span><span>ข้อมูลผู้เข้าพัก</span><span>สัตว์เลี้ยง (ถ้ามี)</span><span>สรุปยอด</span><span>ชำระเงิน/แนบสลิป</span><span>ยอมรับเงื่อนไข → ยืนยัน</span>
+                <span>ห้องพัก/วันที่</span><span>ข้อมูลผู้เข้าพัก</span><span>สัตว์เลี้ยง (ถ้ามี)</span><span>สรุปยอด</span><span>ชำระเงิน: โอน → แนบสลิป</span><span>ยอมรับเงื่อนไข → ยืนยัน</span>
             </div>
         </div>
 
@@ -962,7 +992,8 @@
         </div>
 
         <%-- ══ ขั้นที่ 5: การชำระเงิน ══ --%>
-        <div class="form-panel rv-step" id="rvStepPay">
+        <%-- data-sf (สลิปก่อนยอด, CLAUDE.md ข้อ 18): เซิร์ฟเวอร์ใส่เฉพาะช่องทางโอน/QR + เปิดยอดล็อกตามสลิป — ว่าง = หน้าตาเดิม --%>
+        <div class="form-panel rv-step sf-root" id="rvStepPay"<%= SlipFirstAttrs %>>
             <h3 class="section-header rv-step-h">การชำระเงิน <small>Payment</small></h3>
             <div class="form-row rv-alt">
                 <div class="form-label">วิธีชำระเงิน:<br />Payment Method:</div>
@@ -979,7 +1010,15 @@
                 </div>
             </div>
 
-            <div class="form-row">
+            <%-- 🧾 สลิปก่อนยอด: ขั้นตอนย่อย + ยอดที่ต้องโอน/บัญชี (ปุ่มคัดลอก) — ว่างเมื่อไม่ใช้ (แถวถูกซ่อน) --%>
+            <div class="form-row rv-sf-guiderow">
+                <div class="form-label">ขั้นตอน:<br />Steps:</div>
+                <div class="form-controls">
+                    <asp:Literal ID="litSlipFirstGuide" runat="server" />
+                </div>
+            </div>
+
+            <div class="form-row" id="rvAmountRow">
                 <div class="form-label">ยอดเงินที่โอน/ชำระแล้ว:<br />Amount Paid:</div>
                 <div class="form-controls">
                     <asp:TextBox ID="TextBox5" runat="server" AutoPostBack="True" Width="200px" TextMode="Number" OnTextChanged="TextBox5_TextChanged" CssClass="rounded-textbox" inputmode="decimal">0</asp:TextBox>
@@ -999,7 +1038,7 @@
                 <div class="form-label">&nbsp;</div>
                 <div class="form-controls">
                     <asp:CheckBox ID="CheckBox2" runat="server" Text="มัดจำเพิ่ม" AutoPostBack="True" OnCheckedChanged="CheckBox2_CheckedChanged" Visible="False" CssClass="mycheckbox"/>
-                    <asp:TextBox ID="TextBox10" runat="server" TextMode="Number" Visible="False" AutoPostBack="True" CssClass="rounded-textbox" OnTextChanged="TextBox10_TextChanged" style="margin-left: 10px;">จำนวนเงิน</asp:TextBox>
+                    <asp:TextBox ID="TextBox10" runat="server" TextMode="Number" Visible="False" AutoPostBack="True" CssClass="rounded-textbox rv-sf-amt" OnTextChanged="TextBox10_TextChanged" style="margin-left: 10px;">จำนวนเงิน</asp:TextBox>
                 </div>
             </div>
 
@@ -1022,14 +1061,15 @@
                 </label>
             </asp:Panel>
 
-            <div class="form-row rv-alt" id="rowSlip" runat="server">
+            <div class="form-row rv-alt rv-sf-sliprow" id="rowSlip" runat="server">
                 <div class="form-label">แนบสลิปการโอน:<br />Transfer Slip:</div>
                 <div class="form-controls">
-                    <div>
+                    <%-- สลิปก่อนยอด: สคริปต์ห่อช่องไฟล์เป็นกล่องแตะ/ถ่ายรูป/ลากวาง แล้วกด Button3 ให้เองทันทีที่เลือกไฟล์ (ไม่มีสคริปต์ = แบบเดิม) --%>
+                    <div class="rv-sf-filebox">
                         <asp:FileUpload ID="FileUpload1" runat="server" OnDataBinding="FileUpload1_DataBinding" Width="350px" CssClass="rounded-textbox" accept="image/*"/>
                         <asp:Button ID="Button3" runat="server" Text="อัปโหลดสลิป (Upload)" Width="170px" OnClick="Button3_Click" CssClass="reservation-button" style="margin-left: 10px;"/>
                     </div>
-                    <div id="divSlipHint" runat="server" class="rv-hint">
+                    <div id="divSlipHint" runat="server" class="rv-hint rv-slip-legacy">
                         *เลือกรูปสลิปแล้วกด "ยืนยันการจอง" ได้เลย หรือกดอัปโหลดเพื่อดูรูปก่อน — โอนยอดมัดจำขั้นต่ำ หรือโอนชำระเต็มจำนวนก็ได้ค่ะ
                     </div>
                     <div style="margin-top: 10px;">
@@ -1048,6 +1088,9 @@
                             </span>
                         </div>
                     </asp:Panel>
+
+                    <%-- 🧾 สลิปก่อนยอด: ช่องยอดที่รับย้ายมาแสดงตรงนี้หลังอ่านสลิป (ล็อกตามสลิป / กรอกเอง) + ผลลัพธ์ก่อนยืนยัน --%>
+                    <div id="rvSfRevealSlot"></div>
 
                     <!-- Payment History GridView (shown in CheckIn/Edit/CheckOut modes) -->
                     <div style="margin-top: 20px;" id="divPaymentHistory" runat="server" visible="false">
@@ -1528,6 +1571,14 @@
                 setAll('mindep', baht0(minDep));
                 setAll('petfee', money(fee));
                 RV.cur = { total: total, minDep: minDep };
+                // ปุ่มคัดลอกยอดในการ์ด "โอนเงินตามยอดนี้" (สลิปก่อนยอด) — ตามยอดสด
+                var cps = document.querySelectorAll('[data-sf-rv]');
+                for (var c = 0; c < cps.length; c++) {
+                    var kind = cps[c].getAttribute('data-sf-rv');
+                    var v = kind === 'mindep' ? minDep : kind === 'total' ? total : 0;
+                    if (v > 0) cps[c].setAttribute('data-sf-copy', Math.round(v) === r2(v) ? String(Math.round(v)) : r2(v).toFixed(2));
+                }
+                if (window.rvSfUpdate) window.rvSfUpdate();
                 var q = document.getElementById('rvQuick');
                 if (q) q.style.visibility = total > 0 ? 'visible' : 'hidden';
             }
@@ -1615,7 +1666,23 @@
                     }
                     if (cnt > 0 && sum <= 0) miss.push({ t: 'ระบุจำนวนสัตว์เลี้ยง (หรือเอาเครื่องหมาย "มีสัตว์เลี้ยง" ออก)', e: first });
                 }
-                if (el(RV.ids.rowSlip)) {
+                var sfRoot = document.getElementById('rvStepPay');
+                var sf = sfRoot ? (sfRoot.getAttribute('data-sf') || '') : '';
+                if (sf && el(RV.ids.rowSlip)) {
+                    // 🧾 สลิปก่อนยอด: ยอดมาจากสลิป — ขาดสลิป/สลิปใช้ไม่ได้/ยอดต่ำกว่ามัดจำขั้นต่ำ
+                    var sfFile = el(RV.ids.file), sfAmt = el(RV.ids.amount);
+                    var sfDrop = sfFile ? (up(sfFile, 'sf-drop') || sfFile) : null;
+                    if (sf === 'wait' || sf === 'reading') {
+                        miss.push({ t: sf === 'reading' ? 'รอระบบตรวจสลิปสักครู่' : 'แนบสลิปการโอนเงิน (ระบบอ่านยอดให้เอง)', e: sfDrop });
+                    } else if (sf === 'stop') {
+                        miss.push({ t: 'สลิปนี้ใช้ไม่ได้ — แนบสลิปใบอื่น หรือเลือกวิธีชำระอื่น', e: sfDrop });
+                    } else if (sfAmt) {
+                        var sa = num(sfAmt.value), smd = RV.cur ? RV.cur.minDep : 0;
+                        if (sa <= 0) miss.push({ t: 'กรอกยอดเงินตามสลิป', e: sfAmt });
+                        else if (smd > 0 && sa < smd * 0.8)
+                            miss.push({ t: 'ยอดในสลิปต่ำกว่ามัดจำขั้นต่ำ ฿' + baht0(smd) + ' — ติดต่อเจ้าหน้าที่', e: sfAmt });
+                    }
+                } else if (el(RV.ids.rowSlip)) {
                     // โอนเงินเอง: ยอดโอน + สลิป (ช่องทางชำระออนไลน์ไม่มีแถวนี้ — ไปจ่ายต่อหลังยืนยัน)
                     var amt = el(RV.ids.amount);
                     var a = amt ? num(amt.value) : 0, md = RV.cur ? RV.cur.minDep : 0;
@@ -1709,6 +1776,150 @@
             }
             if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
             else init();
+        })();
+    </script>
+
+    <%-- ── 🧾 สลิปก่อนยอด (CLAUDE.md ข้อ 18): เลือกวิธี → ยอดที่ต้องโอน → แนบสลิป (อ่านทันที) → เห็นยอด → ยืนยัน ──
+         ทำงานเฉพาะเมื่อ #rvStepPay มี data-sf · ยอดที่บันทึกบังคับตามสลิปที่เซิร์ฟเวอร์ (RunSlipGate) เสมอ — ตรงนี้คือหน้าตาล้วน (ES5) --%>
+    <script>
+        (function () {
+            function start() {
+                var root = document.getElementById('rvStepPay');
+                if (!root) return;
+                var st = root.getAttribute('data-sf') || '';
+                if (!st || !window.SlipFirst) return;   // ปิดฟีเจอร์ / สคริปต์กลางโหลดไม่ได้ = หน้าตาเดิม
+                function A(n) { return root.getAttribute('data-sf-' + n) || ''; }
+                function byId(id) { return id ? document.getElementById(id) : null; }
+                var amt = byId(A('amt')), file = byId(A('file')), upBtn = byId(A('up')), img = byId(A('img')),
+                    phone = byId(A('phone')), slot = document.getElementById('rvSfRevealSlot');
+                var cust = A('cust') === '1', mode = A('mode');
+                root.className += ' rv-sf-js';
+                if (upBtn) upBtn.style.display = 'none';      // อัปโหลดให้เองทันทีที่เลือกไฟล์
+                if (img) img.style.display = 'none';          // รูปสลิปไปอยู่ในกล่องแนบสลิป
+                if (st === 'pick') return;
+
+                function steps(onIdx, err) {
+                    var li = document.querySelectorAll('#rvSfSteps li');
+                    for (var i = 0; i < li.length; i++) {
+                        li[i].className = i < onIdx ? 'is-done' : i === onIdx ? (err ? 'is-err' : 'is-on') : '';
+                        if (i === onIdx) li[i].setAttribute('aria-current', 'step'); else li[i].removeAttribute('aria-current');
+                    }
+                }
+
+                var read = st === 'locked' || st === 'edit' || st === 'stop';
+                var dz = file ? SlipFirst.dropzone({
+                    input: file,
+                    texts: cust ? null : { title: 'แนบสลิปที่ลูกค้าโอน', sub: 'ถ่ายรูป / เลือกรูป / ลากไฟล์มาวาง — ระบบอ่านยอดให้ทันที' },
+                    thumb: read ? (A('thumb') || null) : null,
+                    fileName: read ? 'สลิปที่แนบ' : '',
+                    state: read ? 'done' : 'empty',
+                    status: A('msg'),
+                    tone: A('tone'),
+                    onPick: function (f, z) {
+                        if (phone && !String(phone.value || '').replace(/\s/g, '')) {
+                            z.setState('picked', '', 'warn');
+                            z.setError('กรอกเบอร์โทรศัพท์ก่อนแนบสลิป (ขั้น "ข้อมูลผู้เข้าพัก") แล้วแตะ "เปลี่ยนสลิป" เพื่อเลือกอีกครั้ง');
+                            if (window.rvShowError) window.rvShowError(phone.id, 'กรอกเบอร์โทรศัพท์ก่อนแนบสลิป');
+                            return;
+                        }
+                        if (!upBtn) { z.setState('picked', 'เลือกสลิปแล้ว — กดยืนยันได้เลย', 'ok'); return; }
+                        root.setAttribute('data-sf', 'reading');
+                        z.setState('reading', '', null);
+                        steps(2, false);
+                        window.rvSlipUploading = true;
+                        setTimeout(function () { upBtn.click(); }, 60);
+                    }
+                }) : null;
+                if (!dz && file) return;
+
+                if (st === 'stop') { steps(1, true); return; }
+                if (st === 'wait' || !amt || !slot) return;
+
+                // ── ยอดที่รับ: ย้ายช่องยอดเดิม (ชื่อฟอร์มเดิม → เซิร์ฟเวอร์อ่านได้เหมือนเดิม) มาใต้ผลอ่านสลิป ──
+                var locked = st === 'locked' && amt.getAttribute('data-slip-locked') === '1';
+                var fixed = A('fixed') === '1';
+                var box = document.createElement('div');
+                box.id = 'rvSfReveal';
+                box.className = 'sf-reveal ' + (locked || fixed ? 'is-locked' : 'is-edit');
+                var head = document.createElement('div');
+                head.className = 'sf-reveal-h';
+                var title = document.createElement('b');
+                title.textContent = mode === 'reserve' ? (cust ? 'ยอดที่โอน (ตามสลิป)' : 'ยอดที่รับ (ตามสลิป)') : 'ยอดที่รับครั้งนี้ (ตามสลิป)';
+                var chip = document.createElement('span');
+                chip.className = 'sf-chip ' + (locked ? 'ok' : 'warn');
+                chip.textContent = locked ? '🔒 ล็อกตามสลิป' : fixed ? 'ยอดค้างที่ต้องรับ' : '✏️ กรอกให้ตรงสลิป';
+                head.appendChild(title);
+                head.appendChild(chip);
+                var line = document.createElement('div');
+                line.className = 'sf-amount';
+                var unit = document.createElement('span');
+                unit.textContent = 'บาท';
+                amt.parentNode.removeChild(amt);
+                line.appendChild(amt);
+                line.appendChild(unit);
+                var hint = document.createElement('div');
+                hint.className = 'sf-hint';
+                hint.id = 'rvSfHint';
+                hint.textContent = locked
+                    ? 'ยอดนี้มาจากสลิป แก้ไม่ได้ — ถ้าไม่ถูกต้อง แตะ "เปลี่ยนสลิป" แล้วแนบใบที่ถูกต้อง'
+                    : (A('hint') || 'ระบบอ่านยอดจากสลิปไม่ชัดเจน — กรอกยอดให้ตรงกับสลิป' + (cust ? ' เจ้าหน้าที่จะตรวจอีกครั้ง' : ''));
+                var out = document.createElement('div');
+                out.className = 'sf-outcome';
+                out.id = 'rvSfOutcome';
+                out.setAttribute('aria-live', 'polite');
+                box.appendChild(head);
+                box.appendChild(line);
+                box.appendChild(hint);
+                box.appendChild(out);
+                slot.appendChild(box);
+                amt.style.display = '';
+                amt.style.marginLeft = '0';
+                amt.setAttribute('inputmode', 'decimal');
+                amt.setAttribute('aria-describedby', 'rvSfHint rvSfOutcome');
+                amt.setAttribute('aria-label', title.textContent);
+                if (!locked && !fixed) {
+                    var v0 = String(amt.value || '').replace(/\s/g, '');
+                    if (v0 === '0' || isNaN(parseFloat(v0))) amt.value = '';
+                    amt.setAttribute('placeholder', '0.00');
+                }
+                steps(locked ? 3 : 2, false);
+
+                function numv(s) { var n = parseFloat(String(s || '').replace(/,/g, '')); return isNaN(n) ? 0 : n; }
+                window.rvSfUpdate = function () {
+                    var cur = window.RV && RV.cur && RV.cur.total > 0 ? RV.cur : null;
+                    var due = A('due');
+                    var o = SlipFirst.outcome({
+                        amount: numv(amt.value),
+                        total: cur ? cur.total : numv(A('total')),
+                        minDep: cur ? cur.minDep : numv(A('min')),
+                        due: due === '' ? NaN : numv(due),
+                        mode: mode,
+                        customer: cust,
+                        minRule: 0.8
+                    });
+                    out.className = 'sf-outcome' + (o.cls ? ' ' + o.cls : '');
+                    out.innerHTML = o.html;
+                };
+                amt.addEventListener('input', window.rvSfUpdate, false);
+                amt.addEventListener('change', window.rvSfUpdate, false);
+                window.rvSfUpdate();
+
+                if (A('fresh') === '1') {
+                    box.className += ' sf-flash';
+                    var show = function () {
+                        try {
+                            var r = box.getBoundingClientRect();
+                            if (r.top < 0 || r.bottom > (window.innerHeight || 800)) box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        } catch (e) { }
+                        if (!locked && !fixed) { try { amt.focus({ preventScroll: true }); } catch (e2) { } }
+                    };
+                    // MaintainScrollPositionOnPostback คืนตำแหน่งเดิมตอน load → เลื่อนหลังจากนั้น
+                    if (document.readyState === 'complete') setTimeout(show, 150);
+                    else window.addEventListener('load', function () { setTimeout(show, 200); });
+                }
+            }
+            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+            else start();
         })();
     </script>
 
