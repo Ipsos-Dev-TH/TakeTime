@@ -1211,7 +1211,8 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
             {
                 int conf; string why;
                 decimal? amt = null;
-                try { amt = LocalSlipAmountReader.ExtractAmount(insp.OcrText, null, out conf, out why); }
+                // ส่งผลอ่าน 2 รอบ (OcrResult) ด้วย — ไม่งั้นตกไปใช้ heuristic ข้อความล้วนรุ่นเก่า; expected=null = ไม่ดูยอดที่พิมพ์
+                try { amt = LocalSlipAmountReader.ExtractAmount(insp.OcrText, null, out conf, out why, insp.OcrResult); }
                 catch (Exception ex) { conf = 0; why = ex.GetType().Name; }
                 if (amt.HasValue && amt.Value > 0m && conf >= minConfidence)
                 {
