@@ -303,6 +303,42 @@ namespace Take_Time_BangPhra.TaxReports
 
         public const string ChPos = "POS", ChRoomService = "ROOM_SERVICE", ChReservation = "RESERVATION",
             ChOta = "OTA", ChOther = "OTHER";
+        /// <summary>ใบลดหนี้/คืนเงินลูกค้า (Credit_Note — PHASE19_33) — ยอดติดลบตามวันที่ใบลดหนี้</summary>
+        public const string ChCreditNote = "CREDIT_NOTE";
+
+        // ── ใบลดหนี้ (Credit_Note — PHASE19_33, อ่านแบบ guarded: ไม่มีตาราง = รายการว่าง) ──────────
+        public sealed class CreditNoteRow
+        {
+            public string CnNo, Status, DocNo, PaidHowName, SyncError, Path, SourceType;
+            public DateTime Day;
+            public decimal Gross, Vat;
+            /// <summary>ส่ง NextAcc แล้ว (SYNCED)</summary>
+            public bool Sent => Status == "SYNCED";
+            /// <summary>อนุมัติแล้วแต่ยังไม่ถึง NextAcc (ไม่นับใบที่ตั้งใจไม่ส่ง — LOCAL)</summary>
+            public bool Pending => Status == "APPROVED" && Path != "LOCAL";
+        }
+
+        /// <summary>ใบลดหนี้ที่อนุมัติแล้ว/ส่งแล้ว ในช่วง [from, toInclusive] (ไม่รวมร่าง/ยกเลิก)</summary>
+        public static List<CreditNoteRow> LoadCreditNotes(string conn, DateTime from, DateTime toInclusive)
+        {
+            var list = new List<CreditNoteRow>();
+            if (!TableExists(conn, "Credit_Note")) return list;
+            var dt = Query(conn,
+                @"SELECT CN.CN_No, CN.CN_Date, CN.Source_Doc_Type, CN.Amount_Gross, CN.Vat_Amount, CN.Status, ISNULL(CN.Nexaacc_Doc_No, '') AS DocNo,
+                         ISNULL(CN.Nexaacc_Path, '') AS P, ISNULL(CN.Sync_Error, '') AS E, ISNULL(PH.Paid_How, N'') AS PN
+                    FROM Credit_Note CN LEFT JOIN Account_Paid_How PH ON PH.ID = CN.Refund_Paid_How_ID
+                   WHERE CN.CN_Date >= @f AND CN.CN_Date < @t AND CN.Status IN ('APPROVED', 'SYNCED') AND CN.Amount_Gross > 0",
+                new Dictionary<string, object> { { "@f", from.Date }, { "@t", toInclusive.Date.AddDays(1) } });
+            foreach (DataRow r in dt.Rows)
+                list.Add(new CreditNoteRow
+                {
+                    CnNo = Str(r["CN_No"]), Day = NormalizeEra(Convert.ToDateTime(r["CN_Date"])).Date,
+                    SourceType = Str(r["Source_Doc_Type"]), Gross = Dec(r["Amount_Gross"]), Vat = Dec(r["Vat_Amount"]),
+                    Status = Str(r["Status"]).Trim().ToUpperInvariant(), DocNo = Str(r["DocNo"]), Path = Str(r["P"]).Trim().ToUpperInvariant(),
+                    SyncError = Str(r["E"]), PaidHowName = Str(r["PN"])
+                });
+            return list;
+        }
 
         public static string SalesChannelLabel(string ch)
         {
@@ -317,6 +353,7 @@ namespace Take_Time_BangPhra.TaxReports
                 case "AMENITY": return "ของใช้/อาเมนิตี้";
                 case "FRONTDESK_GATEWAY": return "เงินเกตเวย์หน้าร้าน (ไม่มีบันทึกขาย)";
                 case "DAMAGE": return "ค่าเสียหาย";
+                case ChCreditNote: return "ใบลดหนี้/คืนเงิน (ยอดติดลบ)";
                 default: return "อื่น ๆ (สมาชิก/บัตรกำนัล ฯลฯ)";
             }
         }
@@ -928,6 +965,29 @@ namespace Take_Time_BangPhra.TaxReports
                 }
                 catch { }
             }
+
+            // ── F. ใบลดหนี้ / คืนเงินลูกค้า (PHASE19_33) — ยอดขายและภาษีขายติดลบในวันที่ออกใบลดหนี้ (ม.82/10) ─────
+            //    คืนมัดจำโหมด CHECKOUT/พัก VAT = Vat 0 (ภาษีขายยังไม่เคยเข้า ภ.พ.30) · ส่วนที่ยึดไม่ใช่ใบลดหนี้ (คงเป็นรายได้)
+            try
+            {
+                foreach (var cn in LoadCreditNotes(conn, from, toInclusive))
+                {
+                    var g = G(cn.Day, ChCreditNote, new PaidHow
+                    {
+                        Name = cn.PaidHowName.Length > 0 ? "คืนจาก " + cn.PaidHowName : "ไม่คืนเงิน/รอคืน",
+                        ChannelType = "OTHER"
+                    });
+                    g.Count++;
+                    g.Gross -= cn.Gross;
+                    g.Vat -= cn.Vat;
+                    g.Docs.Add(new DocRef { Id = cn.CnNo, Status = cn.Sent ? "COMPLETED" : (cn.Pending ? "PENDING" : "NONE"), DocNo = cn.DocNo });
+                    if (!res.IntegrationOn && !res.QueueReady) continue;
+                    if (cn.Pending && cn.SyncError.Length > 0) { g.Flags.Add(FFailed); g.ProblemIds.Add(cn.CnNo); }
+                    else if (cn.Pending) g.Flags.Add(FPending);
+                    else if (cn.Path == "LOCAL") { g.Flags.Add(FPolicyOff); g.PolicyOffGross -= cn.Gross; g.PolicyOffVat -= cn.Vat; }
+                }
+            }
+            catch (Exception ex) { res.Notes.Add("อ่านใบลดหนี้ไม่ได้: " + ex.Message); }
 
             // ── นโยบาย: ตั้ง "ออกทันที" แต่ถูกรวบเข้าใบสรุปรายวัน (เช่น ขายโอนไปอยู่ใน POSDAY) ─────
             //    ไม่ตีธงกลับด้าน (ตั้งรวบแต่ออกรายใบ) — ลูกค้าขอใบกำกับเต็มรูปรายใบได้เสมอ

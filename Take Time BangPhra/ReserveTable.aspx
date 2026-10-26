@@ -911,6 +911,8 @@
             document.getElementById('<%= hfRefundResId.ClientID %>').value = resId;
             var lbl = document.getElementById('refundModalResIdLabel');
             if (lbl) lbl.textContent = resId;
+            var cnl = document.getElementById('cnDetailLink');
+            if (cnl) cnl.href = cnl.getAttribute('data-base') + encodeURIComponent(resId);
             if (window.jQuery) { jQuery('#refundAccountModal').modal('show'); }
             else { document.getElementById('refundAccountModal').style.display = 'block'; }
         }
@@ -1153,6 +1155,14 @@
                         เลือกบัญชีเจาะจง = คงใบเสร็จมัดจำไว้ + โพสต์รายการคืนเงินแยกออกบัญชีที่เลือก
                         (เช่น รับผ่านธนาคาร คืนเป็นเงินสด).
                     </div>
+                    <% if (CreditNoteFlowOn) { %>
+                    <div style="margin-top:12px; padding:10px 12px; background:#efebe9; border-radius:8px; font-size:13px;">
+                        ต้องการ <b>คืนเงินบางส่วน / หักค่าธรรมเนียมยกเลิก / ออกใบลดหนี้</b> หรือคืนผ่านเกตเวย์?
+                        <a id="cnDetailLink" href="#" data-base="<%= ResolveUrl("~/Account/CreditNotes?cancelRes=") %>"
+                           style="display:inline-block; margin-top:6px; font-weight:700; color:#4e342e;">↪ คืนเงินแบบละเอียด / ออกใบลดหนี้</a>
+                        <div style="font-size:11.5px; color:#6d4c41; margin-top:4px;">ใช้ทางนี้แทนปุ่มยืนยันด้านล่าง (ไม่ใช้ทั้งสองทาง — กันลงบัญชีซ้ำ)</div>
+                    </div>
+                    <% } %>
                 </div>
                 <div class="modal-footer">
                     <asp:HiddenField ID="hfRefundResId" runat="server" />

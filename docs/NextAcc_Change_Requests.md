@@ -238,3 +238,40 @@ Dr บัญชีตามเหตุผล (ภาษีขายที่ร
 ### TakeTime ระหว่างรอ
 มีรายงานฝั่งเราแล้ว: `Report/StockMovementReport` (ยกมา/รับ/ขาย/จ่ายออกตามเหตุผล/คงเหลือ + บัญชีคุมรายวัน, CSV/พิมพ์) — ข้อมูลจาก Product_In/Product_Out ของ TakeTime
 (สต๊อกที่ปรับฝั่ง NextAcc เข้ามาเฉพาะเมื่อเปิด `Nexaacc_StockQtyPull`)
+
+---
+
+## ฏ. ใบลดหนี้ (company) ของใบที่ชำระครบ — เลือกบัญชีเงินที่คืนจริงไม่ได้
+
+> อ้าง NextAcc @ `8c9cf5b` (2026-10-26)
+
+### ข้อเท็จจริงในโค้ด
+- ใบลดหนี้ฝั่งขายที่อ้างใบต้นทาง `BalanceDue <= 0.01` ลงแบบเงินสดเสมอ: `counterAccCode = "111"` (`Services/Implementations/DocumentService.cs:17899`, `:17920-17925`)
+  → `FindAccountAsync("111")` คืนบัญชีโพสต์ได้ตัวแรกตาม prefix (`:15749-15783`) — ไม่อ่าน `PaymentAccountId`/`BankAccountId` ของใบลดหนี้
+- `CreateDocumentRequest` มี `PaymentAccountId` (`Models/DTOs/Document/DocumentDtos.cs:50`) แต่เส้น CN ไม่ใช้
+
+### ผลกระทบ
+โรงแรมคืนเงินออกบัญชีธนาคาร/เกตเวย์ที่รับเข้ามา แต่ NextAcc ลด "เงินสด 111x" — ยอดเงินสด/ธนาคารเพี้ยนสองบัญชีจนกว่าจะลงรายการย้ายเอง
+
+### สิ่งที่ขอ
+ใบลดหนี้ cash-mode: ถ้ามี `PaymentAccountId` (หรือ `BankAccountId` ที่ผูกผัง) ให้ Cr บัญชีนั้นแทน `111` (ตรวจด้วย `DocumentMoneyChannel` เหมือนเส้นอื่น)
+
+### TakeTime ระหว่างรอ
+หลังอนุมัติใบลดหนี้ อ่าน JE ของใบ (`GET /accounting/journals?sourceDocumentId=` — `Controllers/AccountingController.cs:105-116`) หาขาเครดิตที่ NextAcc ลง
+แล้วโพสต์ `/integration/journals` ref `CN-{id}-MNY` Dr บัญชีนั้น / Cr แหล่งเงินที่คืนจริง (`Class/Integration/AccountingSyncService.CreditNote.cs`) — ถ้า NextAcc แก้แล้ว JE นี้จะเป็นศูนย์เอง (บัญชีเดียวกันถูกข้าม)
+
+---
+
+## ฐ. ไม่มี API ยกเลิก "คืนมัดจำ" (refund-deposit)
+
+### ข้อเท็จจริงในโค้ด
+- `POST /document/{id}/refund-deposit` (`Controllers/DocumentController.cs:533-545`) สร้าง JE คืนมัดจำ (SourceDocumentId = ใบมัดจำ) + เพิ่ม `DepositRefundedAmount`
+  + (VAT เข้า ภ.พ.30 แล้ว) ใบลดหนี้ Approved ที่ไม่มี JE ของตัวเอง (`Services/Implementations/DocumentService.cs:5429-5662`)
+- ไม่มี endpoint กลับรายการคืนมัดจำ: void ใบลดหนี้อัตโนมัติไม่กลับ JE/ยอดคืน · กลับ JE ผ่าน `/integration/journals/reverse` ไม่ลด `DepositRefundedAmount`
+
+### ผลกระทบ
+บันทึกคืนมัดจำผิด (ผิดยอด/ผิดบัญชี/ลูกค้าไม่รับเงิน) แก้จากระบบต้นทางไม่ได้ — TakeTime จึงบล็อกการยกเลิกใบลดหนี้ประเภทคืนมัดจำที่ส่งแล้ว
+
+### สิ่งที่ขอ
+`POST /document/{depositId}/refund-deposit/{journalEntryId}/reverse` (หรือ void ใบลดหนี้คืนมัดจำแบบ cascade): กลับ JE + ลด `DepositRefundedAmount` + void ใบลดหนี้คู่กัน
+ในธุรกรรมเดียว (ตรวจงวด ภ.พ.30 ที่ยื่นแล้วเหมือน void ปกติ) · รับ `Idempotency-Key`/อ้างอิงภายนอกเพื่อกันคืนซ้ำเมื่อ retry

@@ -390,6 +390,26 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    `CancelStaleUnpaidIfDue` ข้ามใบที่มีสลิปรอตรวจ. เจ้าหน้าที่อนุมัติที่ `Account/SlipVerification` → `ApproveReservationSlip` (ชิงสถานะ
    PENDING→APPROVED แบบ atomic → `ProcessReservationPayment(existingSlipId)` → `PromoteIfPending`; ลงเงินไม่ผ่าน = คืน PENDING).
    ยังไม่รัน migration = ลงรับเงินแบบเดิมแต่ไม่ยืนยันการจองจากสลิปลูกค้า. พนักงานใช้หน้า Pay = เหมือนเดิม.
+17. **ใบลดหนี้ + คืนเงินลูกค้า (ต.ค. 2026, PHASE19_33, opt-in `CreditNote_Enabled`):** `Credit_Note`/`Credit_Note_Line` (เลข `CN{yyMM}-####`,
+   1 แถว = 1 ใบต้นทาง Account_Receipt) · `Class/Accounting/CreditNoteService.cs` (สร้าง/อนุมัติ/ยกเลิก/คืนภายหลัง/ยกเลิกการจอง) ·
+   `Class/Integration/AccountingSyncService.CreditNote.cs` (คิว `CREATE_CREDIT_NOTE`/`RECORD_CN_REFUND`/`VOID_CREDIT_NOTE`, Entity `CREDIT_NOTE`) ·
+   หน้า `Account/CreditNotes.aspx` + ลิงก์ "คืนเงินแบบละเอียด" ใน modal ยกเลิกคืนเงิน (ReserveTable → `?cancelRes=`). NextAcc (HEAD `8c9cf5b`):
+   - **ใบต้นทาง = มัดจำ** → `POST /document/{id}/refund-deposit` {Amount gross, MoneyAccountId=แหล่งเงินคืน} (DocumentController.cs:533-545;
+     JE Dr หนี้สินมัดจำ (+Dr 21913/21911) / Cr บัญชีที่เลือก + ใบลดหนี้อัตโนมัติเฉพาะ VAT มัดจำเข้า ภ.พ.30 แล้ว DocumentService.cs:5429-5662;
+     เลขใบผูกจาก `ConvertedToDocuments`) · ส่วนที่ยึด → `POST /document/{id}/realize-deposit` {Amount ฐาน, ForfeitAs PriceOrFee=1|Compensation=2}
+     (DocumentController.cs:590-602 — มัดจำไม่เคยเสีย VAT ⇒ NextAcc ออกใบกำกับของยอดที่ยึดเอง DocumentService.cs:4866-4950). กันซ้ำด้วย marker
+     `REFPRE:{คืนแล้วก่อนยิง}`→`REF:{id}`→`|FFTPRE:`→`|FFT`. ยกเลิกหลังส่ง = บล็อก (ไม่มี API — Change Requests ข้อ ฐ.).
+   - **ใบต้นทาง = ใบกำกับ/ใบเสร็จ** → company `POST /document` DocumentType=6 + `RelatedDocumentId` + `CreditNoteReason` (Return1/Discount2/Adjustment3,
+     DocumentDtos.cs:23,77) บัญชีรายได้ต่อบรรทัดจากบรรทัดของเอกสารต้นทาง · ไม่ส่ง ProductCode (สต๊อก/COGS รับคืน TakeTime ลงเอง
+     `Product_In` InType `CN_RESTOCK` + `EnqueueStockOutCogsReversal`) → approve → NextAcc ลง **Cr 111x** เมื่อใบเดิมชำระครบ / Cr ลูกหนี้
+     (DocumentService.cs:17899-17925 — เลือกบัญชีไม่ได้, Change Requests ข้อ ฏ.) ⇒ JE `CN-{id}-MNY` Dr บัญชีนั้น (อ่านจาก
+     `GET /accounting/journals?sourceDocumentId=`) / Cr แหล่งเงินคืน (ยังไม่คืน = Cr ROOM_AR เครดิตลูกค้า → คืนภายหลัง `CN-{id}-RFD`). marker `DOC:`→`APR:`→`MNY`→`DONE`.
+     ไม่พบเอกสารต้นทาง/ไม่มี company endpoint → `/integration/credit-notes` (Cr ลูกหนี้) + JE Dr ROOM_AR / Cr แหล่งเงิน.
+   - **ยกเลิกการจองแบบละเอียด** (`CancelReservation`): แบ่งยอดคืน มัดจำคงเหลือก่อน (ส่วนไม่คืน = ยึด) แล้วใบกำกับ (ส่วนไม่คืน = รายได้คงเดิม ไม่ออกใบลดหนี้ส่วนที่ยึด)
+     → ตั้งสถานะ/ล้างห้อง/ชาร์จค้างเหมือนปุ่มเดิม แต่ **ไม่** ยิง `EnqueueVoidReceipt`/`EnqueueDepositRefund`/`EnqueueDepositForfeit` (กันซ้ำ); ใบมัดจำ → `Refunded`/`Forfeit`.
+   - อนุมัติ (`CreditNote_Require_Approval`=1: Owner / Admin+SYS_ACCOUNTING): คืนผ่านเกตเวย์ `OnlinePaymentService.RefundTransaction` (ล้ม = กลับเป็นร่าง) →
+     คืนสต๊อก → `Payment_History` REFUND ติดลบ (การจองยกเลิกแล้ว = REFUNDED ไม่นับยอด) → เข้าคิว. รายงาน: `TaxReportKit.LoadCreditNotes` = ยอดขาย/VAT ติดลบ
+     ช่องทาง `CREDIT_NOTE` (DailySalesTaxSummary) + หักฝั่ง NextAcc ใน NextAccReconciliation. ยังไม่ทำ: e-Tax ของใบลดหนี้, Idempotency-Key header.
 
 ## Queue resilience (ส.ค. 2026 — หลังเคส NextAcc ล่มทั้งแอป)
 

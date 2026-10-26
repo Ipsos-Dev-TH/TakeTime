@@ -28,6 +28,22 @@ namespace Take_Time_BangPhra
             Session["permission"]?.ToString() == "True"
             && (Session["User"]?.ToString() == "Owner" || Session["User"]?.ToString() == "Admin");
 
+        // ปุ่ม "คืนเงินบางส่วน / ออกใบลดหนี้ (ละเอียด)" ใน modal ยกเลิกคืนเงิน — แสดงเมื่อรัน PHASE19_33 + CreditNote_Enabled = 1
+        // (ไม่เปิด = modal เดิมทุกอย่าง) ไปหน้า Account/CreditNotes?cancelRes={id}
+        private bool? _creditNoteFlowOn;
+        protected bool CreditNoteFlowOn
+        {
+            get
+            {
+                if (!_creditNoteFlowOn.HasValue)
+                {
+                    try { _creditNoteFlowOn = Take_Time_BangPhra.Integration.CreditNoteService.Enabled(conn) && Perm.CanAccess(Perm.FinReceipt); }
+                    catch { _creditNoteFlowOn = false; }
+                }
+                return _creditNoteFlowOn.Value;
+            }
+        }
+
         protected void Page_Load(object sender, EventArgs e)
         {
             Page.MaintainScrollPositionOnPostBack = true;

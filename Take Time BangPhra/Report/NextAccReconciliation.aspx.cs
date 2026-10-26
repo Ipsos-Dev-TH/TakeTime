@@ -105,6 +105,19 @@ namespace Take_Time_BangPhra.TaxReports
                 else r.NaRevUnsent += total;
             }
 
+            // ── ใบลดหนี้ฝั่งคิว NextAcc (ยอดติดลบ — PHASE19_33): ส่งแล้วหักรายได้/VAT · ยังไม่ส่งหักยอดรอส่ง ──
+            try
+            {
+                foreach (var cn in TaxReportKit.LoadCreditNotes(conn, from, to))
+                {
+                    var r = Day(cn.Day);
+                    if (r == null) continue;
+                    if (cn.Sent) { r.NaRev -= cn.Gross; r.NaVat -= cn.Vat; }
+                    else if (cn.Pending) r.NaRevUnsent -= cn.Gross;
+                }
+            }
+            catch (Exception ex) { m.Notes.Add("อ่านใบลดหนี้ไม่ได้: " + ex.Message); }
+
             // ── ต้นทุน/ตัดจำหน่าย ฝั่ง TakeTime ─────────────────────────────────────
             try { LoadTtStock(m, conn, from, toEx, Day); }
             catch (Exception ex) { m.Notes.Add("อ่านความเคลื่อนไหวสต๊อกไม่ได้: " + ex.Message); }

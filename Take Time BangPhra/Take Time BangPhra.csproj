@@ -608,6 +608,7 @@
     <Content Include="Product\In.aspx" />
     <Content Include="Product\PurchaseReturn.aspx" />
     <Content Include="Account\CreditPurchasePayment.aspx" />
+    <Content Include="Account\CreditNotes.aspx" />
     <Content Include="Product\Default.aspx" />
     <Content Include="Reserve.aspx" />
     <Content Include="Resources\ContentInformation.xml" />
@@ -957,6 +958,9 @@
     <Compile Include="Class\Integration\RevenuePostingService.cs" />
     <Compile Include="Class\Integration\SalesDocumentPolicy.cs" />
     <Compile Include="Class\Integration\ChannelSalesPostingService.cs" />
+    <Compile Include="Class\Integration\AccountingSyncService.CreditNote.cs" />
+    <Compile Include="Class\Integration\CreditNoteModels.cs" />
+    <Compile Include="Class\Accounting\CreditNoteService.cs" />
     <Compile Include="Class\Integration\AccountingApiClient.cs" />
     <Compile Include="Class\Integration\AccountingConfig.cs" />
     <Compile Include="Class\Integration\AccountingModels.cs" />
@@ -1780,6 +1784,13 @@
     </Compile>
     <Compile Include="Account\CreditPurchasePayment.aspx.designer.cs">
       <DependentUpon>CreditPurchasePayment.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Account\CreditNotes.aspx.cs">
+      <DependentUpon>CreditNotes.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Account\CreditNotes.aspx.designer.cs">
+      <DependentUpon>CreditNotes.aspx</DependentUpon>
     </Compile>
     <Compile Include="Product\Default.aspx.cs">
       <DependentUpon>Default.aspx</DependentUpon>

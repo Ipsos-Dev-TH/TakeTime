@@ -913,6 +913,9 @@
                                                     <li><a runat="server" href="~/Account/SlipVerification">
                                                         <i class="fas fa-money-check"></i> ตรวจสลิปโอน
                                                     </a></li>
+                                                    <li><a runat="server" href="~/Account/CreditNotes">
+                                                        <i class="fas fa-rotate-left"></i> ใบลดหนี้ / คืนเงินลูกค้า
+                                                    </a></li>
                                                     <li role="separator" style="border-top: 1px solid rgba(255,255,255,0.1); margin: 8px 0;"></li>
                                                     <li><a runat="server" href="~/Account/PaymentVoucher">
                                                         <i class="fas fa-file-invoice"></i> ใบสำคัญจ่าย

@@ -20,7 +20,7 @@ namespace Take_Time_BangPhra.Integration
     ///   sync.EnqueueVoidReceipt(receiptNumber);
     ///   sync.EnqueueVoidPaymentVoucher(documentNumber);
     /// </summary>
-    public class AccountingSyncService
+    public partial class AccountingSyncService
     {
         private readonly code _code = new code();
         private readonly string _connectionString;
@@ -5406,6 +5406,14 @@ namespace Take_Time_BangPhra.Integration
                 // ── เงินประกันความเสียหายแบบโอน (opt-in Nexaacc_SecurityDeposit_Journal) ──
                 case "SECURITY_DEPOSIT_JOURNAL":
                     return await ProcessSecurityDepositJournal(payload);
+
+                // ── ใบลดหนี้ / คืนเงินลูกค้า (PHASE19_33 — AccountingSyncService.CreditNote.cs) ──
+                case "CREATE_CREDIT_NOTE":
+                    return await ProcessCreditNote(payload);
+                case "RECORD_CN_REFUND":
+                    return await ProcessCreditNoteRefund(payload);
+                case "VOID_CREDIT_NOTE":
+                    return await ProcessVoidCreditNote(payload);
 
                 // ── Deprecated: ไม่ผูกกับเอกสาร — skip ไม่ยิง API ──
                 case "CREATE_DEPOSIT_JOURNAL":

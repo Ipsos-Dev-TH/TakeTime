@@ -344,6 +344,10 @@ namespace Take_Time_BangPhra.Admin.Settings
                 "เทียบรายวัน: รายได้ ภาษีขาย ต้นทุนขาย ตัดจำหน่ายสต๊อก กับเอกสารที่ส่ง NextAcc + **คิวล้มเหลว/ค้าง** และการขายที่ไม่มีเอกสาร",
                 "~/Report/NextAccReconciliation",
                 "กระทบยอด reconcile nextacc คิว queue ล้มเหลว ต้นทุนขาย cogs รายได้ ภาษีขาย ส่วนต่าง"));
+            taxRep.Items.Add(new Item("ใบลดหนี้ / คืนเงินลูกค้า",
+                "ยกเลิกการจองแล้วคืนเงิน (เต็ม/บางส่วน หักค่าธรรมเนียม) · ลดราคา/ชดเชย/รับคืนสินค้าหลังออกใบกำกับ · เลือกแหล่งเงินคืน · ส่ง NextAcc (ใบลดหนี้/คืนมัดจำ) — PHASE19_33",
+                "~/Account/CreditNotes",
+                "ใบลดหนี้ credit note คืนเงิน refund ยกเลิก การจอง มัดจำ ส่วนลด รับคืนสินค้า 86/10"));
             groups.Add(taxRep);
 
             return groups;
