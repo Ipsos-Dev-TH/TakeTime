@@ -15,6 +15,9 @@ namespace Take_Time_BangPhra.Account
     ///   JOURNAL/ไม่พบเอกสาร: JE Dr เจ้าหนี้ / Cr แหล่งเงิน
     /// แล้วบันทึกฝั่ง TakeTime (Account_Payment.Credit_Paid_* + Product_In.Payment_Status = PAID ของการรับของที่ผูก)
     /// ข้อจำกัด: NextAcc ฝั่งคิวกันซ้ำ "หนึ่งการจ่ายต่อเอกสาร" (CREDITPAY-{doc}) → จ่ายครบครั้งเดียว ไม่รองรับจ่ายบางส่วน
+    /// PHASE19_39: หักเครดิตกับผู้ขาย (Vendor_Credit_Ledger จากใบลดหนี้ที่ "เก็บเป็นเครดิต") — รับชำระเอกสารเต็ม (เงินจริง+เครดิต)
+    /// แล้ว JE VCRED-{doc} Dr แหล่งเงิน / Cr VENDOR_CREDIT_RECEIVABLE (หรือเจ้าหนี้) ⇒ เงินออกสุทธิ = เงินจริง, เอกสารปิดครบใน NextAcc ·
+    /// ใบเพิ่มหนี้ที่ตั้งเจ้าหนี้รอจ่าย: ปุ่ม "จ่าย" → JE VDNPAY-… Dr เจ้าหนี้ / Cr แหล่งเงิน
     /// </summary>
     public partial class CreditPurchasePayment : Page
     {
@@ -124,6 +127,79 @@ namespace Take_Time_BangPhra.Account
             {
                 litInfo.Text += "<div class='cpp-warn'>โหลดรายการไม่สำเร็จ: " + HttpUtility.HtmlEncode(ex.Message) + "</div>";
             }
+            BindDnPayables();
+        }
+
+        // ── PHASE19_39: ยอดกับผู้ขาย — หักเครดิตจากใบลดหนี้ / จ่ายใบเพิ่มหนี้ที่ตั้งเจ้าหนี้ ──
+        private const string DnPrefix = "DN:";
+        private Take_Time_BangPhra.Purchasing.VendorCnService _vcs;
+        private Take_Time_BangPhra.Purchasing.VendorCnService Vcs => _vcs ?? (_vcs = new Take_Time_BangPhra.Purchasing.VendorCnService(conn));
+
+        private void BindDnPayables()
+        {
+            try
+            {
+                var list = Vcs.ListOpenDnPayables();
+                pnlDn.Visible = list.Count > 0;
+                gvDn.DataSource = list;
+                gvDn.DataBind();
+            }
+            catch { pnlDn.Visible = false; }
+        }
+
+        private static decimal ParseMoney(string s)
+        {
+            decimal v;
+            return decimal.TryParse((s ?? "").Replace(",", "").Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out v) ? v : 0m;
+        }
+
+        /// <summary>เลือกใบเพิ่มหนี้รอจ่าย → ใช้ฟอร์มจ่ายเดียวกัน (hfPayDoc = "DN:{id}")</summary>
+        private void OpenDnPay(int id)
+        {
+            var r = Vcs.GetDnPayable(id);
+            if (r == null) { Alert("ไม่พบใบเพิ่มหนี้รอจ่าย (จ่ายครบแล้ว?)"); return; }
+            hfPayDoc.Value = DnPrefix + id;
+            lblPayDoc.Text = HttpUtility.HtmlEncode("ใบเพิ่มหนี้ " + (r.SourceDocNo ?? "#" + id));
+            txtPayDate.Text = DateTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            txtPayAmount.Text = r.Remaining.ToString("0.00", CultureInfo.InvariantCulture);
+            pnlOffset.Visible = false;
+            txtCreditOffset.Text = "";
+            litPayInfo.Text = "<div class='cpp-warn'>" + HttpUtility.HtmlEncode($"ผู้ขาย: {r.VendorName} · ค้างจ่าย {r.Remaining:N2} (บัญชี {r.AccountCode}) — บันทึกแล้วเข้าคิว JE Dr เจ้าหนี้ / Cr แหล่งเงิน") + "</div>";
+            pnlPay.Visible = true;
+        }
+
+        private void ConfirmDnPay(int id)
+        {
+            var r = Vcs.GetDnPayable(id);
+            if (r == null) { Alert("ไม่พบใบเพิ่มหนี้รอจ่าย (จ่ายครบแล้ว?)"); return; }
+            string paidHow = ddlPayPaidHow.SelectedValue;
+            if (string.IsNullOrEmpty(paidHow) && string.IsNullOrEmpty(ddlPayNexaaccAccount.SelectedValue)) { Alert("กรุณาเลือกแหล่งเงินที่จ่าย"); return; }
+            DateTime payDate;
+            if (!DateTime.TryParse(txtPayDate.Text, CultureInfo.InvariantCulture, DateTimeStyles.None, out payDate)) { Alert("วันที่จ่ายไม่ถูกต้อง"); return; }
+            decimal amount = ParseMoney(txtPayAmount.Text);
+            if (amount <= 0 || amount > r.Remaining + 0.01m) { Alert($"ยอดจ่ายต้องมากกว่า 0 และไม่เกินยอดค้าง {r.Remaining:N2}"); return; }
+            // อ้างอิงคงที่ต่อ "ยอดค้างก่อนจ่าย" ⇒ กดซ้ำ/รีโพสต์ = รายการเดิม (คิว + Reference ของ JE กันซ้ำ)
+            string jref = "VDNPAY-" + id + "-" + ((long)Math.Round(r.Remaining * 100m)).ToString(CultureInfo.InvariantCulture);
+            string user = Session["User"]?.ToString() ?? "";
+            string syncStatus = "off";
+            try
+            {
+                var cfg = new Take_Time_BangPhra.Integration.AccountingConfig(conn);
+                if (cfg.IsConfigured && cfg.Enabled)
+                {
+                    long q = new Take_Time_BangPhra.Integration.AccountingSyncService(conn).EnqueueVendorBalanceJournal(jref, amount, payDate,
+                        "จ่ายใบเพิ่มหนี้ผู้ขาย " + (r.SourceDocNo ?? "") + " - " + (r.VendorName ?? ""),
+                        "ACCOUNTS_PAYABLE", null, null, null, ddlPayNexaaccAccount.SelectedValue, paidHow);
+                    syncStatus = q > 0 ? "queued" : "err";
+                    if (q <= 0) { Alert("ส่งคิวจ่ายไม่สำเร็จ — ไม่ได้บันทึก"); return; }
+                }
+            }
+            catch (Exception ex) { Alert("ส่งคิวจ่ายไม่สำเร็จ: " + ex.Message); return; }
+            Vcs.AddLedger(Take_Time_BangPhra.Purchasing.VendorCnService.EtDnPaid, r.VendorId, r.VendorTaxId, r.VendorName, null, -amount, r.AccountCode,
+                jref, r.SourceDocNo, id, null, jref, "จ่ายผ่าน " + (paidHow ?? ddlPayNexaaccAccount.SelectedItem?.Text), user);
+            try { db.Logs(conn, "Purchase", $"DN payable paid: id={id} doc={r.SourceDocNo} amount={amount:N2} via={paidHow} ref={jref}", user); } catch { }
+            Response.Redirect("/Account/CreditPurchasePayment?paid=1&doc=" + HttpUtility.UrlEncode(r.SourceDocNo ?? jref) + "&s=" + syncStatus, false);
+            Context.ApplicationInstance.CompleteRequest();
         }
 
         protected void chkShowPaid_CheckedChanged(object sender, EventArgs e)
@@ -133,6 +209,12 @@ namespace Take_Time_BangPhra.Account
 
         protected void gvCredit_RowCommand(object sender, GridViewCommandEventArgs e)
         {
+            if (e.CommandName == "PayDn")
+            {
+                int dnId;
+                if (int.TryParse(Convert.ToString(e.CommandArgument), out dnId)) OpenDnPay(dnId);
+                return;
+            }
             if (e.CommandName != "PayCredit") return;
             string doc = Convert.ToString(e.CommandArgument);
             var row = LoadVoucher(doc);
@@ -157,6 +239,16 @@ namespace Take_Time_BangPhra.Account
             decimal returnedNet = ReturnedNetForVoucher(doc);
             if (returnedNet > 0)
                 info.Add($"⚠️ มีการคืนสินค้าของการรับของที่ผูกกับใบนี้ สุทธิ {returnedNet:N2} (+VAT ถ้ามี) ลงหักเจ้าหนี้แล้ว — ถ้าผู้ขายหักให้ในการจ่ายนี้ ให้ลดยอดจ่ายตาม");
+            // PHASE19_39: เครดิตกับผู้ขายที่เก็บจากใบลดหนี้ (Vendor_Credit_Ledger) — หักในการจ่ายนี้ได้
+            decimal avail = 0m;
+            try { avail = Vcs.AvailableCredit(VendorIdOf(row), row["Vendor_TaxId"]?.ToString(), row["Vendor_Name"]?.ToString()); } catch { }
+            pnlOffset.Visible = avail > 0.005m;
+            txtCreditOffset.Text = avail > 0.005m ? Math.Min(avail, total).ToString("0.00", CultureInfo.InvariantCulture) : "";
+            if (avail > 0.005m)
+            {
+                txtPayAmount.Text = Math.Max(0m, total - Math.Min(avail, total)).ToString("0.00", CultureInfo.InvariantCulture);
+                info.Add($"💳 ผู้ขายรายนี้มีเครดิตจากใบลดหนี้คงเหลือ {avail:N2} — ตั้งค่าเริ่มต้นให้หัก {Math.Min(avail, total):N2} (แก้ได้; ใส่ 0 = ไม่หัก)");
+            }
             litPayInfo.Text = "<div class='cpp-warn'>" + string.Join("<br/>", info.ConvertAll(n => HttpUtility.HtmlEncode(n))) + "</div>";
             pnlPay.Visible = true;
         }
@@ -166,12 +258,20 @@ namespace Take_Time_BangPhra.Account
             try
             {
                 var dt = db.DatabaseQuerySafe(conn,
-                    @"SELECT ap.*, ISNULL(v.Name, N'') AS Vendor_Name FROM Account_Payment ap LEFT JOIN Vendor v ON v.ID = ap.Vendor_ID
+                    @"SELECT ap.*, ISNULL(v.Name, N'') AS Vendor_Name, ISNULL(v.IDNumber, N'') AS Vendor_TaxId
+                      FROM Account_Payment ap LEFT JOIN Vendor v ON v.ID = ap.Vendor_ID
                       WHERE ap.ID = @id AND ap.IsCredit = 1",
                     new Dictionary<string, object> { { "@id", doc ?? "" } });
                 return dt != null && dt.Rows.Count > 0 ? dt.Rows[0] : null;
             }
             catch { return null; }
+        }
+
+        private static int? VendorIdOf(DataRow row)
+        {
+            int v;
+            return row != null && row.Table.Columns.Contains("Vendor_ID") && row["Vendor_ID"] != DBNull.Value
+                   && int.TryParse(row["Vendor_ID"].ToString(), out v) && v > 0 ? v : (int?)null;
         }
 
         private decimal ReturnedNetForVoucher(string doc)
@@ -201,6 +301,12 @@ namespace Take_Time_BangPhra.Account
         protected void btnConfirmPay_Click(object sender, EventArgs e)
         {
             string doc = hfPayDoc.Value;
+            if ((doc ?? "").StartsWith(DnPrefix, StringComparison.Ordinal))
+            {
+                int dnId;
+                if (int.TryParse(doc.Substring(DnPrefix.Length), out dnId)) ConfirmDnPay(dnId);
+                return;
+            }
             var row = LoadVoucher(doc);
             if (row == null) { Alert("ไม่พบใบสำคัญจ่าย"); return; }
             if (HasPaidCols && row.Table.Columns.Contains("Credit_Paid_Date") && row["Credit_Paid_Date"] != DBNull.Value)
@@ -211,10 +317,19 @@ namespace Take_Time_BangPhra.Account
             DateTime payDate;
             if (!DateTime.TryParse(txtPayDate.Text, CultureInfo.InvariantCulture, DateTimeStyles.None, out payDate)) { Alert("วันที่จ่ายไม่ถูกต้อง"); return; }
             decimal amount;
-            if (!decimal.TryParse((txtPayAmount.Text ?? "").Replace(",", ""), NumberStyles.Any, CultureInfo.InvariantCulture, out amount) || amount <= 0)
+            if (!decimal.TryParse((txtPayAmount.Text ?? "").Replace(",", ""), NumberStyles.Any, CultureInfo.InvariantCulture, out amount) || amount < 0)
             { Alert("ยอดจ่ายไม่ถูกต้อง"); return; }
             decimal total = row["Total_Amount"] == DBNull.Value ? 0m : Convert.ToDecimal(row["Total_Amount"]);
+            // PHASE19_39: หักเครดิตกับผู้ขาย (คำตัดสินข้อ 3) — รับชำระเอกสารเต็ม (เงินจริง + เครดิต) แล้ว JE VCRED-… Dr แหล่งเงิน / Cr เครดิตผู้ขาย
+            string vendorTax = row.Table.Columns.Contains("Vendor_TaxId") ? row["Vendor_TaxId"]?.ToString() : null;
+            decimal offset = pnlOffset.Visible ? ParseMoney(txtCreditOffset.Text) : 0m;
+            decimal avail = offset > 0 ? Vcs.AvailableCredit(VendorIdOf(row), vendorTax, row["Vendor_Name"]?.ToString()) : 0m;
+            string oerr = Take_Time_BangPhra.Purchasing.VendorCnPolicy.CheckOffset(total, amount, offset, avail);
+            if (oerr != null) { Alert(oerr); return; }
+            if (offset <= 0.005m && amount <= 0) { Alert("ยอดจ่ายไม่ถูกต้อง"); return; }
             if (amount > total + 0.01m) { Alert($"ยอดจ่าย ({amount:N2}) มากกว่ายอดค้างจ่ายของใบ ({total:N2})"); return; }
+            decimal cashAmount = amount;
+            if (offset > 0.005m) amount = Math.Round(amount + offset, 2, MidpointRounding.AwayFromZero);   // ยอดรับชำระของเอกสาร
 
             string vendorName = row["Vendor_Name"]?.ToString() ?? "";
             string syncStatus = "off";
@@ -238,6 +353,21 @@ namespace Take_Time_BangPhra.Account
                     qid = sync.EnqueueCreditVoucherPayment(doc, amount, paidHow, payDate, vendorName, accId);
                     syncStatus = qid > 0 ? "queued" : "err";
                     if (qid <= 0) { Alert("ส่งคิวจ่ายชำระไม่สำเร็จ — ไม่ได้บันทึก"); return; }
+                    if (offset > 0.005m)
+                    {
+                        // เครดิตนั่งที่บัญชีที่ลงไว้ตอนรับใบลดหนี้: VENDOR_CREDIT_RECEIVABLE (ถ้าตรง mapping) ไม่งั้นเจ้าหนี้การค้า (ยอดเดบิต)
+                        string credCode = Vcs.CreditAccountCode(VendorIdOf(row), vendorTax, vendorName);
+                        string vcrCode = Vcs.MappedCode(Take_Time_BangPhra.Purchasing.VendorCnService.MapVendorCredit);
+                        string crKey = !string.IsNullOrEmpty(vcrCode) && string.Equals(credCode, vcrCode, StringComparison.OrdinalIgnoreCase)
+                            ? Take_Time_BangPhra.Purchasing.VendorCnService.MapVendorCredit : "ACCOUNTS_PAYABLE";
+                        long oq = sync.EnqueueVendorBalanceJournal("VCRED-" + doc, offset, payDate,
+                            "หักเครดิตผู้ขาย (ใบลดหนี้) ในการจ่าย " + doc + " - " + vendorName,
+                            null, accId, string.IsNullOrEmpty(accId) ? paidHow : null, crKey, null, null);
+                        if (oq <= 0)
+                        {
+                            try { db.Logs(conn, "VendorCn", $"VCRED-{doc} enqueue failed offset={offset:N2}", "SYSTEM"); } catch { }
+                        }
+                    }
                 }
             }
             catch (Exception ex)
@@ -263,7 +393,11 @@ namespace Take_Time_BangPhra.Account
                     db.DatabaseInsertSafe(conn,
                         "UPDATE Product_In SET Payment_Status = N'PAID' WHERE Linked_Voucher_Id = @id",
                         new Dictionary<string, object> { { "@id", doc } });
-                db.Logs(conn, "Purchase", $"Credit voucher paid: doc={doc} amount={amount:N2} via={paidHow} queue={qid}", Session["User"]?.ToString() ?? "SYSTEM");
+                if (offset > 0.005m)
+                    Vcs.AddLedger(Take_Time_BangPhra.Purchasing.VendorCnService.EtCnApplied, VendorIdOf(row), vendorTax, vendorName, null, -offset,
+                        Vcs.CreditAccountCode(VendorIdOf(row), vendorTax, vendorName), "APPLY-" + doc, doc, null, doc, "VCRED-" + doc,
+                        $"หักในการจ่ายใบซื้อเชื่อ {doc} (เงินจริง {cashAmount:N2})", Session["User"]?.ToString() ?? "");
+                db.Logs(conn, "Purchase", $"Credit voucher paid: doc={doc} amount={amount:N2} cash={cashAmount:N2} vendorCredit={offset:N2} via={paidHow} queue={qid}", Session["User"]?.ToString() ?? "SYSTEM");
             }
             catch (Exception ex)
             {

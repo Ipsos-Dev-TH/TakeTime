@@ -158,6 +158,10 @@ namespace Take_Time_BangPhra
                 try { syncService.RunLocalIntegrityScanIfDue(); }
                 catch (Exception isx) { System.Diagnostics.Trace.TraceError($"Integrity scan timer error: {isx.Message}"); }
 
+                // คืนสินค้าที่วางบิลแล้วยังไม่ได้ใบลดหนี้เกินกำหนด → Telegram วันละครั้ง (PHASE19_39) — ไม่มีตาราง = no-op
+                try { syncService.RemindPendingVendorCnIfDue(); }
+                catch (Exception vcx) { System.Diagnostics.Trace.TraceError($"VendorCn reminder timer error: {vcx.Message}"); }
+
                 // ดึงจำนวนสต๊อกที่ปรับฝั่ง NextAcc เองกลับเข้า TakeTime (ขากลับ) — no-op ถ้า config ปิด
                 try { syncService.PullNextAccStockMovementsIfDue().Wait(TimeSpan.FromMinutes(2)); }
                 catch (Exception sex) { System.Diagnostics.Trace.TraceError($"StockQtyPull timer error: {(sex.InnerException ?? sex).Message}"); }

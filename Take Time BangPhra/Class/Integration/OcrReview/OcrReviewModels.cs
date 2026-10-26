@@ -62,7 +62,8 @@ namespace Take_Time_BangPhra.Integration.OcrReview
         public const string NextAcc = "NEXTACC";
         /// <summary>ใบเดิมอยู่นอกระบบ — ตรวจเพดาน §86/10 อัตโนมัติไม่ได้ ผู้ใช้ยืนยันเอง</summary>
         public const string Outside = "OUTSIDE";
-        /// <summary>เป็นการคืนสินค้าที่บันทึกผ่านหน้า "คืนสินค้าให้ผู้ขาย" (PRT-) แล้ว — เก็บเป็นหลักฐาน ไม่สร้างเอกสารซ้ำ</summary>
+        /// <summary>เป็นการคืนสินค้าที่บันทึกผ่านหน้า "คืนสินค้าให้ผู้ขาย" (PRT-) แล้ว — เก็บเป็นหลักฐาน ไม่สร้างเอกสารซ้ำ.
+        /// ใช้เฉพาะเมื่อปิดนโยบาย Vendor_Cn_Primary (=0) / ยังไม่รัน PHASE19_39 — เปิดอยู่ = ใบลดหนี้เป็นตัวจริง ผูกผ่าน <see cref="OcrReviewState.ReturnRef"/></summary>
         public const string PurchaseReturn = "PRT";
     }
 
@@ -154,7 +155,8 @@ namespace Take_Time_BangPhra.Integration.OcrReview
         public string Settlement { get; set; } = OcrNoteSettlement.Auto;
         /// <summary>บัญชีรับคืน/จ่าย (ChartOfAccount id) เมื่อ Settlement = BANK</summary>
         public string RefundAccountId { get; set; }
-        /// <summary>เลขอ้างอิงการคืนสินค้า PRT- (SourceMode = PRT)</summary>
+        /// <summary>เลขอ้างอิงการคืนสินค้า PRT- — SourceMode = PRT (หลักฐาน, นโยบายเดิม) หรือใบลดหนี้ NEXTACC/OUTSIDE ที่ผูกการคืน
+        /// (PHASE19_39: ใบลดหนี้เป็นตัวจริง → หลังอนุมัติกลับ JE PRT-…-REV + ปรับต้นทุน PRT-…-DIF)</summary>
         public string ReturnRef { get; set; }
         /// <summary>ผู้ใช้ยืนยันว่าใบเดิมอยู่นอกระบบและยอดไม่เกินยอดเดิม (SourceMode = OUTSIDE)</summary>
         public bool OutsideCapConfirmed { get; set; }

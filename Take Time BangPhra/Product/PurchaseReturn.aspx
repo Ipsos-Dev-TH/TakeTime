@@ -93,6 +93,16 @@
                             Text=" กลับภาษีซื้อ (ใบเดิมเคลม VAT แล้ว + ได้รับใบลดหนี้จากผู้ขาย — ม.82/10, ม.86/10)" />
                     </div>
                 </div>
+                <asp:Panel ID="pnlCnMode" runat="server" Visible="false" style="background:#f3f8ff;border:1px solid #bbdefb;border-radius:6px;padding:10px 12px;margin-top:6px;">
+                    <label style="font-weight:600;">ใบลดหนี้จากผู้ขาย (เอกสารที่ลดภาษีซื้อใน ภ.พ.30 — §82/10)</label>
+                    <asp:RadioButtonList ID="rblCnMode" runat="server" RepeatDirection="Vertical" AutoPostBack="true" OnSelectedIndexChanged="rblCnMode_SelectedIndexChanged" CssClass="cn-mode">
+                        <asp:ListItem Value="PENDING" Text=" รอใบลดหนี้จากผู้ขาย — ได้ใบแล้วสแกนที่หน้า OCR (ชนิด ใบลดหนี้) แล้วผูกเลขคืนนี้ (แนะนำ)" Selected="True" />
+                        <asp:ListItem Value="LINK" Text=" มีใบลดหนี้ที่บันทึกจากหน้า OCR แล้ว — เลือกใบด้านล่าง (หน้านี้ตัดจำนวน/ต้นทุนเท่านั้น)" />
+                        <asp:ListItem Value="NONE" Text=" ผู้ขายไม่ออกใบลดหนี้ — ลงบัญชีครบที่หน้านี้ (ภ.พ.30 จะไม่ลดภาษีซื้อเพราะไม่มีเอกสาร)" />
+                    </asp:RadioButtonList>
+                    <asp:DropDownList ID="ddlLinkCn" runat="server" CssClass="form-control" Enabled="false" style="margin-top:6px;" />
+                    <asp:Literal ID="litCnHint" runat="server"></asp:Literal>
+                </asp:Panel>
                 <asp:Literal ID="litPreview" runat="server"></asp:Literal>
             </div>
             <div class="product-card-footer">
@@ -116,9 +126,22 @@
                             <asp:BoundField DataField="Items" HeaderText="รายการ" />
                             <asp:BoundField DataField="Net_Total" HeaderText="มูลค่าคืน (สุทธิ)" DataFormatString="{0:N2}" ItemStyle-HorizontalAlign="Right" />
                             <asp:BoundField DataField="Reason" HeaderText="เหตุผล" />
+                            <asp:BoundField DataField="Cn_Info" HeaderText="ใบลดหนี้ผู้ขาย" />
                         </Columns>
                     </asp:GridView>
                 </div>
+                <asp:Panel ID="pnlPendingClose" runat="server" Visible="false" style="margin-top:10px;">
+                    <div class="form-row">
+                        <div class="form-group" style="flex: 3;">
+                            <label>ปิดรายการรอใบลดหนี้ (ผู้ขายยืนยันว่าไม่ออกใบลดหนี้)</label>
+                            <asp:DropDownList ID="ddlPendingReturn" runat="server" CssClass="form-control" />
+                        </div>
+                        <div class="form-group" style="justify-content: flex-end;">
+                            <asp:Button ID="btnCloseNoCn" runat="server" Text="ปิดรายการ" CssClass="btn btn-outline" OnClick="btnCloseNoCn_Click"
+                                OnClientClick="return confirm('ปิดรายการรอใบลดหนี้? JE คืนสินค้าที่ลงไว้ (ไม่กลับภาษีซื้อ) จะเป็นรายการจริง — ภาษีซื้อคงเดิมเพราะไม่มีใบลดหนี้');" />
+                        </div>
+                    </div>
+                </asp:Panel>
             </div>
         </asp:Panel>
 
@@ -129,6 +152,8 @@
                 <div class="alert-text">
                     ตัดสต๊อก ณ ต้นทุนเฉลี่ย (Cr สินค้าคงเหลือ) · คู่บัญชีตามสถานะ: ยังไม่วางบิล = Dr GRNI, วางบิล/ตั้งหนี้แล้ว = Dr เจ้าหนี้,
                     ผู้ขายคืนเงิน = Dr แหล่งเงิน · กลับภาษีซื้อเฉพาะใบที่เคยเคลมแล้ว · ส่วนต่างราคาซื้อกับต้นทุนเฉลี่ย → บัญชีส่งคืนสินค้า (PURCHASE_RETURNS)
+                    <br />วางบิลแล้ว (PHASE19_39): <b>ใบลดหนี้ใน NextAcc เป็นรายการบัญชี/ภาษีตัวจริง</b> — ระหว่างรอใบ หน้านี้ลง JE ชั่วคราวแบบไม่กลับภาษีซื้อ
+                    แล้วระบบกลับรายการนั้นทั้งใบ (PRT-…-REV) และปรับต้นทุนเฉลี่ย (PRT-…-DIF) ตอนผูกใบลดหนี้ — ยอดไม่ซ้อน · จำนวนสต๊อกฝั่ง NextAcc ส่งตามเดิม
                 </div>
             </div>
         </div>

@@ -223,9 +223,27 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
      เงินสด 111 เสมอ (:17899-17924) ⇒ ผู้ใช้เลือกบัญชีรับคืน/เก็บเป็นยอดกับผู้ขาย → JE ย้ายขา `OCRCN|OCRDN-{scan8}-MNY`.
      กันซ้ำ: เลขผู้ขาย+เลขที่ใน `Ocr_Document_Log` + `SupplierInvoiceNumber` ของ contact เดียวกันบน NextAcc. Draft/สถานะ
      (DRAFT→CREATED→UPDATED→APPROVED→DONE, FAILED, EVIDENCE) + OCR raw vs ค่าที่ยืนยัน (Corrections_Json) ใน `Ocr_Document_Log`
-     (ไม่มีตาราง = Session); `IdempotencyContext=OCR-{scanId}` ⇒ กดส่งซ้ำ = ทำต่อจากขั้นที่ค้าง. **ใบลดหนี้ของการคืนสินค้าที่ลง `PRT-`
-     แล้ว = เก็บเป็นหลักฐาน (EVIDENCE) ไม่สร้างใน NextAcc ซ้ำ** (PRT JE ลงเจ้าหนี้/สต๊อก/ภาษีซื้อครบแล้ว). PDF: `?pdf={docId}`
+     (ไม่มีตาราง = Session); `IdempotencyContext=OCR-{scanId}` ⇒ กดส่งซ้ำ = ทำต่อจากขั้นที่ค้าง. ใบลดหนี้ของการคืน `PRT-` = ดูข้อย่อยถัดไป
+     (ปิดนโยบาย/ยังไม่รัน PHASE19_39 = เก็บเป็นหลักฐาน EVIDENCE แบบเดิม). PDF: `?pdf={docId}`
      (เฉพาะเอกสารจากหน้านี้). ไม่ทำ: ใบรับรองแทนใบเสร็จจาก OCR (ใช้ PaymentVoucher ข้อ 11), ปรับสต๊อกจาก CN.
+   - **ใบลดหนี้ผู้ขาย ↔ คืนสินค้า / เครดิตผู้ขาย (ต.ค. 2026, PHASE19_39 — คำตัดสินทีม 4 ข้อ; ไม่มีตาราง/`Vendor_Cn_Primary=0` = เดิม):**
+     (1) **ใบลดหนี้ใน NextAcc = รายการบัญชี/ภาษีตัวจริง** เพราะ ภ.พ.30 อ่าน "เอกสาร" ใบลดหนี้ ไม่อ่าน JE (TaxService.cs:675-690) และ §82/10 ลด
+     ภาษีซื้อเดือนที่ได้ใบ. หน้า `Product/PurchaseReturn` (วางบิลแล้ว = คู่บัญชีเจ้าหนี้/เงินคืน) เลือก: **รอใบลดหนี้** (default — JE PRT ไม่กลับ VAT;
+     คืนเงินสด = VAT ที่ได้คืนพักเจ้าหนี้ `vatHoldKey`) · **ผูกใบที่บันทึกแล้ว** (CN-first: ไม่มี JE PRT, ตัดจำนวน+DIF) · **ผู้ขายไม่ออก** (JE เดิมครบ).
+     ยังไม่วางบิล (GRNI) = ไม่ต้องรอใบ. OCR ใบลดหนี้เลือก "การคืนสินค้า" (รายการรอ) → หลังอนุมัติ `MarkLinked` (ตัวสร้าง PRT เห็นแล้ว `SKIPPED_CN_LINKED`)
+     + คิว `PURCHASE_RETURN_REVERSE` (`PRT-…-REV` — กลับ JE ที่ลงแล้ว; PROCESSING = รอ, ยังไม่ลง = ไม่มีอะไรกลับ) + `PURCHASE_RETURN_COSTDIFF`
+     (`PRT-…-DIF` = Σบรรทัดใบลดหนี้ที่ลงบัญชี INVENTORY − ต้นทุนเฉลี่ยที่ตัด ↔ PURCHASE_RETURNS — CostService คงค่าเฉลี่ย; บรรทัดลงบัญชีสินค้าชนะ
+     DocumentService.cs:17383). CN ปรับราคา (ไม่ผูกคืน) → แนะนำบัญชีส่งคืน/ส่วนลด (ค่าเฉลี่ยไม่เปลี่ยน). คืนบางส่วน = 1 PRT ↔ 1 CN. qty push ข้อ 9 ไม่เปลี่ยน.
+     เตือน: Telegram วันละครั้ง (`RemindPendingVendorCnIfDue`, `Vendor_Cn_Reminder_Days` 7) + ตรวจสุขภาพข้อ 12 + ปุ่ม "ปิดรายการรอใบลดหนี้".
+     ตาราง `Purchase_Return_Cn_Link` (สถานะ PENDING/LINKED/NOT_REQUIRED, Prt_Journal FULL/PENDING/NONE). การคืนก่อน PHASE19_39 = หลักฐาน.
+     (2) **ใบเพิ่มหนี้ของใบที่จ่ายครบ:** NextAcc ลง Cr 111 (DocumentService.cs:17899 `isCashSettlement`, :17922) ⇒ default **ตั้งเจ้าหนี้รอจ่าย**
+     (JE `OCRDN-…-MNY` Dr 111/Cr เจ้าหนี้ + `Vendor_Credit_Ledger` DN_PAYABLE → หน้า `Account/CreditPurchasePayment` ปุ่ม "จ่าย" = `VDNPAY-…` Dr เจ้าหนี้/Cr แหล่งเงิน)
+     หรือ "จ่ายทันทีจากบัญชี…". ขาเงินจริง = `VendorCnPolicy.EffectiveSettlement` (ใบต้นทางค้าง/นอกระบบ = ไม่มีขาเงิน; ไม่ลงเงินสดที่ไม่มีจริง).
+     (3) **เก็บเป็นเครดิตกับผู้ขาย (CN ใบต้นทางจ่ายครบ, default):** mapping ใหม่ `VENDOR_CREDIT_RECEIVABLE` (ยังไม่ผูก = เจ้าหนี้การค้ายอดเดบิต + ตรวจสุขภาพเตือน)
+     + ledger CN_CREDIT. หักตอนจ่ายใบซื้อเชื่อ: รับชำระเอกสารเต็ม (เงินจริง+เครดิต) + `VCRED-{doc}` Dr แหล่งเงิน/Cr บัญชีที่เครดิตนั่ง (ledger CN_APPLIED).
+     ผู้ขายคืนเงิน = BANK (การคืนแบบคืนเงินตั้ง default บัญชีเดียวกับ PRT). (4) **เติมที่อยู่/สาขา/เลขผู้เสียภาษีของผู้ติดต่อเฉพาะช่องว่าง** (ไม่ทับ) — สวิตช์
+     `Ocr_Fill_Missing_Contact` (1), log audit ค่าเดิม→ใหม่, กล่องสำเร็จแสดง "เติมข้อมูลผู้ขายใน NextAcc: …". โค้ด `Class/Purchasing/VendorCnPolicy.cs` (pure, mono test),
+     `VendorCnService.cs`, `Class/Integration/AccountingSyncService.VendorCn.cs`. ข้อจำกัด: CN-first ช่วงก่อนบันทึกคืน GL สต๊อกลดก่อนจำนวน; ledger จับคู่ผู้ขายด้วยเลขภาษี/Vendor.ID/ชื่อ.
 3b. **หน้า PaymentVoucher (manual) parity กับ OCR:** ✅ DONE (page-side only, ไม่แตะ mapper/sync).
    เพิ่ม 3 dropdown: (a) `ddlPaidHowNexaacc` แหล่งจ่ายเงินดึงจากผังบัญชีจริง NextAcc (11x/21x, value=
    `Nexaacc_AccountId`) → save บังคับ `paymentAccountId` ตัวนี้ก่อน mapping (`LookupPaidHowAccountId`)

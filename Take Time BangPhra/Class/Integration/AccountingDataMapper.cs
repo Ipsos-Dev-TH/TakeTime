@@ -1212,8 +1212,10 @@ namespace Take_Time_BangPhra.Integration
         public CreateJournalEntryRequest MapPurchaseReturnToJournal(string returnRef, DateTime returnDate,
             string supplierName, string supplierDocNo, string counterKey,
             decimal purchaseNet, decimal carryingCost, decimal vatReversal,
-            string paymentMethod = null, string paymentAccountId = null, string reason = null)
+            string paymentMethod = null, string paymentAccountId = null, string reason = null, string vatHoldKey = null)
         {
+            // vatHoldKey (PHASE19_39): คืนเงินระหว่างรอใบลดหนี้ — ส่วน VAT ที่ได้คืนลงบัญชีนี้ (เจ้าหนี้) แทน INPUT_VAT
+            // เพราะ §82/10 ลดภาษีซื้อเดือนที่ได้รับใบลดหนี้ (ภ.พ.30 ของ NextAcc อ่านจากเอกสารใบลดหนี้)
             purchaseNet = Math.Round(purchaseNet, 2, MidpointRounding.AwayFromZero);
             carryingCost = Math.Round(carryingCost, 2, MidpointRounding.AwayFromZero);
             vatReversal = Math.Round(vatReversal, 2, MidpointRounding.AwayFromZero);
@@ -1245,7 +1247,9 @@ namespace Take_Time_BangPhra.Integration
             if (carryingCost > 0)
                 lines.Add(new JournalEntryLineRequest { AccountId = GetAccountId("INVENTORY"), DebitAmount = 0, CreditAmount = carryingCost, Description = $"คืนสินค้าให้ผู้ขาย (ต้นทุนเฉลี่ย) {returnRef}" });
             if (vatReversal > 0)
-                lines.Add(new JournalEntryLineRequest { AccountId = GetAccountId("INPUT_VAT"), DebitAmount = 0, CreditAmount = vatReversal, Description = $"กลับภาษีซื้อตามใบลดหนี้ {supplierDocNo}".Trim() });
+                lines.Add(string.IsNullOrWhiteSpace(vatHoldKey)
+                    ? new JournalEntryLineRequest { AccountId = GetAccountId("INPUT_VAT"), DebitAmount = 0, CreditAmount = vatReversal, Description = $"กลับภาษีซื้อตามใบลดหนี้ {supplierDocNo}".Trim() }
+                    : new JournalEntryLineRequest { AccountId = GetAccountId(vatHoldKey), DebitAmount = 0, CreditAmount = vatReversal, Description = $"VAT ที่ได้คืน รอใบลดหนี้จากผู้ขาย (§82/10) {returnRef}" });
 
             decimal diff = purchaseNet - carryingCost;
             if (diff != 0)

@@ -53,6 +53,27 @@
             </div>
         </div>
 
+        <asp:Panel ID="pnlDn" runat="server" CssClass="cpp-card" Visible="false">
+            <h3 style="margin-top: 0;">🧾 ใบเพิ่มหนี้จากผู้ขายที่ตั้งเจ้าหนี้รอจ่าย</h3>
+            <div class="cpp-note" style="margin-bottom:8px;">ใบเพิ่มหนี้ที่อ้างใบที่จ่ายครบแล้ว — NextAcc ลงเงินสด 111 แต่ยังไม่ได้จ่ายจริง ระบบจึงย้ายไปเจ้าหนี้การค้า (หน้าตรวจทาน OCR). จ่ายจริงเมื่อไรกด "จ่าย" → JE VDNPAY-… Dr เจ้าหนี้ / Cr แหล่งเงิน</div>
+            <div style="overflow-x: auto;">
+                <asp:GridView ID="gvDn" runat="server" AutoGenerateColumns="False" CssClass="cpp-table" GridLines="None" OnRowCommand="gvCredit_RowCommand">
+                    <Columns>
+                        <asp:BoundField DataField="SourceDocNo" HeaderText="ใบเพิ่มหนี้ (NextAcc)" />
+                        <asp:BoundField DataField="CreatedAt" HeaderText="วันที่" DataFormatString="{0:dd/MM/yyyy}" />
+                        <asp:BoundField DataField="VendorName" HeaderText="ผู้ขาย" />
+                        <asp:BoundField DataField="Amount" HeaderText="ยอดเดิม" DataFormatString="{0:N2}" ItemStyle-HorizontalAlign="Right" />
+                        <asp:BoundField DataField="Remaining" HeaderText="ค้างจ่าย" DataFormatString="{0:N2}" ItemStyle-HorizontalAlign="Right" />
+                        <asp:TemplateField HeaderText="">
+                            <ItemTemplate>
+                                <asp:Button ID="btnPayDn" runat="server" Text="จ่าย" CssClass="btn-sel" CommandName="PayDn" CommandArgument='<%# Eval("Id") %>' />
+                            </ItemTemplate>
+                        </asp:TemplateField>
+                    </Columns>
+                </asp:GridView>
+            </div>
+        </asp:Panel>
+
         <asp:Panel ID="pnlPay" runat="server" CssClass="cpp-card" Visible="false">
             <h3 style="margin-top: 0;">บันทึกจ่ายชำระ <asp:Label ID="lblPayDoc" runat="server" /></h3>
             <asp:Literal ID="litPayInfo" runat="server"></asp:Literal>
@@ -77,6 +98,11 @@
                     <asp:TextBox ID="txtPayAmount" runat="server" CssClass="form-control" />
                     <span class="cpp-note">ค่าเริ่มต้น = ยอดค้างจ่ายของใบ (หัก ณ ที่จ่ายถูกหักไว้แล้วตอนตั้งหนี้ — ไม่หักซ้ำ)</span>
                 </div>
+                <asp:Panel ID="pnlOffset" runat="server" CssClass="cpp-field" Visible="false">
+                    <label>หักเครดิตกับผู้ขาย (จากใบลดหนี้ที่เก็บไว้)</label>
+                    <asp:TextBox ID="txtCreditOffset" runat="server" CssClass="form-control" placeholder="0.00" />
+                    <span class="cpp-note">ยอดจ่ายเงินจริง + หักเครดิต ≤ ยอดค้างจ่าย · NextAcc: รับชำระเอกสารเต็ม (ยอดจ่าย+หักเครดิต) แล้ว JE VCRED-… Dr แหล่งเงิน / Cr เครดิตผู้ขาย ⇒ เงินออกจริง = ยอดจ่าย</span>
+                </asp:Panel>
             </div>
             <asp:Button ID="btnConfirmPay" runat="server" Text="💾 บันทึกจ่ายชำระ" CssClass="btn-pay" OnClick="btnConfirmPay_Click"
                 OnClientClick="return confirm('ยืนยันบันทึกจ่ายชำระใบซื้อเชื่อนี้?');" />
