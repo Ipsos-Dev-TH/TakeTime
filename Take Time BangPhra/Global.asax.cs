@@ -154,6 +154,10 @@ namespace Take_Time_BangPhra
                 try { syncService.ReconcileRecentReservationsIfDue(); }
                 catch (Exception rcx) { System.Diagnostics.Trace.TraceError($"Reconcile nightly timer error: {rcx.Message}"); }
 
+                // ตรวจความถูกต้องรายคืนแบบไม่เรียก API (PHASE19_37) — ยอด/มัดจำ/ใบไม่เข้าคิว/ใบค้างก่อนยื่น ภ.พ.30 · โหมด OFF = no-op
+                try { syncService.RunLocalIntegrityScanIfDue(); }
+                catch (Exception isx) { System.Diagnostics.Trace.TraceError($"Integrity scan timer error: {isx.Message}"); }
+
                 // ดึงจำนวนสต๊อกที่ปรับฝั่ง NextAcc เองกลับเข้า TakeTime (ขากลับ) — no-op ถ้า config ปิด
                 try { syncService.PullNextAccStockMovementsIfDue().Wait(TimeSpan.FromMinutes(2)); }
                 catch (Exception sex) { System.Diagnostics.Trace.TraceError($"StockQtyPull timer error: {(sex.InnerException ?? sex).Message}"); }

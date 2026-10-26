@@ -118,6 +118,9 @@ namespace Take_Time_BangPhra.Account.Report
                     DataTable dtReceiptDetail = code.DatabaseQuerySafe(conn,
                         "SELECT Number,ProductType_ID,Product_Data,Product_Amount,Product_Unit,Price_PerPeice,Price_Amount FROM Account_Receipt_Detail WHERE Receipt_ID = @ReceiptID",
                         detailParams);
+                    // PHASE19_37: คงชนิดบรรทัดติดลบ (หักมัดจำ/ส่วนลด/ปรับยอด) ข้ามการแก้ใบ — เดิมลบ+ใส่บรรทัดใหม่แล้วชนิดหาย
+                    ReceiptPreflight.LoadLineKindsInto(conn, id, dtReceiptDetail);
+                    ViewState["PfBeforeJson"] = ReceiptPreflight.SnapshotJson(conn, id);
                     DataTable dtcustomer = new DataTable();
                     try
                     {
@@ -399,6 +402,7 @@ namespace Take_Time_BangPhra.Account.Report
                     dtDetail.Columns.Add("Product_Unit");
                     dtDetail.Columns.Add("Price_PerPeice");
                     dtDetail.Columns.Add("Price_Amount");
+                    dtDetail.Columns.Add("Line_Kind");   // PHASE19_37 ชนิดบรรทัดติดลบ
 
                 }
                 catch
@@ -436,7 +440,12 @@ namespace Take_Time_BangPhra.Account.Report
             if (TextBox1.Text.Length > 1 && TextBox2.Text.Length > 0)
             {
                 DataTable dtDetail = (DataTable)Session["dtDetail"];
+                if (!dtDetail.Columns.Contains("Line_Kind")) dtDetail.Columns.Add("Line_Kind");
                 dtDetail.Rows.Add(dtDetail.Rows.Count+1,DropDownList3.SelectedValue,TextBox1.Text, TextBox14.Text, TextBox15.Text, NumberHelper.TwoDecimalPoints(Convert.ToDouble(TextBox2.Text)),NumberHelper.TwoDecimalPoints(Convert.ToDouble(TextBox14.Text) *Convert.ToDouble(TextBox2.Text)));
+                // PHASE19_37: บรรทัดติดลบ → ชนิดที่เลือก (ว่าง = กฎเดิม "หักมัดจำ")
+                var added = dtDetail.Rows[dtDetail.Rows.Count - 1];
+                if (Convert.ToDouble(added["Price_Amount"].ToString()) < 0 && !string.IsNullOrEmpty(ddlLineKind.SelectedValue))
+                    added["Line_Kind"] = ddlLineKind.SelectedValue;
                 Session["dtDetail"] = (DataTable)dtDetail;
                 GridView1.DataSource = dtDetail;
                 GridView1.DataBind();
@@ -477,6 +486,7 @@ namespace Take_Time_BangPhra.Account.Report
         protected void GridView1_RowDeleting(object sender, GridViewDeleteEventArgs e)
         {
             DataTable dtDetail = (DataTable)Session["dtDetail"];
+            if (!dtDetail.Columns.Contains("Line_Kind")) dtDetail.Columns.Add("Line_Kind");
             dtDetail.Rows[e.RowIndex].Delete();
             dtDetail.AcceptChanges();
             for(int i = 0;i<dtDetail.Rows.Count;i++)
@@ -630,6 +640,66 @@ namespace Take_Time_BangPhra.Account.Report
                     else
                     {
                         System.Diagnostics.Debug.WriteLine($"[Duplicate Check] Receipt number unchanged: '{docNum}'");
+                    }
+                }
+
+                // ── PHASE19_37: ตรวจใบก่อนบันทึก (กฎชุดเดียวกับคิว/worker) + เหตุผลการแก้ที่มีนัยทางบัญชี ─────────────
+                string pfWarn = null;
+                PreflightResult pfResult = null;
+                string pfReason = (txtEditReason.Text ?? "").Trim();
+                ReceiptFacts pfBefore = command == "edit" ? ReceiptPreflight.LoadFacts(conn, id) : null;
+                List<string> pfChanges = new List<string>();
+                if (ReceiptPreflight.CurrentMode(conn) != PreflightMode.Off)
+                {
+                    int pfRes = 0;
+                    if (dtReceipt != null && dtReceipt.Rows.Count > 0 && dtReceipt.Columns.Contains("Reservation_ID")
+                        && dtReceipt.Rows[0]["Reservation_ID"] != DBNull.Value)
+                        int.TryParse(dtReceipt.Rows[0]["Reservation_ID"].ToString(), out pfRes);
+                    if (pfRes <= 0) int.TryParse((TextBox9.Text ?? "").Trim(), out pfRes);
+                    decimal pfTotal, pfVat, pfExcl;
+                    decimal.TryParse(TextBox6.Text, NumberStyles.Any, CultureInfo.InvariantCulture, out pfTotal);
+                    decimal.TryParse(TextBox4.Text, NumberStyles.Any, CultureInfo.InvariantCulture, out pfVat);
+                    decimal.TryParse(TextBox3.Text, NumberStyles.Any, CultureInfo.InvariantCulture, out pfExcl);
+                    var draft = new ReceiptDraft
+                    {
+                        ReceiptNumber = docNum, OriginalReceiptNumber = command == "edit" ? id : null, Uid = uid,
+                        ReservationId = pfRes, IsDeposit = CheckBox1.Checked, IsEdit = command == "edit",
+                        Total = pfTotal, Vat = pfVat, ExclVat = pfExcl, Date = receiptDate,
+                        PaidType = DropDownList2.SelectedItem?.Text, EtaxRequested = CheckBox5.Checked,
+                        BuyerFromForm = true, BuyerTaxId = TextBox12.Text, BuyerAddress = TextBox11.Text,
+                        Lines = ReceiptPreflight.LinesFromTable(dtDetail, null)
+                    };
+                    if (!ReceiptPreflightPage.Gate(this, conn, draft, command == "edit" ? PreflightContext.PageEdit : PreflightContext.PageSave,
+                            pfReason, null, out pfWarn, out pfResult))
+                        return;
+
+                    // แก้ใบ: การเปลี่ยนที่มีนัยทางบัญชีต้องมีเหตุผล (บันทึกใน Account_Receipt_Edit_Log)
+                    if (pfBefore != null)
+                    {
+                        var after = new ReceiptFacts
+                        {
+                            ReceiptNumber = docNum, Total = pfTotal, Date = receiptDate, PaidType = draft.PaidType,
+                            IsDeposit = draft.IsDeposit, Lines = draft.Lines
+                        };
+                        long beforeCust = 0, afterCust = 0;
+                        try
+                        {
+                            var bc = code2.DatabaseQuerySafe(conn,
+                                "SELECT TOP 1 ISNULL(Customer_ID, 0) AS B, ISNULL((SELECT TOP 1 ID FROM Customer WHERE MobilePhone = @p), 0) AS A FROM Account_Receipt WHERE ID = @id",
+                                new Dictionary<string, object> { { "@id", id }, { "@p", (TextBox13.Text ?? "").Trim() } });
+                            if (bc != null && bc.Rows.Count > 0) { beforeCust = Convert.ToInt64(bc.Rows[0]["B"]); afterCust = Convert.ToInt64(bc.Rows[0]["A"]); }
+                        }
+                        catch { }
+                        pfChanges = ReceiptPreflight.MaterialEditChanges(pfBefore, after, beforeCust, afterCust);
+                        if (pfChanges.Count > 0 && pfReason.Length < 10)
+                        {
+                            ClientScript.RegisterStartupScript(this.GetType(), "pfReason",
+                                "alert('" + HttpUtility.JavaScriptStringEncode(
+                                    "ยังไม่ได้บันทึก — การแก้ไขนี้มีผลทางบัญชี กรุณาใส่เหตุผล (อย่างน้อย 10 ตัวอักษร) ในช่องข้างปุ่มบันทึก:\n• "
+                                    + string.Join("\n• ", pfChanges)
+                                    + (pfBefore.HasNextAccDoc ? "\n\nใบนี้มีเอกสารบน NextAcc แล้ว — บันทึกแล้วระบบจะยกเลิกเอกสารเดิมและออกใหม่ให้ตรง" : "\n\nยังไม่มีเอกสารบน NextAcc — ระบบจะส่งข้อมูลใหม่แทน")) + "');", true);
+                            return;
+                        }
                     }
                 }
 
@@ -1090,6 +1160,9 @@ namespace Take_Time_BangPhra.Account.Report
                         "INSERT INTO [dbo].[Account_Receipt_Detail] ([Number],[Receipt_ID],[ProductType_ID],[Product_ID],[Product_Data],[Product_Amount],[Product_Unit],[Price_PerPeice],[Price_Amount]) " +
                         "VALUES (@Number,@ReceiptID,@ProductTypeID,0,@ProductData,@ProductAmount,@ProductUnit,@PricePerPeice,@PriceAmount)",
                         detailInsertParams);
+                    // PHASE19_37: ชนิดบรรทัดติดลบ (หักมัดจำ/ส่วนลด/ปรับยอด) — ไม่มีคอลัมน์ = ข้าม
+                    if (dtDetail.Columns.Contains("Line_Kind") && dtDetail.Rows[i]["Line_Kind"] != DBNull.Value)
+                        ReceiptPreflight.SaveLineKind(conn, docNum, dtDetail.Rows[i]["Number"].ToString(), dtDetail.Rows[i]["Line_Kind"].ToString());
                 }
                 System.Diagnostics.Debug.WriteLine($"[Receipt] Inserted {dtDetail.Rows.Count} detail rows successfully");
 
@@ -1661,23 +1734,14 @@ namespace Take_Time_BangPhra.Account.Report
 
                 // Auto-sync receipt to accounting
                 bool depositRealigned = false;
+                string pfSyncAction = null;
+                long pfQueueId = 0;
                 try
                 {
                     var config = new AccountingConfig(conn);
                     if (config.IsConfigured && config.Enabled)
                     {
                         var sync = new AccountingSyncService(conn);
-
-                        // Edit mode: void เอกสารเก่าก่อน
-                        if (command == "edit")
-                        {
-                            string originalDocNum = Session["EditOriginalDocNum"]?.ToString() ?? docNum;
-                            sync.EnqueueVoidReceipt(originalDocNum);
-                            // ยอดหักมัดจำ = บรรทัดติดลบที่เหลือในใบ (ลบบรรทัดหักมัดจำ = 0) — ต้องหลัง VOID ซึ่งจับยอดที่ลงไว้จริง
-                            // (เคส #149366: คอลัมน์ค้าง 4,700 จากรุ่นก่อนแก้ → CREATE ใหม่ล้ม "หักมัดจำเกินที่รับจริง" ทุก Retry)
-                            sync.RealignDepositAppliedToLines(docNum);
-                            depositRealigned = true;
-                        }
 
                         // Enqueue เอกสารใหม่/อัพเดท
                         int resId = 0;
@@ -1687,20 +1751,34 @@ namespace Take_Time_BangPhra.Account.Report
                         // TextBox10 = ชื่อลูกค้า (เดิมส่ง TextBox16 ซึ่งเป็นรหัสไปรษณีย์ → CustomerName ผิด
                         // บนเส้น int_/walk-in ที่ resolve contact ด้วยชื่อ)
                         string custName = TextBox10.Text;
-
-                        if (config.IsDocumentMode || (!string.IsNullOrEmpty(docNum) && docNum != "0"))
+                        bool doEnqueue = config.IsDocumentMode || (!string.IsNullOrEmpty(docNum) && docNum != "0");
+                        Func<long> enqueueCreate = () =>
                         {
+                            if (!doEnqueue) return -1;
                             string paidMethod = DropDownList2.SelectedItem?.Text ?? "CASH";
                             string payAccId = sync.LookupPaidHowAccountId(paidMethod);
                             // ส่งเบอร์ "ผู้ซื้อบนใบเสร็จ" ไปด้วย — อาจไม่ใช่ลูกค้าของการจอง
                             // (จองในนามบริษัท แต่ออกใบให้ผู้ติดต่อ / แก้ผู้ซื้อในหน้านี้)
                             // ถ้าไม่ส่ง ตัว sync จะอ่านลูกค้าจากการจองอย่างเดียว การแก้ชื่อ/เลขภาษี/
                             // ที่อยู่ตรงนี้จะไม่มีผลกับเอกสารบน NextAcc เลย
-                            sync.EnqueueReceipt(resId, docNum, totalAmt, vatAmt, receiptDate, custName,
+                            return sync.EnqueueReceipt(resId, docNum, totalAmt, vatAmt, receiptDate, custName,
                                 isDeposit: CheckBox1.Checked, paymentMethod: paidMethod,
                                 revenueType: "ROOM_REVENUE", paymentAccountId: payAccId,
                                 customerPhone: TextBox13.Text);
+                        };
+
+                        if (command == "edit")
+                        {
+                            // จุดเดียวหลังแก้ใบ (PHASE19_37): มีเอกสาร NextAcc = VOID เก่า → CREATE เลขเดิม (เส้นเดิม) ·
+                            // ยังไม่มี = รีเฟรชคิวที่ค้าง ไม่ใส่ VOID เปล่า · ยอดหักมัดจำตั้งตามบรรทัดหลัง VOID เสมอ (#149366)
+                            string originalDocNum = Session["EditOriginalDocNum"]?.ToString() ?? docNum;
+                            long editQid;
+                            pfSyncAction = sync.OnReceiptEdited(docNum, originalDocNum, enqueueCreate, out editQid);
+                            pfQueueId = editQid;
+                            depositRealigned = true;
                         }
+                        else
+                            pfQueueId = enqueueCreate();
                     }
                 }
                 catch (Exception accEx)
@@ -1751,12 +1829,27 @@ namespace Take_Time_BangPhra.Account.Report
                 }
                 catch { }
 
+                // PHASE19_37: ประวัติการแก้ใบ (ก่อน/หลัง + เหตุผล + ผลตรวจ + ทางที่ส่งบัญชี)
+                if (command == "edit" && (pfChanges.Count > 0 || pfReason.Length > 0 || pfResult != null))
+                {
+                    try
+                    {
+                        string beforeJson = ViewState["PfBeforeJson"] as string ?? ReceiptPreflight.SnapshotJson(pfBefore);
+                        ReceiptPreflight.WriteEditLog(conn, docNum, Session["EditOriginalDocNum"]?.ToString(), reservation_id, "EDIT",
+                            (pfReason.Length > 0 ? pfReason : null) + (pfChanges.Count > 0 ? " | เปลี่ยน: " + string.Join("; ", pfChanges) : ""),
+                            beforeJson, ReceiptPreflight.SnapshotJson(conn, docNum), pfResult, pfSyncAction ?? "NONE", pfQueueId);
+                    }
+                    catch { }
+                }
+
                 // Show success message then redirect
                 string okMsg = string.IsNullOrEmpty(saveWarn)
                     ? "✅ บันทึกใบเสร็จรับเงินเรียบร้อยแล้ว"
                     : "✅ บันทึกใบเสร็จรับเงินแล้ว\n\n" + saveWarn.Replace("'", "");
+                if (!string.IsNullOrEmpty(pfWarn))
+                    okMsg += "\n\n⚠ ตรวจก่อนส่งบัญชี (เตือน):\n" + pfWarn;
                 ClientScript.RegisterStartupScript(this.GetType(), "success",
-                    "alert('" + okMsg + "'); window.location.href='/Account/Receipt';", true);
+                    "alert('" + HttpUtility.JavaScriptStringEncode(okMsg) + "'); window.location.href='/Account/Receipt';", true);
             }
             else
             {

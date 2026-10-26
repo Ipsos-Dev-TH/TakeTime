@@ -969,6 +969,10 @@
     <Compile Include="Class\Integration\ChannelSalesPostingService.cs" />
     <Compile Include="Class\Integration\AccountingSyncService.CreditNote.cs" />
     <Compile Include="Class\Integration\AccountingSyncService.Reconcile.cs" />
+    <Compile Include="Class\Integration\AccountingSyncService.Prevention.cs" />
+    <Compile Include="Class\Integration\QueueErrors.cs" />
+    <Compile Include="Class\Integration\ReceiptPreflight.cs" />
+    <Compile Include="Class\Integration\ReceiptPreflight.Data.cs" />
     <Compile Include="Class\Integration\CreditNoteModels.cs" />
     <Compile Include="Class\Accounting\CreditNoteService.cs" />
     <Compile Include="Class\Integration\AccountingApiClient.cs" />

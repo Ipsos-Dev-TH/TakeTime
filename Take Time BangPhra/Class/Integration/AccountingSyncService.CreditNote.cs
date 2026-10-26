@@ -310,7 +310,7 @@ namespace Take_Time_BangPhra.Integration
             Guid srcDocId = ResolveCnSourceDocId(cn.SourceReceiptId);
             // ใบต้นทางยังค้างคิว → รอ (ทั้งสองเส้น) ไม่งั้นเส้น integration ออกใบลดหนี้ที่ไม่ผูกเอกสารเดิม (OriginalInvoiceRef หาไม่เจอ)
             if (srcDocId == Guid.Empty && SourceReceiptStillQueued(cn.SourceReceiptId))
-                throw new Exception("ใบต้นทาง " + cn.SourceReceiptId + " ยังรอส่งเข้า NextAcc (คิว CREATE_RECEIPT_DOCUMENT) — ระบบจะลองใหม่อัตโนมัติ");
+                throw QueueErrors.Wait("ใบต้นทาง " + cn.SourceReceiptId + " ยังรอส่งเข้า NextAcc (คิว CREATE_RECEIPT_DOCUMENT) — ระบบจะลองใหม่อัตโนมัติ");
             if (!_config.CanUseCompanyEndpoints) return await ProcessCnIntegrationAsync(cn, srcDocId);
             if (srcDocId == Guid.Empty)
             {
@@ -373,7 +373,7 @@ namespace Take_Time_BangPhra.Integration
                 // ขาเงิน: NextAcc ลง Cr 111x (ใบต้นทางชำระครบ) หรือ Cr ลูกหนี้ — ย้ายไปแหล่งเงินที่คืนจริง
                 var je = await FindDocumentJournalAsync(docId);
                 if (je == null)
-                    throw new Exception("ยังไม่พบรายการบัญชี (JE) ของใบลดหนี้ " + cn.CnNo + " บน NextAcc — จะลองใหม่");
+                    throw QueueErrors.Wait("ยังไม่พบรายการบัญชี (JE) ของใบลดหนี้ " + cn.CnNo + " บน NextAcc — จะลองใหม่", null, 2);
                 var counter = je.Lines.Where(l => l.CreditAmount > 0).OrderByDescending(l => l.CreditAmount).FirstOrDefault();
                 if (counter == null || string.IsNullOrEmpty(counter.AccountCode))
                     throw new Exception("อ่านขาเครดิตของ JE ใบลดหนี้ " + cn.CnNo + " ไม่ได้");
@@ -567,7 +567,7 @@ namespace Take_Time_BangPhra.Integration
                 if (!dep.IsDeposit) dep = null;   // ใบเก่าที่ส่งเป็นใบกำกับ/JE → เส้น JE
             }
             if (dep == null && depId == Guid.Empty && !CnMarkerHas(marker, "JRN") && SourceReceiptStillQueued(cn.SourceReceiptId))
-                throw new Exception("ใบมัดจำ " + cn.SourceReceiptId + " ยังรอส่งเข้า NextAcc (คิว CREATE_RECEIPT_DOCUMENT) — ระบบจะลองใหม่อัตโนมัติ");
+                throw QueueErrors.Wait("ใบมัดจำ " + cn.SourceReceiptId + " ยังรอส่งเข้า NextAcc (คิว CREATE_RECEIPT_DOCUMENT) — ระบบจะลองใหม่อัตโนมัติ");
 
             if (dep != null)
             {
@@ -705,7 +705,7 @@ namespace Take_Time_BangPhra.Integration
             if (cn == null) throw new ArgumentException("ไม่พบใบลดหนี้ #" + cnId);
             if (cn.Status == CreditNoteService.StVoided) return "SKIPPED_VOIDED";
             if (cn.Status != CreditNoteService.StSynced)
-                throw new Exception("ใบลดหนี้ " + cn.CnNo + " ยังไม่ส่ง NextAcc — การคืนเงินจะลงพร้อมใบเมื่อส่ง");
+                throw QueueErrors.Wait("ใบลดหนี้ " + cn.CnNo + " ยังไม่ส่ง NextAcc — การคืนเงินจะลงพร้อมใบเมื่อส่ง");
             if (cn.RefundStatus != CreditNoteService.RsPaid || cn.RefundAmount <= 0.004m) return "SKIPPED_NO_REFUND";
             // ใบที่ส่งแบบ "จะคืนภายหลัง": ขาเงินถูกพักไว้ที่ลูกหนี้ (ROOM_AR หรือบัญชีลูกหนี้ของใบต้นทาง) → ตัดออกไปแหล่งเงินที่คืนจริง
             string from = cn.NexaaccPath == CreditNoteService.PathCompanyCn

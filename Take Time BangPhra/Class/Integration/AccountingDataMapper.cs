@@ -50,11 +50,14 @@ namespace Take_Time_BangPhra.Integration
             if (_accountMappingCache.TryGetValue(takeTimeCode.ToUpper(), out var accountId))
             {
                 if (accountId == Guid.Empty)
-                    throw new Exception($"Account mapping '{takeTimeCode}' has empty GUID. กรุณากดปุ่ม 'ดึง Chart of Accounts' ในหน้า Accounting Integration Settings เพื่ออัพเดท Account ID");
+                    throw QueueErrors.Config("MAPPING_EMPTY_GUID", takeTimeCode,
+                        $"Account mapping '{takeTimeCode}' has empty GUID. กรุณากดปุ่ม 'ดึง Chart of Accounts' ในหน้า Accounting Integration Settings เพื่ออัพเดท Account ID");
                 return accountId;
             }
 
-            throw new Exception($"No Nexaacc account mapping found for TakeTime code: {takeTimeCode}. กรุณาตั้งค่าใน Accounting_Account_Mapping table");
+            // PHASE19_37: ปัญหาตั้งค่า — คิวพักแล้วกลับเข้าคิวเองเมื่อแอดมินบันทึก mapping (ไม่เผา retry 5 รอบ)
+            throw QueueErrors.Config("MAPPING_MISSING", takeTimeCode,
+                $"No Nexaacc account mapping found for TakeTime code: {takeTimeCode}. กรุณาตั้งค่าใน Accounting_Account_Mapping table");
         }
 
         public bool TryGetAccountId(string takeTimeCode, out Guid accountId)
@@ -131,7 +134,8 @@ namespace Take_Time_BangPhra.Integration
             EnsureMappingCache();
             if (_accountCodeCache.TryGetValue(takeTimeCode.ToUpper(), out var code) && !string.IsNullOrEmpty(code))
                 return code;
-            throw new Exception($"No NexaAcc AccountCode mapping for TakeTime code: {takeTimeCode}. ตรวจสอบ Accounting_Account_Mapping.Nexaacc_AccountCode");
+            throw QueueErrors.Config("MAPPING_NO_CODE", takeTimeCode,
+                $"No NexaAcc AccountCode mapping for TakeTime code: {takeTimeCode}. ตรวจสอบ Accounting_Account_Mapping.Nexaacc_AccountCode");
         }
 
         /// <summary>Reverse lookup: AccountId Guid → NexaAcc AccountCode string. ใช้แปลง legacy mapper output → integration request</summary>
@@ -194,7 +198,7 @@ namespace Take_Time_BangPhra.Integration
                 {
                     string code = GetAccountCodeFromId(line.AccountId);
                     if (string.IsNullOrEmpty(code))
-                        throw new Exception($"ConvertJournalToIntegration: ไม่พบ Nexaacc_AccountCode สำหรับ AccountId {line.AccountId} " +
+                        throw QueueErrors.Config("MAPPING_NO_CODE", null, $"ConvertJournalToIntegration: ไม่พบ Nexaacc_AccountCode สำหรับ AccountId {line.AccountId} " +
                             "ทั้งใน Accounting_Account_Mapping และ Accounting_Nexaacc_Accounts. " +
                             "กรุณากด 'ดึง Chart of Accounts' ในหน้า Accounting Integration เพื่อ sync ผังบัญชีให้ครบ");
                     lines.Add(new IntegrationJournalLineRequest
