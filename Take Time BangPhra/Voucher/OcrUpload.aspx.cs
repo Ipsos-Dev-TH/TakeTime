@@ -355,12 +355,54 @@ namespace Take_Time_BangPhra.Voucher
             m["cnResults"] = string.IsNullOrEmpty(cn) ? null : OcrReviewService.Json().DeserializeObject(cn);
             var cnNotes = ViewState["cnNotes"] as string;
             m["cnNotes"] = string.IsNullOrEmpty(cnNotes) ? null : OcrReviewService.Json().DeserializeObject(cnNotes);
+            AddVendorCnMeta(m, s);
             m["serverErrors"] = _serverErrors;
             m["serverNotes"] = _serverNotes;
             m["duplicate"] = _duplicate;
             m["nextaccDupWarn"] = _nextaccDupWarn || s.AllowDuplicate;
             m["locked"] = false;
             return m;
+        }
+
+        /// <summary>
+        /// PHASE19_39 — ใบลดหนี้ผู้ขาย = ตัวจริงของการคืนสินค้า: รายการคืนที่รอใบลดหนี้ (ผู้ขายเดียวกันก่อน), รหัสบัญชีสินค้าคงเหลือ,
+        /// ป้ายบัญชีเครดิตผู้ขาย. ไม่มีตาราง/ปิด Vendor_Cn_Primary → cnPrimary=false (หน้าทำงานแบบเดิม: ตัวเลือก "หลักฐาน PRT")
+        /// </summary>
+        private void AddVendorCnMeta(Dictionary<string, object> m, OcrReviewState s)
+        {
+            bool primary = false;
+            try
+            {
+                var vcs = new Take_Time_BangPhra.Purchasing.VendorCnService(Conn);
+                primary = vcs.CnPrimary();
+                if (!primary) return;
+                m["inventoryCode"] = vcs.MappedCode("INVENTORY");
+                string vcr = vcs.MappedCode(Take_Time_BangPhra.Purchasing.VendorCnService.MapVendorCredit);
+                string ap = vcs.MappedCode("ACCOUNTS_PAYABLE");
+                m["vendorCreditLabel"] = string.IsNullOrEmpty(vcr)
+                    ? "เจ้าหนี้การค้า " + ap + " (ยังไม่ผูกบัญชี VENDOR_CREDIT_RECEIVABLE)"
+                    : "บัญชี " + vcr + " ลูกหนี้ผู้ขาย/เครดิตจากผู้ขาย";
+                var list = vcs.ListPending(80);
+                Guid scanId;
+                if (Guid.TryParse(s.ScanId ?? "", out scanId))
+                {
+                    var mine = vcs.GetByScan(scanId);
+                    if (mine != null && !list.Any(x => x.ReturnRef == mine.ReturnRef)) list.Insert(0, mine);
+                }
+                string tax = OcrReviewMath.Digits(s.SupplierTaxId);
+                m["pendingReturns"] = list
+                    .OrderByDescending(r => tax.Length == 13 && Take_Time_BangPhra.Purchasing.VendorCnService.Digits(r.SupplierTaxId) == tax)
+                    .ThenByDescending(r => r.CreatedAt)
+                    .Select(r => (object)new Dictionary<string, object>
+                    {
+                        { "ref", r.ReturnRef }, { "supplier", r.SupplierName ?? "" }, { "taxId", r.SupplierTaxId ?? "" },
+                        { "net", r.PurchaseNet }, { "vat", r.VatAmount }, { "carry", r.CarryingCost },
+                        { "date", r.CreatedAt.ToString("dd/MM/yy", CultureInfo.InvariantCulture) }, { "refund", r.IsRefund },
+                        { "accId", r.PaidHowAccountId ?? "" }
+                    }).ToList();
+            }
+            catch { }
+            finally { m["cnPrimary"] = primary; }
         }
 
         private static Dictionary<string, object> OcrMeta(OcrResultResponse r)
@@ -550,11 +592,17 @@ namespace Take_Time_BangPhra.Voucher
             RenderDrafts();
             var h = new StringBuilder();
             h.Append("<div class=\"ocr-card\" style=\"border:2px solid #38a169;\"><h3 style=\"color:#276749;\">✓ ").Append(Server.HtmlEncode(r.Message)).Append("</h3>");
+            if (!string.IsNullOrEmpty(r.LinkedReturnRef))
+                h.Append("<p><b>↩️ ผูกกับการคืนสินค้า ").Append(Server.HtmlEncode(r.LinkedReturnRef))
+                 .Append("</b> — ใบลดหนี้นี้เป็นรายการบัญชี/ภาษีตัวจริง (ดูสถานะที่ <a href=\"../Product/PurchaseReturn\">หน้าคืนสินค้าให้ผู้ขาย</a>)</p>");
+            if (!string.IsNullOrEmpty(r.ContactFilled))
+                h.Append("<p><b>เติมข้อมูลผู้ขายใน NextAcc:</b> ").Append(Server.HtmlEncode(r.ContactFilled)).Append(" <small>(เฉพาะช่องที่ว่าง — ไม่ทับข้อมูลเดิม)</small></p>");
             if (r.DocId.HasValue && !r.Evidence)
                 h.Append("<p><a class=\"ocr-btn\" style=\"text-decoration:none;\" target=\"_blank\" href=\"OcrUpload.aspx?pdf=").Append(r.DocId.Value)
                  .Append("\">📄 เปิด PDF เอกสาร NextAcc</a></p>");
-            if (r.Notes.Count > 0)
-                h.Append("<ul class=\"ocr-hint\">").Append(string.Join("", r.Notes.Select(n => "<li>" + Server.HtmlEncode(n) + "</li>"))).Append("</ul>");
+            var notes = r.Notes.Where(n => string.IsNullOrEmpty(r.ContactFilled) || !n.StartsWith("เติมข้อมูลผู้ขายใน NextAcc:", StringComparison.Ordinal)).ToList();
+            if (notes.Count > 0)
+                h.Append("<ul class=\"ocr-hint\">").Append(string.Join("", notes.Select(n => "<li>" + Server.HtmlEncode(n) + "</li>"))).Append("</ul>");
             h.Append("<p class=\"ocr-hint\">สแกนใบถัดไปได้จากฟอร์มด้านบน</p></div>");
             litResult.Text = h.ToString();
         }
@@ -571,6 +619,15 @@ namespace Take_Time_BangPhra.Voucher
             if (row.Status == OcrReviewService.StEvidence) h.Append(" — เก็บเป็นหลักฐานการคืนสินค้า (ไม่มีเอกสารบน NextAcc)");
             else h.Append(" → NextAcc ").Append(Server.HtmlEncode(row.NexaaccDocNo ?? row.NexaaccDocId?.ToString() ?? ""));
             h.Append("</p>");
+            try
+            {
+                var lk = new Take_Time_BangPhra.Purchasing.VendorCnService(Conn).GetByScan(row.ScanId);
+                if (lk != null)
+                    h.Append("<p>↩️ ผูกกับการคืนสินค้า <b>").Append(Server.HtmlEncode(lk.ReturnRef)).Append("</b> · ")
+                     .Append(Server.HtmlEncode((lk.RevRef != null ? "กลับ " + lk.RevRef + " · " : "") + (lk.DifRef != null ? "ปรับต้นทุน " + (lk.DifAmount ?? 0m).ToString("#,##0.00", CultureInfo.InvariantCulture) + " (" + lk.DifRef + ")" : "ต้นทุนตรง")))
+                     .Append("</p>");
+            }
+            catch { }
             if (row.NexaaccDocId.HasValue)
                 h.Append("<a class=\"ocr-btn\" style=\"text-decoration:none;\" target=\"_blank\" href=\"OcrUpload.aspx?pdf=").Append(row.NexaaccDocId.Value).Append("\">📄 เปิด PDF</a>");
             h.Append("</div>");

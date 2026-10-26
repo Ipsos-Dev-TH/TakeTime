@@ -338,6 +338,7 @@
                     if (!/^PRT-/i.test(String(s.ReturnRef || '').trim())) v.errors.push('ระบุเลขอ้างอิงการคืนสินค้า (PRT-)');
                 }
                 if (s.Settlement === 'BANK' && !s.RefundAccountId) v.errors.push('เลือกบัญชีที่รับเงินคืน/จ่ายเงิน');
+                if (s.SourceMode !== 'PRT' && String(s.ReturnRef || '').trim() && s.DocKind !== 'VCN') v.errors.push('ผูกการคืนสินค้าได้เฉพาะใบลดหนี้');
             }
             return v;
         }
@@ -475,10 +476,21 @@
             updateDynamic();
         }
 
+        /* PHASE19_39: ใบต้นทางจ่ายครบ ⇒ NextAcc ลงขาเงิน 111 (DocumentService.cs:17899,:17922) — ไม่มีเงินเข้า/ออกจริง ⇒ "ตาม NextAcc" = เครดิตผู้ขาย/ตั้งเจ้าหนี้ */
+        function sourcePaid() { return S.SourceMode === 'NEXTACC' && !!S.SourceDocId && (+S.SourceBalanceDue || 0) <= 0.01; }
+        function pickedReturn() { var rr = String(S.ReturnRef || '').trim(); return rr && S.SourceMode !== 'PRT' ? (M.pendingReturns || []).filter(function (x) { return x.ref === rr; })[0] || null : null; }
+        function effSettlement() {
+            var s = S.Settlement || 'AUTO';
+            if (!M.cnPrimary) return s;
+            if (!sourcePaid()) return 'AUTO';
+            if (s !== 'AUTO') return s;
+            var r = pickedReturn(); return r && r.refund ? 'BANK' : 'VENDOR';
+        }
         function renderNote() {
+            if (M.cnPrimary && S.SourceMode !== 'PRT') S.Settlement = effSettlement();   // ค่าที่จะทำจริง (ฝั่งเซิร์ฟเวอร์ใช้กติกาเดียวกัน — VendorCnPolicy.EffectiveSettlement)
             var cn = S.DocKind === 'VCN', h = '<div class="rv-sec"><h4>ใบต้นทาง &amp; ' + (cn ? 'ใบลดหนี้' : 'ใบเพิ่มหนี้') + '</h4>';
             h += '<div class="seg" style="margin-bottom:10px;">';
-            [['NEXTACC', 'เลือกเอกสารใน NextAcc'], ['OUTSIDE', 'ใบเดิมอยู่นอกระบบ']].concat(cn ? [['PRT', 'เป็นการคืนสินค้าที่บันทึกแล้ว (PRT-)']] : []).forEach(function (m) {
+            [['NEXTACC', 'เลือกเอกสารใน NextAcc'], ['OUTSIDE', 'ใบเดิมอยู่นอกระบบ']].concat(cn && !M.cnPrimary ? [['PRT', 'เป็นการคืนสินค้าที่บันทึกแล้ว (PRT-)']] : []).forEach(function (m) {
                 h += '<label class="' + (S.SourceMode === m[0] ? 'sel' : '') + '"><input type="radio" name="rvSrc" value="' + m[0] + '" data-act="src"' + (S.SourceMode === m[0] ? ' checked' : '') + ' />' + m[1] + '</label>';
             });
             h += '</div>';
@@ -502,26 +514,65 @@
                     h += '<div class="ocr-msg info"><b>ใบต้นทาง: ' + esc(S.SourceDocNo || S.SourceDocId) + '</b>' + (S.SourceContactName ? ' · ' + esc(S.SourceContactName) : '') +
                          '<br/>ยอดใบ ' + money(S.SourceTotal) + ' · ลดหนี้แล้ว ' + money(S.SourceCredited) + ' · <b>ลดได้อีก ' + money(rem) + '</b> · ค้างจ่าย ' + money(S.SourceBalanceDue) +
                          '<br/><span id="capChk"></span>' +
-                         '<br/><small>' + ((+S.SourceBalanceDue || 0) > 0.01 ? (cn ? 'ใบต้นทางยังค้างจ่าย ⇒ NextAcc ลง <b>Dr เจ้าหนี้</b> (ลดหนี้ที่ค้าง)' : 'NextAcc ลง Cr เจ้าหนี้') : (cn ? 'ใบต้นทางจ่ายครบแล้ว ⇒ NextAcc ลง <b>Dr เงินสด 111</b> (ผู้ขายคืนเงิน) — เลือกด้านล่างถ้าเงินคืนเข้าบัญชีอื่นหรือเก็บเป็นยอดกับผู้ขาย' : 'ใบต้นทางจ่ายครบ ⇒ NextAcc ลง Cr เงินสด 111')) + '</small></div>';
+                         '<br/><small>' + ((+S.SourceBalanceDue || 0) > 0.01 ? (cn ? 'ใบต้นทางยังค้างจ่าย ⇒ NextAcc ลง <b>Dr เจ้าหนี้</b> (ลดหนี้ที่ค้าง)' : 'NextAcc ลง Cr เจ้าหนี้') : (cn ? 'ใบต้นทางจ่ายครบแล้ว ⇒ NextAcc ลง <b>Dr เงินสด 111</b> — เลือกด้านล่างว่าเงินคืนเข้าบัญชีไหน หรือเก็บเป็นเครดิตกับผู้ขาย' : 'ใบต้นทางจ่ายครบ ⇒ NextAcc ลง Cr เงินสด 111 — เลือกด้านล่างว่าตั้งเจ้าหนี้รอจ่าย หรือจ่ายทันที')) + '</small></div>';
                 }
             } else if (S.SourceMode === 'OUTSIDE') {
                 h += '<div class="ocr-msg warn">ไม่ได้อ้างเอกสารใน NextAcc ⇒ ตรวจเพดานยอด §86/10 อัตโนมัติไม่ได้ และ NextAcc จะลง <b>เจ้าหนี้</b> เป็นคู่บัญชี (ไม่มีใบต้นทางให้ดูสถานะการจ่าย)</div>' +
                      '<label style="font-size:13px;"><input type="checkbox" data-f="OutsideCapConfirmed"' + (S.OutsideCapConfirmed ? ' checked' : '') + ' /> ตรวจแล้ว ยอดลด/เพิ่มหนี้รวมไม่เกินยอดใบเดิม และผู้ขายรายเดียวกับใบเดิม</label>';
             } else {
-                h += '<div class="ocr-msg warn">การคืนสินค้าที่บันทึกในหน้า "คืนสินค้าให้ผู้ขาย" โพสต์บัญชีไว้ครบแล้ว (เจ้าหนี้/เงินคืน · สินค้าคงเหลือ · ภาษีซื้อ) ⇒ ระบบจะ <b>เก็บใบลดหนี้นี้เป็นหลักฐาน</b> ไม่สร้างใบลดหนี้ใน NextAcc ซ้ำ</div>' +
+                h += '<div class="ocr-msg warn">การคืนสินค้าที่บันทึกในหน้า "คืนสินค้าให้ผู้ขาย" โพสต์บัญชีไว้ครบแล้ว (เจ้าหนี้/เงินคืน · สินค้าคงเหลือ · ภาษีซื้อ) ⇒ ระบบจะ <b>เก็บใบลดหนี้นี้เป็นหลักฐาน</b> ไม่สร้างใบลดหนี้ใน NextAcc ซ้ำ (Vendor_Cn_Primary=0)</div>' +
                      '<div class="rv-grid">' + field('ReturnRef', 'เลขอ้างอิงการคืนสินค้า (PRT-…)', 'text', { ph: 'PRT-20261026-101500-123' }) + '</div>';
             }
-            if (S.SourceMode !== 'PRT') {
-                var rs2 = cn ? CN_REASONS : DN_REASONS;
-                h += '<div class="rv-grid" style="margin-top:10px;"><div class="rv-f"><label>เหตุผล (§86/' + (cn ? '10' : '9') + ')</label><select data-f="NoteReason" data-int="1"><option value="0">— เลือก —</option>';
-                rs2.forEach(function (r) { h += '<option value="' + r[0] + '"' + (+S.NoteReason === r[0] ? ' selected' : '') + '>' + r[1] + '</option>'; });
-                h += '</select></div>' + field('NoteReasonText', 'รายละเอียดเหตุผล (พิมพ์บนเอกสาร/หมายเหตุ)', 'text') + '</div>';
+            if (S.SourceMode === 'PRT') return h + '</div>';
+
+            var rs2 = cn ? CN_REASONS : DN_REASONS;
+            h += '<div class="rv-grid" style="margin-top:10px;"><div class="rv-f"><label>เหตุผล (§86/' + (cn ? '10' : '9') + ')</label><select data-f="NoteReason" data-int="1"><option value="0">— เลือก —</option>';
+            rs2.forEach(function (r) { h += '<option value="' + r[0] + '"' + (+S.NoteReason === r[0] ? ' selected' : '') + '>' + r[1] + '</option>'; });
+            h += '</select></div>' + field('NoteReasonText', 'รายละเอียดเหตุผล (พิมพ์บนเอกสาร/หมายเหตุ)', 'text') + '</div>';
+
+            // ── การคืนสินค้าที่เกี่ยวข้อง (PHASE19_39: ใบลดหนี้ = ตัวจริง) ──
+            if (cn && M.cnPrimary) {
+                var prs = M.pendingReturns || [], pr = pickedReturn();
+                h += '<div class="rv-f wide" style="margin-top:10px;"><label>ใบลดหนี้นี้เป็นของการคืนสินค้า (หน้า "คืนสินค้าให้ผู้ขาย") หรือไม่</label><select data-f="ReturnRef">' +
+                     '<option value="">ไม่ใช่การคืนสินค้า — ส่วนลด/ปรับราคา (ไม่แตะสต๊อก)</option>';
+                prs.forEach(function (r) { h += '<option value="' + esc(r.ref) + '"' + (pr && pr.ref === r.ref ? ' selected' : '') + '>' + esc(r.ref + ' · ' + (r.supplier || '') + ' · ' + money(r.net) + ' + VAT ' + money(r.vat) + ' · ' + r.date + (r.refund ? ' · ผู้ขายคืนเงินแล้ว' : '')) + '</option>'; });
+                if (S.ReturnRef && !pr) h += '<option value="' + esc(S.ReturnRef) + '" selected>' + esc(S.ReturnRef) + ' (ไม่อยู่ในรายการรอใบลดหนี้)</option>';
+                h += '</select><div class="hint">' + (prs.length ? 'แสดงเฉพาะการคืนที่วางบิลแล้วและยังรอใบลดหนี้' : 'ไม่มีการคืนสินค้าที่รอใบลดหนี้') + '</div></div>';
+                if (pr) {
+                    var invNet = 0; (S.Lines || []).forEach(function (l) { if (M.inventoryCode && String(l.AccountCode || '') === M.inventoryCode) invNet += OcrMath.calcLine(l).net; });
+                    var dif = OcrMath.r2(OcrMath.r2(invNet) - (+pr.carry || 0));
+                    h += '<div class="ocr-msg info"><b>ใบลดหนี้นี้เป็นรายการบัญชี/ภาษีตัวจริงของการคืน ' + esc(pr.ref) + '</b>' +
+                         '<br/>ราคาซื้อที่คืน ' + money(pr.net) + ' · VAT ' + money(pr.vat) + ' · ต้นทุนเฉลี่ยที่ตัดสต๊อก ' + money(pr.carry) +
+                         '<br/>หลังอนุมัติ: กลับ JE ที่ลงระหว่างรอ (<b>' + esc(pr.ref) + '-REV</b>) + ปรับสินค้าคงเหลือ ' + money(dif) + ' (<b>' + esc(pr.ref) + '-DIF</b> ราคาซื้อ ↔ ต้นทุนเฉลี่ย) — ยอดไม่ซ้อน' +
+                         (M.inventoryCode ? '<br/><button type="button" class="ocr-btn ghost" style="padding:4px 10px;margin-top:6px;" data-act="invlines">ตั้งบัญชีทุกบรรทัด = สินค้าคงเหลือ ' + esc(M.inventoryCode) + '</button>' : '<br/><span class="badmark">ยังไม่ผูก mapping INVENTORY</span>') + '</div>';
+                    if (M.inventoryCode && invNet <= 0) h += '<div class="ocr-msg warn">ยังไม่มีบรรทัดที่ลงบัญชีสินค้าคงเหลือ (' + esc(M.inventoryCode) + ') — สต๊อกใน GL จะถูกตัดที่ต้นทุนเฉลี่ยผ่าน ' + esc(pr.ref) + '-DIF ส่วนบรรทัดใบลดหนี้ลงบัญชีที่เลือก</div>';
+                    if (Math.abs(OcrMath.calcTotals(S.Lines).sub - (+pr.net || 0)) > 1) h += '<div class="ocr-msg warn">ยอดก่อน VAT ของใบลดหนี้ ≠ ราคาซื้อที่คืน ' + money(pr.net) + ' — ตรวจว่าผู้ขายลดหนี้เต็มจำนวนหรือไม่ (เจ้าหนี้จะลดตามใบลดหนี้)</div>';
+                } else if (M.inventoryCode && (S.Lines || []).some(function (l) { return String(l.AccountCode || '') === M.inventoryCode; })) {
+                    h += '<div class="ocr-msg warn">ใบลดหนี้ไม่ผูกการคืนสินค้า แต่มีบรรทัดลงบัญชีสินค้าคงเหลือ — ถ้าจะส่งของคืนตามมา: บันทึกในหน้า "คืนสินค้าให้ผู้ขาย" เลือก "มีใบลดหนี้ที่บันทึกแล้ว" (ตัดจำนวน + ปรับต้นทุน) · ถ้าเป็นส่วนลด/ปรับราคา แนะนำบัญชีส่งคืน/ส่วนลดรับ (ต้นทุนเฉลี่ยใน TakeTime ไม่ลดตาม)</div>';
+                }
+            }
+
+            // ── ขาเงิน ──
+            if (!M.cnPrimary) {
                 h += '<div class="rv-f" style="margin-top:10px;"><label>ขาเงิน</label><div class="seg">';
                 [['AUTO', cn ? 'ตาม NextAcc (ค้าง = ลดเจ้าหนี้ · จ่ายแล้ว = เงินสด)' : 'ตาม NextAcc'], ['BANK', cn ? 'ผู้ขายคืนเงินเข้าบัญชี…' : 'จ่ายเพิ่มจากบัญชี…'], ['VENDOR', cn ? 'เก็บเป็นยอดกับผู้ขาย (หักครั้งหน้า)' : 'ตั้งเจ้าหนี้รอจ่าย']].forEach(function (m) {
                     h += '<label class="' + (S.Settlement === m[0] ? 'sel' : '') + '"><input type="radio" name="rvSet" value="' + m[0] + '" data-act="set"' + (S.Settlement === m[0] ? ' checked' : '') + ' />' + m[1] + '</label>';
                 });
                 h += '</div><div class="hint">ใช้เมื่อใบต้นทางจ่ายครบแล้ว: NextAcc ลงขาเงินที่เงินสด 111 เสมอ ⇒ TakeTime โพสต์ JE ย้ายขาไปบัญชีที่เลือก</div></div>';
                 if (S.Settlement === 'BANK') h += '<div class="rv-grid">' + moneySelect('RefundAccountId', 'บัญชีที่รับเงินคืน / จ่ายเงิน', '— เลือกบัญชี —') + '</div>';
+                return h + '</div>';
+            }
+            var eff = effSettlement();
+            h += '<div class="rv-f" style="margin-top:10px;"><label>ขาเงิน</label>';
+            if (!sourcePaid()) {
+                h += '<div class="hint">' + (S.SourceMode === 'NEXTACC' && S.SourceDocId ? 'ใบต้นทางยังค้างจ่าย' : (S.SourceMode === 'NEXTACC' ? 'ยังไม่เลือกใบต้นทาง' : 'ใบเดิมอยู่นอกระบบ')) + ' ⇒ NextAcc ลง <b>เจ้าหนี้</b> (' + (cn ? 'ลด' : 'เพิ่ม') + 'ยอดค้างจ่าย) — ไม่มีขาเงินให้เลือก</div></div>';
+            } else {
+                h += '<div class="seg">';
+                var opts = cn ? [['VENDOR', 'เก็บเป็นเครดิตกับผู้ขาย (หักตอนจ่ายครั้งหน้า) — ' + (M.vendorCreditLabel || 'เจ้าหนี้การค้า')], ['BANK', 'ผู้ขายคืนเงินเข้าบัญชี…']]
+                              : [['VENDOR', 'ตั้งเจ้าหนี้รอจ่าย (ค่าเริ่มต้น)'], ['BANK', 'จ่ายทันทีจากบัญชี…']];
+                opts.forEach(function (m) { h += '<label class="' + (eff === m[0] ? 'sel' : '') + '"><input type="radio" name="rvSet" value="' + m[0] + '" data-act="set"' + (eff === m[0] ? ' checked' : '') + ' />' + esc(m[1]) + '</label>'; });
+                h += '</div><div class="hint">ใบต้นทางจ่ายครบแล้ว: NextAcc ลงขาเงินที่เงินสด 111 เสมอ ⇒ TakeTime โพสต์ JE ย้ายขาไป' + (cn ? 'บัญชีเครดิตผู้ขาย/บัญชีที่รับเงินคืน' : 'เจ้าหนี้การค้า/บัญชีที่จ่ายจริง') + ' (ไม่มีเงินสดเข้า-ออกจริงในวันนั้น)</div></div>';
+                if (eff === 'BANK') h += '<div class="rv-grid">' + moneySelect('RefundAccountId', cn ? 'บัญชีที่รับเงินคืน' : 'จ่ายจากบัญชี', '— เลือกบัญชี —') + '</div>';
             }
             return h + '</div>';
         }
@@ -578,6 +629,13 @@
                 if (f === 'FullTaxInvoice' && el.checked && !S.TaxInvoiceDate) { S.TaxInvoiceDate = S.SupplierDocDate || ''; var td = $('f_TaxInvoiceDate'); if (td) td.value = S.TaxInvoiceDate; }
                 if (f === 'FullTaxInvoice' && !el.checked) { (S.Lines || []).forEach(function (l) { if (OcrMath.vatRate(l.VatType) > 0) l.VatClaimable = false; }); if (e.type === 'change') { render(); return; } }
                 if (f === 'VendorId' || f === 'NoteReason' || f === 'RefundAccountId' || f === 'PaidHowAccountId') { updateDynamic(); return; }
+                if (f === 'ReturnRef' && el.tagName === 'SELECT') {
+                    // การคืนที่ผู้ขายคืนเงินแล้ว ⇒ ขาเงินเริ่มต้น = บัญชีที่ PRT รับเงินคืน
+                    var pr = pickedReturn();
+                    if (pr && pr.refund) { S.Settlement = 'BANK'; if (pr.accId) S.RefundAccountId = pr.accId; }
+                    else if (S.Settlement === 'BANK' && !S.RefundAccountId) S.Settlement = 'AUTO';
+                    if (e.type === 'change') { render(); return; }
+                }
             } else if (li !== null) {
                 var l = S.Lines[+li], k = el.getAttribute('data-k');
                 if (!l) return;
@@ -593,7 +651,8 @@
             var el = e.target.closest ? e.target.closest('[data-act]') : null;
             if (!el) return;
             var act = el.getAttribute('data-act');
-            if (act === 'kind') { S.DocKind = el.value; if (isNote() && !S.SourceMode) S.SourceMode = 'NEXTACC'; if (S.DocKind !== 'VCN' && S.SourceMode === 'PRT') S.SourceMode = 'NEXTACC'; render(); }
+            if (act === 'kind') { S.DocKind = el.value; if (isNote() && !S.SourceMode) S.SourceMode = 'NEXTACC'; if (S.DocKind !== 'VCN' && S.SourceMode === 'PRT') S.SourceMode = 'NEXTACC'; if (S.DocKind !== 'VCN' && S.SourceMode !== 'PRT') S.ReturnRef = ''; render(); }
+            else if (act === 'invlines') { if (M.inventoryCode) (S.Lines || []).forEach(function (l) { l.AccountCode = M.inventoryCode; }); render(); }
             else if (act === 'src') { S.SourceMode = el.value; render(); }
             else if (act === 'set') { S.Settlement = el.value; render(); }
             else if (act === 'add') {
@@ -644,7 +703,9 @@
             if (S.DocKind === 'PV') row('แหล่งจ่ายเงิน', esc(optText('PaidHowAccountId') || 'ให้ NextAcc เลือกเอง'));
             if (isNote()) {
                 row('ใบต้นทาง', S.SourceMode === 'NEXTACC' ? esc(S.SourceDocNo || '-') : (S.SourceMode === 'OUTSIDE' ? 'อยู่นอกระบบ' : 'คืนสินค้า ' + esc(S.ReturnRef || '')));
-                if (S.SourceMode !== 'PRT') row('ขาเงิน', S.Settlement === 'BANK' ? 'บัญชี ' + esc(optText('RefundAccountId')) : (S.Settlement === 'VENDOR' ? 'เก็บเป็นยอดกับผู้ขาย/เจ้าหนี้' : 'ตาม NextAcc'));
+                var es = effSettlement();
+                if (S.SourceMode !== 'PRT') row('ขาเงิน', es === 'BANK' ? 'บัญชี ' + esc(optText('RefundAccountId')) : (es === 'VENDOR' ? (S.DocKind === 'VCN' ? 'เก็บเป็นเครดิตกับผู้ขาย — ' + esc(M.vendorCreditLabel || 'เจ้าหนี้การค้า') : 'ตั้งเจ้าหนี้รอจ่าย') : 'ตาม NextAcc (เจ้าหนี้)'));
+                if (pickedReturn()) row('การคืนสินค้า', '<b>' + esc(S.ReturnRef) + '</b> — ใบลดหนี้นี้เป็นรายการจริง: กลับ ' + esc(S.ReturnRef) + '-REV + ปรับต้นทุน ' + esc(S.ReturnRef) + '-DIF');
             }
             h += '</table>';
             h += S.SourceMode === 'PRT' && isNote()
@@ -696,6 +757,7 @@
             if (!hs || !hm || !hs.value) return;
             try { S = JSON.parse(hs.value); M = JSON.parse(hm.value || '{}'); } catch (e) { $('rvForm').innerHTML = '<div class="ocr-msg err">อ่านข้อมูลตรวจทานไม่ได้: ' + esc(e.message) + '</div>'; return; }
             S.Lines = S.Lines || []; S.LowConfidence = S.LowConfidence || [];
+            if (M.cnPrimary && S.SourceMode === 'PRT') S.SourceMode = 'NEXTACC';   // ร่างเก่า (หลักฐาน PRT) → ใบลดหนี้จริงที่ผูกการคืน
             var form = $('rvForm');
             form.addEventListener('input', onInput);
             form.addEventListener('change', onInput);

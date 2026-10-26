@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
+using Take_Time_BangPhra.Purchasing;
 
 namespace Take_Time_BangPhra.Integration.OcrReview
 {
@@ -69,6 +70,10 @@ namespace Take_Time_BangPhra.Integration.OcrReview
         public List<string> Notes = new List<string>();
         public string DuplicateDocNo;
         public Guid? DuplicateDocId;
+        /// <summary>การคืนสินค้าที่ผูกกับใบลดหนี้นี้ (PHASE19_39)</summary>
+        public string LinkedReturnRef;
+        /// <summary>ข้อมูลผู้ขายที่เติมให้ผู้ติดต่อ NextAcc (ช่องที่ว่าง) — แสดงในกล่องสำเร็จ</summary>
+        public string ContactFilled;
     }
 
     /// <summary>
@@ -686,6 +691,11 @@ namespace Take_Time_BangPhra.Integration.OcrReview
             Guid? docId = row?.NexaaccDocId;
             string user = ctx?.UserName;
             bool note = OcrDocKind.IsNote(s.DocKind);
+            // PHASE19_39: นโยบาย "ใบลดหนี้ผู้ขายเป็นตัวจริง" — ร่างเก่าที่เลือก "หลักฐาน PRT" เปลี่ยนเป็นใบลดหนี้จริงที่ผูกการคืน
+            var vcs = new VendorCnService(_conn);
+            bool cnPrimary = note && vcs.CnPrimary();
+            if (cnPrimary && s.SourceMode == OcrNoteSource.PurchaseReturn) s.SourceMode = OcrNoteSource.NextAcc;
+            if (cnPrimary && s.DocKind != OcrDocKind.VendorCreditNote) s.ReturnRef = null;
 
             // ── ใบต้นทาง (ดึงสดจาก NextAcc — ค่าในหน้าเว็บใช้แสดงผลเท่านั้น) ──
             DocumentResponse source = null;
@@ -725,6 +735,27 @@ namespace Take_Time_BangPhra.Integration.OcrReview
                 }
             }
 
+            // ── PHASE19_39: ผูกการคืนสินค้า (ใบลดหนี้ = ตัวจริง) + ขาเงินที่ทำจริง ──
+            ReturnCnLink link = null;
+            string evidenceWhy = null;
+            if (cnPrimary)
+            {
+                if (!string.IsNullOrWhiteSpace(s.ReturnRef))
+                {
+                    string err = CheckReturnLink(vcs, s, scanId, source, out link, out evidenceWhy);
+                    if (err != null) { res.Errors.Add(err); return res; }
+                    if (evidenceWhy != null) { s.SourceMode = OcrNoteSource.PurchaseReturn; link = null; }   // JE PRT ครบอยู่แล้ว → หลักฐาน
+                }
+                bool paid = s.SourceMode == OcrNoteSource.NextAcc && source != null && source.BalanceDue <= 0.01m;
+                string eff = paid ? VendorCnPolicy.EffectiveSettlement(s.Settlement, true, link != null && link.IsRefund) : OcrNoteSettlement.Auto;
+                if (eff == OcrNoteSettlement.Bank && string.IsNullOrWhiteSpace(s.RefundAccountId) && link != null && link.IsRefund)
+                    s.RefundAccountId = link.PaidHowAccountId;
+                if (!string.Equals(eff, s.Settlement ?? OcrNoteSettlement.Auto, StringComparison.Ordinal) && paid)
+                    res.Notes.Add("ขาเงิน: ใบต้นทางจ่ายครบแล้ว ⇒ " + (eff == OcrNoteSettlement.Bank ? "รับ/จ่ายผ่านบัญชีที่เลือก"
+                        : (s.DocKind == OcrDocKind.VendorCreditNote ? "เก็บเป็นเครดิตกับผู้ขาย" : "ตั้งเจ้าหนี้รอจ่าย")) + " (ไม่ลงเงินสด 111 ที่ไม่มีเงินเข้า-ออกจริง)");
+                s.Settlement = eff;
+            }
+
             // ── ตรวจทั้งใบ (ตัวตัดสินฝั่งเซิร์ฟเวอร์) ──
             var v = OcrReviewMath.Validate(s);
             if (!v.CanSubmit) { res.Errors.AddRange(v.Errors); return res; }
@@ -744,7 +775,7 @@ namespace Take_Time_BangPhra.Integration.OcrReview
             }
 
             // ── คืนสินค้าที่ลงด้วย PRT- แล้ว = เก็บหลักฐาน ไม่สร้างใบลดหนี้ซ้ำ ──
-            if (note && s.SourceMode == OcrNoteSource.PurchaseReturn)
+            if (note && (s.SourceMode == OcrNoteSource.PurchaseReturn || evidenceWhy != null))
             {
                 var exists = PurchaseReturnExists(s.ReturnRef);
                 if (exists == false) { res.Errors.Add("ไม่พบการคืนสินค้าเลข " + s.ReturnRef + " ในหน้า \"คืนสินค้าให้ผู้ขาย\""); return res; }
@@ -753,6 +784,7 @@ namespace Take_Time_BangPhra.Integration.OcrReview
                 res.Ok = true; res.Evidence = true;
                 res.Message = "บันทึกใบลดหนี้ " + s.SupplierDocNo + " เป็นหลักฐานของการคืนสินค้า " + s.ReturnRef
                     + " แล้ว — ไม่สร้างใบลดหนี้ใน NextAcc ซ้ำ (การคืนสินค้าโพสต์ GL: เจ้าหนี้/เงินคืน · สินค้าคงเหลือ · ภาษีซื้อ ไว้ครบแล้ว)"
+                    + (evidenceWhy != null ? " · " + evidenceWhy : "")
                     + (exists == null ? " · ⚠ ตรวจเลข PRT- อัตโนมัติไม่ได้ (ยังไม่รัน PHASE19_31)" : "");
                 return res;
             }
@@ -892,7 +924,7 @@ namespace Take_Time_BangPhra.Integration.OcrReview
             }
 
             // ── 3) เติมที่อยู่/สาขา/เลขผู้เสียภาษีของผู้ติดต่อเมื่อว่าง (§86/4 อ่านจาก Contact — TaxInvoiceCompletenessChecker.cs:40-47) ──
-            if (editable) await TryEnrichContactAsync(client, docId.Value, s, res);
+            if (editable) await TryEnrichContactAsync(client, docId.Value, s, res, user);
 
             // ── 4) อนุมัติ ──
             if (editable)
@@ -934,8 +966,9 @@ namespace Take_Time_BangPhra.Integration.OcrReview
             // ── 5) หลังอนุมัติ: แนบไฟล์ / 50 ทวิ / ย้ายขาเงินของใบลด-เพิ่มหนี้ ──
             await TryAttachScanAsync(client, docId.Value, ctx?.ScanFilePath, res);
             if (s.DocKind == OcrDocKind.PaymentVoucher && v.Totals.Wht > 0m) await TryWhtCertAsync(client, docId.Value, res);
+            if (link != null) LinkReturnAfterApprove(vcs, link, s, scanId, docId.Value, res, user);
             string reclassRef = null;
-            if (note) reclassRef = await TryReclassNoteMoneyLegAsync(client, docId.Value, scanId, s, res);
+            if (note) reclassRef = await TryReclassNoteMoneyLegAsync(client, docId.Value, scanId, s, res, cnPrimary, vcs, user);
 
             var raw = ParseState(row?.OcrRawJson);
             string corrections = ToJson(OcrReviewMath.DiffCorrections(raw, s));
@@ -981,7 +1014,12 @@ namespace Take_Time_BangPhra.Integration.OcrReview
             }
         }
 
-        private static async Task TryEnrichContactAsync(AccountingApiClient client, Guid docId, OcrReviewState s, OcrSubmitResult res)
+        /// <summary>
+        /// คำตัดสินข้อ 4 (PHASE19_39): เติมเฉพาะช่องที่ "ว่าง" ของผู้ติดต่อ NextAcc (ไม่ทับ) เพราะ §86/4 อ่านที่อยู่/สาขาจาก Contact
+        /// (TaxInvoiceCompletenessChecker.cs:40-47) — ไม่เติม = ภาษีซื้อพัก 11640 ทั้งที่กระดาษครบ. สวิตช์ <c>Ocr_Fill_Missing_Contact</c> (default 1),
+        /// บันทึก audit (Logs "OcrReview" ค่าเดิม→ค่าใหม่) และแสดง "เติมข้อมูลผู้ขายใน NextAcc: …" ในกล่องสำเร็จ
+        /// </summary>
+        private async Task TryEnrichContactAsync(AccountingApiClient client, Guid docId, OcrReviewState s, OcrSubmitResult res, string user)
         {
             try
             {
@@ -990,17 +1028,111 @@ namespace Take_Time_BangPhra.Integration.OcrReview
                 var c = (await client.GetContactAsync(doc.Contact.Id))?.data;
                 if (c == null) return;
                 var upd = new UpdateContactRequest();
-                bool any = false;
-                if (string.IsNullOrWhiteSpace(c.Address) && !string.IsNullOrWhiteSpace(s.SupplierAddress)) { upd.Address = s.SupplierAddress.Trim(); any = true; }
+                var parts = new List<string>();
+                if (string.IsNullOrWhiteSpace(c.Address) && !string.IsNullOrWhiteSpace(s.SupplierAddress)) { upd.Address = s.SupplierAddress.Trim(); parts.Add("ที่อยู่ \"" + Cut(upd.Address, 80) + "\""); }
                 string br = OcrReviewMath.NormalizeBranch(s.SupplierBranch);
-                if (string.IsNullOrWhiteSpace(c.BranchCode) && OcrReviewMath.IsValidBranch(br)) { upd.BranchCode = br; any = true; }
-                if (string.IsNullOrWhiteSpace(c.TaxId) && OcrReviewMath.IsValidThaiTaxId(s.SupplierTaxId)) { upd.TaxId = OcrReviewMath.Digits(s.SupplierTaxId); any = true; }
-                if (!any) return;
+                if (string.IsNullOrWhiteSpace(c.BranchCode) && OcrReviewMath.IsValidBranch(br)) { upd.BranchCode = br; parts.Add("สาขา " + br + (br == "00000" ? " (สำนักงานใหญ่)" : "")); }
+                if (string.IsNullOrWhiteSpace(c.TaxId) && OcrReviewMath.IsValidThaiTaxId(s.SupplierTaxId)) { upd.TaxId = OcrReviewMath.Digits(s.SupplierTaxId); parts.Add("เลขผู้เสียภาษี " + upd.TaxId); }
+                if (parts.Count == 0) return;
+                bool enabled = true;
+                try { enabled = new AccountingConfig(_conn).GetConfigValue("Ocr_Fill_Missing_Contact", "1") != "0"; } catch { }
+                if (!enabled)
+                {
+                    res.Notes.Add("ผู้ติดต่อ " + (c.Name ?? "") + " ใน NextAcc ยังขาด " + string.Join(", ", parts.Select(p => p.Split(' ')[0]))
+                        + " — ไม่ได้เติมอัตโนมัติ (ปิด Ocr_Fill_Missing_Contact) · ภาษีซื้ออาจพัก 11640 จนกว่าจะเติมใน NextAcc");
+                    return;
+                }
                 // null = คงค่าเดิม (DocumentService.cs:13897-13916) — ไม่ทับข้อมูลที่ผู้ติดต่อมีอยู่แล้ว
                 await client.UpdateContactAsync(c.Id, upd);
-                res.Notes.Add("เติมข้อมูลผู้ขายที่ขาดใน NextAcc (" + string.Join("/", new[] { upd.Address != null ? "ที่อยู่" : null, upd.BranchCode != null ? "สาขา" : null, upd.TaxId != null ? "เลขผู้เสียภาษี" : null }.Where(x => x != null)) + ")");
+                res.ContactFilled = string.Join(", ", parts);
+                res.Notes.Add("เติมข้อมูลผู้ขายใน NextAcc: " + res.ContactFilled + " (เฉพาะช่องที่ว่าง — ไม่ทับข้อมูลเดิม)");
+                try
+                {
+                    _code.Logs(_conn, "OcrReview", "ContactFill contact=" + c.Id + " (" + (c.Name ?? "") + ") doc=" + docId + " scan=" + s.ScanId + " — "
+                        + (upd.Address != null ? "Address: ''→'" + Cut(upd.Address, 200) + "'; " : "")
+                        + (upd.BranchCode != null ? "BranchCode: ''→'" + upd.BranchCode + "'; " : "")
+                        + (upd.TaxId != null ? "TaxId: ''→'" + upd.TaxId + "'; " : ""), user ?? "SYSTEM");
+                }
+                catch { }
             }
             catch (Exception ex) { res.Notes.Add("เติมข้อมูลผู้ขายใน NextAcc ไม่สำเร็จ: " + ShortError(ex)); }
+        }
+
+        /// <summary>
+        /// ตรวจการผูกใบลดหนี้ ↔ การคืนสินค้า (PHASE19_39). คืนข้อความผิดพลาด หรือ null.
+        /// evidenceWhy ≠ null = การคืนนี้ลง JE PRT ครบแล้ว (ก่อนเปิดนโยบาย / ยังไม่วางบิล / ปิดแบบผู้ขายไม่ออกที่กลับ VAT แล้ว) → เก็บเป็นหลักฐาน
+        /// </summary>
+        private string CheckReturnLink(VendorCnService vcs, OcrReviewState s, Guid scanId, DocumentResponse source, out ReturnCnLink link, out string evidenceWhy)
+        {
+            evidenceWhy = null;
+            string rr = (s.ReturnRef ?? "").Trim();
+            link = vcs.GetReturn(rr);
+            if (link == null)
+            {
+                if (PurchaseReturnExists(rr) == true)
+                {
+                    evidenceWhy = "การคืนนี้บันทึกก่อนเปิดนโยบายใบลดหนี้เป็นตัวจริง (JE PRT ลงเจ้าหนี้/สต๊อก/ภาษีซื้อครบแล้ว)";
+                    return null;
+                }
+                return "ไม่พบการคืนสินค้าเลข " + rr + " ในหน้า \"คืนสินค้าให้ผู้ขาย\"";
+            }
+            if (link.CnStatus == ReturnCnStatus.Linked && link.CnScanId.HasValue && link.CnScanId.Value != scanId)
+                return "การคืน " + rr + " ผูกกับใบลดหนี้ " + (link.CnDocNo ?? link.CnSupplierDocNo ?? "อื่น") + " แล้ว — หนึ่งการคืนผูกได้หนึ่งใบลดหนี้";
+            if (link.CnStatus == ReturnCnStatus.NotRequired && link.PrtJournal == ReturnPrtJournal.Full)
+            {
+                evidenceWhy = VendorCnPolicy.IsBilledCounter(link.CounterKey)
+                    ? "การคืนนี้บันทึกแบบ \"ผู้ขายไม่ออกใบลดหนี้\" (JE PRT ครบแล้ว) — ถ้าต้องการให้ภาษีซื้อลดตามใบนี้ ให้ผู้ทำบัญชีกลับ JE " + rr + " แล้วบันทึกใบลดหนี้ใหม่โดยไม่ผูกการคืน"
+                    : "การคืนนี้ยังไม่วางบิล (ลดยอดพักรับของแล้ว) — ใบแจ้งหนี้ของผู้ขายควรออกยอดสุทธิ";
+                return null;
+            }
+            if (link.IsRefund)
+            {
+                if (s.SourceMode == OcrNoteSource.Outside)
+                    return "การคืน " + rr + " บันทึกว่าผู้ขายคืนเงินแล้ว — ใบลดหนี้ต้องอ้างใบต้นทางใน NextAcc ที่จ่ายแล้ว (ใบเดิมนอกระบบ NextAcc ลงเจ้าหนี้แทนเงินที่รับ)";
+                if (source != null && source.BalanceDue > 0.01m)
+                    return "การคืน " + rr + " บันทึกว่าผู้ขายคืนเงินแล้ว แต่ใบต้นทาง " + source.DocumentNumber + " ยังค้างจ่าย — ใบลดหนี้จะลดเจ้าหนี้แทนเงินที่รับ (เงินขาด) · เลือกใบต้นทางที่จ่ายแล้ว หรือบันทึกใบลดหนี้โดยไม่ผูกการคืน";
+            }
+            string lt = VendorCnService.Digits(link.SupplierTaxId), st = OcrReviewMath.Digits(s.SupplierTaxId);
+            if (lt.Length == 13 && st.Length == 13 && lt != st)
+                return "ผู้ขายของใบลดหนี้ (" + st + ") ไม่ตรงกับผู้ขายของการคืน " + rr + " (" + lt + ")";
+            return null;
+        }
+
+        /// <summary>หลังอนุมัติใบลดหนี้ที่ผูกการคืน: ผูก (ตัวสร้าง JE PRT จะข้าม) → คิวกลับ JE PRT ที่ลงไปแล้ว (PRT-…-REV) + ปรับต้นทุน (PRT-…-DIF)</summary>
+        private void LinkReturnAfterApprove(VendorCnService vcs, ReturnCnLink link, OcrReviewState s, Guid scanId, Guid docId, OcrSubmitResult res, string user)
+        {
+            try
+            {
+                string inv = vcs.MappedCode("INVENTORY");
+                decimal invNet = VendorCnService.InventoryNet(s, inv);
+                decimal dif = VendorCnPolicy.CostDifference(invNet, link.CarryingCost);
+                var t = OcrReviewMath.CalcTotals(s.Lines);
+                string revRef = link.PrtJournal == ReturnPrtJournal.None ? null : VendorCnPolicy.ReverseRef(link.ReturnRef);
+                string difRef = Math.Abs(dif) >= 0.005m ? VendorCnPolicy.CostDiffRef(link.ReturnRef) : null;
+                if (!vcs.MarkLinked(link.ReturnRef, scanId, docId, res.DocNo, s.SupplierDocNo, invNet, t.Total, revRef, difRef, dif, null, user))
+                {
+                    res.Notes.Add("⚠ ผูกใบลดหนี้กับการคืน " + link.ReturnRef + " ไม่สำเร็จ (ถูกผูกกับใบอื่นไปแล้ว?) — ตรวจ JE " + link.ReturnRef + " ใน NextAcc ว่าไม่ซ้อนกับใบลดหนี้");
+                    return;
+                }
+                res.LinkedReturnRef = link.ReturnRef;
+                var sync = new AccountingSyncService(_conn);
+                DateTime d = OcrReviewMath.ParseDate(s.DocDate) ?? DateTime.Today;
+                var parts = new List<string>();
+                if (revRef != null)
+                {
+                    long q = sync.EnqueuePurchaseReturnReverse(link.ReturnRef, d, "ใบลดหนี้ " + (res.DocNo ?? s.SupplierDocNo ?? ""));
+                    parts.Add(q > 0 ? "กลับ JE ที่ลงระหว่างรอ " + revRef + " (คิว #" + q + ")" : "⚠ เข้าคิวกลับ " + revRef + " ไม่สำเร็จ — กลับ JE " + link.ReturnRef + " ใน NextAcc เอง");
+                }
+                if (difRef != null)
+                {
+                    long q2 = sync.EnqueuePurchaseReturnCostDiff(link.ReturnRef, dif, d, link.SupplierName, res.DocNo);
+                    parts.Add(q2 > 0 ? "ปรับต้นทุน " + OcrReviewMath.Money(dif) + " " + difRef + " (คิว #" + q2 + ")" : "⚠ เข้าคิวปรับต้นทุน " + difRef + " ไม่สำเร็จ");
+                }
+                res.Notes.Add("ผูกกับการคืนสินค้า " + link.ReturnRef + " — ใบลดหนี้นี้เป็นรายการจริง" + (parts.Count > 0 ? ": " + string.Join(" · ", parts) : " (ต้นทุนตรง ไม่ต้องปรับ)"));
+                _code.Logs(_conn, "VendorCn", "Linked " + link.ReturnRef + " ↔ CN " + (res.DocNo ?? docId.ToString()) + " scan=" + scanId
+                    + " invNet=" + OcrReviewMath.Money(invNet) + " carrying=" + OcrReviewMath.Money(link.CarryingCost) + " dif=" + OcrReviewMath.Money(dif) + " rev=" + (revRef ?? "-"), user ?? "SYSTEM");
+            }
+            catch (Exception ex) { res.Notes.Add("⚠ ผูกการคืน " + link.ReturnRef + " ไม่สำเร็จ: " + ShortError(ex) + " — กดส่งอีกครั้ง (ทำต่อจากขั้นที่ค้าง)"); }
         }
 
         private static async Task TryAttachScanAsync(AccountingApiClient client, Guid docId, string scanFile, OcrSubmitResult res)
@@ -1034,14 +1166,17 @@ namespace Take_Time_BangPhra.Integration.OcrReview
         /// ใบลด/เพิ่มหนี้ที่ใบต้นทางชำระครบ: NextAcc ลงขาเงินที่บัญชีเงินสด "111" เสมอ (DocumentService.cs:17899, :17920-17924) —
         /// ถ้าผู้ใช้เลือกบัญชีอื่น (ธนาคารที่ผู้ขายโอนคืน / เก็บเป็นยอดกับผู้ขาย = เจ้าหนี้) โพสต์ JE ย้ายขา (ExternalRef idempotent)
         /// </summary>
-        private async Task<string> TryReclassNoteMoneyLegAsync(AccountingApiClient client, Guid docId, Guid scanId, OcrReviewState s, OcrSubmitResult res)
+        private async Task<string> TryReclassNoteMoneyLegAsync(AccountingApiClient client, Guid docId, Guid scanId, OcrReviewState s, OcrSubmitResult res,
+            bool cnPrimary, VendorCnService vcs, string user)
         {
             if (s.Settlement != OcrNoteSettlement.Bank && s.Settlement != OcrNoteSettlement.VendorAccount) return null;
             bool cn = s.DocKind == OcrDocKind.VendorCreditNote;
+            bool vendorLeg = s.Settlement == OcrNoteSettlement.VendorAccount;
             try
             {
                 var mapper = new AccountingDataMapper(_conn);
                 string target = null;
+                bool vcrFallback = false;
                 if (s.Settlement == OcrNoteSettlement.Bank)
                 {
                     Guid acc;
@@ -1049,7 +1184,12 @@ namespace Take_Time_BangPhra.Integration.OcrReview
                 }
                 else
                 {
-                    try { target = mapper.GetAccountCode("ACCOUNTS_PAYABLE"); } catch { target = null; }
+                    string ap = null;
+                    try { ap = mapper.GetAccountCode("ACCOUNTS_PAYABLE"); } catch { ap = null; }
+                    // คำตัดสินข้อ 3: เครดิตกับผู้ขาย (CN) → VENDOR_CREDIT_RECEIVABLE ถ้าผูกไว้ ไม่งั้นเจ้าหนี้การค้า (ยอดเดบิต) · ใบเพิ่มหนี้ → เจ้าหนี้
+                    target = cn && cnPrimary ? VendorCnPolicy.VendorCreditAccount(vcs.MappedCode(VendorCnService.MapVendorCredit), ap, out vcrFallback) : ap;
+                    if (cn && cnPrimary && vcrFallback && !string.IsNullOrEmpty(target))
+                        res.Notes.Add("ยังไม่ผูกบัญชี VENDOR_CREDIT_RECEIVABLE — เครดิตกับผู้ขายลงเจ้าหนี้การค้า " + target + " เป็นยอดเดบิต (ผูก mapping แล้วยอดใหม่จะแยกบัญชี)");
                 }
                 if (string.IsNullOrEmpty(target)) { res.Notes.Add("⚠ ย้ายขาเงินไม่ได้: หา code บัญชีปลายทางไม่พบ (Sync ผังบัญชี/ตั้ง mapping ACCOUNTS_PAYABLE) — ปรับใน NextAcc เอง"); return null; }
 
@@ -1068,8 +1208,12 @@ namespace Take_Time_BangPhra.Integration.OcrReview
                                      : "NextAcc ตั้งเจ้าหนี้เพิ่มแล้ว (ไม่มีขาเงินสดให้ย้าย)");
                     return null;
                 }
-                if (string.Equals(leg.AccountCode, target, StringComparison.OrdinalIgnoreCase)) return null;
                 decimal amt = OcrReviewMath.R2(cn ? leg.DebitAmount : leg.CreditAmount);
+                if (string.Equals(leg.AccountCode, target, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (vendorLeg && cnPrimary) RecordVendorBalance(vcs, s, scanId, res, cn, amt, target, null, user);
+                    return null;
+                }
                 string reff = (cn ? "OCRCN-" : "OCRDN-") + scanId.ToString("N").Substring(0, 8).ToUpperInvariant() + "-MNY";
                 string desc = (cn ? "ใบลดหนี้ผู้ขาย " : "ใบเพิ่มหนี้ผู้ขาย ") + (res.DocNo ?? "") + " — ย้ายขาเงินจาก " + leg.AccountCode + " ไป " + target
                     + (s.Settlement == OcrNoteSettlement.VendorAccount ? " (เก็บเป็นยอดกับผู้ขาย)" : " (บัญชีที่รับ/จ่ายจริง)");
@@ -1084,6 +1228,7 @@ namespace Take_Time_BangPhra.Integration.OcrReview
                     JournalType = "general", Description = desc, Lines = lines, AutoBalanceVat = false
                 });
                 res.Notes.Add("โพสต์ JE " + reff + " ย้ายขาเงิน " + OcrReviewMath.Money(amt) + " จาก " + leg.AccountCode + " ไป " + target);
+                if (vendorLeg && cnPrimary) RecordVendorBalance(vcs, s, scanId, res, cn, amt, target, reff, user);
                 return reff;
             }
             catch (Exception ex)
@@ -1091,6 +1236,25 @@ namespace Take_Time_BangPhra.Integration.OcrReview
                 res.Notes.Add("⚠ ย้ายขาเงินไม่สำเร็จ: " + ShortError(ex) + " — เอกสารอนุมัติแล้ว ปรับขาเงินใน NextAcc เอง");
                 return null;
             }
+        }
+
+        /// <summary>ยอดกับผู้ขาย (Vendor_Credit_Ledger): CN → CN_CREDIT (หักได้ตอนจ่ายใบซื้อเชื่อ) · DN → DN_PAYABLE (จ่ายได้ที่หน้าชำระใบซื้อเชื่อ)</summary>
+        private void RecordVendorBalance(VendorCnService vcs, OcrReviewState s, Guid scanId, OcrSubmitResult res, bool cn, decimal amt, string accountCode, string journalRef, string user)
+        {
+            try
+            {
+                if (!vcs.HasLedgerTable() || amt <= 0m) return;
+                Guid cid;
+                Guid? contactId = Guid.TryParse(s.SourceContactId ?? "", out cid) && cid != Guid.Empty ? cid : (Guid?)null;
+                string name = !string.IsNullOrWhiteSpace(s.SupplierName) ? s.SupplierName.Trim() : s.SourceContactName;
+                int id = vcs.AddLedger(cn ? VendorCnService.EtCnCredit : VendorCnService.EtDnPayable, s.VendorId > 0 ? (int?)s.VendorId : null,
+                    s.SupplierTaxId, name, contactId, amt, accountCode, "OCR-" + scanId.ToString("N"), res.DocNo ?? s.SupplierDocNo, null, null, journalRef,
+                    (cn ? "ใบลดหนี้ผู้ขาย " : "ใบเพิ่มหนี้ผู้ขาย ") + (s.SupplierDocNo ?? "") + " อ้าง " + (s.SourceDocNo ?? "-"), user);
+                if (id > 0)
+                    res.Notes.Add(cn ? "บันทึกเครดิตกับผู้ขาย " + OcrReviewMath.Money(amt) + " (บัญชี " + accountCode + ") — หักได้ตอนบันทึกจ่ายใบซื้อเชื่อครั้งถัดไป"
+                                     : "ตั้งเจ้าหนี้รอจ่าย " + OcrReviewMath.Money(amt) + " (บัญชี " + accountCode + ") — จ่ายได้ที่หน้า \"ชำระใบซื้อเชื่อ\" ส่วนใบเพิ่มหนี้รอจ่าย");
+            }
+            catch (Exception ex) { res.Notes.Add("⚠ บันทึกยอดกับผู้ขายไม่สำเร็จ: " + ShortError(ex)); }
         }
 
         // ──────────────────────────────────────────────────────────────

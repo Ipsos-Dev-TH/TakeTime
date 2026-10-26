@@ -2209,7 +2209,8 @@ namespace Take_Time_BangPhra.Integration
         /// </summary>
         public long EnqueuePurchaseReturn(string returnRef, string receiptBatch, string supplierName, string supplierDocNo,
             DateTime returnDate, string counterKey, decimal purchaseNet, decimal carryingCost, decimal vatReversal,
-            string paymentMethod, string paymentAccountId, IList<PurchaseReturnLine> lines, bool pushQty, string reason)
+            string paymentMethod, string paymentAccountId, IList<PurchaseReturnLine> lines, bool pushQty, string reason,
+            string vatHoldKey = null)
         {
             if (!_config.IsConfigured || string.IsNullOrEmpty(returnRef)) return -1;
 
@@ -2241,6 +2242,7 @@ namespace Take_Time_BangPhra.Integration
                 { "reason", reason ?? "" }
             };
             if (!string.IsNullOrEmpty(paymentAccountId)) payload["paymentAccountId"] = paymentAccountId;
+            if (!string.IsNullOrEmpty(vatHoldKey)) payload["vatHoldKey"] = vatHoldKey;
             return InsertQueue("STOCK", 0, "PURCHASE_RETURN", payload);
         }
 
@@ -2257,14 +2259,17 @@ namespace Take_Time_BangPhra.Integration
             string paymentMethod = p.ContainsKey("paymentMethod") ? p["paymentMethod"]?.ToString() : null;
             string paymentAccountId = p.ContainsKey("paymentAccountId") ? p["paymentAccountId"]?.ToString() : null;
             string reason = p.ContainsKey("reason") ? p["reason"]?.ToString() : "";
+            string vatHoldKey = p.ContainsKey("vatHoldKey") ? p["vatHoldKey"]?.ToString() : null;   // PHASE19_39: คืนเงินระหว่างรอใบลดหนี้
             if (counterKey == "CASH" && string.IsNullOrEmpty(paymentAccountId) && !string.IsNullOrEmpty(paymentMethod))
                 paymentAccountId = LookupPaidHowAccountId(paymentMethod);
+            // PHASE19_39: ผูกใบลดหนี้ NextAcc แล้ว = ใบลดหนี้เป็นรายการจริง → ไม่ลง JE PRT (กันซ้อน)
+            if (IsPurchaseReturnSupersededByCn(returnRef)) return "SKIPPED_CN_LINKED";
 
             _code.Logs(_connectionString, "AccountingSync",
                 $"ProcessPurchaseReturn: ref={returnRef} counter={counterKey} net={purchaseNet:N2} carrying={carrying:N2} vat={vat:N2}", "SYSTEM");
 
             var journal = _mapper.MapPurchaseReturnToJournal(returnRef, returnDate, supplierName, supplierDocNo,
-                counterKey, purchaseNet, carrying, vat, paymentMethod, paymentAccountId, reason);
+                counterKey, purchaseNet, carrying, vat, paymentMethod, paymentAccountId, reason, vatHoldKey);
             var result = await _apiClient.CreateJournalAsync(journal);
             Guid docId = RequireValidDocId(result?.data?.Id, $"PurchaseReturn ref={returnRef}");
             await SafePostJournalAsync(docId);
@@ -5677,6 +5682,13 @@ namespace Take_Time_BangPhra.Integration
                     return await ProcessStockWriteOff(payload);
                 case "PURCHASE_RETURN":
                     return await ProcessPurchaseReturn(payload);
+                // ── ใบลดหนี้ผู้ขาย ↔ คืนสินค้า / ยอดกับผู้ขาย (PHASE19_39 — AccountingSyncService.VendorCn.cs) ──
+                case ActPurchaseReturnReverse:
+                    return await ProcessPurchaseReturnReverse(payload);
+                case ActPurchaseReturnCostDiff:
+                    return await ProcessPurchaseReturnCostDiff(payload);
+                case ActVendorBalanceJournal:
+                    return await ProcessVendorBalanceJournal(payload);
                 case "STOCK_OUT_REASON_JOURNAL":
                     return await ProcessStockOutReasonJournal(payload);
                 case "STOCK_OUT_REASON_REVERSE":

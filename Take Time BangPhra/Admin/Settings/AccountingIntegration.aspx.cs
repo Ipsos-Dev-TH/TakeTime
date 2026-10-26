@@ -2273,6 +2273,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                 // ── 11) ตัวตรวจก่อนส่ง/ชนิดปัญหาคิว (PHASE19_37): โหมด, รายการค้างรายชนิด, ตัวชี้วัด 14 วัน, ผลตรวจรายคืน ─────
                 Integration.AccountingSyncService.AppendQueuePreventionHealth(ConnStr, add);
 
+                // ── 12) ใบลดหนี้ผู้ขาย ↔ คืนสินค้า / เครดิตกับผู้ขาย (PHASE19_39): mapping VENDOR_CREDIT_RECEIVABLE, คืนรอใบลดหนี้เกินกำหนด ─────
+                Take_Time_BangPhra.Purchasing.VendorCnService.AppendHealthIssues(ConnStr, haveCoa, add);
+
                 return new Dictionary<string, object>
                 {
                     { "success", true },

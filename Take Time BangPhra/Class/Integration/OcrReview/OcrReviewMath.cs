@@ -315,6 +315,8 @@ namespace Take_Time_BangPhra.Integration.OcrReview
 
                 if (s.Settlement == OcrNoteSettlement.Bank && string.IsNullOrWhiteSpace(s.RefundAccountId))
                     v.Errors.Add("เลือกบัญชีที่รับเงินคืน/จ่ายเงิน");
+                if (s.SourceMode != OcrNoteSource.PurchaseReturn && !string.IsNullOrWhiteSpace(s.ReturnRef) && s.DocKind != OcrDocKind.VendorCreditNote)
+                    v.Errors.Add("ผูกการคืนสินค้าได้เฉพาะใบลดหนี้");
             }
             return v;
         }
