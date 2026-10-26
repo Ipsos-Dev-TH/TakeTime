@@ -1001,7 +1001,9 @@ namespace Take_Time_BangPhra.Integration
 
             var sync = new AccountingSyncService(_conn);
             bool sent = rec.Status == StSynced || !string.IsNullOrEmpty(rec.NexaaccMarker);
-            if (sent && (rec.NexaaccPath == PathDepositRefund || (rec.SourceDocType == SrcDeposit && rec.NexaaccPath == PathJournal)))
+            // มัดจำ: marker REFPRE:/JRN ถูกจด "ก่อน" ยิง refund-deposit/JE (Nexaacc_Path ตั้งทีหลัง) — มี marker = อาจคืนบน NextAcc ไปแล้ว ห้ามยกเลิกในระบบ
+            if (sent && (rec.NexaaccPath == PathDepositRefund
+                         || (rec.SourceDocType == SrcDeposit && rec.NexaaccPath != PathLocal)))
             {
                 message = "คืนมัดจำบน NextAcc ไปแล้ว — NextAcc ยังไม่มี API ยกเลิกการคืนมัดจำ (กลับรายการที่หน้า \"เงินมัดจำ\" ของ NextAcc แล้วยกเลิกใบนี้ด้วยมือในฐานข้อมูล)";
                 return false;

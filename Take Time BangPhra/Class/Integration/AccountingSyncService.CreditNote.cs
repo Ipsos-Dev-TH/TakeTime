@@ -290,11 +290,12 @@ namespace Take_Time_BangPhra.Integration
         private async Task<string> ProcessCnInvoiceAsync(CreditNoteService.Record cn)
         {
             Guid srcDocId = ResolveCnSourceDocId(cn.SourceReceiptId);
+            // ใบต้นทางยังค้างคิว → รอ (ทั้งสองเส้น) ไม่งั้นเส้น integration ออกใบลดหนี้ที่ไม่ผูกเอกสารเดิม (OriginalInvoiceRef หาไม่เจอ)
+            if (srcDocId == Guid.Empty && SourceReceiptStillQueued(cn.SourceReceiptId))
+                throw new Exception("ใบต้นทาง " + cn.SourceReceiptId + " ยังรอส่งเข้า NextAcc (คิว CREATE_RECEIPT_DOCUMENT) — ระบบจะลองใหม่อัตโนมัติ");
             if (!_config.CanUseCompanyEndpoints) return await ProcessCnIntegrationAsync(cn, srcDocId);
             if (srcDocId == Guid.Empty)
             {
-                if (SourceReceiptStillQueued(cn.SourceReceiptId))
-                    throw new Exception("ใบต้นทาง " + cn.SourceReceiptId + " ยังรอส่งเข้า NextAcc (คิว CREATE_RECEIPT_DOCUMENT) — ระบบจะลองใหม่อัตโนมัติ");
                 // ใบต้นทางไม่เคยเป็นเอกสารบน NextAcc (ยุค JOURNAL/ข้อมูลเก่า) → ใบลดหนี้เส้น integration (อ้างเลขใบเดิมเป็นข้อความ)
                 _code.Logs(_connectionString, "AccountingSync",
                     "CreditNote " + cn.CnNo + ": ไม่พบเอกสาร NextAcc ของ " + cn.SourceReceiptId + " → ใช้ /integration/credit-notes (Cr ลูกหนี้) + JE ขาเงิน", "SYSTEM");
@@ -486,12 +487,17 @@ namespace Take_Time_BangPhra.Integration
                 {
                     if (l.Amount <= 0) continue;
                     decimal qty = l.Qty > 0 ? l.Qty : 1m;
+                    // /integration/credit-notes คิดราคาแบบไม่รวม VAT (IntegrationService.ProcessCreditNoteAsync → BuildDocumentLinesAsync
+                    // includeVat=false) — ยอดของเรารวม VAT ⇒ ถอด VAT ก่อนส่ง (เหมือน MapReceiptVoidToCreditNote) ไม่งั้น VAT ถูกบวกซ้ำ 7%
+                    decimal net = hasVat ? Math.Round(l.Amount * 100m / 107m, 2, MidpointRounding.AwayFromZero) : l.Amount;
+                    decimal unitNet = Math.Round(net / qty, 2, MidpointRounding.AwayFromZero);
+                    if (unitNet * qty != net) { qty = 1m; unitNet = net; }
                     lines.Add(new IntegrationLineRequest
                     {
                         ItemName = string.IsNullOrWhiteSpace(l.Description) ? "ลดหนี้" : l.Description,
                         Description = l.Description,
                         Quantity = qty,
-                        UnitPrice = l.Amount / qty,
+                        UnitPrice = unitNet,
                         Unit = l.Unit,
                         AccountCode = string.IsNullOrWhiteSpace(l.AccountCode) ? null : l.AccountCode,
                         VatRate = hasVat ? 7 : 0
@@ -705,7 +711,8 @@ namespace Take_Time_BangPhra.Integration
             if (cn == null) throw new ArgumentException("ไม่พบใบลดหนี้ #" + cnId);
             if (cn.Status == CreditNoteService.StVoided) return "ALREADY_VOIDED";
             if (cn.NexaaccPath == CreditNoteService.PathDepositRefund
-                || (cn.SourceDocType == CreditNoteService.SrcDeposit && cn.NexaaccPath == CreditNoteService.PathJournal))
+                || (cn.SourceDocType == CreditNoteService.SrcDeposit
+                    && (cn.NexaaccPath == CreditNoteService.PathJournal || !string.IsNullOrEmpty(cn.NexaaccMarker))))
                 throw new ArgumentException("ใบลดหนี้ " + cn.CnNo + " เป็นการคืนมัดจำบน NextAcc — ยกเลิกผ่าน API ไม่ได้ (ดู docs/NextAcc_Change_Requests.md)");
 
             if (cn.NexaaccDocId.HasValue)
