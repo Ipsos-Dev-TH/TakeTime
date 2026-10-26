@@ -85,6 +85,10 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "attachFiles", config.AttachFiles },
                     { "depositVatRecognition", config.DepositVatRecognition },
                     { "depositDeferOutputVat", config.IsDepositOutputVatDeferred },
+                    // ใบลดหนี้ (PHASE19_33) — ไม่มีตาราง = แสดงเป็นปิด + บอกให้รัน migration
+                    { "creditNoteTableReady", Integration.CreditNoteGuards.SchemaReady(ConnStr) },
+                    { "creditNoteEnabled", config.GetConfigValue(Integration.CreditNoteService.CfgEnabled, "0") == "1" },
+                    { "creditNoteRequireApproval", config.GetConfigValue(Integration.CreditNoteService.CfgRequireApproval, "1") != "0" },
                     { "depositDrivesJournal", config.IsDepositAppliedDrivesJournal },
                     { "depositDrivesJournalRef", config.IsDrivesJournalRefEnabled },
                     { "autoRecoverDeposit", config.IsAutoRecoverDeposit },
@@ -466,6 +470,25 @@ namespace Take_Time_BangPhra.Admin.Settings
                             Session["UserName"]?.ToString() ?? "SYSTEM");
                         config.SetConfig("Deposit_Defer_Output_Vat", newDefer);
                     }
+                }
+                // ใบลดหนี้ (PHASE19_33): เขียนเฉพาะเมื่อเปลี่ยนจริง + log ใคร เปลี่ยนอะไร (หน้าเว็บส่งมาเฉพาะเมื่อโหลดค่าจริงแล้ว)
+                foreach (var cnFlag in new[]
+                {
+                    new KeyValuePair<string, string>("creditNoteEnabled", Integration.CreditNoteService.CfgEnabled),
+                    new KeyValuePair<string, string>("creditNoteRequireApproval", Integration.CreditNoteService.CfgRequireApproval)
+                })
+                {
+                    if (!data.ContainsKey(cnFlag.Key)) continue;
+                    string nv = BoolToFlag(data[cnFlag.Key]);
+                    // ค่าที่มีผลจริงตอนนี้ (ไม่มีแถว: เปิดใช้ = ปิด, ต้องอนุมัติ = ต้อง — ตรงกับ CreditNoteService)
+                    string cv = cnFlag.Key == "creditNoteEnabled"
+                        ? (config.GetConfigValue(cnFlag.Value, "0") == "1" ? "1" : "0")
+                        : (config.GetConfigValue(cnFlag.Value, "1") != "0" ? "1" : "0");
+                    if (cv == nv) continue;
+                    _code.Logs(ConnStr, "AccountingConfig",
+                        $"ใบลดหนี้: {cnFlag.Value} {cv} → {nv} โดย {Session["UserName"] ?? "?"}",
+                        Session["UserName"]?.ToString() ?? "SYSTEM");
+                    config.SetConfig(cnFlag.Value, nv);
                 }
                 // ⚠ เปิดได้เมื่อ NextAcc deploy รองรับ depositAppliedDrivesJournal แล้วเท่านั้น (spec §9.1) —
                 //   เปิด flag = ส่ง drives=true + เลิกส่ง JV แยกพร้อมกัน; เปิดก่อน NextAcc พร้อม = GL พัง
@@ -2113,6 +2136,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                 }
                 catch { }
 
+                // ── 9) ใบลดหนี้ / คืนเงินลูกค้า (PHASE19_33): ตาราง, ROOM_AR, แหล่งเงินคืน, ร่างค้างอนุมัติ, คิวล้ม, คืนเงินเกตเวย์ที่ยังไม่มีใบลดหนี้ ─────
+                Integration.CreditNoteGuards.AppendHealthIssues(ConnStr, haveCoa, add);
+
                 return new Dictionary<string, object>
                 {
                     { "success", true },
@@ -2392,6 +2418,21 @@ namespace Take_Time_BangPhra.Admin.Settings
                     && actDt.Rows[0]["Status"]?.ToString() == "COMPLETED")
                     return new Dictionary<string, object> { { "success", false },
                         { "message", "เอกสารรับเงิน OTA สร้างสำเร็จแล้ว — ใช้หัวข้อ \"ยกเลิกเอกสาร OTA (OTADOC)\" (ติ๊กสร้างใหม่อัตโนมัติ) แทนการ resync คิวนี้" } };
+
+                // ใบเสร็จที่มีใบลดหนี้อ้าง / ส่ง e-Tax ถึงกรมสรรพากรแล้ว: ยิงสร้างซ้ำ = เอกสารซ้อน/ยอดไม่ตรงกับใบลดหนี้ → บล็อก
+                if (actDt != null && actDt.Rows.Count > 0
+                    && actDt.Rows[0]["Action_Type"]?.ToString() == "CREATE_RECEIPT_DOCUMENT"
+                    && actDt.Rows[0]["Status"]?.ToString() == "COMPLETED")
+                {
+                    var plDt = _code.DatabaseQuerySafe(ConnStr, "SELECT Payload FROM Accounting_Sync_Queue WHERE ID = @id",
+                        new Dictionary<string, object> { { "@id", queueId } });
+                    var rn = System.Text.RegularExpressions.Regex.Match(
+                        plDt != null && plDt.Rows.Count > 0 ? plDt.Rows[0]["Payload"]?.ToString() ?? "" : "",
+                        "\"receiptNumber\"\\s*:\\s*\"([^\"]*)\"");
+                    string cnBlock = rn.Success ? Integration.CreditNoteGuards.VoidBlockReason(ConnStr, rn.Groups[1].Value) : null;
+                    if (cnBlock != null)
+                        return new Dictionary<string, object> { { "success", false }, { "message", cnBlock } };
+                }
 
                 _code.DatabaseInsertSafe(ConnStr,
                     @"UPDATE Accounting_Sync_Queue
@@ -4239,6 +4280,15 @@ namespace Take_Time_BangPhra.Admin.Settings
                     return new Dictionary<string, object> { { "success", false }, { "message", "Reservation ID ไม่ถูกต้อง" } };
                 if (!decimal.TryParse(amountStr, out decimal amount) || amount <= 0)
                     return new Dictionary<string, object> { { "success", false }, { "message", "จำนวนเงินไม่ถูกต้อง" } };
+
+                // คืน/ริบมัดจำแบบเดิม (JE) ซ้ำกับใบลดหนี้ที่คืน/ยึดมัดจำของการจองนี้ไปแล้ว → บล็อก (ไม่มีตารางใบลดหนี้ = เดิม)
+                string opLower = (operation ?? "").ToLower();
+                if (opLower == "refund" || opLower == "forfeit")
+                {
+                    string cnBlock = Integration.CreditNoteGuards.ReservationBlockReason(ConnStr, resId);
+                    if (cnBlock != null)
+                        return new Dictionary<string, object> { { "success", false }, { "message", cnBlock } };
+                }
 
                 // ดึงชื่อลูกค้า + paid type
                 var dt = _code.DatabaseQuerySafe(ConnStr,

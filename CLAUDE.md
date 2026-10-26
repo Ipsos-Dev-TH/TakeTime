@@ -420,6 +420,16 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
      บวกคืน + ใบมัดจำกลับปกติ → ปิดเงินค้างใหม่ได้. ยอดคืนเริ่มต้น = ใบของ folio (มัดจำ/มี Payment_History/บรรทัดค่าห้อง) — ใบอื่นติ๊กรวมเอง ·
      ตัดใบ OTA_RECLASS/`RECLASS-` (OTA คืนลูกค้าเอง). มัดจำโหมด CHECKOUT/RECEIPT+defer: VAT ใบ = 0 พิมพ์ "ใบคืนเงินมัดจำ". `ReservationBalance`:
      ยอดรวม − ใบลดหนี้ที่อนุมัติ (ไม่ใช่มัดจำ) และ `PaidHeld` (Deposit + แถวคืน เมื่อไม่มีแถวรับเงิน) ⇒ คืนเงินไม่ทำให้ยอดค้างกลับขึ้น.
+   - **การเชื่อมส่วนอื่น** (`Class/Accounting/CreditNoteGuards.cs` — อ่าน `Credit_Note` ตรง, guarded ไม่มีตาราง = เดิม): ใบเสร็จที่มีใบลดหนี้อ้าง
+     (หรือ e-Tax Submitted/Accepted เมื่อเปิดระบบ — NextAcc `DocumentVoidPreconditions.cs:21-29,91-94`) **ยกเลิก/ลบ/แก้ไข/repost/reset ไม่ได้**
+     (Receipt/CheckDocument(_New)/Voucher/ReceiptService + `EnqueueVoidReceipt`/`RepostReceiptWithCurrentLogic`/`ResetReservationAccounting` +
+     admin resync/คืน-ริบมัดจำ) → ชี้ไป `CreditNotes?new=1&src=`. **เช็คเอาท์จ่ายเกิน**: `CheckoutService` กันส่วนเกิน (Credit − รูมเซอร์วิสเข้าห้อง − ค่าเสียหาย)
+     ไว้ในเงินรับล่วงหน้า (ไม่ตัดเป็นรายได้ — เฉพาะเมื่อเปิดระบบ) → หน้า `Account/OverpayRefund?res=` ออกใบลดหนี้มัดจำ (`Create(fromCancellation:true)`
+     = เส้น refund-deposit, ไม่ยกเลิกการจอง). คืนเงินเกตเวย์จากหน้า Admin/แดชบอร์ด (webhook Omise `refund.*`/`dispute.*`, Payso `Payso_Status_Refunded`
+     + ฟิลด์ `refundedAmount`) = บันทึก `Refunded_Amount` + Telegram ไม่ลงบัญชีเอง (ไม่เขียน Payment_History — ใบลดหนี้ "คืนภายหลัง → บันทึกการคืนเงิน"
+     ด้วยแหล่งเงินเกตเวย์เขียนให้). ตรวจสุขภาพข้อ 9 + Telegram poll (Global.asax, 15 นาที) ร่างรออนุมัติ/คืนเกตเวย์ไม่มีใบลดหนี้. สวิตช์ 2 ตัวใน
+     Accounting Integration. ProfitLoss หักใบลดหนี้ + บวกส่วนที่ยึด; PaymentHistory การ์ด/ตัวกรอง REFUND. PHASE19_33 เปลี่ยนชื่อ `Credit_Note` schema เก่าเป็น
+     `Credit_Note_Legacy_yyyyMMdd`. โค้ดใบลดหนี้เก่าใน `Class/AccountingService.cs` ลบแล้ว.
 
 ## Queue resilience (ส.ค. 2026 — หลังเคส NextAcc ล่มทั้งแอป)
 

@@ -2928,6 +2928,14 @@ namespace Take_Time_BangPhra.Integration
         /// </summary>
         public long EnqueueVoidReceipt(string receiptNumber)
         {
+            // ด่านสุดท้าย: ใบที่มีใบลดหนี้อ้างอยู่ — NextAcc ปฏิเสธ void (DocumentVoidPreconditions) และรายได้จะถูกกลับซ้ำกับใบลดหนี้
+            // (หน้าจอหลักบล็อกก่อนแล้ว ตรงนี้กันเส้นที่หลุดมา เช่น ปุ่มยกเลิกแบบเดิมหลังยกเลิกผ่านใบลดหนี้) · ไม่มีตาราง = เดิม
+            string cnBlock = CreditNoteGuards.VoidBlockReason(_connectionString, receiptNumber, false);
+            if (cnBlock != null)
+            {
+                _code.Logs(_connectionString, "AccountingSync", "EnqueueVoidReceipt บล็อก: " + cnBlock, "SYSTEM");
+                return -1;
+            }
             TryReversePosSaleOnVoid(receiptNumber);   // ขายหน้าร้านถูกยกเลิกจริง → คืนสต๊อก + กลับต้นทุน (PHASE19_29)
             if (!_config.IsConfigured)
             {
@@ -14228,6 +14236,9 @@ namespace Take_Time_BangPhra.Integration
         {
             if (reservationId <= 0) return (-1, "รหัสการจองไม่ถูกต้อง");
             if (!_config.IsConfigured) return (-1, "ยังไม่ได้ตั้งค่า NextAcc");
+            // รีเซ็ตกลับ JE ตาม Reference ของการจอง แต่ไม่กลับ JE/เอกสารของใบลดหนี้ (CN-{id}-*) ⇒ มีใบลดหนี้แล้วห้ามรีเซ็ต
+            string cnBlock = CreditNoteGuards.ReservationBlockReason(_connectionString, reservationId);
+            if (cnBlock != null) return (-1, cnBlock);
             try
             {
                 var refs = new List<string>
@@ -15286,6 +15297,15 @@ namespace Take_Time_BangPhra.Integration
             catch { return -1; }
             string receiptNumber = p.ContainsKey("receiptNumber") ? p["receiptNumber"]?.ToString() : null;
             if (string.IsNullOrEmpty(receiptNumber)) return -1;
+
+            // ใบที่มีใบลดหนี้อ้าง / ส่ง e-Tax ถึงกรมสรรพากรแล้ว: resync ถูก NextAcc ปฏิเสธ (guard CN-DN/ยื่นภาษี) แล้ว fallback
+            // void→สร้างใหม่จะล้ม/ได้เอกสารซ้อน ⇒ ไม่ repost (ใช้ใบลดหนี้แก้ยอดแทน)
+            string cnBlock = CreditNoteGuards.VoidBlockReason(_connectionString, receiptNumber);
+            if (cnBlock != null)
+            {
+                LastRepostMessage = cnBlock;
+                return -1;
+            }
 
             // รายการนี้ถูกแทนแล้ว (แก้ใบ = void→CREATE ใหม่ของเลขเดียวกัน) → ห้าม repost จากแถวเก่า
             // ไม่งั้น path "เอกสารเดิมถูกลบ/void" ด้านล่างจะสร้างเอกสารเพิ่มอีกใบซ้อนกับของใหม่

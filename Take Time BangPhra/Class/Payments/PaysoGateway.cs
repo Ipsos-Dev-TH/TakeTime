@@ -293,6 +293,9 @@ namespace Take_Time_BangPhra.Payments
             ev.CardBrand = ReadMapped(root, "cardBrand");
             ev.CardLast4 = ReadMapped(root, "cardLast4");
             ev.Message = ReadMapped(root, "message");
+            // คืนเงินจากแดชบอร์ด Payso: ต้องตั้ง Payso_Status_Refunded (คำสถานะของเกตเวย์ คั่นด้วย ,) — ยอดคืนสะสมอ่านจากฟิลด์
+            // "refundedAmount" (ตั้งตำแหน่งได้ใน Payso_Response_Map) ไม่มี = ถือว่าคืนเต็มยอด
+            if (ev.Status == PaymentStatus.Refunded) ev.RefundedAmount = ReadDecimal(root, "refundedAmount");
 
             ev.SignatureValid = VerifyWebhookSignature(headers, body);
             return ev;
@@ -744,6 +747,7 @@ namespace Take_Time_BangPhra.Payments
 
             if (Matches(s, PaymentGatewayConfig.Get("Payso_Status_Paid", ""))) return PaymentStatus.Paid;
             if (Matches(s, PaymentGatewayConfig.Get("Payso_Status_Failed", ""))) return PaymentStatus.Failed;
+            if (Matches(s, PaymentGatewayConfig.Get("Payso_Status_Refunded", ""))) return PaymentStatus.Refunded;   // ว่าง = ไม่ใช้
             if (Matches(s, PaymentGatewayConfig.Get("Payso_Status_Pending", ""))) return PaymentStatus.Pending;
 
             // ไม่รู้จัก → ถือว่ายังรออยู่ ปลอดภัยกว่าเดาว่าจ่ายแล้ว

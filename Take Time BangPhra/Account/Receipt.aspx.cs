@@ -549,6 +549,16 @@ namespace Take_Time_BangPhra.Account.Report
                         receiptUidEditParams);
                     id = dtReceipt.Rows[0]["ID"].ToString();
                     System.Diagnostics.Debug.WriteLine($"[Edit Mode] Original ID from DB: {id}");
+
+                    // แก้ไข = void ใบเดิม → สร้างใหม่: ใบที่มีใบลดหนี้อ้าง / ส่ง e-Tax ถึงกรมสรรพากรแล้ว ทำไม่ได้
+                    // (NextAcc ปฏิเสธ void → ได้เอกสารซ้อน 2 ใบ) — ต้องออกใบลดหนี้ที่หน้า Account/CreditNotes แทน
+                    string cnBlockEdit = CreditNoteGuards.VoidBlockReason(conn, id);
+                    if (cnBlockEdit != null)
+                    {
+                        ClientScript.RegisterStartupScript(this.GetType(), "cnBlockEdit",
+                            "alert('" + HttpUtility.JavaScriptStringEncode("⚠ " + cnBlockEdit) + "');", true);
+                        return;
+                    }
                 }
 
                 // 🔍 Debug: ดูค่าทั้งหมดก่อนตัดสินใจ
@@ -1943,6 +1953,19 @@ namespace Take_Time_BangPhra.Account.Report
                 receiptParams);
 
             string id = dtRec.Rows[0]["ID"].ToString();
+
+            // ใบที่มีใบลดหนี้อ้าง / ส่ง e-Tax ถึงกรมสรรพากรแล้ว → ยกเลิกไม่ได้ (NextAcc ปฏิเสธ void → สองระบบไม่ตรงกัน)
+            for (int i = 0; i < dtRec.Rows.Count; i++)
+            {
+                string cnBlock = CreditNoteGuards.VoidBlockReason(conn, dtRec.Rows[i]["ID"].ToString());
+                if (cnBlock != null)
+                {
+                    ClientScript.RegisterStartupScript(this.GetType(), "cnBlockCancel",
+                        "alert('" + HttpUtility.JavaScriptStringEncode("⚠ " + cnBlock) + "');", true);
+                    return;
+                }
+            }
+
             for (int i = 0; i < dtRec.Rows.Count; i++)
             {
                 // Delete related records before cancelling (to maintain data integrity)

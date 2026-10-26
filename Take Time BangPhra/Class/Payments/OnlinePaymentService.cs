@@ -315,6 +315,48 @@ namespace Take_Time_BangPhra.Payments
         /// <summary>เปลี่ยนสถานะรายการตามเหตุการณ์ แล้วลงบันทึกปลายทางถ้าจ่ายสำเร็จ</summary>
         private string ApplyEventToTransaction(PaymentTransaction txn, PaymentWebhookEvent ev)
         {
+            // ข้อพิพาท / chargeback (Omise dispute.*) — แจ้งเตือนอย่างเดียว: ผลยังไม่ชี้ขาด ผู้ทำบัญชีตัดสินเอง (ใบลดหนี้ หรือ ขาดทุน)
+            if (ev.IsDispute)
+            {
+                Log("Webhook " + txn.TxnRef + ": ลูกค้าโต้แย้งรายการ (dispute/chargeback) " + (ev.EventType ?? ""));
+                Notify.Send(Notify.Ev.PaymentOnline,
+                    "⚠️ <b>ลูกค้าโต้แย้งรายการชำระเงิน (chargeback)</b>\n"
+                    + Notify.E(PaymentSource.Thai(txn.SourceType) + " " + (txn.SourceId ?? "")) + " · อ้างอิง " + Notify.E(txn.TxnRef)
+                    + " · ยอด " + txn.TotalPayable.ToString("N2") + " บาท\n"
+                    + "ตอบข้อโต้แย้งที่แดชบอร์ดเกตเวย์ — ถ้าแพ้และเงินถูกดึงคืน ต้องออกใบลดหนี้ (หรือบันทึกเป็นขาดทุน) ตามที่ผู้ทำบัญชีตัดสิน");
+                return "ข้อพิพาท/chargeback — แจ้งเตือนแล้ว (ไม่เปลี่ยนสถานะ/ไม่ลงบัญชี)";
+            }
+
+            // คืนเงินที่ทำจากแดชบอร์ดเกตเวย์ (ไม่ได้ผ่านระบบนี้) — บันทึกยอดคืนสะสมให้ตรง + แจ้งเตือนให้ออกใบลดหนี้
+            // ไม่ลงบัญชีอัตโนมัติ (ต้องมีใบลดหนี้อ้างใบต้นทาง ม.86/10) · การคืนจากระบบนี้บันทึกยอดไปก่อนแล้ว → ส่วนต่าง = 0 ไม่ทำซ้ำ
+            if (txn.Status == PaymentStatus.Paid || txn.Status == PaymentStatus.Refunded)
+            {
+                decimal? reported = ev.RefundedAmount;
+                if (!reported.HasValue && ev.Status == PaymentStatus.Refunded) reported = txn.TotalPayable;   // ไม่บอกยอด = คืนเต็ม
+                if (reported.HasValue)
+                {
+                    decimal already = _store.GetRefundedAmount(txn.ID);
+                    decimal delta = Math.Min(reported.Value, txn.TotalPayable) - already;
+                    if (delta > 0.005m)
+                    {
+                        bool full = already + delta >= txn.TotalPayable - 0.005m;
+                        _store.RecordRefund(txn.ID, delta, full, "คืนจากแดชบอร์ดเกตเวย์ (webhook)", null);
+                        Log("Webhook " + txn.TxnRef + ": พบการคืนเงินนอกระบบ " + delta.ToString("N2") + " บาท (คืนสะสม "
+                            + (already + delta).ToString("N2") + ")");
+                        Notify.Send(Notify.Ev.PaymentOnline,
+                            "↩️ <b>มีการคืนเงินจากแดชบอร์ดเกตเวย์ ต้องออกใบลดหนี้</b> " + delta.ToString("N2") + " บาท"
+                            + (full ? " (ครบทั้งยอด)" : " (บางส่วน)") + "\n"
+                            + Notify.E(PaymentSource.Thai(txn.SourceType) + " " + (txn.SourceId ?? ""))
+                            + " · อ้างอิง " + Notify.E(txn.TxnRef)
+                            + (string.IsNullOrEmpty(txn.ReceiptId) ? "" : " · ใบ " + Notify.E(txn.ReceiptId)) + "\n"
+                            + (txn.AppliedAt.HasValue
+                                ? "เงินออกแล้วแต่รายได้/ภาษีขายยังอยู่ — ออกใบลดหนี้ของใบต้นทาง (คืนภายหลัง → บันทึกการคืนเงินด้วยแหล่งเงินเกตเวย์)"
+                                : "รายการนี้ยังไม่ถูกบันทึกเข้าระบบ — ตรวจว่าไม่ต้องลงรับเงิน"));
+                        return "บันทึกการคืนเงินนอกระบบ " + delta.ToString("N2") + " บาท — ต้องออกใบลดหนี้";
+                    }
+                }
+            }
+
             if (ev.Status == PaymentStatus.Paid)
             {
                 // ตรวจยอด: เกตเวย์ต้องบอกยอดที่ตรงกับที่เราขอ ไม่งั้นไม่รับ

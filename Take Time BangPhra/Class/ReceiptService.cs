@@ -41,6 +41,9 @@ namespace Take_Time_BangPhra.Services
 
         public async Task CancelReceipt(string receiptId, string uid)
         {
+            // ใบที่มีใบลดหนี้อ้าง / ส่ง e-Tax ถึงกรมสรรพากรแล้ว → ยกเลิกไม่ได้ (NextAcc ปฏิเสธ — ต้องออกใบลดหนี้แทน)
+            string cnBlock = Take_Time_BangPhra.Integration.CreditNoteGuards.VoidBlockReason(_connectionString, receiptId);
+            if (cnBlock != null) throw new InvalidOperationException(cnBlock);
             try
             {
                 // Update receipt status in database

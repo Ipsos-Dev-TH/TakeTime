@@ -466,6 +466,15 @@ namespace Take_Time_BangPhra.Payments
             ev.EventType = S(root, "key");                     // charge.complete / charge.create ...
             string chargeId = S(root, "data.id");
             if (string.IsNullOrEmpty(chargeId)) chargeId = S(root, "id");
+            // refund.create / dispute.* : data เป็นอ็อบเจกต์ refund (rfnd_) / dispute (dspt_) → ใช้ charge ที่อ้างถึง
+            // (เดิมตกเป็น "ไม่พบรหัส charge" ⇒ การคืนเงินจากแดชบอร์ด Omise ไม่เคยถูกเห็นในระบบ)
+            if (!string.IsNullOrEmpty(chargeId) && (chargeId.StartsWith("rfnd_") || chargeId.StartsWith("dspt_")))
+            {
+                ev.IsDispute = chargeId.StartsWith("dspt_");
+                string refCharge = S(root, "data.charge.id") ?? S(root, "data.charge");
+                if (!string.IsNullOrEmpty(refCharge)) chargeId = refCharge;
+            }
+            if ((ev.EventType ?? "").StartsWith("dispute", StringComparison.OrdinalIgnoreCase)) ev.IsDispute = true;
 
             if (string.IsNullOrEmpty(chargeId) || !chargeId.StartsWith("chrg_"))
             {
@@ -494,6 +503,8 @@ namespace Take_Time_BangPhra.Payments
             ev.Fee = FeeBaht(c);
             ev.CardBrand = S(c, "card.brand");
             ev.CardLast4 = S(c, "card.last_digits");
+            // ยอดคืนสะสมจากตัว charge จริง (ไม่ใช่จากเนื้อ webhook) — ไม่มีฟิลด์ = null
+            if (S(c, "refunded_amount") != null) ev.RefundedAmount = Baht(L(c, "refunded_amount"));
             if (ev.Status == PaymentStatus.Failed) ev.Message = FailureText(c);
             return ev;
         }
