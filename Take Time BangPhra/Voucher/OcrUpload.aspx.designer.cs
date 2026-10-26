@@ -8,33 +8,28 @@ namespace Take_Time_BangPhra.Voucher
 {
     public partial class OcrUpload
     {
+        protected global::System.Web.UI.WebControls.Panel pnlUpload;
         protected global::System.Web.UI.WebControls.FileUpload fuOcr;
         protected global::System.Web.UI.WebControls.DropDownList ddlTargetType;
         protected global::System.Web.UI.WebControls.Button btnScan;
-        protected global::System.Web.UI.WebControls.Literal litStatus;
+        protected global::System.Web.UI.WebControls.Literal litDrafts;
         protected global::System.Web.UI.UpdatePanel upOcr;
+        protected global::System.Web.UI.WebControls.Literal litStatus;
         protected global::System.Web.UI.WebControls.Panel pnlScanning;
         protected global::System.Web.UI.Timer tmrPoll;
-        protected global::System.Web.UI.WebControls.Panel pnlReview;
-        protected global::System.Web.UI.WebControls.Literal litMeta;
-        protected global::System.Web.UI.WebControls.TextBox txtVendorName;
-        protected global::System.Web.UI.WebControls.TextBox txtVendorTaxId;
-        protected global::System.Web.UI.WebControls.DropDownList ddlVendor;
-        protected global::System.Web.UI.WebControls.TextBox txtDocNumber;
-        protected global::System.Web.UI.WebControls.TextBox txtDocDate;
-        protected global::System.Web.UI.WebControls.TextBox txtSubTotal;
-        protected global::System.Web.UI.WebControls.TextBox txtVat;
-        protected global::System.Web.UI.WebControls.TextBox txtTotal;
-        protected global::System.Web.UI.WebControls.Literal litSuggested;
-        protected global::System.Web.UI.WebControls.DropDownList ddlPaidHow;
-        protected global::System.Web.UI.WebControls.DropDownList ddlChargeAccount;
-        protected global::System.Web.UI.WebControls.DropDownList ddlVatClaim;
-        protected global::System.Web.UI.WebControls.TextBox txtWhtRate;
-        protected global::System.Web.UI.WebControls.Button btnCreate;
         protected global::System.Web.UI.WebControls.Literal litResult;
+        protected global::System.Web.UI.WebControls.Panel pnlReview;
+        protected global::System.Web.UI.WebControls.Literal litReviewHead;
+        protected global::System.Web.UI.WebControls.Button btnSaveDraft;
+        protected global::System.Web.UI.WebControls.Button btnDiscard;
+        protected global::System.Web.UI.WebControls.Panel pnlWarnings;
+        protected global::System.Web.UI.WebControls.Literal litWarnings;
+        protected global::System.Web.UI.WebControls.Button btnSubmitAck;
+        protected global::System.Web.UI.WebControls.Button btnSubmit;
+        protected global::System.Web.UI.WebControls.Button btnCnSearch;
+        protected global::System.Web.UI.WebControls.HiddenField hfReviewJson;
+        protected global::System.Web.UI.WebControls.HiddenField hfMetaJson;
         protected global::System.Web.UI.WebControls.HiddenField hfScanId;
-        protected global::System.Web.UI.WebControls.HiddenField hfDebitAcc;
-        protected global::System.Web.UI.WebControls.HiddenField hfHasWht;
-        protected global::System.Web.UI.WebControls.HiddenField hfCreatedDocId;
+        protected global::System.Web.UI.WebControls.HiddenField hfHintKind;
     }
 }

@@ -4,20 +4,22 @@ using System.Configuration;
 using System.Data;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text;
-using System.Threading;
 using System.Threading.Tasks;
 using System.Web.UI;
 using System.Web.UI.WebControls;
 using Take_Time_BangPhra.Integration;
+using Take_Time_BangPhra.Integration.OcrReview;
 
 namespace Take_Time_BangPhra.Voucher
 {
     /// <summary>
-    /// OCR-first ใบสำคัญจ่าย flow (Known gap #3): อัปโหลด → ocr/upload (autoCreate=false)
-    /// → poll ผล → ให้ผู้ใช้ตรวจ/แก้ + เลือกแหล่งจ่ายเงิน → ocr/{id}/create-document?targetType=PaymentVoucher
-    /// → PUT แก้ Draft (บังคับ PaymentAccountId/แหล่งเงิน + ค่าที่ผู้ใช้ยืนยัน) → approve.
-    /// ใช้ company endpoints (/api/companies/*) ผ่าน X-Api-Key — รองรับทั้ง acc_/int_ (gate CanUseCompanyEndpoints).
+    /// OCR → ตรวจทาน → ส่ง NextAcc (CLAUDE.md ข้อ 3 + "หน้าตรวจทานก่อนส่ง + ใบลดหนี้ผู้ขาย"):
+    ///   อัปโหลด → ocr/upload (autoCreate=false) → โพลล์ → หน้าตรวจทาน <c>?scan={scanId}</c> (ภาพเอกสารคู่ฟอร์ม, บรรทัดแก้ได้,
+    ///   เทียบยอดกับกระดาษ, §86/4, ใบต้นทางของใบลด/เพิ่มหนี้) → ผู้ใช้กด "ส่ง" → <see cref="OcrReviewService.SubmitAsync"/>
+    ///   (create → PUT → approve(422 ให้ผู้ใช้ยืนยันเอง) → แนบไฟล์ → 50 ทวิ → ย้ายขาเงิน). Draft เก็บใน Ocr_Document_Log (PHASE19_38)
+    ///   หรือ Session เมื่อยังไม่รัน migration. ใช้ company endpoints — gate <c>CanUseCompanyEndpoints</c>.
     /// </summary>
     public partial class OcrUpload : Page
     {
@@ -25,6 +27,30 @@ namespace Take_Time_BangPhra.Voucher
 
         // รันงาน async บน threadpool เพื่อเลี่ยง deadlock กับ ASP.NET sync context
         private static T RunSync<T>(Func<Task<T>> f) => Task.Run(f).GetAwaiter().GetResult();
+
+        private bool _served;   // ส่งไฟล์ (preview/pdf) แล้ว — ไม่ render หน้า
+        private readonly List<string> _serverErrors = new List<string>();
+        private readonly List<string> _serverNotes = new List<string>();
+        private Dictionary<string, object> _duplicate;
+        private bool _nextaccDupWarn;
+
+        private OcrReviewService Svc => new OcrReviewService(Conn);
+        private string UserName => Session["username"]?.ToString();
+
+        private Guid? QueryScanId
+        {
+            get
+            {
+                Guid g;
+                return Guid.TryParse(Request.QueryString["scan"] ?? "", out g) && g != Guid.Empty ? g : (Guid?)null;
+            }
+        }
+
+        private static string FileKey(Guid scanId) => "OcrScanFile_" + scanId.ToString("N");
+        private static string NameKey(Guid scanId) => "OcrScanName_" + scanId.ToString("N");
+        private static string DraftKey(Guid scanId) => "OcrReview_" + scanId.ToString("N");
+        private static string RawKey(Guid scanId) => "OcrReviewRaw_" + scanId.ToString("N");
+        private const string DocsKey = "OcrReviewDocs";
 
         protected void Page_Load(object sender, EventArgs e)
         {
@@ -35,33 +61,66 @@ namespace Take_Time_BangPhra.Voucher
                 return;
             }
 
+            if (!string.IsNullOrEmpty(Request.QueryString["preview"])) { ServePreview(); return; }
+            if (!string.IsNullOrEmpty(Request.QueryString["pdf"])) { ServePdf(); return; }
+
             if (!IsPostBack)
             {
-                var cfg = new AccountingConfig(Conn);
-                if (!cfg.IsConfigured || !cfg.Enabled)
-                {
-                    Msg(litStatus, "warn", "ยังไม่ได้ตั้งค่า/เปิดใช้งาน Accounting Integration — ไปที่ Admin → Settings → Accounting Integration ก่อน");
-                    btnScan.Enabled = false;
-                }
-                else if (!cfg.CanUseCompanyEndpoints)
-                {
-                    Msg(litStatus, "warn", "OCR flow ใช้ company endpoints (/api/companies/*) — ต้องตั้ง Company ID และเปิด Nexaacc_Company_Endpoints. แนะนำตั้ง acc_ key แยกในหน้า Accounting Integration (ไม่งั้นจะใช้ int_ ผ่าน X-Api-Key fallback)");
-                    btnScan.Enabled = false;
-                }
+                bool ready = CheckConfig();
+                var scan = QueryScanId;
+                if (scan.HasValue && ready) ShowReview(scan.Value, Request.QueryString["kind"]);
+                else RenderDrafts();
             }
         }
+
+        protected override void Render(HtmlTextWriter writer)
+        {
+            if (_served) return;
+            base.Render(writer);
+        }
+
+        private bool CheckConfig()
+        {
+            var cfg = new AccountingConfig(Conn);
+            if (!cfg.IsConfigured || !cfg.Enabled)
+            {
+                Msg(litStatus, "warn", "ยังไม่ได้ตั้งค่า/เปิดใช้งาน Accounting Integration — ไปที่ Admin → Settings → Accounting Integration ก่อน");
+                btnScan.Enabled = false;
+                return false;
+            }
+            if (!cfg.CanUseCompanyEndpoints)
+            {
+                Msg(litStatus, "warn", "OCR ใช้ company endpoints (/api/companies/*) — ต้องตั้ง Company ID และเปิด Nexaacc_Company_Endpoints. แนะนำตั้ง acc_ key แยกในหน้า Accounting Integration (ไม่งั้นจะใช้ int_ ผ่าน X-Api-Key fallback)");
+                btnScan.Enabled = false;
+                return false;
+            }
+            return true;
+        }
+
+        private AccountingApiClient NewClient()
+        {
+            var client = new AccountingApiClient(new AccountingConfig(Conn), Conn);
+            client.ActingUser = UserName;   // creator จริง → ลายเซ็น/audit ใน NextAcc
+            return client;
+        }
+
+        // ══════════════════════════════════════════════════════════════
+        // 1) อัปโหลด + โพลล์
+        // ══════════════════════════════════════════════════════════════
 
         protected void btnScan_Click(object sender, EventArgs e)
         {
             // OCR ประมวลผล + poll นานได้ → ยืด request timeout ของ ASP.NET (default 110s) กัน "A task was canceled"
             Server.ScriptTimeout = 600;
             litResult.Text = "";
+            RenderDrafts();
+            if (!CheckConfig()) return;
             if (!fuOcr.HasFile)
             {
                 Msg(litStatus, "err", "กรุณาเลือกไฟล์ก่อน");
                 return;
             }
-            // NextAcc จำกัด 10 MB/ไฟล์ — กันส่งไปแล้วโดน reject
+            // NextAcc จำกัดขนาดไฟล์ — กันส่งไปแล้วโดน reject
             if (fuOcr.PostedFile != null && fuOcr.PostedFile.ContentLength > 10 * 1024 * 1024)
             {
                 Msg(litStatus, "err", "ไฟล์ใหญ่เกิน 10 MB — กรุณาบีบ/ลดขนาดไฟล์ก่อน");
@@ -69,15 +128,12 @@ namespace Take_Time_BangPhra.Voucher
             }
 
             string tempPath = null;
-            bool keepFile = false;   // เก็บไฟล์ไว้ให้ btnCreate แนบเข้าเอกสาร NextAcc (ไม่ลบใน finally)
+            bool keepFile = false;   // เก็บไฟล์ไว้แสดงข้างฟอร์ม + แนบเข้าเอกสาร NextAcc (ไม่ลบใน finally)
             try
             {
-                var cfg = new AccountingConfig(Conn);
-                var client = new AccountingApiClient(cfg, Conn);
-                client.ActingUser = Session["username"]?.ToString();   // creator จริง → ลายเซ็น/audit ใน NextAcc
+                var client = NewClient();
 
-                // บันทึกไฟล์ชั่วคราว — เก็บชื่อไฟล์เดิมไว้ (ในโฟลเดอร์ย่อย) เพื่อใช้เป็นชื่อไฟล์แนบที่อ่านง่าย
-                // (ไม่งั้น NextAcc/ระบบจะตั้งชื่อเป็น ocr_<guid>)
+                // บันทึกไฟล์ชั่วคราว — คงชื่อไฟล์เดิม (ในโฟลเดอร์ย่อย) เป็นชื่อไฟล์แนบที่อ่านง่าย (ไม่งั้นได้ ocr_<guid>)
                 string origName = Path.GetFileName(fuOcr.FileName ?? "");
                 if (string.IsNullOrWhiteSpace(origName)) origName = "scan" + Path.GetExtension(fuOcr.FileName);
                 foreach (char ch in Path.GetInvalidFileNameChars()) origName = origName.Replace(ch, '_');
@@ -86,7 +142,7 @@ namespace Take_Time_BangPhra.Voucher
                 tempPath = Path.Combine(tempDir, origName);
                 fuOcr.SaveAs(tempPath);
 
-                // อัปโหลดเข้า OCR inbox (ไม่สร้างเอกสารอัตโนมัติ)
+                // อัปโหลดเข้า OCR inbox (ไม่สร้างเอกสารอัตโนมัติ — ผู้ใช้ตรวจทานก่อน)
                 var up = RunSync(() => client.UploadOcrAsync(tempPath, autoCreate: false));
                 if (up == null || up.data == null)
                 {
@@ -96,34 +152,28 @@ namespace Take_Time_BangPhra.Voucher
 
                 var result = up.data;
                 Guid scanId = result.Id;
-
-                // เก็บไฟล์ที่อัปโหลดไว้ (ผูกกับ scanId) เพื่อแนบเข้าเอกสาร NextAcc ตอนกดสร้าง
                 hfScanId.Value = scanId.ToString();
-                hfCreatedDocId.Value = "";                       // สแกนใหม่ → รีเซ็ต resume guard
-                Session["OcrScanFile_" + scanId.ToString("N")] = tempPath;
+                hfHintKind.Value = ddlTargetType.SelectedValue ?? "";
+                Session[FileKey(scanId)] = tempPath;
+                Session[NameKey(scanId)] = origName;
                 keepFile = true;
                 ViewState["ocrTicks"] = 0;
 
-                // ไม่ poll แบบ block thread อีกต่อไป — ถ้ายังไม่เสร็จให้ Timer (async) โพลล์ต่อ
                 if (IsTerminal(result.ScanStatus))
                 {
                     if (string.Equals(result.ScanStatus, "Failed", StringComparison.OrdinalIgnoreCase))
-                    {
                         Msg(litStatus, "err", "OCR ประมวลผลไม่สำเร็จ: " + (result.ProcessingNotes ?? "ไม่ทราบสาเหตุ"));
-                    }
                     else
                     {
-                        BindReview(result);
-                        Msg(litStatus, "ok", "สแกนเสร็จแล้ว — ตรวจสอบข้อมูลด้านล่างก่อนสร้างเอกสาร");
+                        Response.Redirect(ReviewUrl(scanId, hfHintKind.Value), false);
+                        Context.ApplicationInstance.CompleteRequest();
                     }
                 }
                 else
                 {
-                    // กำลังประมวลผล → แสดง spinner inline + เปิด Timer โพลล์อัตโนมัติ (ไม่ค้างหน้า)
-                    pnlReview.Visible = false;
                     pnlScanning.Visible = true;
                     tmrPoll.Enabled = true;
-                    Msg(litStatus, "info", "อัปโหลดแล้ว — กำลังประมวลผล OCR (จะแสดงผลให้อัตโนมัติ)");
+                    Msg(litStatus, "info", "อัปโหลดแล้ว — กำลังประมวลผล OCR (จะเปิดหน้าตรวจทานให้อัตโนมัติ)");
                 }
             }
             catch (AuthenticationFailedException ax)
@@ -132,7 +182,7 @@ namespace Take_Time_BangPhra.Voucher
             }
             catch (AccountingApiException ae)
             {
-                Msg(litStatus, "err", "OCR ผิดพลาด (" + ae.StatusCode + "): " + ae.Message);
+                Msg(litStatus, "err", "OCR ผิดพลาด (" + ae.StatusCode + "): " + OcrReviewService.ApiMessage(ae));
             }
             catch (Exception ex)
             {
@@ -140,16 +190,14 @@ namespace Take_Time_BangPhra.Voucher
             }
             finally
             {
-                // ลบเฉพาะกรณีไม่ได้เก็บไว้ให้ btnCreate แนบ (เช่น OCR ล้มเหลว/ยกเลิก)
-                if (!keepFile && tempPath != null)
-                {
-                    try { TryDeleteScanFile(tempPath); } catch { /* ไฟล์ชั่วคราว — ละเลยถ้าลบไม่ได้ */ }
-                }
+                if (!keepFile && tempPath != null) TryDeleteScanFile(tempPath);
             }
         }
 
-        /// <summary>โพลล์สถานะ OCR แบบ async (UpdatePanel + Timer) — ไม่บล็อก request thread.
-        /// เมื่อประมวลผลเสร็จ → bind รีวิวอัตโนมัติ; cap ~30 รอบ (~75 วิ) กันโพลล์ไม่จบ</summary>
+        private static string ReviewUrl(Guid scanId, string kind) =>
+            "OcrUpload.aspx?scan=" + scanId + (OcrDocKind.IsKnown(kind) ? "&kind=" + kind : "");
+
+        /// <summary>โพลล์สถานะ OCR แบบ async (UpdatePanel + Timer) — เสร็จแล้วพาไปหน้าตรวจทาน; cap ~30 รอบ (~75 วิ)</summary>
         protected void tmrPoll_Tick(object sender, EventArgs e)
         {
             Server.ScriptTimeout = 600;
@@ -160,48 +208,39 @@ namespace Take_Time_BangPhra.Voucher
                 pnlScanning.Visible = false;
                 return;
             }
-
             int ticks = 0;
             int.TryParse(ViewState["ocrTicks"]?.ToString(), out ticks);
             ticks++;
             ViewState["ocrTicks"] = ticks;
-
             try
             {
-                var cfg = new AccountingConfig(Conn);
-                var client = new AccountingApiClient(cfg, Conn);
-                var poll = RunSync(() => client.GetOcrResultAsync(scanId));
-                var result = poll?.data;
-
+                var result = RunSync(() => NewClient().GetOcrResultAsync(scanId))?.data;
                 if (result != null && IsTerminal(result.ScanStatus))
                 {
                     tmrPoll.Enabled = false;
                     pnlScanning.Visible = false;
                     if (string.Equals(result.ScanStatus, "Failed", StringComparison.OrdinalIgnoreCase))
-                    {
                         Msg(litStatus, "err", "OCR ประมวลผลไม่สำเร็จ: " + (result.ProcessingNotes ?? "ไม่ทราบสาเหตุ"));
-                    }
                     else
                     {
-                        BindReview(result);
-                        Msg(litStatus, "ok", "สแกนเสร็จแล้ว — ตรวจสอบข้อมูลด้านล่างก่อนสร้างเอกสาร");
+                        Msg(litStatus, "ok", "สแกนเสร็จแล้ว — กำลังเปิดหน้าตรวจทาน…");
+                        ScriptManager.RegisterStartupScript(upOcr, GetType(), "ocrGoReview",
+                            "location.href=" + JsString(ReviewUrl(scanId, hfHintKind.Value)) + ";", true);
                     }
                     return;
                 }
-
-                if (ticks >= 30)   // ~75 วินาที → หยุดโพลล์ กันค้าง
+                if (ticks >= 30)
                 {
                     tmrPoll.Enabled = false;
                     pnlScanning.Visible = false;
-                    Msg(litStatus, "warn", "OCR ยังประมวลผลไม่เสร็จ — กดสแกนใหม่อีกครั้งภายหลัง");
+                    Msg(litStatus, "warn", "OCR ยังประมวลผลไม่เสร็จ — เปิดหน้าตรวจทานภายหลังจากรายการ \"งานที่ยังไม่ส่ง\" หรือ "
+                        + "ลิงก์นี้: OcrUpload.aspx?scan=" + scanId);
                     return;
                 }
-
-                Msg(litStatus, "info", $"กำลังประมวลผล OCR… (รอบ {ticks})");
+                Msg(litStatus, "info", "กำลังประมวลผล OCR… (รอบ " + ticks + ")");
             }
             catch (Exception ex)
             {
-                // ล้มเหลวชั่วคราว → โพลล์ต่อ ยกเว้นเกิน cap
                 if (ticks >= 30)
                 {
                     tmrPoll.Enabled = false;
@@ -211,567 +250,589 @@ namespace Take_Time_BangPhra.Voucher
             }
         }
 
-        protected void btnCreate_Click(object sender, EventArgs e)
+        // ══════════════════════════════════════════════════════════════
+        // 2) หน้าตรวจทาน
+        // ══════════════════════════════════════════════════════════════
+
+        /// <summary>เปิดหน้าตรวจทาน: draft (DB → Session) หรือสร้างจากผล OCR ครั้งแรก</summary>
+        private void ShowReview(Guid scanId, string hintKind)
         {
-            Server.ScriptTimeout = 600;   // create+update+approve หลาย call → ยืด request timeout
-            Guid scanId;
-            if (!Guid.TryParse(hfScanId.Value, out scanId))
+            var row = Svc.Load(scanId);
+            if (row != null && (row.Status == OcrReviewService.StDone || row.Status == OcrReviewService.StEvidence))
             {
-                Msg(litResult, "err", "ไม่พบรายการสแกน — กรุณาอัปโหลด & สแกนใหม่");
+                ShowFinished(row);
                 return;
             }
 
+            var state = OcrReviewService.ParseState(row?.ReviewJson) ?? OcrReviewService.ParseState(Session[DraftKey(scanId)] as string);
+            OcrResultResponse ocr = null;
+            try { ocr = RunSync(() => NewClient().GetOcrResultAsync(scanId))?.data; }
+            catch (Exception ex)
+            {
+                if (state == null)
+                {
+                    Msg(litStatus, "err", "อ่านผลสแกนจาก NextAcc ไม่สำเร็จ: " + OcrReviewService.ApiMessage(ex));
+                    RenderDrafts();
+                    return;
+                }
+                _serverNotes.Add("อ่านผลสแกนล่าสุดจาก NextAcc ไม่สำเร็จ — แสดงร่างที่บันทึกไว้ (" + OcrReviewService.ShortError(ex) + ")");
+            }
+
+            if (state == null)
+            {
+                if (ocr == null) { Msg(litStatus, "err", "ไม่พบผลสแกนนี้ใน NextAcc"); RenderDrafts(); return; }
+                if (!IsTerminal(ocr.ScanStatus))
+                {
+                    hfScanId.Value = scanId.ToString();
+                    hfHintKind.Value = hintKind ?? "";
+                    pnlScanning.Visible = true;
+                    tmrPoll.Enabled = true;
+                    Msg(litStatus, "info", "OCR ยังประมวลผลอยู่ — จะเปิดหน้าตรวจทานให้อัตโนมัติ");
+                    return;
+                }
+                if (string.Equals(ocr.ScanStatus, "Failed", StringComparison.OrdinalIgnoreCase))
+                {
+                    Msg(litStatus, "err", "OCR ประมวลผลไม่สำเร็จ: " + (ocr.ProcessingNotes ?? "ไม่ทราบสาเหตุ") + " — สแกนใหม่อีกครั้ง");
+                    RenderDrafts();
+                    return;
+                }
+                state = OcrReviewService.BuildInitialState(ocr, hintKind);
+                string raw = OcrReviewService.ToJson(state);
+                Session[RawKey(scanId)] = raw;
+                Session[DraftKey(scanId)] = raw;
+                Svc.SaveDraft(state, raw, ocr.OriginalFileName ?? Session[NameKey(scanId)] as string, UserName);
+                if (ocr.CreatedDocumentId.HasValue)
+                    _serverNotes.Add("สแกนนี้มีเอกสารบน NextAcc แล้ว — กดส่งจะใช้เอกสารเดิม (แก้ร่าง/อนุมัติต่อ) ไม่สร้างใหม่");
+            }
+            if (ocr != null)
+            {
+                ViewState["ocrMeta"] = OcrReviewService.ToJson(OcrMeta(ocr));
+                ViewState["fileName"] = ocr.OriginalFileName;
+            }
+            if (row != null && row.NexaaccDocId.HasValue)
+                _serverNotes.Add("มีเอกสารบน NextAcc แล้ว (" + (row.NexaaccDocNo ?? row.NexaaccDocId.ToString()) + ", สถานะ " + row.Status
+                    + ") — กดส่งจะทำต่อจากขั้นที่ค้าง ไม่สร้างใหม่" + (string.IsNullOrEmpty(row.LastError) ? "" : " · ล่าสุด: " + row.LastError));
+            RenderReview(state);
+        }
+
+        private void RenderReview(OcrReviewState s)
+        {
+            Guid scanId = Guid.Parse(s.ScanId);
+            pnlUpload.Visible = false;
+            pnlReview.Visible = true;
+            hfScanId.Value = s.ScanId;
+            var row = Svc.Load(scanId);
+            btnDiscard.Visible = row == null || !row.NexaaccDocId.HasValue;
+
+            string fileName = ViewState["fileName"] as string ?? row?.FileName ?? Session[NameKey(scanId)] as string ?? "เอกสาร";
+            var head = new StringBuilder();
+            head.Append("<div class=\"ocr-hint\">ไฟล์ <b>").Append(Server.HtmlEncode(fileName)).Append("</b> · สแกน ")
+                .Append(scanId.ToString("N").Substring(0, 8));
+            if (row != null) head.Append(" · สถานะ ").Append(Server.HtmlEncode(row.Status));
+            if (!Svc.HasLogTable()) head.Append(" · <span style=\"color:#c05621;\">ร่างเก็บใน session (ยังไม่รัน PHASE19_38)</span>");
+            head.Append("</div>");
+            litReviewHead.Text = head.ToString();
+
+            hfReviewJson.Value = OcrReviewService.ToJson(s);
+            hfMetaJson.Value = OcrReviewService.ToJson(BuildMeta(s, row, fileName));
+        }
+
+        private Dictionary<string, object> BuildMeta(OcrReviewState s, OcrLogRow row, string fileName)
+        {
+            var m = new Dictionary<string, object>();
+            m["scanId"] = s.ScanId;
+            m["fileName"] = fileName;
+            m["previewUrl"] = "OcrUpload.aspx?preview=" + s.ScanId;
+            m["previewIsPdf"] = (Path.GetExtension(fileName ?? "") ?? "").Equals(".pdf", StringComparison.OrdinalIgnoreCase);
+            bool synced;
+            m["accounts"] = LoadAccountOptions(out synced);
+            m["chartSynced"] = synced;
+            m["money"] = LoadMoneyOptions();
+            m["vendors"] = LoadVendorOptions();
+            var ocrJson = ViewState["ocrMeta"] as string;
+            m["ocr"] = string.IsNullOrEmpty(ocrJson) ? new Dictionary<string, object>() : OcrReviewService.Json().DeserializeObject(ocrJson);
+            var cn = ViewState["cnResults"] as string;
+            m["cnResults"] = string.IsNullOrEmpty(cn) ? null : OcrReviewService.Json().DeserializeObject(cn);
+            var cnNotes = ViewState["cnNotes"] as string;
+            m["cnNotes"] = string.IsNullOrEmpty(cnNotes) ? null : OcrReviewService.Json().DeserializeObject(cnNotes);
+            m["serverErrors"] = _serverErrors;
+            m["serverNotes"] = _serverNotes;
+            m["duplicate"] = _duplicate;
+            m["nextaccDupWarn"] = _nextaccDupWarn || s.AllowDuplicate;
+            m["locked"] = false;
+            return m;
+        }
+
+        private static Dictionary<string, object> OcrMeta(OcrResultResponse r)
+        {
+            var o = new Dictionary<string, object>();
+            if (r.Quality != null) o["quality"] = new Dictionary<string, object> { { "l", r.Quality.Letter }, { "s", r.Quality.Score }, { "c", r.Quality.Color } };
+            o["engine"] = r.OcrEngine;
+            o["target"] = r.TargetDocumentType;
+            o["role"] = r.OurRole;
+            o["scanned"] = r.ScannedDocumentType ?? r.DocumentType;
+            o["handwriting"] = r.HasHandwriting;
+            o["asset"] = r.HasPotentialFixedAsset;
+            o["duplicate"] = r.IsDuplicate;
+            o["compliance"] = (r.ComplianceIssues ?? new List<OcrScanIssueDto>())
+                .Select(c => (object)new Dictionary<string, object> { { "s", c.Severity }, { "m", c.Message } }).ToList();
+            return o;
+        }
+
+        /// <summary>สถานะที่หน้าเว็บส่งกลับมา — ScanId มาจาก query string เสมอ (ไม่เชื่อค่าในฟอร์ม)</summary>
+        private OcrReviewState ReadPostedState()
+        {
+            var scan = QueryScanId;
+            if (!scan.HasValue) return null;
+            var s = OcrReviewService.ParseState(hfReviewJson.Value)
+                    ?? OcrReviewService.ParseState(Svc.Load(scan.Value)?.ReviewJson)
+                    ?? OcrReviewService.ParseState(Session[DraftKey(scan.Value)] as string);
+            if (s == null) return null;
+            s.ScanId = scan.Value.ToString();
+            if (!OcrDocKind.IsKnown(s.DocKind)) s.DocKind = OcrDocKind.PaymentVoucher;
+            if (s.Lines == null) s.Lines = new List<OcrReviewLine>();
+            if (s.LowConfidence == null) s.LowConfidence = new List<string>();
+            if (OcrReviewMath.IsValidThaiTaxId(s.SupplierTaxId)) s.SupplierTaxId = OcrReviewMath.Digits(s.SupplierTaxId);
+            string br = OcrReviewMath.NormalizeBranch(s.SupplierBranch);
+            if (OcrReviewMath.IsValidBranch(br)) s.SupplierBranch = br;
+            foreach (var l in s.Lines)
+            {
+                l.Description = (l.Description ?? "").Trim();
+                l.AccountCode = (l.AccountCode ?? "").Trim();
+                if (l.VatType != "0" && l.VatType != "EX") l.VatType = "7";
+                if (l.VatType != "7") { l.VatOverride = null; l.VatClaimable = true; }
+            }
+            Session[DraftKey(scan.Value)] = OcrReviewService.ToJson(s);
+            return s;
+        }
+
+        private bool ReviewLost()
+        {
+            Msg(litResult, "err", "ไม่พบข้อมูลตรวจทาน (session หมดอายุ?) — เปิดลิงก์สแกนนี้ใหม่หรือสแกนอีกครั้ง");
+            pnlReview.Visible = false;
+            pnlUpload.Visible = true;
+            RenderDrafts();
+            return false;
+        }
+
+        protected void btnSaveDraft_Click(object sender, EventArgs e)
+        {
+            var s = ReadPostedState();
+            if (s == null) { ReviewLost(); return; }
+            bool db = Svc.SaveDraft(s, Session[RawKey(Guid.Parse(s.ScanId))] as string, Session[NameKey(Guid.Parse(s.ScanId))] as string, UserName);
+            _serverNotes.Add(db ? "บันทึกร่างแล้ว — กลับมาทำต่อได้จากหน้าสแกน (รายการ \"งานที่ยังไม่ส่ง\") หรือลิงก์หน้านี้"
+                                : "บันทึกร่างไว้ใน session แล้ว (ยังไม่รัน PHASE19_38 — ปิดเบราว์เซอร์/หมด session = หาย)");
+            RenderReview(s);
+        }
+
+        protected void btnCnSearch_Click(object sender, EventArgs e)
+        {
+            Server.ScriptTimeout = 300;
+            var s = ReadPostedState();
+            if (s == null) { ReviewLost(); return; }
+            var notes = new List<string>();
             try
             {
-                var cfg = new AccountingConfig(Conn);
-                var client = new AccountingApiClient(cfg, Conn);
-                client.ActingUser = Session["username"]?.ToString();   // creator จริง → ลายเซ็นผู้จัดทำ/audit
-                string target = ddlTargetType.SelectedValue;
-
-                // Resume guard: ถ้าเคยสร้าง Draft แล้วแต่ขั้นตอนถัดไป (update/approve) ล้มเหลว
-                // → ใช้ docId เดิม ไม่เรียก create-document ซ้ำ (กัน Draft ซ้ำใน NextAcc)
-                Guid? docId = null;
-                if (Guid.TryParse(hfCreatedDocId.Value, out var resumeDoc) && resumeDoc != Guid.Empty)
-                {
-                    docId = resumeDoc;
-                }
-                else
-                {
-                    // สร้างเอกสาร Draft จากผล OCR (auto-create Contact จาก TaxId/Name)
-                    var created = RunSync(() => client.CreateDocumentFromOcrAsync(scanId, target));
-                    docId = created?.data?.CreatedDocumentId;
-                    if (docId == null || docId == Guid.Empty)
-                    {
-                        Msg(litResult, "err", "สร้างเอกสารไม่สำเร็จ: " + (created?.message ?? "NextAcc ไม่คืนรหัสเอกสาร"));
-                        return;
-                    }
-                    hfCreatedDocId.Value = docId.Value.ToString();   // persist ทันที กัน re-create ตอนกดซ้ำ
-                }
-
-                // บังคับแหล่งเงิน + ใช้ค่าที่ผู้ใช้ยืนยัน (PUT แก้ Draft ก่อน approve)
-                var upd = BuildUpdateFromReview();
-
-                // ผู้ใช้เลือกผู้ขายจากระบบ (กรณี OCR ไม่เจอชื่อ) → ผูก contact ใน NextAcc (set ContactId)
-                if (int.TryParse(ddlVendor.SelectedValue, out var vendorId) && vendorId > 0)
-                {
-                    try
-                    {
-                        var sync = new AccountingSyncService(Conn);
-                        Guid? contactId = RunSync(() => sync.EnsureVendorContactAsync(vendorId));
-                        if (contactId.HasValue && contactId.Value != Guid.Empty)
-                        {
-                            if (upd == null) upd = new UpdateDocumentRequest();
-                            upd.ContactId = contactId.Value;
-                        }
-                        else
-                        {
-                            Msg(litResult, "warn", "ผูกผู้ขายจากระบบไม่สำเร็จ (สร้าง contact ใน NextAcc ไม่ได้) — เอกสารจะใช้ผู้ติดต่อจาก OCR");
-                        }
-                    }
-                    catch (Exception vex)
-                    {
-                        Msg(litResult, "warn", "ผูกผู้ขายจากระบบไม่สำเร็จ: " + vex.Message);
-                    }
-                }
-
-                if (upd != null)
-                {
-                    try
-                    {
-                        RunSync(() => client.UpdateDocumentAsync(docId.Value, upd));
-                    }
-                    catch (Exception uex)
-                    {
-                        // Draft ถูกสร้างแล้ว แต่ปรับแหล่งเงิน/ค่าที่แก้ไม่สำเร็จ → คงสถานะไว้ (panel + hfCreatedDocId)
-                        // กด"สร้าง"อีกครั้งจะ resume จาก Draft เดิม (ไม่สร้างซ้ำ) ลอง update+approve ใหม่
-                        Msg(litResult, "warn", "สร้างเอกสาร (Draft) แล้ว แต่ปรับแหล่งเงิน/ค่าที่แก้ไม่สำเร็จ: " + uex.Message +
-                            " — กด \"สร้างใบสำคัญจ่าย & อนุมัติ\" อีกครั้งเพื่อลองใหม่ (จะใช้เอกสารเดิม ไม่สร้างซ้ำ) หรือไปจัดการใน NextAcc");
-                        return;
-                    }
-                }
-
-                // อนุมัติ (auto-post GL). ครั้งแรกถ้ามี soft warning จะได้ 422 → ยืนยันซ้ำ
-                string approveMsg;
-                try
-                {
-                    var ap = RunSync(() => client.ApproveDocumentAsync(docId.Value,
-                        new ApproveDocumentRequest { AcknowledgeWarnings = false }));
-                    approveMsg = ap?.data != null
-                        ? "อนุมัติแล้ว เลขที่เอกสาร: " + (ap.data.DocumentNumber ?? docId.Value.ToString())
-                        : "สร้างเอกสารแล้ว แต่ผลอนุมัติไม่ชัดเจน: " + (ap?.message ?? "");
-                }
-                catch (AccountingApiException ae) when (ae.StatusCode == 422)
-                {
-                    // soft warning → ยืนยันด้วย AcknowledgeWarnings=true
-                    var ap2 = RunSync(() => client.ApproveDocumentAsync(docId.Value,
-                        new ApproveDocumentRequest { AcknowledgeWarnings = true, Notes = "ยืนยันผ่าน OCR review" }));
-                    approveMsg = ap2?.data != null
-                        ? "อนุมัติแล้ว (ยืนยันคำเตือน) เลขที่เอกสาร: " + (ap2.data.DocumentNumber ?? docId.Value.ToString())
-                        : "อนุมัติแล้ว (ยืนยันคำเตือน)";
-                }
-
-                // แนบไฟล์ที่สแกนเข้าเอกสารใน NextAcc ในรูปแบบ "ไฟล์แนบเอกสาร" (Document attachment)
-                // เพื่อให้แสดงในหน้า CheckPayment ฝั่ง TakeTime ได้ (ตัว linked-scan ที่ NextAcc สร้างเอง
-                // ชื่อ ocr_... เป็นคนละชนิด /attachments/Document/{id} จึงอ่านไม่เจอ → คอลัมน์ไฟล์แนบขึ้น "-")
-                string scanKey = "OcrScanFile_" + scanId.ToString("N");
-                string scanFile = Session[scanKey]?.ToString();
-                string attachNote = "";
-                if (!string.IsNullOrEmpty(scanFile) && File.Exists(scanFile))
-                {
-                    try
-                    {
-                        // แนบเฉพาะเมื่อยังไม่มีไฟล์แนบชนิด Document อยู่แล้ว (กันซ้ำ)
-                        var existing = RunSync(() => client.GetAttachmentsAsync("Document", docId.Value));
-                        bool hasDocAttachment = existing?.data != null && existing.data.Count > 0;
-                        if (!hasDocAttachment)
-                        {
-                            RunSync(() => client.UploadAttachmentAsync("Document", docId.Value, scanFile));
-                            attachNote = " (แนบไฟล์เอกสารแล้ว)";
-                        }
-                        else
-                        {
-                            attachNote = " (มีไฟล์แนบอยู่แล้ว)";
-                        }
-                    }
-                    catch (Exception aex)
-                    {
-                        attachNote = " — แต่แนบไฟล์ไม่สำเร็จ: " + aex.Message;
-                    }
-                    finally
-                    {
-                        TryDeleteScanFile(scanFile);
-                        Session.Remove(scanKey);
-                    }
-                }
-
-                pnlReview.Visible = false;
-                hfScanId.Value = "";
-                hfCreatedDocId.Value = "";   // เสร็จสมบูรณ์ → เคลียร์ resume guard
-                Msg(litResult, "ok", "สำเร็จ! " + approveMsg + attachNote);
-            }
-            catch (AccountingApiException ae)
-            {
-                Msg(litResult, "err", "สร้าง/อนุมัติเอกสารไม่สำเร็จ (" + ae.StatusCode + "): " + ae.Message);
+                var results = RunSync(() => OcrReviewService.SearchSourceDocsAsync(NewClient(), s, notes));
+                ViewState["cnResults"] = OcrReviewService.ToJson(results);
             }
             catch (Exception ex)
             {
-                Msg(litResult, "err", "เกิดข้อผิดพลาด: " + ex.Message);
+                notes.Add("ค้นเอกสารต้นทางไม่สำเร็จ: " + OcrReviewService.ApiMessage(ex));
+                ViewState["cnResults"] = null;
             }
+            ViewState["cnNotes"] = OcrReviewService.ToJson(notes);
+            Svc.SaveDraft(s, null, null, UserName);
+            RenderReview(s);
         }
 
-        private void BindReview(OcrResultResponse r)
+        protected void btnSubmit_Click(object sender, EventArgs e) => DoSubmit(false);
+
+        protected void btnSubmitAck_Click(object sender, EventArgs e) => DoSubmit(true);
+
+        private void DoSubmit(bool acknowledge)
         {
-            pnlReview.Visible = true;
-            LoadPaidHowOptions();
-            LoadChargeAccountOptions();
-            LoadVendorOptions();
-            hfDebitAcc.Value = r.SuggestedAccounts?.DebitAccountCode ?? "";
-
-            // pre-select ผังบัญชีที่ AI/OCR แนะนำไว้เลย — เฉพาะใบ "รายการเดียว"
-            // (ใบหลายรายการคงค่า "ใช้บัญชีที่ OCR แนะนำ" ไว้ เพื่อรักษาผังบัญชีต่อบรรทัด)
-            string suggestedAcc = r.SuggestedAccounts?.DebitAccountCode;
-            bool ocrSingleLine = r.ExtractedItems == null || r.ExtractedItems.Count <= 1;
-            if (ocrSingleLine && !string.IsNullOrEmpty(suggestedAcc)
-                && ddlChargeAccount.Items.FindByValue(suggestedAcc) != null)
+            Server.ScriptTimeout = 600;   // create + update + approve + แนบไฟล์ หลาย call
+            pnlWarnings.Visible = false;
+            var s = ReadPostedState();
+            if (s == null) { ReviewLost(); return; }
+            Guid scanId = Guid.Parse(s.ScanId);
+            string scanFile = Session[FileKey(scanId)] as string;
+            string prepName, prepSig;
+            ResolvePreparer(out prepName, out prepSig);
+            var ctx = new OcrSubmitContext
             {
-                ddlChargeAccount.SelectedValue = suggestedAcc;
+                UserName = UserName,
+                PreparerName = prepName,
+                PreparerSignature = prepSig,
+                ScanFilePath = scanFile,
+                AcknowledgeWarnings = acknowledge
+            };
+
+            OcrSubmitResult r;
+            try
+            {
+                r = RunSync(() => Svc.SubmitAsync(NewClient(), s, ctx));
+            }
+            catch (AuthenticationFailedException ax)
+            {
+                r = new OcrSubmitResult();
+                r.Errors.Add("ยืนยันตัวตน API ล้มเหลว: " + ax.Message);
+            }
+            catch (Exception ex)
+            {
+                r = new OcrSubmitResult();
+                r.Errors.Add("เกิดข้อผิดพลาด: " + OcrReviewService.ApiMessage(ex));
             }
 
-            hfHasWht.Value = r.HasWht ? "1" : "0";
-            txtWhtRate.Text = (r.HasWht && r.WhtRate.HasValue) ? r.WhtRate.Value.ToString("0.##", CultureInfo.InvariantCulture) : "";
-            txtVendorName.Text = r.ExtractedVendorName ?? "";
-            txtVendorTaxId.Text = r.ExtractedVendorTaxId ?? "";
-            txtDocNumber.Text = r.ExtractedDocumentNumber ?? "";
-            txtDocDate.Text = r.ExtractedDate.HasValue ? r.ExtractedDate.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : "";
-            // ── ยอดเงิน + ภาษีซื้อ ตามชนิดเอกสาร ──
-            // ใบกำกับภาษี (หรือ OCR เจอ VAT) → เคลมภาษีซื้อ, คงยอดที่ OCR แยกไว้
-            // ไม่ใช่ใบกำกับ (ใบเสร็จ/บิลเงินสด/ลายมือ) + ไม่เจอ VAT → ไม่มีภาษีซื้อให้เคลม:
-            //   ตั้ง "ยอดก่อน VAT = ยอดรวม", VAT = 0, และเลือก "ไม่เคลม" ให้อัตโนมัติ (§82/5)
-            decimal? sub = r.ExtractedSubTotal;
-            decimal? vat = r.ExtractedVatAmount;
-            decimal? total = r.ExtractedTotalAmount;
-            bool isTaxInvoice = IsScannedTaxInvoice(r) || (r.ExtractedVatAmount ?? 0m) > 0m;
-
-            if (!isTaxInvoice)
+            if (r.Ok)
             {
-                bool vatMissing = !vat.HasValue || vat.Value == 0m;
-                if (vatMissing)
+                if (r.DocId.HasValue)
                 {
-                    decimal amount = total ?? sub ?? 0m;   // ใช้ยอดรวมเป็นยอดก่อน VAT
-                    if (amount > 0m) sub = amount;
-                    vat = 0m;
-                    if (!total.HasValue && sub.HasValue) total = sub;
+                    var docs = Session[DocsKey] as HashSet<Guid> ?? new HashSet<Guid>();
+                    docs.Add(r.DocId.Value);
+                    Session[DocsKey] = docs;
+                }
+                if (!string.IsNullOrEmpty(scanFile)) TryDeleteScanFile(scanFile);
+                Session.Remove(FileKey(scanId));
+                Session.Remove(DraftKey(scanId));
+                Session.Remove(RawKey(scanId));
+                ShowSuccess(r);
+                return;
+            }
+
+            _serverNotes.AddRange(r.Notes);
+            if (r.NeedsAck)
+            {
+                pnlWarnings.Visible = true;
+                litWarnings.Text = "<ul>" + string.Join("", r.ApproveWarnings.Select(w => "<li>" + Server.HtmlEncode(w) + "</li>")) + "</ul>";
+                _serverNotes.Insert(0, r.Message);
+            }
+            else
+            {
+                _serverErrors.AddRange(r.Errors);
+                if (r.Errors.Any(x => x.Contains("ไม่ใช่ใบซ้ำ"))) _nextaccDupWarn = true;
+                if (r.DuplicateDocId.HasValue || !string.IsNullOrEmpty(r.DuplicateDocNo))
+                {
+                    var d = new Dictionary<string, object> { { "text", "เอกสารที่ซ้ำ: " + (r.DuplicateDocNo ?? r.DuplicateDocId.ToString()) } };
+                    if (r.DuplicateDocId.HasValue && Svc.IsKnownDocument(r.DuplicateDocId.Value)) d["pdf"] = "OcrUpload.aspx?pdf=" + r.DuplicateDocId.Value;
+                    _duplicate = d;
                 }
             }
-
-            txtSubTotal.Text = sub.HasValue ? sub.Value.ToString("0.00") : "";
-            txtVat.Text = vat.HasValue ? vat.Value.ToString("0.00") : "";
-            txtTotal.Text = total.HasValue ? total.Value.ToString("0.00") : "";
-
-            // ภาษีซื้อ: ใบกำกับ → เคลม (1), ไม่ใช่ใบกำกับ → ไม่เคลม (0)
-            string vatClaimDefault = isTaxInvoice ? "1" : "0";
-            if (ddlVatClaim.Items.FindByValue(vatClaimDefault) != null)
-                ddlVatClaim.SelectedValue = vatClaimDefault;
-
-            var meta = new StringBuilder();
-            // เตือนเมื่อยังไม่ได้ Sync ผังบัญชี NextAcc → dropdown แหล่งจ่ายเงิน/ผังบัญชีจะ fallback ไป
-            // mapping เดิม (เสี่ยงบัญชีผิด เช่น กสิกร→กรุงไทย). ชี้ทางไปกด Sync
-            var chartChk = LoadNexaaccAccounts("Account_Code LIKE '%'");
-            if (chartChk == null || chartChk.Rows.Count == 0)
-                meta.Append("<div class=\"ocr-msg warn\">⚠️ ยังไม่ได้ Sync ผังบัญชีจาก NextAcc — dropdown แหล่งจ่ายเงิน/ผังบัญชีจะใช้ mapping เดิม (อาจได้บัญชีไม่ตรง). แนะนำไปที่ <a href=\"/Admin/Settings/AccountingIntegration\" target=\"_blank\">Admin → Accounting Integration → กด \"Sync บัญชี\"</a> ก่อน</div>");
-            if (r.Quality != null)
-                meta.Append("<span class=\"badge\" style=\"background:" + Server.HtmlEncode(r.Quality.Color ?? "#888") + "\">คุณภาพ " +
-                    Server.HtmlEncode(r.Quality.Letter ?? "?") + " (" + r.Quality.Score + ")</span> ");
-            if (!string.IsNullOrEmpty(r.TargetDocumentType))
-                meta.Append("<span class=\"ocr-hint\">เอกสารที่ระบบแนะนำให้สร้าง: <b>" + Server.HtmlEncode(r.TargetDocumentType) + "</b></span> ");
-            if (r.HasHandwriting)
-                meta.Append("<div class=\"ocr-msg warn\">✋ พบลายมือเขียน — โปรดตรวจยอดเงินให้ละเอียด</div>");
-            if (r.HasPotentialFixedAsset)
-                meta.Append("<div class=\"ocr-msg warn\">พบรายการที่อาจเป็นสินทรัพย์ถาวร — ควรลงทะเบียนสินทรัพย์แทนค่าใช้จ่าย</div>");
-            if (r.IsDuplicate)
-                meta.Append("<div class=\"ocr-msg warn\">เอกสารนี้อาจซ้ำกับที่เคยสแกนแล้ว</div>");
-            litMeta.Text = meta.ToString();
-
-            var sg = new StringBuilder();
-            if (r.SuggestedAccounts != null)
-            {
-                string aiBadge = r.GlAccountUsedAi ? "🤖 AI แนะนำ" : "ระบบแนะนำ (rule-based)";
-                sg.Append("<div class=\"ocr-msg info\"><b>ผังบัญชีที่แนะนำ</b> (" + aiBadge + "):<br/>");
-                sg.Append("Dr: " + Server.HtmlEncode(JoinAcc(r.SuggestedAccounts.DebitAccountCode, r.SuggestedAccounts.DebitAccountName)) + "<br/>");
-                sg.Append("Cr: " + Server.HtmlEncode(JoinAcc(r.SuggestedAccounts.CreditAccountCode, r.SuggestedAccounts.CreditAccountName)));
-                if (!string.IsNullOrEmpty(r.SuggestedAccounts.VatAccountCode))
-                    sg.Append("<br/>VAT: " + Server.HtmlEncode(JoinAcc(r.SuggestedAccounts.VatAccountCode, r.SuggestedAccounts.VatAccountName)));
-                sg.Append("</div>");
-            }
-            if (r.HasWht && r.WhtRate.HasValue)
-                sg.Append("<div class=\"ocr-msg info\">ตรวจพบหัก ณ ที่จ่าย " + r.WhtRate.Value.ToString("0.##") + "%</div>");
-
-            // แสดงรายการหลายบรรทัดที่ OCR แยกมา (read-only) — จะถูกสร้างเป็น multi-line ใน NextAcc
-            // ตามนี้ ตราบใดที่ไม่ได้ "เลือกผังบัญชีเดียว/ไม่เคลม VAT/ใส่ WHT" (ซึ่งจะยุบเป็นบรรทัดเดียว)
-            if (r.ExtractedItems != null && r.ExtractedItems.Count > 1)
-            {
-                sg.Append("<div class=\"ocr-msg info\"><b>รายการที่ OCR แยกได้ " + r.ExtractedItems.Count + " รายการ</b> "
-                    + "(จะสร้างเป็นหลายบรรทัดตามนี้ ถ้าไม่เลือกผังบัญชีเดียว/ไม่เคลม VAT/ใส่ WHT):"
-                    + "<table style=\"width:100%;border-collapse:collapse;margin-top:6px;font-size:12px;\">"
-                    + "<tr style=\"background:#eee;\"><th style=\"text-align:left;padding:2px 6px;\">รายละเอียด</th>"
-                    + "<th style=\"text-align:right;padding:2px 6px;\">จำนวนเงิน</th>"
-                    + "<th style=\"text-align:left;padding:2px 6px;\">ผังบัญชี (OCR)</th></tr>");
-                foreach (var it in r.ExtractedItems)
-                {
-                    decimal amt = it.Amount ?? ((it.Quantity ?? 1) * (it.UnitPrice ?? 0));
-                    sg.Append("<tr>"
-                        + "<td style=\"padding:2px 6px;border-top:1px solid #ddd;\">" + Server.HtmlEncode(it.Description ?? "") + "</td>"
-                        + "<td style=\"padding:2px 6px;border-top:1px solid #ddd;text-align:right;\">" + amt.ToString("N2") + "</td>"
-                        + "<td style=\"padding:2px 6px;border-top:1px solid #ddd;\">" + Server.HtmlEncode(it.SuggestedAccountCode ?? "-") + "</td>"
-                        + "</tr>");
-                }
-                sg.Append("</table></div>");
-            }
-            litSuggested.Text = sg.ToString();
+            RenderReview(s);
         }
 
-        /// <summary>โหลดผังบัญชีจาก cache NextAcc (Accounting_Nexaacc_Accounts) ตาม code filter.
-        /// คืน null/ว่าง ถ้ายังไม่ได้กด "Sync บัญชี". codeFilter เป็นค่าคงที่ในโค้ด (ไม่ใช่ user input)</summary>
+        protected void btnDiscard_Click(object sender, EventArgs e)
+        {
+            var scan = QueryScanId;
+            if (!scan.HasValue) { Response.Redirect("OcrUpload.aspx", false); return; }
+            var row = Svc.Load(scan.Value);
+            if (row != null && row.NexaaccDocId.HasValue)
+            {
+                var s = ReadPostedState();
+                _serverErrors.Add("มีเอกสารบน NextAcc แล้ว (" + (row.NexaaccDocNo ?? row.NexaaccDocId.ToString()) + ") — ทิ้งร่างจากหน้านี้ไม่ได้ ให้ส่งต่อหรือยกเลิกเอกสารใน NextAcc");
+                if (s != null) RenderReview(s);
+                return;
+            }
+            Svc.SetStatus(scan.Value, OcrReviewService.StDiscarded, null, null, null, UserName);
+            string f = Session[FileKey(scan.Value)] as string;
+            if (!string.IsNullOrEmpty(f)) TryDeleteScanFile(f);
+            Session.Remove(FileKey(scan.Value));
+            Session.Remove(DraftKey(scan.Value));
+            Session.Remove(RawKey(scan.Value));
+            Response.Redirect("OcrUpload.aspx", false);
+        }
+
+        private void ShowSuccess(OcrSubmitResult r)
+        {
+            pnlReview.Visible = false;
+            pnlUpload.Visible = true;
+            RenderDrafts();
+            var h = new StringBuilder();
+            h.Append("<div class=\"ocr-card\" style=\"border:2px solid #38a169;\"><h3 style=\"color:#276749;\">✓ ").Append(Server.HtmlEncode(r.Message)).Append("</h3>");
+            if (r.DocId.HasValue && !r.Evidence)
+                h.Append("<p><a class=\"ocr-btn\" style=\"text-decoration:none;\" target=\"_blank\" href=\"OcrUpload.aspx?pdf=").Append(r.DocId.Value)
+                 .Append("\">📄 เปิด PDF เอกสาร NextAcc</a></p>");
+            if (r.Notes.Count > 0)
+                h.Append("<ul class=\"ocr-hint\">").Append(string.Join("", r.Notes.Select(n => "<li>" + Server.HtmlEncode(n) + "</li>"))).Append("</ul>");
+            h.Append("<p class=\"ocr-hint\">สแกนใบถัดไปได้จากฟอร์มด้านบน</p></div>");
+            litResult.Text = h.ToString();
+        }
+
+        private void ShowFinished(OcrLogRow row)
+        {
+            pnlReview.Visible = false;
+            pnlUpload.Visible = true;
+            RenderDrafts();
+            var h = new StringBuilder();
+            h.Append("<div class=\"ocr-card\" style=\"border:2px solid #38a169;\"><h3 style=\"color:#276749;\">สแกนนี้ส่งเรียบร้อยแล้ว</h3><p>")
+             .Append(Server.HtmlEncode(OcrDocKind.Label(row.DocKind))).Append(" · ").Append(Server.HtmlEncode(row.SupplierName ?? ""))
+             .Append(" เลขที่ ").Append(Server.HtmlEncode(row.SupplierDocNo ?? "-"));
+            if (row.Status == OcrReviewService.StEvidence) h.Append(" — เก็บเป็นหลักฐานการคืนสินค้า (ไม่มีเอกสารบน NextAcc)");
+            else h.Append(" → NextAcc ").Append(Server.HtmlEncode(row.NexaaccDocNo ?? row.NexaaccDocId?.ToString() ?? ""));
+            h.Append("</p>");
+            if (row.NexaaccDocId.HasValue)
+                h.Append("<a class=\"ocr-btn\" style=\"text-decoration:none;\" target=\"_blank\" href=\"OcrUpload.aspx?pdf=").Append(row.NexaaccDocId.Value).Append("\">📄 เปิด PDF</a>");
+            h.Append("</div>");
+            litResult.Text = h.ToString();
+        }
+
+        /// <summary>งานที่ยังไม่ส่ง (draft / ร่างบน NextAcc / ล้ม) — ลิงก์กลับไปทำต่อ</summary>
+        private void RenderDrafts()
+        {
+            var rows = Svc.ListOpen();
+            if (rows.Count == 0) { litDrafts.Text = ""; return; }
+            var h = new StringBuilder();
+            h.Append("<h4 style=\"margin:16px 0 6px;\">งานที่ยังไม่ส่ง (ทำต่อได้)</h4><div style=\"overflow-x:auto;\"><table class=\"tbl\"><thead><tr>")
+             .Append("<th>ไฟล์</th><th>ชนิด</th><th>ผู้ขาย</th><th>เลขที่</th><th class=\"num\">ยอด</th><th>สถานะ</th><th>แก้ล่าสุด</th><th></th></tr></thead><tbody>");
+            foreach (var r in rows)
+            {
+                h.Append("<tr><td>").Append(Server.HtmlEncode(r.FileName ?? "-")).Append("</td><td>").Append(Server.HtmlEncode(OcrDocKind.Label(r.DocKind)))
+                 .Append("</td><td>").Append(Server.HtmlEncode(r.SupplierName ?? "")).Append("</td><td>").Append(Server.HtmlEncode(r.SupplierDocNo ?? ""))
+                 .Append("</td><td class=\"num\">").Append(r.Total.HasValue ? r.Total.Value.ToString("#,##0.00", CultureInfo.InvariantCulture) : "")
+                 .Append("</td><td>").Append(Server.HtmlEncode(r.Status)).Append(string.IsNullOrEmpty(r.NexaaccDocNo) ? "" : "<br/><small>" + Server.HtmlEncode(r.NexaaccDocNo) + "</small>")
+                 .Append(string.IsNullOrEmpty(r.LastError) ? "" : "<br/><small style=\"color:#c53030;\">" + Server.HtmlEncode(r.LastError.Length > 120 ? r.LastError.Substring(0, 120) + "…" : r.LastError) + "</small>")
+                 .Append("</td><td>").Append(r.UpdatedAt.HasValue ? r.UpdatedAt.Value.ToString("dd/MM HH:mm", CultureInfo.InvariantCulture) : "")
+                 .Append("</td><td><a href=\"OcrUpload.aspx?scan=").Append(r.ScanId).Append("\">ทำต่อ →</a></td></tr>");
+            }
+            h.Append("</tbody></table></div>");
+            litDrafts.Text = h.ToString();
+        }
+
+        // ══════════════════════════════════════════════════════════════
+        // ไฟล์: ภาพเอกสาร (preview) / PDF ของเอกสาร NextAcc
+        // ══════════════════════════════════════════════════════════════
+
+        private void ServePreview()
+        {
+            Guid scanId;
+            if (!Guid.TryParse(Request.QueryString["preview"], out scanId)) { EndWith(404, "ไม่พบไฟล์"); return; }
+            try
+            {
+                string path = Session[FileKey(scanId)] as string;
+                if (!string.IsNullOrEmpty(path) && File.Exists(path))
+                {
+                    SendBytes(File.ReadAllBytes(path), ContentTypeOf(path), Path.GetFileName(path));
+                    return;
+                }
+                // ไฟล์ชั่วคราวหมดแล้ว (กลับมาทำ draft ต่อ) → ดึงต้นฉบับจาก NextAcc — เฉพาะสแกนที่หน้านี้รู้จัก
+                if (Svc.Load(scanId) == null && Session[DraftKey(scanId)] == null) { EndWith(403, "ไม่มีสิทธิ์ดูไฟล์นี้"); return; }
+                var img = RunSync(() => NewClient().GetOcrImageAsync(scanId));
+                if (img == null || img.Item1 == null || img.Item1.Length == 0) { EndWith(404, "ไม่พบไฟล์ต้นฉบับใน NextAcc"); return; }
+                SendBytes(img.Item1, img.Item2, "scan");
+            }
+            catch (Exception ex) { EndWith(500, "เปิดไฟล์ไม่สำเร็จ: " + ex.Message); }
+        }
+
+        private void ServePdf()
+        {
+            Guid docId;
+            if (!Guid.TryParse(Request.QueryString["pdf"], out docId)) { EndWith(404, "ไม่พบเอกสาร"); return; }
+            var docs = Session[DocsKey] as HashSet<Guid>;
+            if (!(docs != null && docs.Contains(docId)) && !Svc.IsKnownDocument(docId)) { EndWith(403, "เปิดได้เฉพาะเอกสารที่สร้างจากหน้าตรวจทาน OCR"); return; }
+            try
+            {
+                var pdf = RunSync(() => NewClient().GenerateDocumentPdfAsync(docId));
+                if (pdf == null || pdf.Length == 0) { EndWith(404, "NextAcc ยังไม่มี PDF ของเอกสารนี้ (ไม่มีแม่แบบ/ยังไม่อนุมัติ)"); return; }
+                SendBytes(pdf, "application/pdf", docId.ToString("N").Substring(0, 8) + ".pdf");
+            }
+            catch (Exception ex) { EndWith(500, "ดึง PDF จาก NextAcc ไม่สำเร็จ: " + ex.Message); }
+        }
+
+        private void SendBytes(byte[] bytes, string contentType, string fileName)
+        {
+            Response.Clear();
+            Response.ContentType = contentType ?? "application/octet-stream";
+            Response.AddHeader("Content-Disposition", "inline; filename=\"" + Uri.EscapeDataString(fileName ?? "file") + "\"");
+            Response.AddHeader("X-Content-Type-Options", "nosniff");
+            Response.Cache.SetCacheability(System.Web.HttpCacheability.Private);
+            Response.BinaryWrite(bytes);
+            Response.Flush();
+            _served = true;
+            Context.ApplicationInstance.CompleteRequest();
+        }
+
+        private void EndWith(int status, string text)
+        {
+            Response.Clear();
+            Response.StatusCode = status;
+            Response.ContentType = "text/plain; charset=utf-8";
+            Response.Write(text);
+            _served = true;
+            Context.ApplicationInstance.CompleteRequest();
+        }
+
+        private static string ContentTypeOf(string path)
+        {
+            switch ((Path.GetExtension(path) ?? "").ToLowerInvariant())
+            {
+                case ".pdf": return "application/pdf";
+                case ".png": return "image/png";
+                case ".gif": return "image/gif";
+                case ".webp": return "image/webp";
+                case ".bmp": return "image/bmp";
+                case ".tif": case ".tiff": return "image/tiff";
+                case ".heic": return "image/heic";
+                default: return "image/jpeg";
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════
+        // ตัวเลือก (ผังบัญชี NextAcc / แหล่งเงิน / ผู้ขาย)
+        // ══════════════════════════════════════════════════════════════
+
+        /// <summary>ผังบัญชีจาก cache NextAcc (Accounting_Nexaacc_Accounts) — codeFilter เป็นค่าคงที่ในโค้ด (ไม่ใช่ user input)</summary>
         private DataTable LoadNexaaccAccounts(string codeFilter)
         {
             try
             {
-                var c = new Take_Time_BangPhra.code();
-                return c.DatabaseQuerySafe(Conn,
+                return new Take_Time_BangPhra.code().DatabaseQuerySafe(Conn,
                     "SELECT Nexaacc_AccountId, Account_Code, Account_Name FROM Accounting_Nexaacc_Accounts " +
                     "WHERE ISNULL(Is_Active, 1) = 1 AND (" + codeFilter + ") ORDER BY Account_Code", null);
             }
             catch { return null; }
         }
 
-        /// <summary>แหล่งจ่ายเงิน — ดึงผังบัญชีจริงจาก NextAcc (เงินสด/ธนาคาร/เจ้าหนี้กรรมการ) value = Nexaacc_AccountId
-        /// → เลี่ยงปัญหา mapping ผิด. ถ้ายังไม่ได้ Sync ผังบัญชี → fallback Account_Paid_How เดิม</summary>
-        private void LoadPaidHowOptions()
+        /// <summary>บัญชีฝั่งเดบิตของบรรทัด: ล้างรับของ (GR/IR) · ค่าใช้จ่าย 5x · สินทรัพย์ถาวร 12x · สินทรัพย์หมุนเวียน 11x (ไม่รวมเงินสด 111) ·
+        /// เงินทดรองกรรมการ — ถ้ายังไม่ Sync ผังบัญชี → mapping เดิม (Account_Paid_Type)</summary>
+        private List<object> LoadAccountOptions(out bool synced)
         {
-            ddlPaidHow.Items.Clear();
-            ddlPaidHow.Items.Add(new ListItem("— ไม่บังคับ (ให้ NextAcc เลือกเอง) —", ""));
-
-            // ผังบัญชีจริงจาก NextAcc: สินทรัพย์หมุนเวียน (11x เงินสด/ธนาคาร) + หนี้สินหมุนเวียน (21x เจ้าหนี้กรรมการ)
-            var na = LoadNexaaccAccounts("Account_Code LIKE '11%' OR Account_Code LIKE '21%'");
-            if (na != null && na.Rows.Count > 0)
-            {
-                foreach (DataRow row in na.Rows)
-                    ddlPaidHow.Items.Add(new ListItem(
-                        ($"{row["Account_Code"]} {row["Account_Name"]}").Trim(),
-                        row["Nexaacc_AccountId"]?.ToString() ?? ""));
-                return;
-            }
-
-            // fallback: mapping เดิม (Account_Paid_How) เมื่อยังไม่ได้ Sync ผังบัญชี
-            try
-            {
-                var c = new Take_Time_BangPhra.code();
-                var dt = c.DatabaseQuerySafe(Conn,
-                    @"SELECT Paid_How, Nexaacc_AccountId FROM Account_Paid_How
-                      WHERE Status = 'True' AND Nexaacc_AccountId IS NOT NULL AND LTRIM(RTRIM(Nexaacc_AccountId)) <> ''
-                      ORDER BY Paid_How", null);
-                if (dt != null)
-                    foreach (DataRow row in dt.Rows)
-                        ddlPaidHow.Items.Add(new ListItem(
-                            row["Paid_How"]?.ToString() ?? "",
-                            row["Nexaacc_AccountId"]?.ToString() ?? ""));
-            }
-            catch { /* เหลือแค่ "ไม่บังคับ" */ }
-        }
-
-        /// <summary>ผังบัญชีที่จะชาร์จ — ดึงผังบัญชีค่าใช้จ่ายจริงจาก NextAcc (5x ค่าใช้จ่าย + 12x สินทรัพย์ถาวร)
-        /// value = Account_Code → ใช้เป็น DocumentLineRequest.AccountCode. ถ้ายังไม่ได้ Sync → fallback Account_Paid_Type</summary>
-        private void LoadChargeAccountOptions()
-        {
-            ddlChargeAccount.Items.Clear();
-            ddlChargeAccount.Items.Add(new ListItem("— ใช้บัญชีที่ OCR แนะนำ —", ""));
-
-            // GR/IR: ถ้าใบนี้คือ "ใบกำกับของสินค้าที่รับเข้าสต๊อกแล้ว" → เดบิต GRNI (ล้างรับของ) แทนค่าใช้จ่าย
-            // → NextAcc โพสต์ Dr GRNI + Dr ภาษีซื้อ / Cr แหล่งเงิน = ล้างพักรับของ + เคลม VAT, ไม่โพสต์สินค้าซ้ำ
-            // บัญชีล้างรับของตามโหมดรับของ — ตัวเดียวกับหน้าใบสำคัญจ่าย (PurchaseService.ClearingAccountKey, PHASE19_31):
-            //   GR/IR (default) → GRNI · Nexaacc_StockIn_SkipJournal/LOCAL (รับของไม่โพสต์ JE) → สินค้าคงเหลือ · GR/IR ปิด → เจ้าหนี้
+            var list = new List<object>();
+            synced = false;
+            // GR/IR: ใบกำกับของสินค้าที่รับเข้าสต๊อกแล้ว → เดบิตบัญชีล้างรับของ (PurchaseService.ClearingAccountKey — PHASE19_31) ไม่ใช่ค่าใช้จ่าย
             string clearKey = "GRNI";
             try { clearKey = Take_Time_BangPhra.Purchasing.PurchaseService.ClearingAccountKey(new AccountingConfig(Conn)); } catch { }
             string grniCode = LookupMappedAccountCode(clearKey);
             if (!string.IsNullOrEmpty(grniCode))
-                ddlChargeAccount.Items.Add(new ListItem(
-                    clearKey == "GRNI"
-                        ? $"🔄 ล้างรับของ GRNI {grniCode} (ใบกำกับสินค้าที่รับเข้าสต๊อกแล้ว)"
-                        : $"🔄 ล้างรับของ {grniCode} {Take_Time_BangPhra.Purchasing.PurchaseService.ClearingAccountLabel(clearKey)} (ใบกำกับสินค้าที่รับเข้าสต๊อกแล้ว)",
-                    grniCode));
+                list.Add(Acc(grniCode, "🔄 ล้างรับของ " + (clearKey == "GRNI" ? "GRNI" : Take_Time_BangPhra.Purchasing.PurchaseService.ClearingAccountLabel(clearKey)),
+                    "ล้างรับของ (สินค้าที่รับเข้าสต๊อกแล้ว)"));
 
-            // 5x ค่าใช้จ่าย + 12x สินทรัพย์ถาวร + เจ้าหนี้/เงินทดรองกรรมการ (2x ที่ชื่อมี "กรรมการ")
-            // → รองรับเคส "คืนเงินทดรองกรรมการ" (Dr เจ้าหนี้กรรมการ / Cr เงินสด-ธนาคาร) ที่เดบิตเป็นหนี้สิน
-            var na = LoadNexaaccAccounts(
-                "Account_Code LIKE '5%' OR Account_Code LIKE '12%' OR (Account_Code LIKE '2%' AND Account_Name LIKE N'%กรรมการ%')");
+            var na = LoadNexaaccAccounts("Account_Code LIKE '5%' OR Account_Code LIKE '12%' OR (Account_Code LIKE '11%' AND Account_Code NOT LIKE '111%')"
+                + " OR (Account_Code LIKE '2%' AND Account_Name LIKE N'%กรรมการ%')");
             if (na != null && na.Rows.Count > 0)
             {
+                synced = true;
                 foreach (DataRow row in na.Rows)
                 {
                     string code = row["Account_Code"]?.ToString() ?? "";
-                    string name = row["Account_Name"]?.ToString() ?? "";
-                    ddlChargeAccount.Items.Add(new ListItem($"{code} {name}".Trim(), code));
+                    string g = code.StartsWith("5") ? "ค่าใช้จ่าย (5x)" : code.StartsWith("12") ? "สินทรัพย์ถาวร (12x)"
+                             : code.StartsWith("11") ? "สินทรัพย์หมุนเวียน/สินค้า (11x)" : "หนี้สิน — เงินทดรองกรรมการ";
+                    list.Add(Acc(code, row["Account_Name"]?.ToString() ?? "", g));
                 }
-                return;
+                return list;
             }
-
-            // fallback: mapping เดิม (Account_Paid_Type) เมื่อยังไม่ได้ Sync ผังบัญชี
             try
             {
-                var c = new Take_Time_BangPhra.code();
-                var dt = c.DatabaseQuerySafe(Conn,
+                var dt = new Take_Time_BangPhra.code().DatabaseQuerySafe(Conn,
                     @"SELECT Paid_Type, Nexaacc_AccountCode FROM Account_Paid_Type
                       WHERE Status = 'True' AND Nexaacc_AccountCode IS NOT NULL AND LTRIM(RTRIM(Nexaacc_AccountCode)) <> ''
                       ORDER BY Paid_Type", null);
                 if (dt != null)
                     foreach (DataRow row in dt.Rows)
-                    {
-                        string code = row["Nexaacc_AccountCode"]?.ToString() ?? "";
-                        string name = row["Paid_Type"]?.ToString() ?? "";
-                        ddlChargeAccount.Items.Add(new ListItem($"{code} {name}".Trim(), code));
-                    }
+                        list.Add(Acc(row["Nexaacc_AccountCode"]?.ToString() ?? "", row["Paid_Type"]?.ToString() ?? "", "หมวดค่าใช้จ่าย (mapping เดิม)"));
             }
-            catch { /* เหลือแค่ "ใช้บัญชีที่ OCR แนะนำ" */ }
+            catch { }
+            return list;
         }
 
-        /// <summary>หา Nexaacc_AccountCode (เช่น "21240") จาก TakeTime_Code ใน Accounting_Account_Mapping.
-        /// คืน "" ถ้ายังไม่ได้ map/ปิด — ใช้ตัดสินใจว่าจะโชว์ตัวเลือก GRNI ไหม.</summary>
+        private static Dictionary<string, object> Acc(string c, string n, string g) =>
+            new Dictionary<string, object> { { "c", c }, { "n", n }, { "g", g } };
+
+        /// <summary>แหล่งเงิน (เงินสด/ธนาคาร 11x · หนี้สิน 21x เช่นเจ้าหนี้กรรมการ) value = Nexaacc_AccountId → fallback Account_Paid_How</summary>
+        private List<object> LoadMoneyOptions()
+        {
+            var list = new List<object>();
+            var na = LoadNexaaccAccounts("Account_Code LIKE '11%' OR Account_Code LIKE '21%'");
+            if (na != null && na.Rows.Count > 0)
+            {
+                foreach (DataRow row in na.Rows)
+                    list.Add(new Dictionary<string, object> { { "id", row["Nexaacc_AccountId"]?.ToString() ?? "" }, { "c", row["Account_Code"]?.ToString() ?? "" }, { "n", row["Account_Name"]?.ToString() ?? "" } });
+                return list;
+            }
+            try
+            {
+                var dt = new Take_Time_BangPhra.code().DatabaseQuerySafe(Conn,
+                    @"SELECT Paid_How, Nexaacc_AccountId FROM Account_Paid_How
+                      WHERE Status = 'True' AND Nexaacc_AccountId IS NOT NULL AND LTRIM(RTRIM(Nexaacc_AccountId)) <> ''
+                      ORDER BY Paid_How", null);
+                if (dt != null)
+                    foreach (DataRow row in dt.Rows)
+                        list.Add(new Dictionary<string, object> { { "id", row["Nexaacc_AccountId"]?.ToString() ?? "" }, { "c", "" }, { "n", row["Paid_How"]?.ToString() ?? "" } });
+            }
+            catch { }
+            return list;
+        }
+
+        private List<object> LoadVendorOptions()
+        {
+            var list = new List<object>();
+            try
+            {
+                var dt = new Take_Time_BangPhra.code().DatabaseQuerySafe(Conn,
+                    "SELECT ID, Name FROM Vendor WHERE (Status = 'True' OR Status IS NULL) ORDER BY Name", null);
+                if (dt != null)
+                    foreach (DataRow row in dt.Rows)
+                    {
+                        int id;
+                        if (int.TryParse(row["ID"]?.ToString(), out id))
+                            list.Add(new Dictionary<string, object> { { "id", id }, { "n", row["Name"]?.ToString() ?? "" } });
+                    }
+            }
+            catch { }
+            return list;
+        }
+
+        /// <summary>หา Nexaacc_AccountCode จาก TakeTime_Code ใน Accounting_Account_Mapping ("" = ยังไม่ map/ปิด)</summary>
         private string LookupMappedAccountCode(string takeTimeCode)
         {
             try
             {
-                var c = new Take_Time_BangPhra.code();
-                var dt = c.DatabaseQuerySafe(Conn,
+                var dt = new Take_Time_BangPhra.code().DatabaseQuerySafe(Conn,
                     @"SELECT TOP 1 Nexaacc_AccountCode FROM Accounting_Account_Mapping
                       WHERE TakeTime_Code = @code AND Is_Active = 1
                         AND Nexaacc_AccountCode IS NOT NULL AND LTRIM(RTRIM(Nexaacc_AccountCode)) <> ''",
                     new Dictionary<string, object> { { "@code", takeTimeCode } });
-                if (dt != null && dt.Rows.Count > 0)
-                    return dt.Rows[0]["Nexaacc_AccountCode"]?.ToString() ?? "";
+                if (dt != null && dt.Rows.Count > 0) return dt.Rows[0]["Nexaacc_AccountCode"]?.ToString() ?? "";
             }
             catch { }
             return "";
         }
 
-        /// <summary>โหลดรายชื่อผู้ขายจากระบบ TakeTime (Vendor) — กรณี OCR ไม่เจอชื่อ</summary>
-        private void LoadVendorOptions()
+        // ══════════════════════════════════════════════════════════════
+        // ผู้จัดทำ (พนักงานที่ล็อกอิน) — ชื่อ + ลายเซ็น ส่งใน PUT/POST เอกสาร
+        // ══════════════════════════════════════════════════════════════
+
+        /// <summary>ผู้จัดทำ = พนักงาน TakeTime (Session["UserID"] → Admin) — NextAcc ให้ priority เหนือ CreatedBy
+        /// (UpdateDocumentRequest.PreparerName/Signature DocumentDtos.cs:338-343). best-effort</summary>
+        private void ResolvePreparer(out string name, out string signature)
         {
-            ddlVendor.Items.Clear();
-            ddlVendor.Items.Add(new ListItem("— ใช้ชื่อจาก OCR —", ""));
+            name = null;
+            signature = null;
             try
             {
-                var c = new Take_Time_BangPhra.code();
-                var dt = c.DatabaseQuerySafe(Conn,
-                    "SELECT ID, Name FROM Vendor WHERE (Status = 'True' OR Status IS NULL) ORDER BY Name", null);
-                if (dt != null)
-                    foreach (DataRow row in dt.Rows)
-                        ddlVendor.Items.Add(new ListItem(row["Name"]?.ToString() ?? "", row["ID"]?.ToString() ?? ""));
-            }
-            catch { /* เหลือแค่ "ใช้ชื่อจาก OCR" */ }
-        }
-
-        /// <summary>สร้าง UpdateDocumentRequest จากค่าในแผงตรวจสอบ: บังคับแหล่งเงิน + วันที่ + เลขที่เอกสาร
-        /// + (ถ้าไม่มี WHT) สร้าง line เดียวจากยอดที่แก้. คืน null ถ้าไม่มีอะไรต้องอัปเดต.</summary>
-        private UpdateDocumentRequest BuildUpdateFromReview()
-        {
-            var upd = new UpdateDocumentRequest();
-            bool any = false;
-
-            if (Guid.TryParse(ddlPaidHow.SelectedValue, out var payAcc) && payAcc != Guid.Empty)
-            {
-                upd.PaymentAccountId = payAcc;
-                any = true;
-            }
-
-            if (DateTime.TryParse(txtDocDate.Text.Trim(), CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt))
-            {
-                upd.DocumentDate = dt;
-                any = true;
-            }
-
-            string docNo = txtDocNumber.Text.Trim();
-            if (!string.IsNullOrEmpty(docNo))
-            {
-                upd.SupplierInvoiceNumber = docNo;
-                upd.Reference = docNo;
-                any = true;
-            }
-
-            // Lines: โดย default "ไม่ override" → คง multi-line ที่ create-from-OCR สร้างจาก ExtractedItems
-            // (NextAcc แตกหลายบรรทัดพร้อมผังบัญชีต่อรายการให้แล้ว). จะ rebuild เป็นบรรทัดเดียวเฉพาะเมื่อ
-            // ผู้ใช้ "สั่ง override" จริง: เลือกผังบัญชีเดียว / เลือกไม่เคลม VAT / ใส่ WHT / VAT ผสม
-            // (กรณีเหล่านี้ต้องคุมทั้งใบเป็นบัญชี/อัตราเดียว เพราะ OCR ไม่ได้ให้ flag ราย line)
-            decimal.TryParse(txtSubTotal.Text.Trim(), out var subTotal);
-            decimal.TryParse(txtVat.Text.Trim(), out var vat);
-            decimal whtRate = 0m;
-            decimal.TryParse(txtWhtRate.Text.Trim(), out whtRate);
-            bool userPickedAccount = !string.IsNullOrEmpty(ddlChargeAccount.SelectedValue);
-            bool noClaim = ddlVatClaim.SelectedValue == "0";
-            bool hasWht = whtRate > 0;
-            // VAT ผสมจริง = VAT ขาดจาก "7% เต็มของยอดก่อน VAT" เกิน 1 บาท (ไม่ใช่เศษปัดเศษ)
-            //   เดิมเช็ค nonTaxableNet >= 0.01 → ไวเกิน: VAT 82.10 ≈ 7% ของ 1172.90 พอดี แต่ 82.10/0.07
-            //   ปัดเหลือเศษ 0.04 → แตก line "ไม่มีภาษี 0.04" ไร้ความหมาย. ใช้ tolerance 1 บาทแทน
-            decimal expectedFullVat = Math.Round(subTotal * 0.07m, 2, MidpointRounding.AwayFromZero);
-            bool mixedVat = vat > 0 && (expectedFullVat - vat) > 1.00m;
-            decimal taxableNet = mixedVat ? Math.Round(vat / 0.07m, 2, MidpointRounding.AwayFromZero) : 0m;
-            decimal nonTaxableNet = mixedVat ? Math.Round(subTotal - taxableNet, 2, MidpointRounding.AwayFromZero) : 0m;
-            bool needOverride = userPickedAccount || noClaim || hasWht || mixedVat;
-
-            if (needOverride && subTotal > 0)
-            {
-                string chargeAcc = ddlChargeAccount.SelectedValue;
-                if (string.IsNullOrEmpty(chargeAcc)) chargeAcc = hfDebitAcc.Value;
-                if (!string.IsNullOrEmpty(chargeAcc))
+                short adminId;
+                if (short.TryParse(Session["UserID"]?.ToString() ?? "0", out adminId) && adminId > 0)
                 {
-                    bool claimVat = !noClaim;
-                    string reason = claimVat ? null : "ไม่ขอเครดิตภาษีซื้อ — รวม VAT เข้าค่าใช้จ่าย (§82/5)";
-
-                    // รายการ (description): ถ้าผู้ใช้เลือกผังบัญชี → ใช้ "ชื่อผังบัญชีที่เลือก" เป็นรายการ
-                    // (ตรงกับที่ผู้ใช้ต้องการ) + ต่อท้ายด้วยชื่อผู้ขายถ้ามี. ไม่งั้นใช้ ชื่อผู้ขาย+เลขเอกสาร
-                    string desc;
-                    if (userPickedAccount && ddlChargeAccount.SelectedItem != null)
+                    var dt = new Take_Time_BangPhra.code().DatabaseQuerySafe(Conn, "SELECT FirstName, LastName FROM Admin WHERE ID = @id",
+                        new Dictionary<string, object> { { "@id", adminId } });
+                    if (dt != null && dt.Rows.Count > 0)
                     {
-                        desc = ddlChargeAccount.SelectedItem.Text;          // เช่น "51110 ซื้อสินค้า/วัตถุดิบ"
-                        string code = ddlChargeAccount.SelectedValue;
-                        if (!string.IsNullOrEmpty(code) && desc.StartsWith(code))
-                            desc = desc.Substring(code.Length).Trim();      // → "ซื้อสินค้า/วัตถุดิบ"
-                        string vn = txtVendorName.Text.Trim();
-                        if (!string.IsNullOrEmpty(vn)) desc = desc + " - " + vn;
+                        string first = dt.Rows[0]["FirstName"] == DBNull.Value ? "" : dt.Rows[0]["FirstName"].ToString();
+                        string last = dt.Rows[0]["LastName"] == DBNull.Value ? "" : dt.Rows[0]["LastName"].ToString();
+                        name = (first + " " + last).Trim();
                     }
-                    else
-                    {
-                        desc = (txtVendorName.Text.Trim() + " " + docNo).Trim();
-                    }
-                    if (string.IsNullOrEmpty(desc)) desc = "ค่าใช้จ่ายตามใบกำกับ (OCR)";
-                    upd.PricesIncludeVat = false; // UnitPrice = ยอดก่อน VAT, NextAcc บวก VAT ให้
-
-                    var lines = new List<DocumentLineRequest>();
-                    if (mixedVat)
-                    {
-                        // VAT ผสม → 2 บรรทัด (ยุบเป็นบัญชีเดียวเพื่อให้ VAT ตรง)
-                        lines.Add(new DocumentLineRequest { Description = desc + " (ส่วนมีภาษี)", Quantity = 1, UnitPrice = taxableNet, VatRate = 7m, WithholdingTaxRate = whtRate, AccountCode = chargeAcc, IsVatClaimable = claimVat, VatNonClaimableReason = reason });
-                        lines.Add(new DocumentLineRequest { Description = desc + " (ส่วนไม่มีภาษี)", Quantity = 1, UnitPrice = nonTaxableNet, VatRate = 0m, WithholdingTaxRate = whtRate, AccountCode = chargeAcc, IsVatClaimable = true });
-                    }
-                    else
-                    {
-                        lines.Add(new DocumentLineRequest { Description = desc, Quantity = 1, UnitPrice = subTotal, VatRate = vat > 0 ? 7m : 0m, WithholdingTaxRate = whtRate, AccountCode = chargeAcc, IsVatClaimable = claimVat, VatNonClaimableReason = reason });
-                    }
-                    upd.Lines = lines;
-                    any = true;
+                    string dataUri = new SignatureService().GetSignatureUrl(adminId);
+                    if (!string.IsNullOrEmpty(dataUri) && dataUri.StartsWith("data:", StringComparison.OrdinalIgnoreCase) && dataUri.Length <= 256 * 1024)
+                        signature = dataUri;   // cap เท่ากับฝั่ง sync
                 }
+                if (string.IsNullOrEmpty(name)) name = UserName;
             }
-
-            // ผู้จัดทำ = พนักงานที่ทำใน TakeTime (ไม่ใช่ NextAcc user/เจ้าของ). เอกสารนี้ NextAcc สร้างจาก OCR
-            // → เราไม่คุมตอน create → ยัดผู้จัดทำผ่าน PUT ตรงนี้ (NextAcc รับ preparerName/preparerSignatureBase64
-            // บน UpdateDocumentRequest + ให้ priority เหนือ CreatedBy). X-Acting-User ช่วยเฉพาะเมื่อ staff เป็น
-            // NextAcc user — ที่นี่ส่งชื่อ+ลายเซ็นตรง ๆ ครอบทุกเคส. ตั้ง any=true เพื่อให้ push แม้ไม่มีการแก้อื่น.
-            if (ApplyCurrentUserPreparer(upd)) any = true;
-
-            return any ? upd : null;
+            catch { }
         }
 
-        /// <summary>ตั้งผู้จัดทำ (ชื่อ+ลายเซ็น) จากพนักงานที่ล็อกอิน (Session["UserID"] → Admin) ลง update request.
-        /// คืน true ถ้าตั้งอย่างน้อยชื่อ. best-effort — ล้มเหลว/ไม่มี = ข้ามเงียบ.</summary>
-        private bool ApplyCurrentUserPreparer(UpdateDocumentRequest upd)
-        {
-            try
-            {
-                if (!short.TryParse(Session["UserID"]?.ToString() ?? "0", out short adminId) || adminId <= 0) return false;
-                var c = new Take_Time_BangPhra.code();
-                var dt = c.DatabaseQuerySafe(Conn,
-                    "SELECT FirstName, LastName FROM Admin WHERE ID = @id",
-                    new Dictionary<string, object> { { "@id", adminId } });
-                string name = null;
-                if (dt != null && dt.Rows.Count > 0)
-                {
-                    string first = dt.Rows[0]["FirstName"] == DBNull.Value ? "" : dt.Rows[0]["FirstName"].ToString();
-                    string last = dt.Rows[0]["LastName"] == DBNull.Value ? "" : dt.Rows[0]["LastName"].ToString();
-                    name = (first + " " + last).Trim();
-                }
-                if (string.IsNullOrEmpty(name)) name = Session["username"]?.ToString();
-                if (string.IsNullOrEmpty(name)) return false;
-                upd.PreparerName = name;
-
-                string dataUri = LoadSignatureDataUri(adminId);
-                if (!string.IsNullOrEmpty(dataUri) && dataUri.Length <= 256 * 1024)   // cap เท่ากับฝั่ง sync
-                    upd.PreparerSignatureBase64 = dataUri;
-                return true;
-            }
-            catch { return false; }
-        }
-
-        /// <summary>อ่านลายเซ็นของ admin → base64 data URI ผ่าน SignatureService.GetSignatureUrl
-        /// (กลไก MapPath เดียวกับเอกสาร local — รองรับ physical/virtual path + fallback ตามชื่อ). คืน null ถ้าไม่มี.</summary>
-        private string LoadSignatureDataUri(short adminId)
-        {
-            try
-            {
-                string dataUri = new SignatureService().GetSignatureUrl(adminId);
-                if (!string.IsNullOrEmpty(dataUri) && dataUri.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
-                    return dataUri;
-                return null;
-            }
-            catch { return null; }
-        }
-
-        private static string JoinAcc(string code, string name)
-        {
-            if (string.IsNullOrEmpty(code) && string.IsNullOrEmpty(name)) return "-";
-            if (string.IsNullOrEmpty(name)) return code;
-            if (string.IsNullOrEmpty(code)) return name;
-            return code + " " + name;
-        }
-
-        /// <summary>เอกสารที่สแกนเป็น "ใบกำกับภาษี" หรือไม่ (ดูจากชนิดเอกสารที่ OCR ตรวจได้).
-        /// ใช้ตั้งค่า default ภาษีซื้อ: ใบกำกับ → เคลม, ไม่ใช่ → ไม่เคลม.
-        /// หมายเหตุ: "Invoice" (TargetDocumentType เอกสารที่จะสร้าง) ไม่นับ — เช็คเฉพาะ "ใบกำกับภาษี/TaxInvoice"</summary>
-        private static bool IsScannedTaxInvoice(OcrResultResponse r)
-        {
-            if (r == null) return false;
-            string t = ((r.ScannedDocumentType ?? "") + "|" + (r.DocumentType ?? "")).ToLowerInvariant();
-            return t.Contains("taxinvoice") || t.Contains("tax invoice") || t.Contains("tax_invoice")
-                || t.Contains("ใบกำกับ");
-        }
+        // ══════════════════════════════════════════════════════════════
+        // helpers
+        // ══════════════════════════════════════════════════════════════
 
         private static bool IsTerminal(string status)
         {
@@ -781,12 +842,15 @@ namespace Take_Time_BangPhra.Voucher
                 || status.Equals("Cached", StringComparison.OrdinalIgnoreCase);
         }
 
-        private void Msg(System.Web.UI.WebControls.Literal lit, string kind, string text)
+        private void Msg(Literal lit, string kind, string text)
         {
             lit.Text = "<div class=\"ocr-msg " + kind + "\">" + Server.HtmlEncode(text) + "</div>";
         }
 
-        /// <summary>ลบไฟล์สแกนชั่วคราว + โฟลเดอร์ย่อยที่สร้างไว้ (ocrupload_*) — ละเลยข้อผิดพลาด</summary>
+        private static string JsString(string s) =>
+            "'" + (s ?? "").Replace("\\", "\\\\").Replace("'", "\\'").Replace("<", "\\x3c").Replace("\r", "").Replace("\n", " ") + "'";
+
+        /// <summary>ลบไฟล์สแกนชั่วคราว + โฟลเดอร์ย่อย (ocrupload_*) — ละเลยข้อผิดพลาด</summary>
         private static void TryDeleteScanFile(string filePath)
         {
             if (string.IsNullOrEmpty(filePath)) return;

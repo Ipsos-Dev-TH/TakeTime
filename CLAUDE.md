@@ -211,6 +211,21 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    ดึงครั้งแรก. TakeTime อ่าน `OutboundDocumentResponse.Attachments` (fast-path ใน `FetchAndCacheNextAccAttachmentsAsync`
    โหลดผ่าน `DownloadUrl` กัน N+1) ถ้าว่าง/null → fallback `GetAttachmentsAsync` เดิม (มี repair). เมื่อ NextAcc
    deploy แล้ว guard ในหน้า OCR จะ skip การ upload ซ้ำเอง (GetAttachments trigger repair → เจอไฟล์).
+   - **หน้าตรวจทานก่อนส่ง + ใบลดหนี้ผู้ขาย (ต.ค. 2026, PHASE19_38):** สแกนเสร็จ → `OcrUpload.aspx?scan={id}` (ภาพซ้าย/ฟอร์มขวา,
+     มือถือเรียงบน-ล่าง) แก้ได้ทุกช่อง: ชนิด PV/EXP/**VCN ใบลดหนี้**/**VDN ใบเพิ่มหนี้**, ผู้ขาย (เลข 13 หลัก mod-11, สาขา 5 หลัก, ที่อยู่),
+     เลขที่/วันที่/วันที่ใบกำกับ, **บรรทัดหลายรายการ** (บัญชี NextAcc, VAT 7/0/ยกเว้น(-1), เคลม/ไม่เคลม, VAT ฿ override, WHT%) +
+     **ตารางเทียบยอดกับกระดาษ** — ส่งไม่ได้จนก่อน VAT/VAT/รวม ตรง ±0.01 (`Class/Integration/OcrReview/OcrReviewMath.cs` ตัดสินฝั่ง
+     server; JS ในหน้าเป็นสำเนาแสดงผลสด). `OcrReviewService.SubmitAsync`: PV/EXP/ใบเดิมนอกระบบ = `ocr/{id}/correct`(best-effort) →
+     `create-document?allowDuplicate` → PUT ทั้งชุด (Lines+VatAmountOverride) · VCN/VDN อ้างเอกสาร NextAcc (PI/EXP/PV) = `POST /document`
+     ตรง (RelatedDocumentId ตั้งได้แค่ตอน create; ContactId = ของใบต้นทาง; `CnDnPurchaseSideOverride=true`; เพดาน §86/10 =
+     ยอดใบ − ΣCN และ ≤ BalanceDue เมื่อค้าง — DocumentService.cs:11919-11951) → `link-document` → เติมที่อยู่/สาขา contact ที่ว่าง →
+     approve (**422 แสดงคำเตือนให้ผู้ใช้กด "ยืนยันแม้มีคำเตือน" เอง**) → แนบไฟล์ → 50 ทวิ (PV) → CN/DN ใบต้นทางจ่ายครบ: NextAcc ลง
+     เงินสด 111 เสมอ (:17899-17924) ⇒ ผู้ใช้เลือกบัญชีรับคืน/เก็บเป็นยอดกับผู้ขาย → JE ย้ายขา `OCRCN|OCRDN-{scan8}-MNY`.
+     กันซ้ำ: เลขผู้ขาย+เลขที่ใน `Ocr_Document_Log` + `SupplierInvoiceNumber` ของ contact เดียวกันบน NextAcc. Draft/สถานะ
+     (DRAFT→CREATED→UPDATED→APPROVED→DONE, FAILED, EVIDENCE) + OCR raw vs ค่าที่ยืนยัน (Corrections_Json) ใน `Ocr_Document_Log`
+     (ไม่มีตาราง = Session); `IdempotencyContext=OCR-{scanId}` ⇒ กดส่งซ้ำ = ทำต่อจากขั้นที่ค้าง. **ใบลดหนี้ของการคืนสินค้าที่ลง `PRT-`
+     แล้ว = เก็บเป็นหลักฐาน (EVIDENCE) ไม่สร้างใน NextAcc ซ้ำ** (PRT JE ลงเจ้าหนี้/สต๊อก/ภาษีซื้อครบแล้ว). PDF: `?pdf={docId}`
+     (เฉพาะเอกสารจากหน้านี้). ไม่ทำ: ใบรับรองแทนใบเสร็จจาก OCR (ใช้ PaymentVoucher ข้อ 11), ปรับสต๊อกจาก CN.
 3b. **หน้า PaymentVoucher (manual) parity กับ OCR:** ✅ DONE (page-side only, ไม่แตะ mapper/sync).
    เพิ่ม 3 dropdown: (a) `ddlPaidHowNexaacc` แหล่งจ่ายเงินดึงจากผังบัญชีจริง NextAcc (11x/21x, value=
    `Nexaacc_AccountId`) → save บังคับ `paymentAccountId` ตัวนี้ก่อน mapping (`LookupPaidHowAccountId`)

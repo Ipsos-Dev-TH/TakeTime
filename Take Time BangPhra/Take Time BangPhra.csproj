@@ -973,6 +973,9 @@
     <Compile Include="Class\Integration\AccountingConfig.cs" />
     <Compile Include="Class\Integration\AccountingModels.cs" />
     <Compile Include="Class\Integration\AccountingDataMapper.cs" />
+    <Compile Include="Class\Integration\OcrReview\OcrReviewModels.cs" />
+    <Compile Include="Class\Integration\OcrReview\OcrReviewMath.cs" />
+    <Compile Include="Class\Integration\OcrReview\OcrReviewService.cs" />
     <Compile Include="Class\CheckoutService.cs" />
     <Compile Include="Class\Accounting\CreditNoteGuards.cs" />
     <Compile Include="Class\DatabaseHelper.cs" />

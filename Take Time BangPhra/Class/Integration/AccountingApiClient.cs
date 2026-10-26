@@ -1067,6 +1067,87 @@ namespace Take_Time_BangPhra.Integration
             return await PostAsync<object, ApiResponse<OcrResultResponse>>(path, null);
         }
 
+        // ── หน้าตรวจทาน OCR ก่อนส่ง (Voucher/OcrUpload) — additive ──
+
+        /// <summary>create-document พร้อม <c>allowDuplicate</c> (OcrController.cs:378-384) — ผู้ใช้ยืนยันแล้วว่าไม่ใช่ใบซ้ำ
+        /// หลังด่านกันซ้ำของ NextAcc (OcrService.cs:6680-6684). สแกนที่สร้างเอกสารแล้วถูกปฏิเสธเสมอ (:6665-6668)</summary>
+        public async Task<ApiResponse<OcrResultResponse>> CreateDocumentFromOcrAsync(Guid scanId, string targetType, bool allowDuplicate)
+        {
+            var qs = new List<string>();
+            if (!string.IsNullOrEmpty(targetType)) qs.Add("targetType=" + Uri.EscapeDataString(targetType));
+            if (allowDuplicate) qs.Add("allowDuplicate=true");
+            string path = $"{CompanyPath}/ocr/{scanId}/create-document" + (qs.Count > 0 ? "?" + string.Join("&", qs) : "");
+            return await PostAsync<object, ApiResponse<OcrResultResponse>>(path, null);
+        }
+
+        /// <summary>บันทึกค่าที่ผู้ใช้ยืนยันลงแถวสแกน + สอนตัวเรียน (POST ocr/{scanId}/correct — OcrController.cs:790-800)</summary>
+        public async Task<ApiResponse<object>> SubmitOcrCorrectionAsync(Guid scanId, OcrCorrectionRequest correction)
+        {
+            return await PostAsync<OcrCorrectionRequest, ApiResponse<object>>(
+                $"{CompanyPath}/ocr/{scanId}/correct", correction ?? new OcrCorrectionRequest());
+        }
+
+        /// <summary>ใบต้นทางที่ NextAcc จัดอันดับให้สแกน (GET ocr/{scanId}/predecessor-candidates — OcrController.cs:665-676)</summary>
+        public async Task<ApiResponse<List<OcrPredecessorCandidateDto>>> GetOcrPredecessorCandidatesAsync(Guid scanId)
+        {
+            return await GetAsync<ApiResponse<List<OcrPredecessorCandidateDto>>>($"{CompanyPath}/ocr/{scanId}/predecessor-candidates");
+        }
+
+        /// <summary>ผูกไฟล์สแกนเข้าเอกสารที่สร้างผ่าน POST /document เอง (OcrController.cs:545-561) — ไฟล์ต้นฉบับย้ายจาก OcrScan มาอยู่กับเอกสาร</summary>
+        public async Task<ApiResponse<bool>> LinkOcrScanToDocumentAsync(Guid scanId, Guid documentId)
+        {
+            return await PostAsync<object, ApiResponse<bool>>($"{CompanyPath}/ocr/{scanId}/link-document/{documentId}", null);
+        }
+
+        /// <summary>รายการเอกสาร (GET document — DocumentController.cs:251-270): types หลายค่า, contactId, relatedDocumentId,
+        /// search (= เลขที่เอกสาร/ชื่อคู่ค้า ILIKE — DocumentService.cs:2422-2427)</summary>
+        public async Task<ApiResponse<PagedResponse<DocumentResponse>>> ListDocumentsAsync(IEnumerable<int> types, Guid? contactId,
+            string search, Guid? relatedDocumentId = null, int pageSize = 20)
+        {
+            var qs = new List<string> { "page=1", "pageSize=" + Math.Max(1, Math.Min(pageSize, 100)), "sortBy=date", "sortDesc=true" };
+            if (types != null) foreach (int t in types) qs.Add("types=" + t);
+            if (contactId.HasValue && contactId.Value != Guid.Empty) qs.Add("contactId=" + contactId.Value);
+            if (relatedDocumentId.HasValue && relatedDocumentId.Value != Guid.Empty) qs.Add("relatedDocumentId=" + relatedDocumentId.Value);
+            if (!string.IsNullOrWhiteSpace(search)) qs.Add("search=" + Uri.EscapeDataString(search.Trim()));
+            return await GetAsync<ApiResponse<PagedResponse<DocumentResponse>>>($"{CompanyPath}/document?" + string.Join("&", qs));
+        }
+
+        /// <summary>ผู้ติดต่อเดี่ยว (GET document/contacts/{id} — DocumentController.cs:1439)</summary>
+        public async Task<ApiResponse<ContactResponse>> GetContactAsync(Guid contactId)
+        {
+            return await GetAsync<ApiResponse<ContactResponse>>($"{CompanyPath}/document/contacts/{contactId}");
+        }
+
+        /// <summary>ไฟล์ต้นฉบับของสแกน (GET ocr/{scanId}/image — OcrController.cs:1629-1655, inline) — ใช้แสดงข้างฟอร์มเมื่อไฟล์ชั่วคราว
+        /// ฝั่ง TakeTime หมดอายุ (กลับมาทำ draft ต่อ). คืน null เมื่อไม่พบ</summary>
+        public async Task<Tuple<byte[], string>> GetOcrImageAsync(Guid scanId)
+        {
+            EnsureApiKeyConfigured();
+            if (string.IsNullOrEmpty(_config.BaseUrl) || scanId == Guid.Empty) return null;
+            ValidateDnsResolution(_config.BaseUrl);
+            CheckAuthCooldown();
+            string path = $"{CompanyPath}/ocr/{scanId}/image";
+            string url = $"{_config.BaseUrl.TrimEnd('/')}{path}";
+            using (var request = new HttpRequestMessage(HttpMethod.Get, url))
+            {
+                request.Headers.Add("X-Api-Key", _config.CompanyApiKey);
+                var startTime = DateTime.Now;
+                var response = await _httpClient.SendAsync(request).ConfigureAwait(false);
+                int durationMs = (int)(DateTime.Now - startTime).TotalMilliseconds;
+                if (!response.IsSuccessStatusCode)
+                {
+                    string errBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                    LogApiCall("GET", path, "", errBody, (int)response.StatusCode, false, durationMs);
+                    if ((int)response.StatusCode == 401 || (int)response.StatusCode == 403)
+                        throw new AuthenticationFailedException($"ocr image auth failed ({(int)response.StatusCode}): {errBody}");
+                    return null;
+                }
+                LogApiCall("GET", path, "", "[file bytes]", (int)response.StatusCode, true, durationMs);
+                string ct = response.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
+                return Tuple.Create(await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false), ct);
+            }
+        }
+
         /// <summary>
         /// DEPRECATED: ใช้ /document/{id}/void (JWT-only). Process* flow ใช้ credit note แทนแล้ว
         /// คงไว้สำหรับ admin tools ที่อาจมี API Key (JWT) แยก
