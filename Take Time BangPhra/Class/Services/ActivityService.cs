@@ -590,6 +590,35 @@ namespace Take_Time_BangPhra.Services
                 decimal amount = Convert.ToDecimal(b["TotalAmount"]);
                 string newPayStatus = amount <= 0 ? "WAIVED" : (hasSlip ? "PAID" : b["PaymentStatus"].ToString());
 
+                // 🔎 ตรวจสลิปก่อนบันทึกว่าชำระแล้ว (PHASE19_34 — ปิดสวิตช์ = แบบเดิม)
+                Take_Time_BangPhra.Payments.SlipCheck.SlipVerifyResult slipCheck = null;
+                if (newPayStatus == "PAID" && Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.IsEnabled)
+                {
+                    var ctx = new Take_Time_BangPhra.Payments.SlipCheck.SlipVerifyContext
+                    {
+                        SourceType = "ACTIVITY", SourceId = bookingId,
+                        User = Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.CurrentUserName()
+                    };
+                    slipCheck = Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.VerifyFile(b["SlipFileURL"].ToString(), amount, ctx);
+                    if (slipCheck.IsBlocking)
+                    {
+                        // หน้านี้ไม่มีช่องเหตุผล → Owner/Admin กด "อนุมัติ" ซ้ำภายใน 10 นาที = ยืนยันแล้ว (สลิปซ้ำยืนยันไม่ได้)
+                        bool confirmed = slipCheck.CanOverride
+                            && Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.CanOverrideCurrentUser()
+                            && Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.ConsumeSecondClick("ACT-" + bookingId);
+                        if (!confirmed)
+                        {
+                            Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.NotifyIfSerious(slipCheck, null, null, null, ctx.User);
+                            return (false, "🔎 ตรวจสลิปไม่ผ่าน: " + slipCheck.Message
+                                + (slipCheck.CanOverride && Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.CanOverrideCurrentUser()
+                                    ? " — ตรวจกับบัญชีธนาคารแล้วกด \"อนุมัติ\" อีกครั้งภายใน 10 นาทีเพื่อยืนยัน" : ""));
+                        }
+                        Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.NotifyIfSerious(slipCheck, null, null,
+                            "ยืนยันซ้ำที่หน้าจัดการกิจกรรม (การจอง #" + bookingId + ")", ctx.User);
+                    }
+                    Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.TryLog(ctx, slipCheck, true);   // กันใช้สลิปเดิมซ้ำ
+                }
+
                 _code.DatabaseInsertSafe(_conn,
                     @"UPDATE Activity_Bookings
                          SET Status = 'CONFIRMED', PaymentStatus = @ps,
@@ -603,7 +632,8 @@ namespace Take_Time_BangPhra.Services
                 // สลิปผ่านการตรวจ = รับเงินแล้วจริง → ลงรายได้ (ครั้งเดียว — กันซ้ำด้วย ACT-{id})
                 string revNote = newPayStatus == "PAID" ? RecordActivityRevenue(bookingId, null, adminId) : null;
                 return (true, "ยืนยันการจองแล้ว" + (newPayStatus == "PAID" ? " (บันทึกว่าชำระเงินแล้ว)" : "")
-                    + (string.IsNullOrEmpty(revNote) ? "" : " · " + revNote));
+                    + (string.IsNullOrEmpty(revNote) ? "" : " · " + revNote)
+                    + (slipCheck == null ? "" : " · สลิป: " + slipCheck.ShortText()));
             }
 
             _code.DatabaseInsertSafe(_conn,

@@ -26,7 +26,8 @@ public static class AppCfg
         "TelegramTokenTakeTime",
         "Email_Password_From",
         "GooglePlacesApiKey",
-        "TaxInvoiceApiKey"
+        "TaxInvoiceApiKey",
+        "SlipOK_ApiKey_Encrypted"   // ตรวจสลิป (PHASE19_34) — เข้ารหัสด้วย code.Crypt แบบ Nexaacc_ApiKey_Encrypted
     };
 
     private static string ConnStr =>

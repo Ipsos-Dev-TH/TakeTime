@@ -1681,6 +1681,20 @@ namespace Take_Time_BangPhra
                                                        // ใบจองจะถูกบันทึกเป็น "รอชำระเงิน" แล้วพาไปจ่ายต่อ
                                                        PayNowChosen;
 
+                            // 🔎 ตรวจสลิปโอนก่อนออกเอกสาร (PHASE19_34 — ปิดสวิตช์/ไม่ใช่การโอน = ข้าม แบบเดิม)
+                            //    ไม่ผ่าน (ยอดไม่ตรง/ซ้ำ/ผู้รับผิด) = หยุดพร้อมผลตรวจ · ใช้ยอดธนาคาร = แก้ช่องยอดแล้วคำนวณมัดจำใหม่
+                            if ((!needSlipValidation || hasValidPaymentProof) && checkpaymentselect == 0 && !RunSlipGate(command))
+                                return;
+                            if (_slipAmountApplied)
+                            {
+                                try
+                                {
+                                    deposit = Convert.ToDecimal(TextBox5.Text);
+                                    IsDeposit = deposit > 0 && deposit < Convert.ToDecimal(TextBox4.Text);
+                                }
+                                catch { }
+                            }
+
                             // ✅ Skip slip validation for edit without additional deposit
                             if ((!needSlipValidation || hasValidPaymentProof) && checkpaymentselect == 0)
                             {
@@ -3625,11 +3639,12 @@ namespace Take_Time_BangPhra
                                                     Convert.ToInt32(DropDownList1.SelectedValue),
                                                     // จ่ายด้วยบัตร/QR ทันที = ยังไม่ได้เงิน จึงยังไม่ใช่ "มัดจำแล้ว"
                                                     // บันทึกเป็น "รอชำระเงิน" กันห้องไว้ก่อน จ่ายสำเร็จค่อยเลื่อนสถานะ
-                                                    PayNowChosen
+                                                    // 🔎 ลูกค้าแนบสลิปที่ธนาคารยังไม่ยืนยัน (PHASE19_34) = รอพนักงานตรวจ ไม่ใช่ "มัดจำแล้ว"
+                                                    PayNowChosen || CustomerSlipHold
                                                         ? Take_Time_BangPhra.Payments.BookingPayment.PendingStatus
                                                         : "มัดจำแล้ว",
                                                     Convert.ToDecimal(Session["totalPrice"]?.ToString() ?? "0"),
-                                                    PayNowChosen ? 0m : Convert.ToDecimal(TextBox5.Text ?? "0"),
+                                                    PayNowChosen || CustomerSlipHold ? 0m : Convert.ToDecimal(TextBox5.Text ?? "0"),
                                                     TextBox6.Text,
                                                     reserveBy,
                                                     now,
@@ -3647,11 +3662,12 @@ namespace Take_Time_BangPhra
                                                     Convert.ToInt32(DropDownList1.SelectedValue),
                                                     // จ่ายด้วยบัตร/QR ทันที = ยังไม่ได้เงิน จึงยังไม่ใช่ "มัดจำแล้ว"
                                                     // บันทึกเป็น "รอชำระเงิน" กันห้องไว้ก่อน จ่ายสำเร็จค่อยเลื่อนสถานะ
-                                                    PayNowChosen
+                                                    // 🔎 ลูกค้าแนบสลิปที่ธนาคารยังไม่ยืนยัน (PHASE19_34) = รอพนักงานตรวจ ไม่ใช่ "มัดจำแล้ว"
+                                                    PayNowChosen || CustomerSlipHold
                                                         ? Take_Time_BangPhra.Payments.BookingPayment.PendingStatus
                                                         : "มัดจำแล้ว",
                                                     Convert.ToDecimal(Session["totalPrice"]?.ToString() ?? "0"),
-                                                    PayNowChosen ? 0m : Convert.ToDecimal(TextBox5.Text ?? "0"),
+                                                    PayNowChosen || CustomerSlipHold ? 0m : Convert.ToDecimal(TextBox5.Text ?? "0"),
                                                     TextBox6.Text,
                                                     reserveBy,
                                                     now,
@@ -3965,6 +3981,12 @@ namespace Take_Time_BangPhra
                                             code2.Logs(conn, "Reserve - Pay Online Pending",
                                                 $"Reservation {ID}: ลูกค้าเลือกชำระออนไลน์ ({DropDownList2.SelectedItem?.Text ?? "-"}) — ยังไม่ออกใบเสร็จ รอเกตเวย์ยืนยัน",
                                                 Session["User"]?.ToString() ?? "Customer");
+                                        }
+                                        else if (CustomerSlipHold)
+                                        {
+                                            // 🔎 สลิปของลูกค้าที่ธนาคารยังไม่ยืนยัน/ยอดไม่ตรง → เก็บรอพนักงานตรวจ (ไม่ออกใบเสร็จ/ไม่ส่งบัญชี)
+                                            //    อนุมัติที่ Account/SlipVerification → ลงรับเงิน + ใบเสร็จ + ยืนยันการจอง (CLAUDE.md ข้อ 16, 18)
+                                            SubmitCustomerSlipHold(ID);
                                         }
                                         else if (TextBox1.Text != "02" && CheckBox4.Checked == false)
                                         {
@@ -4440,7 +4462,8 @@ namespace Take_Time_BangPhra
 
                 // Generate unique filename pattern: {ReservationID}_{Phone}_{PaymentHistoryId}.jpg
                 string uniqueSuffix = paymentHistoryId.HasValue ? $"_{paymentHistoryId.Value}" : $"_{DateTime.Now:yyyyMMddHHmmss}";
-                string tempFilename = TextBox1.Text + ".jpg";
+                // ชื่อไฟล์ชั่วคราวผูกกับ session + การจอง (เดิม {phone}.jpg — สองการจองเบอร์เดียวกันใช้สลิปไฟล์เดียวกันได้)
+                string tempFilename = SlipTempFilename;
                 string finalFilename = reservationID + "_" + TextBox1.Text + uniqueSuffix + ".jpg";
 
                 if (File.Exists(AppDomain.CurrentDomain.BaseDirectory + "\\Upload\\Slip\\" + tempFilename))
@@ -4633,6 +4656,9 @@ namespace Take_Time_BangPhra
                             if (dtSlipId.Rows.Count > 0)
                             {
                                 long paymentSlipId = Convert.ToInt64(dtSlipId.Rows[0][0]);
+
+                                // 🔎 ผลตรวจสลิป (ตรวจไว้ก่อนออกใบเสร็จใน RunSlipGate) → แถวสลิป + ผูกใบเสร็จ
+                                ApplySlipVerifyToRow(paymentSlipId, receiptID, reservationID, slipPath);
 
                                 // Update Payment_History with PaymentSlip_ID
                                 string updatePaymentQuery = @"
@@ -7594,6 +7620,303 @@ namespace Take_Time_BangPhra
             }
         }
 
+        // ══════════════════════════════════════════════════════════════════════
+        //  🔎 ตรวจสลิปโอนก่อนออกเอกสาร (PHASE19_34 / CLAUDE.md ข้อ 18)
+        //  SlipOK → อ่านยอดจากรูปเอง → ตรวจไม่ได้ = ข้ามการตรวจ (ติดธง) · ปิดสวิตช์ = ไม่มีอะไรเปลี่ยน
+        // ══════════════════════════════════════════════════════════════════════
+        private Take_Time_BangPhra.Payments.SlipCheck.SlipVerifyResult _slipVerify;
+        private Take_Time_BangPhra.Payments.SlipCheck.SlipGateDecision _slipGate;
+        private decimal? _slipAmountUsed;
+        private bool _slipAmountApplied;
+        private bool _custSlipHold;
+
+        /// <summary>ลูกค้าจองเองแนบสลิปที่ยังไม่ผ่าน "ธนาคารยืนยัน + ยอดตรง" → บันทึกเป็นรอชำระ/รอพนักงานตรวจ</summary>
+        private bool CustomerSlipHold => _custSlipHold;
+
+        /// <summary>ชื่อไฟล์สลิปชั่วคราว: {เบอร์}_{แท็ก session+การจอง}.jpg — กันสลิปค้างของการจองหนึ่งไปติดอีกการจองที่ใช้เบอร์เดียวกัน</summary>
+        private string SlipTempFilename
+        {
+            get
+            {
+                string raw = (Session != null ? Session.SessionID : "") + "|" + (Request.QueryString["id"] ?? "new") + "|"
+                             + (Request.QueryString["command"] ?? "");
+                string tag;
+                using (var sha = System.Security.Cryptography.SHA1.Create())
+                    tag = BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(raw))).Replace("-", "").Substring(0, 10).ToLowerInvariant();
+                string phone = Regex.Replace(TextBox1.Text ?? "", @"[^0-9A-Za-z]", "");
+                return phone + "_" + tag + ".jpg";
+            }
+        }
+
+        /// <summary>ยอดที่จะออกเอกสารของคำสั่งนี้ (null = ครั้งนี้ไม่มีการรับเงิน)</summary>
+        private decimal? SlipExpectedAmount(string command)
+        {
+            try
+            {
+                if (TextBox1.Text == "02" || PayNowChosen) return null;
+                decimal v;
+                if (command == "reserve")
+                    return decimal.TryParse(TextBox5.Text, NumberStyles.Any, CultureInfo.InvariantCulture, out v) && v > 0m ? v : (decimal?)null;
+                if ((command == "edit" || command == "checkin") && CheckBox2.Checked)
+                    return decimal.TryParse(TextBox10.Text, NumberStyles.Any, CultureInfo.InvariantCulture, out v) && v > 0m ? v : (decimal?)null;
+            }
+            catch { }
+            return null;
+        }
+
+        private void SetSlipExpectedAmount(string command, decimal amount)
+        {
+            string t = amount.ToString("0.##", CultureInfo.InvariantCulture);
+            if (command == "reserve") TextBox5.Text = t;
+            else TextBox10.Text = t;
+        }
+
+        /// <summary>รูปสลิปที่รออยู่: ไฟล์ชั่วคราว (ปุ่มอัปโหลด) หรือไฟล์ที่เลือกมากับการกดบันทึก</summary>
+        private byte[] ReadPendingSlip(out string fileName, out string physicalPath)
+        {
+            fileName = null;
+            physicalPath = null;
+            try
+            {
+                string temp = AppDomain.CurrentDomain.BaseDirectory + "\\Upload\\Slip\\" + SlipTempFilename;
+                // ไฟล์ที่เพิ่งเลือกมากับการกดครั้งนี้มาก่อนไฟล์ชั่วคราวเก่า (เลือกสลิปใหม่ = ใช้สลิปใหม่)
+                if (FileUpload1.HasFile)
+                {
+                    fileName = FileUpload1.FileName;
+                    byte[] b = FileUpload1.FileBytes;
+                    // เก็บเป็นไฟล์ชั่วคราวด้วย — ด่านหยุดแล้วกดบันทึกใหม่ ไม่ต้องเลือกไฟล์ซ้ำ (uploadSlip ย้ายไฟล์ชั่วคราวนี้ตามเดิม)
+                    try
+                    {
+                        string dir = AppDomain.CurrentDomain.BaseDirectory + "\\Upload\\Slip";
+                        if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+                        File.WriteAllBytes(temp, b);
+                        physicalPath = temp;
+                        Image1.ImageUrl = "./Upload/Slip/" + SlipTempFilename;
+                        Image1.Visible = true;
+                    }
+                    catch { }
+                    return b;
+                }
+                if (File.Exists(temp)) { fileName = SlipTempFilename; physicalPath = temp; return File.ReadAllBytes(temp); }
+            }
+            catch { }
+            return null;
+        }
+
+        private bool SlipCheckApplies(string command, out decimal expected)
+        {
+            expected = 0m;
+            if (!Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.IsEnabled) return false;
+            decimal? e = SlipExpectedAmount(command);
+            if (!e.HasValue) return false;
+            expected = e.Value;
+            string text = DropDownList2.SelectedItem != null ? DropDownList2.SelectedItem.Text : "";
+            return Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.IsTransferPaidHow(DropDownList2.SelectedValue, text);
+        }
+
+        private Take_Time_BangPhra.Payments.SlipCheck.SlipVerifyResult VerifyPendingSlip(string command, decimal expected)
+        {
+            string name, path;
+            byte[] bytes = ReadPendingSlip(out name, out path);
+            if (bytes == null) return null;
+            int resId;
+            int.TryParse(Request.QueryString["id"], out resId);
+            return Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.Verify(bytes, name, expected,
+                new Take_Time_BangPhra.Payments.SlipCheck.SlipVerifyContext
+                {
+                    SourceType = "RESERVATION",
+                    SourceId = resId > 0 ? (long?)resId : null,
+                    CustomerSelfService = IsCustomerReserveMode,
+                    User = Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.CurrentUserName()
+                });
+        }
+
+        /// <summary>แสดงการ์ดผลตรวจ + ตัวเลือกพนักงาน (ใช้ยอดตามสลิป / แบ่งสลิป / override เฉพาะ Owner-Admin)</summary>
+        private void ShowSlipCheck(Take_Time_BangPhra.Payments.SlipCheck.SlipVerifyResult r)
+        {
+            try
+            {
+                if (r == null) { pnlSlipCheck.Visible = false; return; }
+                pnlSlipCheck.Visible = true;
+                if (IsCustomerReserveMode)
+                {
+                    // ลูกค้า: บอกผลแบบสั้น — ทุกกรณีที่ไม่ใช่ธนาคารยืนยัน การจองจะรอเจ้าหน้าที่ตรวจ
+                    string msg = r.Status == Take_Time_BangPhra.Payments.SlipCheck.SlipVerifyStatus.Verified && r.BankConfirmed
+                        ? "✅ ตรวจสลิปกับธนาคารแล้ว ยอด " + (r.Amount ?? 0m).ToString("N2") + " บาท"
+                        : r.Status == Take_Time_BangPhra.Payments.SlipCheck.SlipVerifyStatus.Mismatch && r.Amount.HasValue
+                            ? "⚠️ ยอดในสลิป " + r.Amount.Value.ToString("N2") + " บาท ไม่ตรงกับยอดที่กรอก — กรุณาแก้ยอดให้ตรงสลิป (หรือกดยืนยัน เจ้าหน้าที่จะตรวจให้)"
+                            : "ℹ️ ได้รับสลิปแล้ว — เจ้าหน้าที่จะตรวจสอบและยืนยันการจองให้";
+                    litSlipCheck.Text = "<div class='rv-hint' style='margin:6px 0;'>" + HttpUtility.HtmlEncode(msg) + "</div>";
+                    divSlipStaffOpts.Visible = false;
+                    ViewState["SlipAmt"] = r.Amount.HasValue ? (object)r.Amount.Value : null;
+                    btnSlipUseAmount.Visible = false;
+                    return;
+                }
+                litSlipCheck.Text = r.ToHtml();
+                bool problem = r.IsBlocking;
+                divSlipStaffOpts.Visible = problem || (r.Amount.HasValue && r.Difference.HasValue && r.Difference.Value != 0m);
+                btnSlipUseAmount.Visible = r.Amount.HasValue && r.Difference.HasValue && r.Difference.Value != 0m
+                                           && r.Status != Take_Time_BangPhra.Payments.SlipCheck.SlipVerifyStatus.Duplicate;
+                chkSlipAllocate.Visible = r.CanAllocate;
+                spanSlipOverride.Visible = r.CanOverride && Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.CanOverrideCurrentUser();
+                ViewState["SlipAmt"] = r.Amount.HasValue ? (object)r.Amount.Value : null;
+            }
+            catch { }
+        }
+
+        /// <summary>ปุ่มอัปโหลดสลิป → ตรวจทันทีเพื่อแสดงผล (ไม่บล็อก ไม่บันทึก)</summary>
+        private void PreviewSlipCheck()
+        {
+            try
+            {
+                string command = Request.QueryString["command"] ?? "";
+                decimal expected;
+                if (!SlipCheckApplies(command, out expected))
+                {
+                    // ยังไม่ได้เลือกวิธีชำระ/ยอด → ตรวจแบบไม่มียอดเทียบ (ดูยอดในสลิปได้เลย)
+                    if (!Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.IsEnabled) return;
+                    var r0 = VerifyPendingSlip(command, SlipExpectedAmount(command) ?? 0m);
+                    if (r0 != null && !SlipExpectedAmount(command).HasValue) { r0.ExpectedAmount = null; r0.Difference = null; }
+                    ShowSlipCheck(r0);
+                    return;
+                }
+                ShowSlipCheck(VerifyPendingSlip(command, expected));
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// ด่านก่อนออกเอกสาร (เรียกใน Button1 ก่อนบันทึกอะไรลงฐานข้อมูล) — false = หยุด (แสดงเหตุผลแล้ว)
+        /// ลูกค้าจองเอง: ผลที่ไม่ใช่ธนาคารยืนยัน+ยอดตรง → _custSlipHold (บันทึกเป็นรอชำระ + สลิปรอตรวจ) ถ้ามี PHASE19_25
+        /// </summary>
+        private bool RunSlipGate(string command)
+        {
+            try
+            {
+                decimal expected;
+                if (!SlipCheckApplies(command, out expected)) return true;
+                var r = VerifyPendingSlip(command, expected);
+                if (r == null) return true;   // ไม่มีสลิป — การตรวจเดิม (hasValidPaymentProof) ดูแลเอง
+                _slipVerify = r;
+
+                bool customer = IsCustomerReserveMode && command == "reserve";
+                var d = Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.Decide(r, customer,
+                    chkSlipAllocate.Checked, chkSlipOverride.Checked, txtSlipOverrideReason.Text,
+                    Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.CanOverrideCurrentUser());
+                _slipGate = d;
+
+                if (d.HoldForStaff)
+                {
+                    if (new PaymentService(conn).HasSlipClaimColumn())
+                    {
+                        _custSlipHold = true;
+                        code2.Logs(conn, "SlipVerify", "ลูกค้าจองพร้อมสลิป — " + r.ShortText() + " → รอเจ้าหน้าที่ตรวจ (ยังไม่ออกใบเสร็จ)",
+                            Session["User"]?.ToString() ?? "Customer");
+                    }
+                    else
+                    {
+                        // ยังไม่รัน PHASE19_25 — ทำแบบเดิม (ออกใบเสร็จ) แต่ผลตรวจถูกบันทึกในแถวสลิปให้ตรวจภายหลัง
+                        _slipGate = new Take_Time_BangPhra.Payments.SlipCheck.SlipGateDecision();
+                    }
+                    return true;
+                }
+                if (!d.Proceed)
+                {
+                    ShowSlipCheck(r);
+                    Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.NotifyIfSerious(r,
+                        int.TryParse(Request.QueryString["id"], out int rid) ? (int?)rid : null, null, null,
+                        Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.CurrentUserName());
+                    ShowUserError("slipCheck", "🔎 ตรวจสลิปไม่ผ่าน — ยังไม่บันทึก\n" + d.BlockMessage, FileUpload1);
+                    code2.Logs(conn, "SlipVerify", "Reserve(" + command + ") หยุดก่อนออกใบเสร็จ: " + r.ShortText(),
+                        Session["User"]?.ToString() ?? "SYSTEM");
+                    return false;
+                }
+
+                _slipAmountUsed = expected;
+                if (d.UseAmount.HasValue && d.UseAmount.Value > 0m && d.UseAmount.Value != expected)
+                {
+                    SetSlipExpectedAmount(command, d.UseAmount.Value);
+                    _slipAmountUsed = d.UseAmount.Value;
+                    _slipAmountApplied = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                // นโยบาย: ตรวจไม่ได้ = ข้ามการตรวจ ไม่ขวางการบันทึก
+                try { code2.Logs(conn, "SlipVerify", "Reserve gate error (ข้ามการตรวจ): " + ex.Message, "SYSTEM"); } catch { }
+            }
+            return true;
+        }
+
+        /// <summary>หลัง uploadSlip สร้างแถว Payment_Slips — บันทึกผลตรวจ/ผูกใบเสร็จ/แบ่งสลิป</summary>
+        private void ApplySlipVerifyToRow(long slipId, string receiptId, string reservationId, string slipPath)
+        {
+            try
+            {
+                if (!Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.IsEnabled) return;
+                var r = _slipVerify;
+                if (r == null)
+                {
+                    // ไม่ได้ผ่านด่าน (เช่น เงินสด/ไม่มีการรับเงินรอบนี้) แต่เป็นการโอน → บันทึกผลอ่านไว้เฉย ๆ ไม่บล็อก
+                    decimal expected;
+                    if (!SlipCheckApplies(Request.QueryString["command"] ?? "", out expected)) return;
+                    r = Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.VerifyFile(slipPath, expected,
+                        new Take_Time_BangPhra.Payments.SlipCheck.SlipVerifyContext { SourceType = "RESERVATION", ExcludeSlipId = slipId });
+                }
+                int rid;
+                Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.SaveResult(slipId, r, _slipGate, receiptId,
+                    int.TryParse(reservationId, out rid) ? (int?)rid : null, _slipAmountUsed,
+                    Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.CurrentUserName());
+            }
+            catch { }
+        }
+
+        /// <summary>ลูกค้าจองเอง + สลิปรอตรวจ: ย้ายสลิปเข้า Payment_Slips (PENDING + Claimed_Amount) ไม่ออกใบเสร็จ</summary>
+        private void SubmitCustomerSlipHold(string reservationId)
+        {
+            try
+            {
+                int rid;
+                if (!int.TryParse(reservationId, out rid) || rid <= 0) return;
+                string name, path;
+                byte[] bytes = ReadPendingSlip(out name, out path);
+                if (path == null && bytes != null)
+                {
+                    path = AppDomain.CurrentDomain.BaseDirectory + "\\Upload\\Slip\\" + SlipTempFilename;
+                    File.WriteAllBytes(path, bytes);
+                }
+                decimal amt = SlipExpectedAmount("reserve") ?? 0m;
+                var pr = new PaymentService(conn).SubmitReservationSlipFileForVerification(rid, amt, path, TextBox1.Text,
+                    "แนบสลิปตอนจอง (ลูกค้า) — " + (_slipVerify != null ? _slipVerify.ShortText() : "ไม่ได้ตรวจ"));
+                if (pr != null && pr.Success)
+                {
+                    try { File.Delete(path); } catch { }
+                }
+                code2.Logs(conn, "SlipVerify", $"การจอง {rid}: สลิปลูกค้ารอตรวจ — {(pr == null ? "-" : pr.Message)}",
+                    Session["User"]?.ToString() ?? "Customer");
+            }
+            catch (Exception ex)
+            {
+                try { code2.Logs(conn, "SlipVerify", $"การจอง {reservationId}: เก็บสลิปรอตรวจไม่สำเร็จ — {ex.Message}", "SYSTEM"); } catch { }
+            }
+        }
+
+        /// <summary>ปุ่ม "ใช้ยอดตามสลิป" — ใส่ยอดจากสลิปลงช่องยอดของคำสั่งนี้ แล้วให้กดบันทึกอีกครั้ง</summary>
+        protected void btnSlipUseAmount_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                object o = ViewState["SlipAmt"];
+                if (!(o is decimal)) return;
+                string command = Request.QueryString["command"] ?? "";
+                SetSlipExpectedAmount(command, (decimal)o);
+                PreviewSlipCheck();
+                ClientScript.RegisterStartupScript(GetType(), "slipUseAmt",
+                    "alert('ใส่ยอดตามสลิป " + ((decimal)o).ToString("N2") + " บาทแล้ว — ตรวจยอด/มัดจำ แล้วกดบันทึกอีกครั้ง');", true);
+            }
+            catch { }
+        }
+
         protected void Button2_Click(object sender, EventArgs e)
         {
             TextBox12.Text = "";
@@ -7609,9 +7932,9 @@ namespace Take_Time_BangPhra
                     {
                         string phone = TextBox1.Text.Trim();
 
-                        // ✅ Save as TEMP file: {phone}.jpg
+                        // ✅ Save as TEMP file: {phone}_{session+booking tag}.jpg (PHASE19_34 — เดิม {phone}.jpg ชนกันข้ามการจอง)
                         // This will be moved to final filename when Button1 is clicked
-                        string tempFilename = phone + ".jpg";
+                        string tempFilename = SlipTempFilename;
 
                         // Delete old temp file if exists
                         string tempPath = AppDomain.CurrentDomain.BaseDirectory + "\\Upload\\Slip\\" + tempFilename;
@@ -7628,6 +7951,9 @@ namespace Take_Time_BangPhra
                         Image1.ImageUrl = "./Upload/Slip/" + tempFilename;
                         Image1.Visible = true;
                         Image1.DataBind();
+
+                        // 🔎 ขั้น "ตรวจสลิป" ทันทีหลังอัปโหลด (PHASE19_34) — ผลถูก cache ตามไฟล์ ตอนกดบันทึกไม่เสียโควต้าซ้ำ
+                        PreviewSlipCheck();
 
                         // ✅ Show success message (ลูกค้า: ข้อความสีเขียวใต้ช่องสลิป ไม่ใช่ alert)
                         if (IsCustomerReserveMode)

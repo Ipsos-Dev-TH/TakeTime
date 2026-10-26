@@ -15,6 +15,15 @@ namespace Take_Time_BangPhra.Payment
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            // หน้านี้รับเงิน + ออกใบเสร็จ — เดิมไม่มีการตรวจสิทธิ์เลย (ใครรู้ URL ก็ลงรับเงินได้)
+            if (!Perm.Guard(this, Perm.FinReceipt)) return;
+            if (Session["permission"]?.ToString() != "True")
+            {
+                Response.Redirect("~/Admin/Login", false);
+                Context.ApplicationInstance.CompleteRequest();
+                return;
+            }
+
             paymentService = new PaymentService(connectionString);
             paymentDataAccess = new PaymentDataAccess(connectionString);
 

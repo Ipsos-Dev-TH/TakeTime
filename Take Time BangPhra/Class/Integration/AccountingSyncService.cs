@@ -805,7 +805,10 @@ namespace Take_Time_BangPhra.Integration
                     "SYSTEM");
             }
 
-            return InsertQueue("RECEIPT", reservationId, "CREATE_RECEIPT_DOCUMENT", payload);
+            long queued = InsertQueue("RECEIPT", reservationId, "CREATE_RECEIPT_DOCUMENT", payload);
+            // ตรวจสลิป (PHASE19_34): สลิปที่ผูกใบนี้ยังไม่ผ่าน (ไม่ตรง/ซ้ำ/ผู้รับผิด ไม่มี override) → AWAITING_SLIP (worker ข้ามเอง)
+            Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.HoldQueueIfSlipBlocked(_connectionString, queued, receiptNumber);
+            return queued;
         }
 
         /// <summary>

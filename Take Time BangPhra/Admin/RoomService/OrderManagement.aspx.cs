@@ -369,7 +369,17 @@ namespace Take_Time_BangPhra.Admin.RoomService
             if (string.IsNullOrEmpty(orderId)) return;
             try
             {
-                bool hasPaidDate = Take_Time_BangPhra.Integration.ChannelPosting.HasColumn(_connectionString, "Guest_Room_Service_Orders", "Paid_Date");
+                // 🔎 ตรวจสลิปโอนก่อนบันทึกรับเงิน (PHASE19_34 — ปิดสวิตช์ = แบบเดิม)
+                string slipBlock = CheckOrderSlip(Convert.ToInt64(orderId));
+                if (slipBlock != null)
+                {
+                    LoadOrderDetail(Convert.ToInt64(orderId));
+                    ScriptManager.RegisterStartupScript(this, GetType(), "slipBlock",
+                        "alert('" + System.Web.HttpUtility.JavaScriptStringEncode(slipBlock) + "');", true);
+                    return;
+                }
+
+                bool hasPaidDate =Take_Time_BangPhra.Integration.ChannelPosting.HasColumn(_connectionString, "Guest_Room_Service_Orders", "Paid_Date");
                 int n = _code.DatabaseInsertSafe(_connectionString,
                     "UPDATE Guest_Room_Service_Orders SET Payment_Status = 'PAID'" + (hasPaidDate ? ", Paid_Date = GETDATE()" : "") +
                     " WHERE ID = @OrderId AND Payment_Method IN ('CASH','TRANSFER')" +
@@ -392,6 +402,56 @@ namespace Take_Time_BangPhra.Admin.RoomService
                 ScriptManager.RegisterStartupScript(this, GetType(), "error",
                     "alert('เกิดข้อผิดพลาด: " + ex.Message.Replace("'", "\\'") + "');", true);
             }
+        }
+
+        /// <summary>
+        /// ออเดอร์โอนที่มีสลิป → ตรวจยอดกับสลิป ก่อน PAID — คืนข้อความหยุด หรือ null = ไปต่อ
+        /// ไม่ผ่าน (ยอดไม่ตรง/ผู้รับผิด): Owner/Admin กด "ยืนยันรับเงิน" ซ้ำภายใน 10 นาที = ยืนยัน · สลิปซ้ำ = หยุดเสมอ
+        /// ตรวจไม่ได้ = ไปต่อ (นโยบาย: มีปัญหาให้ข้ามการตรวจ)
+        /// </summary>
+        private string CheckOrderSlip(long orderId)
+        {
+            try
+            {
+                if (!Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.IsEnabled) return null;
+                DataTable dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT Payment_Method, Payment_Slip_Path, Total_Amount FROM Guest_Room_Service_Orders WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", orderId } });
+                if (dt == null || dt.Rows.Count == 0) return null;
+                DataRow o = dt.Rows[0];
+                string path = o["Payment_Slip_Path"] == DBNull.Value ? null : o["Payment_Slip_Path"].ToString();
+                if (Convert.ToString(o["Payment_Method"]) != "TRANSFER" || string.IsNullOrEmpty(path)) return null;
+                decimal amount = o["Total_Amount"] == DBNull.Value ? 0m : Convert.ToDecimal(o["Total_Amount"]);
+
+                var ctx = new Take_Time_BangPhra.Payments.SlipCheck.SlipVerifyContext
+                {
+                    SourceType = "ROOM_SERVICE", SourceId = orderId,
+                    User = Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.CurrentUserName()
+                };
+                var r = Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.VerifyFile(path, amount > 0m ? (decimal?)amount : null, ctx);
+                if (r.IsBlocking)
+                {
+                    bool canOv = Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.CanOverrideCurrentUser();
+                    bool confirmed = r.CanOverride && canOv
+                        && Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.ConsumeSecondClick("RS-" + orderId);
+                    if (!confirmed)
+                    {
+                        Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.NotifyIfSerious(r, null, null, null, ctx.User);
+                        return "ตรวจสลิปไม่ผ่าน: " + r.Message
+                            + (r.CanOverride && canOv ? "\nตรวจกับบัญชีธนาคารแล้วกด \"ยืนยันรับเงินแล้ว\" อีกครั้งภายใน 10 นาทีเพื่อยืนยัน" : "");
+                    }
+                    Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.NotifyIfSerious(r, null, null,
+                        "ยืนยันซ้ำที่หน้าจัดการรูมเซอร์วิส (ออเดอร์ #" + orderId + ")", ctx.User);
+                }
+                Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.TryLog(ctx, r, true);   // กันใช้สลิปเดิมซ้ำ
+                _code.Logs(_connectionString, "RoomService", "ตรวจสลิปออเดอร์ #" + orderId + ": " + r.ShortText(),
+                    Session["username"]?.ToString() ?? "Unknown");
+            }
+            catch (Exception ex)
+            {
+                try { _code.Logs(_connectionString, "RoomService", "ตรวจสลิปออเดอร์ #" + orderId + " ไม่ได้ (ข้าม): " + ex.Message, "SYSTEM"); } catch { }
+            }
+            return null;
         }
 
         /// <summary>

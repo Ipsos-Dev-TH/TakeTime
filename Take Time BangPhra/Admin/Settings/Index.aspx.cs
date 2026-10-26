@@ -143,6 +143,11 @@ namespace Take_Time_BangPhra.Admin.Settings
                 "~/Admin/Settings/PaymentGateway",
                 "จ่ายเงิน ชำระเงิน บัตรเครดิต omise payso เกตเวย์ gateway qr พร้อมเพย์ webhook รับเงิน ออนไลน์ วงเงินประกัน กันวงเงิน hold ช่องทาง")
             { StatusKey = "gateway" });
+            pay.Items.Add(new Item("ตรวจสลิปโอน (SlipOK / อ่านยอดจากรูป)",
+                "ตรวจสลิปก่อนออกใบเสร็จ: SlipOK (ฟรี 100 สลิป/เดือน) → อ่านตัวเลขยอดโอนจากรูปเอง → ตรวจไม่ได้ = ข้ามแต่ติดธง · กันสลิปซ้ำ/ยอดไม่ตรง/โอนเข้าบัญชีอื่น + ทดสอบด้วยสลิป",
+                "~/Admin/Settings/SlipCheckSettings",
+                "สลิป slip slipok ตรวจสลิป โอน ยอดโอน ocr qr สลิปปลอม สลิปซ้ำ ยอดไม่ตรง บัญชีผู้รับ tesseract โควต้า")
+            { AdminOnly = true });
             pay.Items.Add(new Item("เงินประกันความเสียหาย",
                 "วิธีรับเงินประกัน (โอน/เงินสด/กันวงเงินบัตร), วงเงินแนะนำ, **ตั้งวงเงินแยกรายห้องพัก** และดูเงินประกันที่ยังค้าง",
                 "~/Admin/Settings/SecurityDeposit",

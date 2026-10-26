@@ -626,6 +626,30 @@ namespace Take_Time_BangPhra
         /// </remarks>
         protected global::System.Web.UI.WebControls.Image Image1;
 
+        /// <summary>pnlSlipCheck control (ผลตรวจสลิป — PHASE19_34).</summary>
+        protected global::System.Web.UI.WebControls.Panel pnlSlipCheck;
+
+        /// <summary>litSlipCheck control.</summary>
+        protected global::System.Web.UI.WebControls.Literal litSlipCheck;
+
+        /// <summary>divSlipStaffOpts control.</summary>
+        protected global::System.Web.UI.HtmlControls.HtmlGenericControl divSlipStaffOpts;
+
+        /// <summary>btnSlipUseAmount control.</summary>
+        protected global::System.Web.UI.WebControls.Button btnSlipUseAmount;
+
+        /// <summary>chkSlipAllocate control.</summary>
+        protected global::System.Web.UI.WebControls.CheckBox chkSlipAllocate;
+
+        /// <summary>spanSlipOverride control.</summary>
+        protected global::System.Web.UI.HtmlControls.HtmlGenericControl spanSlipOverride;
+
+        /// <summary>chkSlipOverride control.</summary>
+        protected global::System.Web.UI.WebControls.CheckBox chkSlipOverride;
+
+        /// <summary>txtSlipOverrideReason control.</summary>
+        protected global::System.Web.UI.WebControls.TextBox txtSlipOverrideReason;
+
         /// <summary>
         /// divPaymentHistory control.
         /// </summary>

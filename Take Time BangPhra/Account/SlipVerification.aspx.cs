@@ -69,6 +69,13 @@ namespace Take_Time_BangPhra.Account
         {
             // สลิปที่ลูกค้าแนบเอง: แสดงยอดที่ลูกค้าแจ้ง (Claimed_Amount, PHASE19_25) — ยอดที่จะลงรับเงินเมื่ออนุมัติ
             bool hasClaim = new PaymentService(conn).HasSlipClaimColumn();
+            // ผลตรวจสลิป (PHASE19_34) — ยังไม่รัน migration = คอลัมน์ว่าง
+            bool hasVerify = Payments.SlipCheck.SlipVerificationService.SchemaReady;
+            string verifyCols = hasVerify
+                ? "ps.Slip_Amount, ps.Slip_TransRef, ps.Verify_Status, ps.Verify_Source, ps.Verify_Message, ps.Override_By, ps.Override_Reason,"
+                : "CAST(NULL AS DECIMAL(18,2)) AS Slip_Amount, CAST(NULL AS NVARCHAR(40)) AS Slip_TransRef, CAST(NULL AS NVARCHAR(20)) AS Verify_Status, "
+                  + "CAST(NULL AS NVARCHAR(20)) AS Verify_Source, CAST(NULL AS NVARCHAR(1000)) AS Verify_Message, "
+                  + "CAST(NULL AS NVARCHAR(100)) AS Override_By, CAST(NULL AS NVARCHAR(500)) AS Override_Reason,";
             string query = @"
                 SELECT
                     ps.ID AS SlipID,
@@ -82,6 +89,7 @@ namespace Take_Time_BangPhra.Account
                     ps.VerificationStatus,
                     ps.VerifiedDate,
                     ps.RejectionReason,
+                    " + verifyCols + @"
                     c.FullName AS CustomerName,
                     c.MobilePhone AS CustomerPhone,
                     " + (hasClaim ? "COALESCE(ps.Claimed_Amount, r.Total)" : "r.Total") + @" AS PaymentAmount,
@@ -161,7 +169,22 @@ namespace Take_Time_BangPhra.Account
             {
                 long slipId = Convert.ToInt64(e.CommandArgument);
 
-                if (e.CommandName == "ApproveSlip")
+                if (e.CommandName == "RecheckSlip")
+                {
+                    // ตรวจใหม่ (ข้าม cache) เทียบยอดที่ลูกค้าแจ้ง/ยอดของรายการ — บันทึกผลลงแถว ไม่อนุมัติ
+                    var r = Payments.SlipCheck.SlipVerificationService.VerifySlipRow(slipId, LoadExpectedAmount(slipId), true, true);
+                    lblMessage.Text = r == null ? "ไม่พบสลิป" : "ผลตรวจใหม่: " + r.ShortText() + (string.IsNullOrEmpty(r.Message) ? "" : " — " + r.Message);
+                    lblMessage.ForeColor = r != null && !r.IsBlocking ? System.Drawing.Color.Green : System.Drawing.Color.Red;
+                }
+                else if (e.CommandName == "ApproveSlipAmount")
+                {
+                    // อนุมัติตามยอดในสลิป (แทนยอดที่ลูกค้าแจ้ง)
+                    decimal? slipAmt = LoadSlipAmount(slipId);
+                    string err = ApproveSlip(slipId, out string okMsg, slipAmt);
+                    lblMessage.Text = err ?? okMsg ?? "อนุมัติสลิปสำเร็จ";
+                    lblMessage.ForeColor = err == null ? System.Drawing.Color.Green : System.Drawing.Color.Red;
+                }
+                else if (e.CommandName == "ApproveSlip")
                 {
                     string err = ApproveSlip(slipId, out string okMsg);
                     lblMessage.Text = err ?? okMsg ?? "อนุมัติสลิปสำเร็จ";
@@ -191,12 +214,17 @@ namespace Take_Time_BangPhra.Account
         /// สลิปที่ลูกค้าแนบเองจากหน้า /Payment/Pay (มี Claimed_Amount) = อนุมัติแล้วลงรับเงินจริง (Payment_History / ใบเสร็จ /
         /// บัญชี) + ยืนยันการจอง ผ่าน PaymentService.ApproveReservationSlip · สลิปอื่น (ลงเงินไปแล้ว) = เปลี่ยนสถานะอย่างเดียวแบบเดิม
         /// </summary>
-        private string ApproveSlip(long slipId, out string okMessage)
+        private string ApproveSlip(long slipId, out string okMessage, decimal? amountOverride = null)
         {
             okMessage = null;
             int adminId = Session["ID"] != null ? Convert.ToInt32(Session["ID"]) : 0;
 
-            PaymentResult pr = new PaymentService(conn).ApproveReservationSlip(slipId, adminId > 0 ? (int?)adminId : null);
+            // เหตุผลยืนยันสลิปที่ตรวจไม่ผ่าน (ยอดไม่ตรง/ผู้รับผิด) — ใช้ได้เฉพาะ Owner/Admin (สลิปซ้ำยืนยันไม่ได้)
+            string overrideReason = (txtOverrideReason.Text ?? "").Trim();
+            if (overrideReason.Length == 0 || !Payments.SlipCheck.SlipVerificationService.CanOverrideCurrentUser()) overrideReason = null;
+
+            PaymentResult pr = new PaymentService(conn).ApproveReservationSlip(slipId, adminId > 0 ? (int?)adminId : null,
+                overrideReason, amountOverride);
             if (pr != null)
             {
                 codeInstance.Logs(conn, pr.Success ? "Slip Approved" : "Slip Approve Failed",
@@ -223,6 +251,10 @@ namespace Take_Time_BangPhra.Account
             };
 
             codeInstance.DatabaseInsertSafe(conn, query, parameters);
+            if (overrideReason != null)
+                Payments.SlipCheck.SlipVerificationService.RecordOverride(slipId,
+                    Payments.SlipCheck.SlipVerificationService.CurrentUserName(), overrideReason);
+            Payments.SlipCheck.SlipVerificationService.ReleaseQueueForSlip(slipId);   // ปล่อยคิวบัญชีที่พักไว้ (AWAITING_SLIP)
 
             // Log action
             codeInstance.Logs(conn, "Slip Approved",
@@ -255,11 +287,79 @@ namespace Take_Time_BangPhra.Account
             };
 
             codeInstance.DatabaseInsertSafe(conn, query, parameters);
+            Payments.SlipCheck.SlipVerificationService.MarkRejected(slipId);   // ปล่อยรหัสอ้างอิงสลิป (PHASE19_34)
 
             // Log action
             codeInstance.Logs(conn, "Slip Rejected",
                 $"SlipID: {slipId}, AdminID: {adminId}, Reason: {reason}",
                 Session["UserName"]?.ToString() ?? "SYSTEM");
+        }
+
+        /// <summary>ยอดที่ใช้เทียบตอนตรวจใหม่: ยอดที่ลูกค้าแจ้ง (Claimed_Amount) → ยอดใบเสร็จที่ผูก → ไม่มี</summary>
+        private decimal? LoadExpectedAmount(long slipId)
+        {
+            try
+            {
+                bool hasClaim = new PaymentService(conn).HasSlipClaimColumn();
+                DataTable dt = codeInstance.DatabaseQuerySafe(conn,
+                    "SELECT " + (hasClaim ? "ps.Claimed_Amount" : "CAST(NULL AS DECIMAL(18,2))") + @" AS Claimed,
+                            (SELECT TOP 1 ar.Total_Amount FROM Account_Receipt ar WHERE CAST(ar.ID AS NVARCHAR(50)) = CAST(ps.Account_Receipt_ID AS NVARCHAR(50))) AS RcptAmt
+                       FROM Payment_Slips ps WHERE ps.ID = @id",
+                    new Dictionary<string, object> { { "@id", slipId } });
+                if (dt.Rows.Count == 0) return null;
+                if (dt.Rows[0]["Claimed"] != DBNull.Value && Convert.ToDecimal(dt.Rows[0]["Claimed"]) > 0m) return Convert.ToDecimal(dt.Rows[0]["Claimed"]);
+                if (dt.Rows[0]["RcptAmt"] != DBNull.Value) return Convert.ToDecimal(dt.Rows[0]["RcptAmt"]);
+            }
+            catch { }
+            return null;
+        }
+
+        private decimal? LoadSlipAmount(long slipId)
+        {
+            var row = Payments.SlipCheck.SlipVerificationService.LoadSavedResult(slipId);
+            return row != null && row["Slip_Amount"] != DBNull.Value ? Convert.ToDecimal(row["Slip_Amount"]) : (decimal?)null;
+        }
+
+        /// <summary>คอลัมน์ "ผลตรวจสลิป" ในตาราง</summary>
+        protected string FormatVerify(object item)
+        {
+            try
+            {
+                var r = (DataRowView)item;
+                string st = r["Verify_Status"] == DBNull.Value ? null : r["Verify_Status"].ToString();
+                if (string.IsNullOrEmpty(st)) return "<span style='color:#999;'>ยังไม่ตรวจ</span>";
+                string color = st == "VERIFIED" || st == "ALLOCATED" ? "#2e7d32"
+                    : Payments.SlipCheck.SlipVerifyStatus.IsBlocking(st) ? "#c62828" : "#ef6c00";
+                var sb = new System.Text.StringBuilder();
+                sb.Append("<b style='color:").Append(color).Append("'>")
+                  .Append(Server.HtmlEncode(Payments.SlipCheck.SlipVerifyStatus.Thai(st))).Append("</b>");
+                if (r["Slip_Amount"] != DBNull.Value) sb.Append("<br/>สลิป ").Append(Convert.ToDecimal(r["Slip_Amount"]).ToString("N2"));
+                sb.Append("<br/><small>").Append(Server.HtmlEncode(Payments.SlipCheck.SlipVerifySource.Thai(Convert.ToString(r["Verify_Source"])))).Append("</small>");
+                if (r["Override_By"] != DBNull.Value)
+                    sb.Append("<br/><small style='color:#6a1b9a'>ยืนยันโดย ").Append(Server.HtmlEncode(r["Override_By"].ToString()))
+                      .Append(": ").Append(Server.HtmlEncode(Convert.ToString(r["Override_Reason"]))).Append("</small>");
+                string msg = Convert.ToString(r["Verify_Message"]);
+                if (!string.IsNullOrEmpty(msg))
+                    sb.Append("<br/><small title='").Append(Server.HtmlEncode(msg)).Append("'>")
+                      .Append(Server.HtmlEncode(msg.Length > 90 ? msg.Substring(0, 90) + "…" : msg)).Append("</small>");
+                return sb.ToString();
+            }
+            catch { return "-"; }
+        }
+
+        protected bool SlipVerifyOn => Payments.SlipCheck.SlipVerificationService.IsEnabled;
+
+        /// <summary>แสดงปุ่ม "อนุมัติตามยอดสลิป" เมื่อยอดสลิปต่างจากยอดที่แจ้ง</summary>
+        protected bool ShowApproveSlipAmount(object item)
+        {
+            try
+            {
+                var r = (DataRowView)item;
+                if (r["VerificationStatus"].ToString() != "PENDING" || r["Slip_Amount"] == DBNull.Value || r["PaymentAmount"] == DBNull.Value) return false;
+                return Convert.ToString(r["Verify_Status"]) != "DUPLICATE"
+                    && Math.Abs(Convert.ToDecimal(r["Slip_Amount"]) - Convert.ToDecimal(r["PaymentAmount"])) > 0.009m;
+            }
+            catch { return false; }
         }
 
         /// <summary>

@@ -430,6 +430,29 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
      ด้วยแหล่งเงินเกตเวย์เขียนให้). ตรวจสุขภาพข้อ 9 + Telegram poll (Global.asax, 15 นาที) ร่างรออนุมัติ/คืนเกตเวย์ไม่มีใบลดหนี้. สวิตช์ 2 ตัวใน
      Accounting Integration. ProfitLoss หักใบลดหนี้ + บวกส่วนที่ยึด; PaymentHistory การ์ด/ตัวกรอง REFUND. PHASE19_33 เปลี่ยนชื่อ `Credit_Note` schema เก่าเป็น
      `Credit_Note_Legacy_yyyyMMdd`. โค้ดใบลดหนี้เก่าใน `Class/AccountingService.cs` ลบแล้ว.
+18. **ตรวจสลิปก่อนออกเอกสาร (ต.ค. 2026, PHASE19_34, opt-in `SlipVerify_Enabled` ใน System_Config):** นโยบายเจ้าของ = SlipOK (ฟรี 100/เดือน) →
+   หมด/ใช้ไม่ได้ = อ่านตัวเลขยอดโอนจากรูปเอง → มีปัญหา = **ข้ามการตรวจ** (UNVERIFIED_BYPASS ใช้ยอดที่ลง ติดธงในแถวสลิป). โค้ด `Class/Payments/SlipCheck/`:
+   `SlipVerificationService` (Inspect=ข้อเท็จจริงของรูป cache ตาม SHA-256 60 นาที → Evaluate=เทียบยอด/ซ้ำ/ผู้รับ → Decide=ไป/หยุด/พักรอพนักงาน → SaveResult),
+   `SlipOkVerifier` (`POST https://api.slipok.com/api/line/apikey/{branch}` header `x-authorization`, multipart `data`=QR payload (หรือ `files`), `log=true`,
+   ไม่ส่ง `amount`; รหัส 1003/1004 โควต้า → ธง `Slip_Verify_Usage.Exhausted`, 1012/1013/1014 แนบ data; นับโควต้าเองรายเดือน),
+   `SlipQrDecoder` (ZXing.Net 0.16.11 `lib\net47\zxing.dll` + TLV mini-QR ธปท.: ธนาคาร+transRef+CRC16 — ไม่มี DLL = คืน null),
+   `LocalSlipAmountReader` (**tesseract.exe ผ่าน Process** ไม่ใช่ P/Invoke — native crash ไม่ล้ม w3wp, timeout kill ได้; heuristic คะแนนบรรทัด
+   "จำนวนเงิน/Amount" ทดสอบกับสลิปจริง SCB + KBank/KTB/BBL/PromptPay จำลอง; ซ่อม ฿→8 เฉพาะเทียบยอดที่ลง). ผลอ่านจาก OCR ไม่ใช่ข้อมูลธนาคาร.
+   **กฎ:** VERIFIED ต่าง ≤ `SlipVerify_Amount_Tolerance` (1.00) → ผ่าน + ใช้ยอดธนาคาร (เฉพาะ SlipOK) · MISMATCH → หยุด "สลิป X / ลง Y / ต่าง Z" (แก้ยอดตามสลิป /
+   ติ๊กแบ่งสลิปหลายการจอง → `Payment_Slip_Allocation` / Owner-Admin override + เหตุผล) · DUPLICATE (unique `UX_Payment_Slips_TransRef` บน ธนาคาร+transRef ยกเว้น
+   REJECTED/ALLOCATED; 1012 ของ SlipOK ไม่นับ — ฐานข้อมูลเราเป็นตัวตัดสิน) → หยุด ห้าม override (ยกเว้นใช้ยอดคงเหลือของสลิปที่แบ่งไว้ → แถวรอง ALLOCATED) ·
+   WRONG_RECEIVER (เทียบเลขปิดบังกับ `Account_Paid_How.Bank_Code/Bank_Account_No/PromptPay_Id` หรือ NextAcc `Account_Number`; ยังไม่ตั้งบัญชี = ข้าม) → หยุด, override ได้ ·
+   ช่องทางลูกค้าทำเอง: ออกเอกสารอัตโนมัติเฉพาะ SlipOK ยืนยัน+ยอดตรง ไม่งั้นพักรอพนักงาน (หน้าจองลูกค้า → `Reservation` PendingStatus + Deposit 0 +
+   `SubmitReservationSlipFileForVerification`; ต้องมี PHASE19_25). **จุดตรวจ:** Reserve (`RunSlipGate` ก่อนบันทึกใด ๆ ใน Button1 + `PreviewSlipCheck` หลังปุ่มอัปโหลด,
+   ไฟล์ชั่วคราว `{เบอร์}_{hash session+การจอง}.jpg`, `ApplySlipVerifyToRow` หลัง uploadSlip) · `PaymentService.GateUploadedSlip` (ProcessReservationPayment/
+   ProcessAdditionalPayment ก่อนสร้างสลิป/ใบเสร็จ) · `ApproveReservationSlip(…, overrideReason, amountOverride)` ลงยอดธนาคารแทน Claimed_Amount · หน้า
+   `Account/SlipVerification` (คอลัมน์ผลตรวจ, ตรวจใหม่, อนุมัติตามยอดสลิป, ช่องเหตุผล override) · `ActivityService.ReviewBooking` + รูมเซอร์วิส `btnMarkPaid`
+   (ไม่มีช่องเหตุผล → Owner/Admin กดซ้ำภายใน 10 นาที; กันซ้ำผ่าน `Slip_Verify_Log.Consumed`) · `MakePayment` เพิ่ม `Perm.Guard(FinReceipt)`. **Backstop:** `EnqueueReceipt` →
+   `HoldQueueIfSlipBlocked` (คิวเป็น `AWAITING_SLIP` — worker อ่านแค่ PENDING/FAILED) ปล่อยเมื่อ override/อนุมัติ (`ReleaseQueueForReceipt`: ตัวล่าสุด PENDING
+   ตัวเก่า SUPERSEDED). Telegram เมื่อซ้ำ/ผู้รับผิด/override (`Notify.Ev.PaymentOnline`). PDPA: เก็บเลขบัญชีที่ปิดบังเท่านั้น ส่ง QR payload แทนรูปเมื่ออ่าน QR ได้; ไม่ log คีย์.
+   ตั้งค่า: `Admin/Settings/SlipCheckSettings` (สถานะ/โควต้าเดือนนี้/บัญชีรับเงิน/ทดสอบด้วยสลิป). **Deploy:** NuGet restore ZXing.Net 0.16.11; ติดตั้ง Tesseract 5
+   (UB Mannheim, เลือกภาษา Thai) ที่ `C:\Program Files\Tesseract-OCR` หรือวาง `tesseract.exe`+DLL ที่ `~/App_Data/tesseract` และ `tha/eng.traineddata`
+   (tessdata_fast) ที่ `~/App_Data/tessdata`; App Pool identity ต้อง execute ได้ + เขียน `%TEMP%`; VC++ 2015-2022 x64 (ตัวติดตั้งใส่ให้). ไม่มีอะไรเลย = ข้ามการตรวจ.
 
 ## Queue resilience (ส.ค. 2026 — หลังเคส NextAcc ล่มทั้งแอป)
 

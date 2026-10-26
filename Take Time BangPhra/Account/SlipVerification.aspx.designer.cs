@@ -92,6 +92,9 @@ namespace Take_Time_BangPhra.Account
         /// </remarks>
         protected global::System.Web.UI.WebControls.Button btnSearch;
 
+        /// <summary>txtOverrideReason control (เหตุผลยืนยันสลิปที่ตรวจไม่ผ่าน — PHASE19_34).</summary>
+        protected global::System.Web.UI.WebControls.TextBox txtOverrideReason;
+
         /// <summary>
         /// gvSlips control.
         /// </summary>

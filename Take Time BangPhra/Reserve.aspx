@@ -1036,6 +1036,19 @@
                         <asp:Image ID="Image1" runat="server" Width="90%" style="max-width: 500px; border: 1px solid #D7CCC8; border-radius: 5px;"/>
                     </div>
 
+                    <%-- 🔎 ผลตรวจสลิป (PHASE19_34) — แสดงหลังกดอัปโหลด และเมื่อด่านก่อนออกใบเสร็จหยุด --%>
+                    <asp:Panel ID="pnlSlipCheck" runat="server" Visible="false">
+                        <asp:Literal ID="litSlipCheck" runat="server" />
+                        <div id="divSlipStaffOpts" runat="server" visible="false" style="font-size:13px; line-height:2; max-width:560px;">
+                            <asp:Button ID="btnSlipUseAmount" runat="server" Text="ใช้ยอดตามสลิป" OnClick="btnSlipUseAmount_Click" CausesValidation="false" CssClass="reservation-button" />
+                            <br /><asp:CheckBox ID="chkSlipAllocate" runat="server" Text=" แบ่งสลิปนี้ใช้กับหลายการจอง (โอนรวมครั้งเดียว — ยอดที่เหลือใช้กับการจองอื่นได้)" />
+                            <span id="spanSlipOverride" runat="server">
+                                <br /><asp:CheckBox ID="chkSlipOverride" runat="server" Text=" ยืนยันใช้สลิปนี้แม้ตรวจไม่ผ่าน (Owner/Admin)" />
+                                <asp:TextBox ID="txtSlipOverrideReason" runat="server" CssClass="rounded-textbox" Width="280px" MaxLength="500" placeholder="เหตุผล (บังคับ) เช่น ตรวจในแอปธนาคารแล้ว" />
+                            </span>
+                        </div>
+                    </asp:Panel>
+
                     <!-- Payment History GridView (shown in CheckIn/Edit/CheckOut modes) -->
                     <div style="margin-top: 20px;" id="divPaymentHistory" runat="server" visible="false">
                         <h4 style="color: #5D4037; margin-bottom: 10px;">📋 ประวัติการชำระเงิน</h4>

@@ -132,6 +132,10 @@
     <Reference Include="Newtonsoft.Json, Version=13.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed, processorArchitecture=MSIL">
       <HintPath>..\packages\Newtonsoft.Json.13.0.3\lib\net45\Newtonsoft.Json.dll</HintPath>
     </Reference>
+    <!-- ZXing.Net 0.16.11 — อ่าน mini-QR ของสลิปโอน (Class/Payments/SlipCheck/SlipQrDecoder.cs) managed ล้วน -->
+    <Reference Include="zxing">
+      <HintPath>..\packages\ZXing.Net.0.16.11\lib\net47\zxing.dll</HintPath>
+    </Reference>
     <Reference Include="Npgsql, Version=8.0.7.0, Culture=neutral, PublicKeyToken=5d8b90d52f46fda7, processorArchitecture=MSIL">
       <HintPath>..\packages\Npgsql.8.0.7\lib\netstandard2.0\Npgsql.dll</HintPath>
     </Reference>
@@ -522,6 +526,7 @@
     <Content Include="Admin\Settings\ProductAccounting.aspx" />
     <Content Include="Admin\Settings\StockOutReasons.aspx" />
     <Content Include="Admin\Settings\SalesDocPolicy.aspx" />
+    <Content Include="Admin\Settings\SlipCheckSettings.aspx" />
     <Content Include="Admin\CRM\MemberVouchers.aspx" />
     <Content Include="Admin\CRM\MemberHub.aspx" />
     <Content Include="Admin\CRM\ReviewAnalytics.aspx" />
@@ -1520,6 +1525,13 @@
     <Compile Include="Member\Card.aspx.designer.cs">
       <DependentUpon>Card.aspx</DependentUpon>
     </Compile>
+    <Compile Include="Admin\Settings\SlipCheckSettings.aspx.cs">
+      <DependentUpon>SlipCheckSettings.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Settings\SlipCheckSettings.aspx.designer.cs">
+      <DependentUpon>SlipCheckSettings.aspx</DependentUpon>
+    </Compile>
     <Compile Include="Admin\Settings\SalesDocPolicy.aspx.cs">
       <DependentUpon>SalesDocPolicy.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>
@@ -1614,6 +1626,11 @@
     <Compile Include="Class\Payments\PaymentGatewayConfig.cs" />
     <Compile Include="Class\Payments\IPaymentGateway.cs" />
     <Compile Include="Class\Payments\PaysoGateway.cs" />
+    <Compile Include="Class\Payments\SlipCheck\LocalSlipAmountReader.cs" />
+    <Compile Include="Class\Payments\SlipCheck\SlipOkVerifier.cs" />
+    <Compile Include="Class\Payments\SlipCheck\SlipQrDecoder.cs" />
+    <Compile Include="Class\Payments\SlipCheck\SlipVerificationService.cs" />
+    <Compile Include="Class\Payments\SlipCheck\SlipVerifyModels.cs" />
     <Compile Include="Class\Payments\PaymentTransactionStore.cs" />
     <Compile Include="Class\Payments\OnlinePaymentService.cs" />
     <Compile Include="Class\Payments\OmiseGateway.cs" />
