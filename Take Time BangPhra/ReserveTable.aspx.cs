@@ -184,6 +184,9 @@ namespace Take_Time_BangPhra
 
             var sb = new StringBuilder();
             bool inStaffPart = false;
+            // ไฮไลต์ส้มเฉพาะใบที่ "ไม่รวมอาหารเช้า" — หมายเหตุแผนราคาบางแถวใน MapDataWithSTAAH เป็นชื่อ OTA
+            // (เช่น "Trip dot com") หรือแผนรวมอาหารเช้า ซึ่งไม่ต้องเตือนหน้างาน → แสดงเป็นบรรทัดธรรมดา
+            bool noBreakfast = IsNoBreakfastRemark(raw);
 
             foreach (string rawLine in raw.Replace("\r\n", "\n").Replace("\r", "\n").Split('\n'))
             {
@@ -204,7 +207,10 @@ namespace Take_Time_BangPhra
                 else if (line.StartsWith(planKey, StringComparison.Ordinal))
                 {
                     string v = line.Substring(planKey.Length).Trim();
-                    sb.Append("<div><span class=\"rm-plan\">").Append(Server.HtmlEncode(v)).Append("</span></div>");
+                    if (noBreakfast)
+                        sb.Append("<div><span class=\"rm-plan\">").Append(Server.HtmlEncode(v)).Append("</span></div>");
+                    else
+                        sb.Append("<div class=\"rm-line\">").Append(Server.HtmlEncode(line)).Append("</div>");
                 }
                 else if (line.StartsWith(reqKey, StringComparison.Ordinal))
                 {
@@ -216,6 +222,30 @@ namespace Take_Time_BangPhra
                 }
             }
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// ใบนี้ "ไม่รวมอาหารเช้า" ไหม — ดูจากบรรทัดหมายเหตุแผนราคา + แผนราคา (ชื่อแผนจาก OTA/STAAH)
+        /// เจอคำบอกว่ารวมอาหารเช้า (with breakfast / รวมอาหารเช้า) โดยไม่มีคำปฏิเสธ = รวม → ไม่ไฮไลต์
+        /// </summary>
+        private static bool IsNoBreakfastRemark(string remark)
+        {
+            if (string.IsNullOrEmpty(remark)) return false;
+            string planText = "";
+            foreach (string l in remark.Replace("\r\n", "\n").Replace("\r", "\n").Split('\n'))
+            {
+                string t = l.Trim();
+                if (t.StartsWith("หมายเหตุแผนราคา:", StringComparison.Ordinal) || t.StartsWith("แผนราคา:", StringComparison.Ordinal))
+                    planText += " " + t;
+            }
+            if (planText.Length == 0) return false;
+            string low = planText.ToLowerInvariant();
+            string[] noBf = { "ไม่รวมอาหารเช้า", "ไม่มีอาหารเช้า", "ไม่รวมอาหาร", "room only", "roomonly", "without breakfast",
+                              "no breakfast", "breakfast not included", "excl. breakfast", "exclude breakfast", "excluding breakfast" };
+            foreach (string k in noBf)
+                if (low.IndexOf(k, StringComparison.Ordinal) >= 0) return true;
+            // รหัสแผน "RO" (Room Only) เป็นคำเดี่ยว เช่น "Villa_RO_prepay" — ไม่นับ "_Room" / "Room With Breakfast"
+            return System.Text.RegularExpressions.Regex.IsMatch(low, @"(^|[\s_\-(/])ro($|[\s_\-)/])");
         }
 
         /// <summary>ป้ายสถานะ e-Tax บนแถวการจอง (ว่าง = ใบนี้ไม่มี e-Tax)</summary>
