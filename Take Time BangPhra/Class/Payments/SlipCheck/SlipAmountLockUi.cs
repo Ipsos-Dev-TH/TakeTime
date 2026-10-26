@@ -31,7 +31,7 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
             {
                 var cs = page.ClientScript;
                 if (!cs.IsClientScriptIncludeRegistered(typeof(SlipAmountLockUi), "slipLockJs"))
-                    cs.RegisterClientScriptInclude(typeof(SlipAmountLockUi), "slipLockJs", page.ResolveUrl("~/Scripts/slip-amount-lock.js?v=37"));
+                    cs.RegisterClientScriptInclude(typeof(SlipAmountLockUi), "slipLockJs", page.ResolveUrl("~/Scripts/slip-amount-lock.js?v=38"));
                 if (!cs.IsStartupScriptRegistered(typeof(SlipAmountLockUi), "slipLockCss"))
                     cs.RegisterStartupScript(typeof(SlipAmountLockUi), "slipLockCss",
                         "(function(){if(document.getElementById('slipLockCss'))return;var s=document.createElement('style');s.id='slipLockCss';s.appendChild(document.createTextNode("
@@ -53,11 +53,11 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
             {
                 var cs = page.ClientScript;
                 if (!cs.IsClientScriptIncludeRegistered(typeof(SlipAmountLockUi), "slipFirstJs"))
-                    cs.RegisterClientScriptInclude(typeof(SlipAmountLockUi), "slipFirstJs", page.ResolveUrl("~/Scripts/slip-first.js?v=1"));
+                    cs.RegisterClientScriptInclude(typeof(SlipAmountLockUi), "slipFirstJs", page.ResolveUrl("~/Scripts/slip-first.js?v=2"));
                 if (!cs.IsClientScriptBlockRegistered(typeof(SlipAmountLockUi), "slipFirstCss"))
                     cs.RegisterClientScriptBlock(typeof(SlipAmountLockUi), "slipFirstCss",
                         "(function(){if(document.getElementById('slipFirstCss'))return;var l=document.createElement('link');l.id='slipFirstCss';l.rel='stylesheet';l.href='"
-                        + HttpUtility.JavaScriptStringEncode(page.ResolveUrl("~/Content/slip-first.css?v=1")) + "';document.getElementsByTagName('head')[0].appendChild(l);})();", true);
+                        + HttpUtility.JavaScriptStringEncode(page.ResolveUrl("~/Content/slip-first.css?v=2")) + "';document.getElementsByTagName('head')[0].appendChild(l);})();", true);
             }
             catch { }
         }

@@ -494,6 +494,24 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
      (ไม่มี JS) → `SlipFirstPreSubmit` อ่านก่อน (ล็อก = ไปต่อ, กรอกเอง/หยุด = หยุดให้ดู); เปลี่ยนวิธีชำระ = อ่านซ้ำจาก cache / ไม่ใช่โอนแล้วปลดล็อก.
      ด่านเซิร์ฟเวอร์ไม่เปลี่ยน. `MakePayment` ลำดับ วิธี→สลิป→ยอด (AJAX preview ส่ง event `sliplock:start|result|error`, ลิงก์ "ไม่มีสลิป? กรอกยอดเอง")
      · `Pay.aspx` กล่องแนบสลิปแบบเดียวกัน. ไม่มี data-sf / สคริปต์โหลดไม่ได้ = หน้าตาเดิม. ต้องทดสอบบน Windows.
+   - **ตรวจสลิป async + ย่อรูป + เติมยอด + ไม่มีสลิป (ต.ค. 2026 — เจ้าของให้ตัดสินเอง):**
+     ① `SlipFirst.prepare` (slip-first.js) ย่อก่อนส่งทุกหน้า (Reserve/MakePayment/Pay): ด้านยาว 1600 px JPEG 0.85 smoothing high, หมุนตาม EXIF,
+     ≤600 KB/PDF/ไม่เล็กลง = ไฟล์เดิม (วัดสลิปจริง 6 ใบใน Chromium: QR 6/6 ยอดเท่าเดิม 6/6; 1024/0.75 เริ่มทำ QR/ยอดหาย). Reserve ส่งไป
+     `API/SlipCheck.ashx` (IRequiresSessionState; nonce ต่อหน้าใน Session ผูก id/command/พนักงาน-ลูกค้า — `SlipUploadStore.IssueContext`,
+     header `X-Slip-Check` + Origin/Referer โฮสต์เดียวกัน, 20 ครั้ง/session + 60/IP ต่อ 10 นาที, ≤8 MB + magic bytes, Web.config
+     `maxRequestLength` 10 MB เฉพาะ path นี้) → เขียนไฟล์ชั่วคราวชื่อเดิม (`SlipUploadStore.TempFilename` = สูตร SlipTempFilename) →
+     VerifyWithLock + `SlipFirstVerdict.Build` (แยกจาก ShowSlipCheck — ตัวเดียวกันทั้ง postback/async) → JSON; QR หายหรืออ่านยอดไม่ได้โดยไม่มีผล
+     SlipOK = ส่งรูปเดิมซ้ำ 1 ครั้ง; API ใช้ไม่ได้ = กด Button3 เดิมด้วยรูปที่ย่อ. postback ถัดไป/Button1 `SfAdoptAsyncSlip` อ่านซ้ำจากไฟล์ (cache) ·
+     RunSlipGate ตรวจจากไฟล์เสมอ (ไม่เชื่อค่าจากหน้า). ② พนักงาน: เลือกวิธีชำระล่าสุดของผู้ใช้ไว้ให้ (cookie `ttRvPH_{hash}` เก็บแค่ ID, เฉพาะเปิดยอดล็อก)
+     + สถานะ pick มีปุ่มลัด ≤6 วิธี (ล่าสุดก่อน); **ไม่เพิ่มตัวเลือก "ยังไม่รับเงิน"** (เส้นบันทึกผูกวิธีชำระ→ใบเสร็จ ต้องมีสถานะไม่ออกใบเสร็จแยก — เลื่อนไว้).
+     ③ ลูกค้าสลิปต่ำกว่ามัดจำขั้นต่ำ (80%): การ์ด "ยอดรวมจากสลิป X / ขั้นต่ำ Y / ขาดอีก Z" + คัดลอกยอดที่ขาด + "แนบสลิปเพิ่ม" (สูงสุด 3 ใบ,
+     ไฟล์ `_t{n}`, ลบได้) + ปุ่มติดต่อ. `SlipUploadStore.EvaluateCustomerSet`: ทุกใบต้องล็อกยอด, ซ้ำ DB/ซ้ำในชุด (hash หรือธนาคาร+transRef) = ใช้ไม่ได้,
+     CONTACT_ADMIN = ใช้ไม่ได้ / ALLOW_MANUAL = รอพนักงาน. บันทึก (`RunSlipGateTopUp`): ยอด = ผลรวมจากไฟล์; ธนาคารยืนยันครบ = **ใบเสร็จมัดจำใบเดียว**
+     ยอดรวม + Payment_Slips ต่อใบผูก Account_Receipt_ID เดียว (`SfSaveTopUpRows` — NextAcc แนบสลิปครบ, คิว/บัญชีไม่เปลี่ยน); มีใบรอตรวจ = การจองรอตรวจ
+     + สลิปรอตรวจแยกใบ (Claimed ต่อใบ, อนุมัติทีละใบตามกลไกเดิม). ใบเดียว: ยอดล็อกต่ำกว่าเกณฑ์ = หยุดหลังล็อก (เดิมด่านขั้นต่ำเชื่อยอดที่หน้าส่ง).
+     ④ MakePayment ช่องทางโอนโดยไม่มีสลิป: เฉพาะ `CanRecordWithoutSlip` (Owner / Admin ที่มี FIN_RECEIPT|SYS_ACCOUNTING|FIN_REPORT — คนอื่นไม่เห็นลิงก์
+     `pnlNoSlip` และเซิร์ฟเวอร์ปฏิเสธ) + เหตุผล ≥10 ตัว → หมายเหตุ `[ไม่มีสลิป — รอตรวจ]` + `RecordNoSlipPayment` (Logs, Slip_Verify_Log NO_SLIP,
+     Telegram 1 ครั้ง/ผู้ใช้/10 นาที). ปิดยอดล็อก = เดิมทุกอย่าง. ต้องทดสอบบน Windows.
 19. **กันเอกสารซ้ำ + ตัวตรวจเทียบ (ต.ค. 2026, PHASE19_35 — เคส #149286: REC-…0001/0002 + TIV-…0002/0003 ซ้อน ไม่มีใบถูก void):**
    - **แนบไฟล์:** `LookupReceiptAttachmentFiles` = PDF ของใบเอง (`{เลขใบ}[_uid].pdf` โฟลเดอร์ปี/เดือนของ `Created_Date` ±1) + สลิป
      `Payment_Slips.Account_Receipt_ID = ใบนี้` (สลิประดับการจองเฉพาะเมื่อการจองมีใบเดียว) — ใช้ทั้ง sync และ "📎 ไฟล์" ในหน้าต่างการจอง.
