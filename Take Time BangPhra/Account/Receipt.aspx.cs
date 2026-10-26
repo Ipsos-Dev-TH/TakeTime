@@ -1440,13 +1440,17 @@ namespace Take_Time_BangPhra.Account.Report
                         {
                             File.Delete(path + "\\" + Year + "\\" + Month + "\\" + docNum + ".pdf");
                         }
-                        using (FileStream fs = new FileStream(path + "\\" + Year + "\\" + Month + "\\" + docNum + "_" + uid + ".pdf", FileMode.Append))
-                        { 
+                        // FileMode.Create (เดิม Append): เขียนทับเสมอ ไม่ต่อท้ายไฟล์ที่อาจค้างอยู่
+                        using (FileStream fs = new FileStream(path + "\\" + Year + "\\" + Month + "\\" + docNum + "_" + uid + ".pdf", FileMode.Create))
+                        {
                             fs.Write(bytes, 0, bytes.Length);
                         }
                     }
                     catch (Exception ex)
                     {
+                        // เดิมกลืนเงียบ → PDF ในหน้าแก้ไข/ดูเอกสารยังเป็นรุ่นก่อนแก้โดยไม่มีใครรู้
+                        code2.Logs(conn, "Receipt",
+                            $"สร้าง PDF ใบ {docNum} ไม่สำเร็จ — ไฟล์เดิม (รุ่นก่อนแก้) ยังค้าง: {ex.Message}", "SYSTEM");
                     }
 
                     if (CheckBox5.Checked == true)
@@ -1656,6 +1660,7 @@ namespace Take_Time_BangPhra.Account.Report
 
 
                 // Auto-sync receipt to accounting
+                bool depositRealigned = false;
                 try
                 {
                     var config = new AccountingConfig(conn);
@@ -1668,6 +1673,10 @@ namespace Take_Time_BangPhra.Account.Report
                         {
                             string originalDocNum = Session["EditOriginalDocNum"]?.ToString() ?? docNum;
                             sync.EnqueueVoidReceipt(originalDocNum);
+                            // ยอดหักมัดจำ = บรรทัดติดลบที่เหลือในใบ (ลบบรรทัดหักมัดจำ = 0) — ต้องหลัง VOID ซึ่งจับยอดที่ลงไว้จริง
+                            // (เคส #149366: คอลัมน์ค้าง 4,700 จากรุ่นก่อนแก้ → CREATE ใหม่ล้ม "หักมัดจำเกินที่รับจริง" ทุก Retry)
+                            sync.RealignDepositAppliedToLines(docNum);
+                            depositRealigned = true;
                         }
 
                         // Enqueue เอกสารใหม่/อัพเดท
@@ -1697,6 +1706,11 @@ namespace Take_Time_BangPhra.Account.Report
                 catch (Exception accEx)
                 {
                     code2.Logs(conn, "Accounting Sync", $"Receipt auto-sync error (Receipt page): {accEx.Message}", "SYSTEM");
+                }
+                // ไม่ได้เชื่อม NextAcc ก็ยังต้องตั้งยอดหักมัดจำให้ตรงบรรทัด (ตารางจอง/เช็คเอาท์คำนวณมัดจำคงเหลือจากคอลัมน์นี้)
+                if (command == "edit" && !depositRealigned)
+                {
+                    try { new AccountingSyncService(conn).RealignDepositAppliedToLines(docNum); } catch { }
                 }
 
                 // ── ตรวจซ้ำว่า "ผู้ซื้อ" ถูกผูกกับใบนี้จริง ────────────────────────────────
