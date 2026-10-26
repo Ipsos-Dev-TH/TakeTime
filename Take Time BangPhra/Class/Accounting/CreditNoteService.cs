@@ -133,6 +133,9 @@ namespace Take_Time_BangPhra.Integration
             public DateTime Date;
             public decimal Total, Vat, DepositApplied, Credited, Creditable;
             public bool IsDeposit;
+            /// <summary>ใบของ folio การจอง (มัดจำ / มีบรรทัดค่าห้อง / ผูก Payment_History ของการจอง) — false = ใบอื่นที่แค่ผูกเลขจอง
+            /// (รูมเซอร์วิส/POS ชำระทันที) ไม่รวมในยอดคืนตอนยกเลิกโดยอัตโนมัติ</summary>
+            public bool IsFolio = true;
             public readonly List<SourceLine> Lines = new List<SourceLine>();
             public string DocType => IsDeposit ? SrcDeposit : SrcTaxInvoice;
         }
@@ -155,7 +158,23 @@ namespace Take_Time_BangPhra.Integration
             public string CustomerName, Status;
             public readonly List<SourceReceipt> Receipts = new List<SourceReceipt>();
             public decimal TotalCreditable { get { decimal s = 0; foreach (var r in Receipts) s += r.Creditable; return s; } }
+            /// <summary>ยอดคืนได้เฉพาะใบของ folio การจอง (ค่าเริ่มต้นตอนยกเลิก)</summary>
+            public decimal FolioCreditable { get { decimal s = 0; foreach (var r in Receipts) if (r.IsFolio) s += r.Creditable; return s; } }
             public bool HasGateway;
+            /// <summary>CHANNEL | HOTEL | UNKNOWN | NONE (ReservationBalance) · Ota_Revenue_Ref ของการจอง (ว่าง = ไม่มี/ยังไม่รัน migration)</summary>
+            public string CollectMode = "", OtaRevenueRef = "";
+            /// <summary>ใบที่ไม่นำมาคืน (เงิน OTA ที่ปรับเป็นลูกหนี้ OTA แล้ว) — แสดงเหตุผลให้ผู้ใช้เห็น</summary>
+            public readonly List<string> Excluded = new List<string>();
+            public bool IsChannelCollect => CollectMode == ReservationBalance.ModeChannel;
+        }
+
+        /// <summary>ผลตรวจว่ายกเลิก/ปิดเงินค้างของการจองได้ไหม (CheckCancellable)</summary>
+        public sealed class CancelCheck
+        {
+            public bool Allowed;
+            /// <summary>การจองถูกยกเลิกไปแล้ว (เลื่อนวันแล้วยกเลิก / ยกเลิกผ่านใบลดหนี้แต่ใบร่างถูกยกเลิก) — คืน/ยึดเงินค้างอย่างเดียว ไม่เปลี่ยนสถานะซ้ำ</summary>
+            public bool SettleOnly;
+            public string Message = "";
         }
 
         // ── โครงสร้าง ───────────────────────────────────────────────────────────
@@ -265,6 +284,163 @@ namespace Take_Time_BangPhra.Integration
             if (AccountingSyncService.IsOtaSalesDocRef(s)) return true;
             if (s.StartsWith("OTA-", StringComparison.OrdinalIgnoreCase)) return true;
             return false;   // ใบสรุปขายหน้าร้าน (POSDAY…) = ขายจริงให้ลูกค้า walk-in — ออกใบลดหนี้คืนสินค้าได้
+        }
+
+        public const string StatusPostponeCancelled = "ยกเลิกการเลื่อนวันเข้าพัก";
+
+        /// <summary>
+        /// เข้าพักแล้ว/เช็คเอาท์แล้ว — กฎเดียวกับ PaymentService.ProcessReservationPayment (arrived):
+        /// เช็คเอาท์จริงเขียน 'เสร็จสิ้น' (sp_ProcessCheckout) · ตารางการจองใช้ 'เช็คเอ้าท์แล้ว' · 'ไม่มาเช็คอิน' (no-show) ไม่ใช่เข้าพัก
+        /// </summary>
+        public static bool IsArrivedStatus(string status)
+        {
+            string s = (status ?? "").Trim();
+            return s == "เช็คอินแล้ว" || s == "เสร็จสิ้น"
+                   || s.StartsWith("เช็คเอาท์", StringComparison.Ordinal)
+                   || s.StartsWith("เช็คเอ้าท์", StringComparison.Ordinal);
+        }
+
+        /// <summary>มีใบลดหนี้ (ยังไม่ยกเลิก) ของการจองนี้/ใบเสร็จของการจองนี้ — ปุ่มยกเลิกแบบเดิมต้องไม่ void ใบเสร็จ/ลงคืน-ริบซ้ำ</summary>
+        public static bool HasActiveCreditNotes(string conn, int reservationId)
+        {
+            if (reservationId <= 0 || !TableReady(conn)) return false;
+            try
+            {
+                var dt = new code().DatabaseQuerySafe(conn,
+                    @"SELECT TOP 1 1 AS X FROM Credit_Note CN
+                       WHERE CN.Status <> 'VOIDED'
+                         AND (CN.Reservation_ID = @id
+                              OR CN.Source_Receipt_ID IN (SELECT ID FROM Account_Receipt WHERE Reservation_ID = @id))",
+                    new Dictionary<string, object> { { "@id", reservationId } });
+                return dt != null && dt.Rows.Count > 0;
+            }
+            catch { return false; }
+        }
+
+        /// <summary>เคยยกเลิกการจองนี้ผ่านใบลดหนี้ (มีชุด CXL-{id}-… แม้ใบร่างถูกยกเลิกภายหลัง)</summary>
+        private bool HasCancelBatch(int reservationId)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_conn,
+                    "SELECT TOP 1 1 AS X FROM Credit_Note WHERE Cancel_Batch LIKE @p",
+                    new Dictionary<string, object> { { "@p", "CXL-" + reservationId.ToString(Inv) + "-%" } });
+                return dt != null && dt.Rows.Count > 0;
+            }
+            catch { return false; }
+        }
+
+        /// <summary>เคยเข้าคิวคืน/ริบมัดจำแบบเดิม (REFUND_DEPOSIT / FORFEIT_DEPOSIT) ของการจองนี้ — ห้ามคืน/ยึดผ่านใบลดหนี้ซ้ำ</summary>
+        private bool LegacyDepositActionQueued(int reservationId)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_conn,
+                    @"SELECT TOP 1 1 AS X FROM Accounting_Sync_Queue
+                       WHERE Entity_Type = 'RESERVATION' AND CAST(Entity_ID AS NVARCHAR(50)) = @id
+                         AND Action_Type IN ('REFUND_DEPOSIT', 'FORFEIT_DEPOSIT') AND ISNULL(Status, '') <> 'CANCELLED'",
+                    new Dictionary<string, object> { { "@id", reservationId.ToString(Inv) } });
+                return dt != null && dt.Rows.Count > 0;
+            }
+            catch { return false; }
+        }
+
+        /// <summary>สลิปที่ลูกค้าแนบเองยังรอตรวจ (CLAUDE.md ข้อ 16) — เงินอาจเข้าบัญชีแล้วแต่ยังไม่ลงระบบ</summary>
+        public int PendingSlipCount(int reservationId)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_conn,
+                    @"IF OBJECT_ID('dbo.Payment_Slips','U') IS NOT NULL
+                        SELECT COUNT(*) AS N FROM Payment_Slips
+                         WHERE Reservation_ID = @id AND VerificationStatus = 'PENDING' AND ISNULL(IsActive, 1) = 1
+                      ELSE SELECT 0 AS N",
+                    new Dictionary<string, object> { { "@id", reservationId } });
+                return dt != null && dt.Rows.Count > 0 ? Convert.ToInt32(dt.Rows[0][0]) : 0;
+            }
+            catch { return 0; }
+        }
+
+        /// <summary>
+        /// ใบเสร็จ "เงินสดปลอม" ของใบ OTA Channel Collect ที่ปรับเป็นลูกหนี้ OTA แล้ว (Payment_History OTA_RECLASS /
+        /// Reservation.Ota_Revenue_Ref = 'RECLASS-{ใบเสร็จ}') — โรงแรมไม่ได้รับเงินนี้ OTA เป็นผู้คืนลูกค้า ⇒ ห้ามคืน/ลดหนี้จากโรงแรม
+        /// </summary>
+        public bool IsOtaReclassed(string receiptId, int reservationId)
+        {
+            if (string.IsNullOrWhiteSpace(receiptId)) return false;
+            string rid = receiptId.Trim();
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_conn,
+                    "SELECT TOP 1 1 AS X FROM Payment_History WHERE Receipt_ID = @r AND Status = 'OTA_RECLASS'",
+                    new Dictionary<string, object> { { "@r", rid } });
+                if (dt != null && dt.Rows.Count > 0) return true;
+            }
+            catch { }
+            return reservationId > 0 && LoadOtaRevenueRef(reservationId).Equals("RECLASS-" + rid, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>Reservation.Ota_Revenue_Ref — ไม่มีคอลัมน์ (ยังไม่รัน migration) = ""</summary>
+        private string LoadOtaRevenueRef(int reservationId)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_conn,
+                    "SELECT TOP 1 ISNULL(Ota_Revenue_Ref, N'') AS R FROM Reservation WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", reservationId } });
+                return dt != null && dt.Rows.Count > 0 ? Str(dt.Rows[0][0]).Trim() : "";
+            }
+            catch { return ""; }
+        }
+
+        /// <summary>
+        /// ยกเลิก/ปิดเงินค้างได้ไหม:
+        ///   · เข้าพัก/เช็คเอาท์แล้ว ('เช็คอินแล้ว', 'เสร็จสิ้น', 'เช็คเอ้าท์แล้ว') → ไม่ได้ — ออกก่อนกำหนด/ลดคืน = ใบลดหนี้ manual ต่อใบเสร็จ
+        ///   · ยกเลิกแล้ว → ได้เฉพาะ "ปิดเงินค้าง" (ไม่เปลี่ยนสถานะซ้ำ) เมื่อเป็นใบเลื่อนวันที่ถูกยกเลิก หรือเคยยกเลิกผ่านใบลดหนี้
+        ///     และไม่เคยคืน/ริบมัดจำแบบเดิม (กันลงบัญชีซ้ำ)
+        ///   · มีสลิปลูกค้ารอตรวจ → ต้องตรวจสลิปก่อน (อนุมัติ = เงินเข้า / ปฏิเสธ = ไม่มีเงิน)
+        /// </summary>
+        public CancelCheck CheckCancellable(ReservationMoney money)
+        {
+            var c = new CancelCheck();
+            if (money == null) { c.Message = "ไม่พบการจอง"; return c; }
+            string st = (money.Status ?? "").Trim();
+            if (st.StartsWith("ลบ", StringComparison.Ordinal))
+            { c.Message = "ใบนี้ถูกย้ายไปใบใหม่จากการเลื่อนวันเข้าพัก (" + st + ") — ทำรายการที่ใบใหม่"; return c; }
+            if (IsArrivedStatus(st))
+            {
+                c.Message = "การจองสถานะ \"" + st + "\" (เข้าพัก/เช็คเอาท์แล้ว) — ยกเลิกการจองไม่ได้: ออกก่อนกำหนด/ลดจำนวนคืน/คืนเงินบางส่วน " +
+                            "ให้ออกใบลดหนี้ manual ต่อใบเสร็จ (แท็บ \"ออกใบลดหนี้\")";
+                return c;
+            }
+            if (st.StartsWith("ยกเลิก", StringComparison.Ordinal))
+            {
+                bool ok = (st == StatusPostponeCancelled || HasCancelBatch(money.ReservationId))
+                          && !LegacyDepositActionQueued(money.ReservationId);
+                if (!ok)
+                {
+                    c.Message = "การจองนี้ถูกยกเลิกไปแล้ว (" + st + ") ด้วยปุ่ม/ขั้นตอนเดิม — เงินถูกคืน/ริบด้วยรายการเดิม ห้ามทำซ้ำที่นี่";
+                    return c;
+                }
+                if (money.TotalCreditable <= 0.005m)
+                {
+                    c.Message = "การจองนี้ถูกยกเลิกแล้ว และไม่มีเงินค้างให้คืน/ยึด";
+                    return c;
+                }
+                c.SettleOnly = true;
+            }
+            int slips = PendingSlipCount(money.ReservationId);
+            if (slips > 0)
+            {
+                c.SettleOnly = false;
+                c.Message = "มีสลิปที่ลูกค้าแนบรอตรวจ " + slips + " ใบ — ตรวจที่หน้า \"ตรวจสลิป\" (Account/SlipVerification) ก่อน: " +
+                            "อนุมัติ = เงินเข้าแล้ว (คืนได้) / ปฏิเสธ = ไม่มีเงิน แล้วจึงยกเลิกการจอง";
+                return c;
+            }
+            c.Allowed = true;
+            if (c.SettleOnly)
+                c.Message = "การจองถูกยกเลิกแล้ว (" + st + ") แต่ยังมีเงินรับไว้ — บันทึกคืน/ยึดเงินค้างได้ (ไม่เปลี่ยนสถานะการจองซ้ำ)";
+            return c;
         }
 
         /// <summary>ยอดที่ออกใบลดหนี้/ยึดไปแล้วของใบต้นทาง (ไม่นับใบที่ยกเลิก)</summary>
@@ -408,10 +584,26 @@ namespace Take_Time_BangPhra.Integration
             }
             catch { }
 
+            try
+            {
+                var bal = ReservationBalance.Load(_conn, reservationId);
+                if (bal != null) m.CollectMode = bal.CollectMode ?? "";
+            }
+            catch { }
+            m.OtaRevenueRef = LoadOtaRevenueRef(reservationId);
+
+            // Folio = มัดจำ / ผูก Payment_History ของการจอง (รับเงินผ่านหน้าการจอง) / มีบรรทัดค่าห้อง (ProductType 1)
+            // Reclass = เงินสดปลอมของใบ OTA ที่ปรับเป็นลูกหนี้ OTA แล้ว (Payment_History OTA_RECLASS)
             var dt = _code.DatabaseQuerySafe(_conn,
                 @"SELECT R.ID, R.Reservation_ID, R.Created_Date, R.Total_Amount, R.Vat, R.IsDeposit, R.Paid_Type,
                          ISNULL(R.Deposit_Applied_Amount, 0) AS DA, ISNULL(R.Status, N'Normal') AS St,
-                         CAST(NULL AS NVARCHAR(200)) AS CustName
+                         CAST(NULL AS NVARCHAR(200)) AS CustName,
+                         CASE WHEN ISNULL(R.IsDeposit, 0) = 1
+                                OR EXISTS (SELECT 1 FROM Payment_History ph WHERE ph.Receipt_ID = R.ID AND ISNULL(ph.PaymentType, '') <> 'REFUND')
+                                OR EXISTS (SELECT 1 FROM Account_Receipt_Detail d WHERE d.Receipt_ID = R.ID AND TRY_CONVERT(INT, d.ProductType_ID) = 1)
+                              THEN 1 ELSE 0 END AS Folio,
+                         CASE WHEN EXISTS (SELECT 1 FROM Payment_History px WHERE px.Receipt_ID = R.ID AND px.Status = 'OTA_RECLASS')
+                              THEN 1 ELSE 0 END AS Reclass
                     FROM Account_Receipt R
                    WHERE R.Reservation_ID = @id AND ISNULL(R.Status, N'Normal') IN (N'Normal', N'')
                    ORDER BY R.Created_Date, R.ID",
@@ -423,6 +615,12 @@ namespace Take_Time_BangPhra.Integration
             {
                 var s = MapSource(r, paidHows);
                 if (IsExcludedSource(s.Id) || s.Total <= 0) continue;
+                if (Bool(r["Reclass"]) || m.OtaRevenueRef.Equals("RECLASS-" + s.Id, StringComparison.OrdinalIgnoreCase))
+                {
+                    m.Excluded.Add(s.Id + " " + s.Total.ToString("#,##0.00", Inv) + " — เงินที่ OTA เก็บ (ปรับเป็นลูกหนี้ OTA แล้ว) OTA เป็นผู้คืนลูกค้า");
+                    continue;
+                }
+                s.IsFolio = Bool(r["Folio"]);
                 s.CustomerName = m.CustomerName;
                 all.Add(s);
             }
@@ -464,6 +662,7 @@ namespace Take_Time_BangPhra.Integration
                     LEFT JOIN Reservation Res ON Res.ID = R.Reservation_ID
                     LEFT JOIN Customer C ON C.MobilePhone = Res.Customer_MobilePhone
                    WHERE {where} AND ISNULL(R.Status, N'Normal') NOT IN (N'Cancel', N'Void', N'ยกเลิก')
+                     AND NOT EXISTS (SELECT 1 FROM Payment_History px WHERE px.Receipt_ID = R.ID AND px.Status = 'OTA_RECLASS')
                    ORDER BY R.Created_Date DESC", ps);
             if (dt == null) return list;
             var paidHows = PaidHowIdsByName();
@@ -602,6 +801,13 @@ namespace Take_Time_BangPhra.Integration
             return _code.DatabaseQuerySafe(_conn, sb.ToString(), ps);
         }
 
+        /// <summary>รัน UPDATE แล้วคืนจำนวนแถว (@@ROWCOUNT — ไม่พึ่งค่าคืนของ ExecuteNonQuery ที่เป็น −1 เมื่อเซิร์ฟเวอร์ตั้ง NOCOUNT)</summary>
+        private int RowCount(string updateSql, Dictionary<string, object> ps)
+        {
+            var dt = _code.DatabaseQuerySafe(_conn, "SET NOCOUNT OFF; " + updateSql + " SELECT @@ROWCOUNT AS N;", ps);
+            return dt != null && dt.Rows.Count > 0 && dt.Rows[0][0] != DBNull.Value ? Convert.ToInt32(dt.Rows[0][0]) : 0;
+        }
+
         private void SetFields(int id, string setSql, Dictionary<string, object> ps)
         {
             if (ps == null) ps = new Dictionary<string, object>();
@@ -618,12 +824,20 @@ namespace Take_Time_BangPhra.Integration
         /// <returns>ID ใบลดหนี้ (&gt;0) หรือ -1 (ดู message)</returns>
         public int Create(Request req, bool fromCancellation, out string message)
         {
+            return CreateCore(req, fromCancellation, true, out message);
+        }
+
+        /// <param name="autoApprove">false = สร้างเป็นร่างเสมอ (ยกเลิกการจองสร้างทั้งชุดก่อน แล้วอนุมัติ/คืนผ่านเกตเวย์ทีหลังสุด)</param>
+        private int CreateCore(Request req, bool fromCancellation, bool autoApprove, out string message)
+        {
             message = null;
             if (!TableReady(_conn)) { message = "ยังไม่ได้รัน migration PHASE19_Migration_33_Credit_Notes.sql"; return -1; }
             if (req == null) { message = "ไม่มีข้อมูล"; return -1; }
             var src = LoadSource(req.SourceReceiptId);
             if (src == null) { message = "ไม่พบใบต้นทาง " + req.SourceReceiptId; return -1; }
             if (IsExcludedSource(src.Id)) { message = "ใบ " + src.Id + " เป็นเอกสารรับเงิน OTA — คืนเงินผ่านช่องทาง OTA (ออกใบลดหนี้จากหน้านี้ไม่ได้)"; return -1; }
+            if (IsOtaReclassed(src.Id, src.ReservationId))
+            { message = "ใบ " + src.Id + " เป็นเงินที่ OTA เก็บ (ปรับเป็นลูกหนี้ OTA แล้ว) — OTA เป็นผู้คืนลูกค้า โรงแรมออกใบลดหนี้/คืนเงินจากใบนี้ไม่ได้"; return -1; }
             if (!(src.Status == "" || src.Status.Equals("Normal", StringComparison.OrdinalIgnoreCase)
                   || (fromCancellation && src.IsDeposit)))
             { message = "ใบต้นทางสถานะ " + src.Status + " — ออกใบลดหนี้ได้เฉพาะใบปกติ"; return -1; }
@@ -671,7 +885,9 @@ namespace Take_Time_BangPhra.Integration
             if (hasVat && gross > 0)
             {
                 var cfg = new AccountingConfig(_conn);
-                if (src.IsDeposit && !cfg.IsDepositVatAtReceipt) vat = 0m;                // CHECKOUT: มัดจำไม่แยก VAT
+                // มัดจำที่ภาษีขายยังไม่เข้า ภ.พ.30 — CHECKOUT (ไม่แยก VAT) / RECEIPT+defer (พัก 21913) — ไม่มี VAT ให้ลด
+                // ⇒ เอกสารเป็น "ใบคืนเงินมัดจำ/หลักฐานการคืนเงิน" ไม่ใช่ใบลดหนี้ (NextAcc refund-deposit ไม่ออกใบลดหนี้ในกรณีนี้)
+                if (src.IsDeposit && (!cfg.IsDepositVatAtReceipt || cfg.IsDepositOutputVatDeferred)) vat = 0m;
                 else if (src.Total > 0 && src.Vat > 0) vat = Math.Round(gross * src.Vat / src.Total, 2, MidpointRounding.AwayFromZero);
                 else if (!src.IsDeposit) vat = 0m;
                 else vat = Math.Round(gross * 7m / 107m, 2, MidpointRounding.AwayFromZero);
@@ -713,12 +929,49 @@ namespace Take_Time_BangPhra.Integration
                 { "@restock", req.Lines.Any(l => l.RestockQty > 0) },
                 { "@batch", (object)Trunc(req.CancelBatch, 40) ?? DBNull.Value },
                 { "@by", user },
-                { "@notes", (object)Trunc(req.Notes, 1000) ?? DBNull.Value }
+                { "@notes", (object)Trunc(req.Notes, 1000) ?? DBNull.Value },
+                // เพดานรวมของใบต้นทาง (ลดหนี้+ยึดทุกใบที่ยังไม่ยกเลิก): มัดจำ = ยอดใบ − ส่วนที่ถูกนำไปหักในใบอื่น · ใบกำกับ = ยอดใบ
+                { "@cap", Math.Round(src.Creditable + src.Credited, 2, MidpointRounding.AwayFromZero) }
             };
-            // เลขที่รันต่อเดือน CN{yyMM}-#### — UPDLOCK/HOLDLOCK ใน statement เดียวกับ INSERT กันเลขซ้ำเมื่อกดพร้อมกัน
+            // บรรทัดอยู่ใน transaction เดียวกับหัวใบ (ล้มกลางทาง = ไม่มีใบครึ่ง ๆ)
+            var lineSql = new StringBuilder();
+            for (int i = 0; i < req.Lines.Count; i++)
+            {
+                var l = req.Lines[i];
+                string k = "@l" + i.ToString(Inv) + "_";
+                lineSql.Append(@"
+                  INSERT INTO Credit_Note_Line (CN_ID, Line_No, Source_Line_No, Product_ID, ProductType_ID, Description, Qty, Unit,
+                                               Unit_Price, Amount, Restock_Qty, Unit_Cost, Account_Code)
+                  VALUES (@newId, ").Append(k).Append("no, ").Append(k).Append("sno, ").Append(k).Append("pid, ").Append(k).Append("pt, ")
+                  .Append(k).Append("desc, ").Append(k).Append("qty, ").Append(k).Append("unit, ").Append(k).Append("price, ")
+                  .Append(k).Append("amt, ").Append(k).Append("rq, ").Append(k).Append("cost, ").Append(k).Append("acc);");
+                ps[k + "no"] = l.LineNo;
+                ps[k + "sno"] = l.SourceLineNo.HasValue ? (object)l.SourceLineNo.Value : DBNull.Value;
+                ps[k + "pid"] = l.ProductId.HasValue ? (object)l.ProductId.Value : DBNull.Value;
+                ps[k + "pt"] = l.ProductTypeId.HasValue ? (object)l.ProductTypeId.Value : DBNull.Value;
+                ps[k + "desc"] = (object)Trunc(l.Description, 500) ?? DBNull.Value;
+                ps[k + "qty"] = l.Qty;
+                ps[k + "unit"] = (object)Trunc(l.Unit, 30) ?? DBNull.Value;
+                ps[k + "price"] = l.Qty > 0 ? Math.Round(l.Amount / l.Qty, 4) : l.Amount;
+                ps[k + "amt"] = l.Amount;
+                ps[k + "rq"] = l.RestockQty;
+                ps[k + "cost"] = l.UnitCost.HasValue ? (object)l.UnitCost.Value : DBNull.Value;
+                ps[k + "acc"] = (object)Trunc(l.AccountCode, 30) ?? DBNull.Value;
+            }
+            // เลขที่รันต่อเดือน CN{yyMM}-#### — UPDLOCK/HOLDLOCK ใน transaction เดียวกับ INSERT กันเลขซ้ำเมื่อกดพร้อมกัน
+            // + ล็อกใบลดหนี้ของใบต้นทางเดียวกันแล้วตรวจเพดานซ้ำ (สองหน้าต่าง/กดซ้ำพร้อมกันผ่านการตรวจฝั่ง C# ได้ทั้งคู่)
             var ins = _code.DatabaseQuerySafe(_conn,
-                @"SET XACT_ABORT ON;
+                @"SET NOCOUNT ON;
+                  SET XACT_ABORT ON;
                   BEGIN TRAN;
+                  DECLARE @used DECIMAL(18,2) = ISNULL((SELECT SUM(Amount_Gross + Retained_Amount) FROM Credit_Note WITH (UPDLOCK, HOLDLOCK)
+                                                        WHERE Source_Receipt_ID = @src AND Status <> 'VOIDED'), 0);
+                  IF @used + @gross + @ret > @cap + 0.01
+                  BEGIN
+                      ROLLBACK;
+                      SELECT CAST(-1 AS INT) AS NewID, CAST(NULL AS NVARCHAR(30)) AS CnNo, @used AS Used;
+                      RETURN;
+                  END
                   DECLARE @next INT = ISNULL((SELECT MAX(TRY_CONVERT(INT, SUBSTRING(CN_No, @plen, 10)))
                                                 FROM Credit_Note WITH (UPDLOCK, HOLDLOCK)
                                                WHERE CN_No LIKE @prefix + '%'), 0) + 1;
@@ -729,36 +982,24 @@ namespace Take_Time_BangPhra.Integration
                                            Restock, Status, Cancel_Batch, Created_By, Created_At, Notes)
                   VALUES (@no, @d, @res, @src, @srcType, @reason, @rtext, @cust, @gross, @vat, @refund, @ret, @retAs,
                           @ph, @method, @rref, @slip, @rstatus, @gw, @restock, 'DRAFT', @batch, @by, GETDATE(), @notes);
-                  SELECT CAST(SCOPE_IDENTITY() AS INT) AS NewID, @no AS CnNo;
-                  COMMIT;", ps);
+                  DECLARE @newId INT = CAST(SCOPE_IDENTITY() AS INT);" + lineSql + @"
+                  COMMIT;
+                  SELECT @newId AS NewID, @no AS CnNo, @used AS Used;", ps);
             if (ins == null || ins.Rows.Count == 0 || ins.Rows[0]["NewID"] == DBNull.Value) { message = "บันทึกใบลดหนี้ไม่สำเร็จ"; return -1; }
             int id = Convert.ToInt32(ins.Rows[0]["NewID"]);
-            string cnNo = Str(ins.Rows[0]["CnNo"]);
-
-            foreach (var l in req.Lines)
+            if (id <= 0)
             {
-                _code.DatabaseInsertSafe(_conn,
-                    @"INSERT INTO Credit_Note_Line (CN_ID, Line_No, Source_Line_No, Product_ID, ProductType_ID, Description, Qty, Unit,
-                                                   Unit_Price, Amount, Restock_Qty, Unit_Cost, Account_Code)
-                      VALUES (@cn, @no, @sno, @pid, @pt, @desc, @qty, @unit, @price, @amt, @rq, @cost, @acc)",
-                    new Dictionary<string, object>
-                    {
-                        { "@cn", id }, { "@no", l.LineNo },
-                        { "@sno", l.SourceLineNo.HasValue ? (object)l.SourceLineNo.Value : DBNull.Value },
-                        { "@pid", l.ProductId.HasValue ? (object)l.ProductId.Value : DBNull.Value },
-                        { "@pt", l.ProductTypeId.HasValue ? (object)l.ProductTypeId.Value : DBNull.Value },
-                        { "@desc", (object)Trunc(l.Description, 500) ?? DBNull.Value },
-                        { "@qty", l.Qty }, { "@unit", (object)Trunc(l.Unit, 30) ?? DBNull.Value },
-                        { "@price", l.Qty > 0 ? Math.Round(l.Amount / l.Qty, 4) : l.Amount }, { "@amt", l.Amount },
-                        { "@rq", l.RestockQty }, { "@cost", l.UnitCost.HasValue ? (object)l.UnitCost.Value : DBNull.Value },
-                        { "@acc", (object)Trunc(l.AccountCode, 30) ?? DBNull.Value }
-                    });
+                message = $"ใบ {src.Id} ถูกออกใบลดหนี้/ยึดไปแล้ว {Dec(ins.Rows[0]["Used"]):N2} จากเพดาน {src.Creditable + src.Credited:N2} " +
+                          "(อาจมีการทำรายการซ้อนจากอีกหน้าต่าง) — โหลดหน้าใหม่แล้วตรวจยอด";
+                return -1;
             }
+            string cnNo = Str(ins.Rows[0]["CnNo"]);
 
             _code.Logs(_conn, "CreditNote",
                 $"สร้างใบลดหนี้ {cnNo} (#{id}) ต้นทาง {src.Id} [{src.DocType}] ยอด {gross:N2} VAT {vat:N2} คืน {refund:N2} ({method}) ยึด {retained:N2} โดย {user}", user);
             message = "สร้างใบลดหนี้ " + cnNo + " แล้ว";
 
+            if (!autoApprove) return id;
             if (!RequireApproval(_conn) || CanApproveCurrentUser())
             {
                 string am;
@@ -802,24 +1043,63 @@ namespace Take_Time_BangPhra.Integration
             var rec = Load(id);
             if (rec == null) { message = "ไม่พบใบลดหนี้"; return false; }
 
-            // 1) เกตเวย์
+            // 1) เกตเวย์ — จดยอดคืนสะสมของรายการเกตเวย์ "ก่อน" สั่งคืน (GWPRE:) แล้วตรวจจากยอดจริงเมื่อผลไม่ชัด
+            //    กันคืนซ้ำ: เกตเวย์คืนสำเร็จแต่บันทึกฝั่งเราล้ม → ใบกลับเป็นร่าง → อนุมัติใหม่จะไม่สั่งคืนซ้ำ
             if (rec.RefundMethod == MGateway && rec.RefundAmount > 0 && rec.GatewayTxnId.HasValue)
             {
+                string origRef;
+                decimal before = ParseGwPre(rec.RefundRef, out origRef);
+                decimal now = GatewayRefundedAmount(rec.GatewayTxnId.Value);
                 string r;
-                try
+                if (now < 0m)
                 {
-                    r = new Take_Time_BangPhra.Payments.OnlinePaymentService(_conn)
-                        .RefundTransaction(rec.GatewayTxnId.Value, rec.RefundAmount, "ใบลดหนี้ " + rec.CnNo + " " + (rec.ReasonText ?? ""), CurrentAdminId());
-                }
-                catch (Exception ex) { r = "คืนเงินไม่สำเร็จ: " + ex.Message; }
-                if (r == null || r.IndexOf("สำเร็จ", StringComparison.Ordinal) < 0 || r.IndexOf("ไม่สำเร็จ", StringComparison.Ordinal) >= 0)
-                {
-                    SetFields(id, "Status = 'DRAFT', Approved_By = NULL, Approved_At = NULL, Sync_Error = @e",
-                        new Dictionary<string, object> { { "@e", Trunc("คืนผ่านเกตเวย์ไม่สำเร็จ: " + r, 1000) } });
-                    message = "คืนผ่านเกตเวย์ไม่สำเร็จ — ใบยังเป็นร่าง: " + r;
+                    RevertToDraft(id, rec.RefundRef, "อ่านยอดคืนของรายการเกตเวย์ไม่ได้ — ยังไม่ได้สั่งคืน");
+                    message = "อ่านยอดคืนของรายการเกตเวย์ #" + rec.GatewayTxnId.Value + " ไม่ได้ — ใบยังเป็นร่าง (ยังไม่ได้สั่งคืน)";
                     return false;
                 }
-                SetFields(id, "Refund_Ref = ISNULL(Refund_Ref, @r)", new Dictionary<string, object> { { "@r", Trunc(r, 200) } });
+                if (before >= 0m && now >= before + rec.RefundAmount - 0.01m)
+                {
+                    r = "คืนผ่านเกตเวย์สำเร็จ (ตรวจพบยอดคืนในรายการเกตเวย์แล้ว — ไม่สั่งซ้ำ)";
+                }
+                else if (before >= 0m)
+                {
+                    RevertToDraft(id, rec.RefundRef, "เคยสั่งคืนผ่านเกตเวย์แล้วแต่ไม่ได้รับผลยืนยัน");
+                    message = "เคยสั่งคืนผ่านเกตเวย์ของใบนี้แล้วแต่ไม่ได้รับผลยืนยัน (ยอดคืนสะสมในรายการเกตเวย์ไม่เพิ่ม) — " +
+                              "ตรวจที่แดชบอร์ดเกตเวย์ก่อน: ถ้าคืนแล้วจริง ให้ผู้ดูแลบันทึกยอดคืนในรายการเกตเวย์แล้วอนุมัติใหม่ / " +
+                              "ถ้ายังไม่ได้คืน ให้ยกเลิกใบร่างนี้แล้วทำรายการใหม่";
+                    return false;
+                }
+                else
+                {
+                    SetFields(id, "Refund_Ref = @m",
+                        new Dictionary<string, object> { { "@m", Trunc(GwPrePrefix + now.ToString(Inv) + "|" + origRef, 200) } });
+                    bool threw = false;
+                    try
+                    {
+                        r = new Take_Time_BangPhra.Payments.OnlinePaymentService(_conn)
+                            .RefundTransaction(rec.GatewayTxnId.Value, rec.RefundAmount, "ใบลดหนี้ " + rec.CnNo + " " + (rec.ReasonText ?? ""), CurrentAdminId());
+                    }
+                    catch (Exception ex) { r = "คืนเงินไม่สำเร็จ: " + ex.Message; threw = true; }
+                    bool ok = r != null && r.IndexOf("สำเร็จ", StringComparison.Ordinal) >= 0 && r.IndexOf("ไม่สำเร็จ", StringComparison.Ordinal) < 0;
+                    if (!ok)
+                    {
+                        decimal after = GatewayRefundedAmount(rec.GatewayTxnId.Value);
+                        if (after >= 0m && after >= now + rec.RefundAmount - 0.01m)
+                        {
+                            ok = true;
+                            r = "คืนผ่านเกตเวย์สำเร็จ (ตรวจพบยอดคืนแล้ว — " + (r ?? "") + ")";
+                        }
+                    }
+                    if (!ok)
+                    {
+                        // เกตเวย์ตอบปฏิเสธชัดเจน (ไม่มีเงินออก) → ล้างเครื่องหมาย ลองใหม่ได้ · exception = ไม่รู้ผล → คงเครื่องหมายกันสั่งซ้ำ
+                        RevertToDraft(id, threw ? GwPrePrefix + now.ToString(Inv) + "|" + origRef : origRef, "คืนผ่านเกตเวย์ไม่สำเร็จ: " + r);
+                        message = "คืนผ่านเกตเวย์ไม่สำเร็จ — ใบยังเป็นร่าง: " + r;
+                        return false;
+                    }
+                }
+                SetFields(id, "Refund_Ref = @r",
+                    new Dictionary<string, object> { { "@r", Trunc((origRef.Length > 0 ? origRef + " · " : "") + r, 200) } });
             }
 
             var notes = new List<string>();
@@ -837,10 +1117,86 @@ namespace Take_Time_BangPhra.Integration
             }
             // 4) NextAcc
             notes.Add(EnqueueToNextAcc(rec));
+            // 5) ใบมัดจำของการยกเลิก: ตั้งสถานะ Refunded/Forfeit เมื่อใบลดหนี้ทุกใบของใบนั้นอนุมัติแล้ว (ร่าง = ใบยังปกติ ยกเลิกร่างแล้วทำใหม่ได้)
+            //    เฉพาะชุดยกเลิกการจอง (Cancel_Batch) — คืนมัดจำส่วนเกินตอนเช็คเอาท์ (การจองยังอยู่) ต้องคงใบมัดจำปกติ
+            //    ไม่งั้นยอดมัดจำที่เหลือหลุดจากการตัดมัดจำตอนเช็คเอาท์ (CheckoutService อ่านเฉพาะใบมัดจำ Normal)
+            if (rec.SourceDocType == SrcDeposit && !string.IsNullOrWhiteSpace(rec.CancelBatch))
+                MarkDepositReceiptIfSettled(rec.SourceReceiptId);
 
             _code.Logs(_conn, "CreditNote", $"อนุมัติใบลดหนี้ {rec.CnNo} (#{id}) โดย {user} — {string.Join(" · ", notes)}", user);
             message = "อนุมัติแล้ว · " + string.Join(" · ", notes.Where(x => !string.IsNullOrEmpty(x)));
             return true;
+        }
+
+        private const string GwPrePrefix = "GWPRE:";
+
+        /// <summary>Refund_Ref = "GWPRE:{ยอดคืนสะสมก่อนสั่ง}|{อ้างอิงเดิม}" → คืนยอดก่อนสั่ง (−1 = ยังไม่เคยสั่ง) + อ้างอิงเดิม</summary>
+        private static decimal ParseGwPre(string refundRef, out string original)
+        {
+            string s = refundRef ?? "";
+            original = s;
+            if (!s.StartsWith(GwPrePrefix, StringComparison.Ordinal)) return -1m;
+            int bar = s.IndexOf('|');
+            string num = bar > 0 ? s.Substring(GwPrePrefix.Length, bar - GwPrePrefix.Length) : s.Substring(GwPrePrefix.Length);
+            original = bar > 0 ? s.Substring(bar + 1) : "";
+            decimal d;
+            return decimal.TryParse(num, NumberStyles.Any, Inv, out d) ? d : 0m;
+        }
+
+        /// <summary>อ้างอิงการคืนสำหรับแสดงผล (ตัดเครื่องหมายภายใน GWPRE: ออก)</summary>
+        public static string DisplayRefundRef(string refundRef)
+        {
+            string orig;
+            ParseGwPre(refundRef, out orig);
+            return orig;
+        }
+
+        /// <summary>Payment_Transaction.Refunded_Amount (−1 = อ่านไม่ได้)</summary>
+        private decimal GatewayRefundedAmount(int txnId)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_conn, "SELECT ISNULL(Refunded_Amount, 0) AS R FROM Payment_Transaction WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", txnId } });
+                return dt != null && dt.Rows.Count > 0 ? Dec(dt.Rows[0][0]) : -1m;
+            }
+            catch { return -1m; }
+        }
+
+        private void RevertToDraft(int id, string refundRef, string error)
+        {
+            SetFields(id, "Status = 'DRAFT', Approved_By = NULL, Approved_At = NULL, Sync_Error = @e, Refund_Ref = @rr",
+                new Dictionary<string, object>
+                {
+                    { "@e", Trunc(error, 1000) ?? (object)DBNull.Value },
+                    { "@rr", (object)Trunc(refundRef, 200) ?? DBNull.Value }
+                });
+        }
+
+        /// <summary>
+        /// ใบเสร็จมัดจำที่ถูกคืน/ยึดผ่านใบลดหนี้: ตั้ง 'Refunded' (มีคืน) / 'Forfeit' (ยึดทั้งหมด) เมื่อใบลดหนี้ทุกใบของใบนั้น "ไม่ใช่ร่าง"
+        /// (ไม่ใช่ 'Cancel' — ไม่ void บน NextAcc) · ยังมีร่าง = คงใบปกติ (ยกเลิกร่าง → ยอดคืนได้กลับมา)
+        /// </summary>
+        private void MarkDepositReceiptIfSettled(string receiptId)
+        {
+            if (string.IsNullOrWhiteSpace(receiptId)) return;
+            try
+            {
+                var c = _code.DatabaseQuerySafe(_conn,
+                    @"SELECT COUNT(*) AS N, ISNULL(SUM(CASE WHEN Status = 'DRAFT' THEN 1 ELSE 0 END), 0) AS D,
+                             ISNULL(SUM(Refund_Amount), 0) AS R, ISNULL(SUM(Retained_Amount), 0) AS K
+                        FROM Credit_Note WHERE Source_Receipt_ID = @r AND Status <> 'VOIDED'",
+                    new Dictionary<string, object> { { "@r", receiptId.Trim() } });
+                if (c == null || c.Rows.Count == 0) return;
+                int n = Convert.ToInt32(c.Rows[0]["N"]), d = Convert.ToInt32(c.Rows[0]["D"]);
+                decimal rf = Dec(c.Rows[0]["R"]), kp = Dec(c.Rows[0]["K"]);
+                if (n == 0 || d > 0 || (rf <= 0 && kp <= 0)) return;
+                _code.DatabaseInsertSafe(_conn,
+                    @"UPDATE Account_Receipt SET Status = @st
+                       WHERE ID = @r AND ISNULL(IsDeposit, 0) = 1 AND ISNULL(Status, N'Normal') IN (N'Normal', N'')",
+                    new Dictionary<string, object> { { "@r", receiptId.Trim() }, { "@st", rf > 0 ? "Refunded" : "Forfeit" } });
+            }
+            catch { }
         }
 
         private string EnqueueToNextAcc(Record rec)
@@ -951,7 +1307,7 @@ namespace Take_Time_BangPhra.Integration
             var got = _code.DatabaseQuerySafe(_conn,
                 @"UPDATE Credit_Note SET Refund_Status = 'PAID', Refund_Method = @m, Refund_Paid_How_ID = @ph, Refund_Amount = Amount_Gross,
                                          Refund_Ref = @r, Refund_Slip_Path = ISNULL(@s, Refund_Slip_Path)
-                   WHERE ID = @id AND Refund_Status = 'PENDING';
+                   WHERE ID = @id AND Refund_Status = 'PENDING' AND Status IN ('APPROVED', 'SYNCED');
                   SELECT @@ROWCOUNT AS N;",
                 new Dictionary<string, object>
                 {
@@ -982,6 +1338,13 @@ namespace Take_Time_BangPhra.Integration
 
         public bool Void(int id, string reason, out string message)
         {
+            return VoidCore(id, reason, true, out message);
+        }
+
+        /// <param name="restoreBooking">true = ใบของชุดยกเลิกการจองที่ "ตั้งสถานะการจองไปแล้ว" → คืนยอดที่รับไว้ (Reservation.Deposit)
+        /// + ใบมัดจำกลับเป็นปกติ ⇒ ปิดเงินค้างใหม่ได้ · false = ถอยชุดที่ยังไม่ได้แตะการจอง (สร้างชุดไม่สำเร็จ)</param>
+        private bool VoidCore(int id, string reason, bool restoreBooking, out string message)
+        {
             message = null;
             var rec = Load(id);
             if (rec == null) { message = "ไม่พบใบลดหนี้"; return false; }
@@ -993,9 +1356,27 @@ namespace Take_Time_BangPhra.Integration
 
             if (rec.Status == StDraft)
             {
-                SetFields(id, "Status = 'VOIDED', Voided_By = @by, Voided_At = GETDATE(), Void_Reason = @r",
-                    new Dictionary<string, object> { { "@by", user }, { "@r", Trunc(reason, 500) } });
-                message = "ยกเลิกใบร่างแล้ว";
+                string warn = "";
+                string origRef;
+                decimal before = ParseGwPre(rec.RefundRef, out origRef);
+                if (before >= 0m && rec.GatewayTxnId.HasValue)
+                {
+                    decimal now = GatewayRefundedAmount(rec.GatewayTxnId.Value);
+                    if (now >= 0m && now >= before + rec.RefundAmount - 0.01m)
+                    {
+                        message = "ตรวจพบว่าเกตเวย์คืนเงินของใบนี้ไปแล้ว — ห้ามยกเลิก ให้กด \"อนุมัติ\" (ระบบจะไม่สั่งคืนซ้ำ แค่บันทึกบัญชี)";
+                        return false;
+                    }
+                    warn = " · ⚠ ใบนี้เคยสั่งคืนผ่านเกตเวย์แต่ไม่ได้ผลยืนยัน — ตรวจแดชบอร์ดเกตเวย์ว่าไม่มีเงินออกจริงก่อนทำรายการใหม่";
+                }
+                // ชิงสถานะแบบ atomic — กันอนุมัติ/ยกเลิกพร้อมกันจากสองหน้าต่าง
+                int n = RowCount(
+                    @"UPDATE Credit_Note SET Status = 'VOIDED', Voided_By = @by, Voided_At = GETDATE(), Void_Reason = @r
+                       WHERE ID = @id AND Status = 'DRAFT';",
+                    new Dictionary<string, object> { { "@id", id }, { "@by", user }, { "@r", Trunc(reason, 500) } });
+                if (n <= 0) { message = "สถานะใบเปลี่ยนไปแล้ว (อาจถูกอนุมัติ/ยกเลิกจากอีกหน้าต่าง) — โหลดหน้าใหม่"; return false; }
+                string rb = restoreBooking ? RestoreCancelledBooking(rec) : "";
+                message = "ยกเลิกใบร่างแล้ว" + rb + warn;
                 return true;
             }
 
@@ -1016,17 +1397,23 @@ namespace Take_Time_BangPhra.Integration
                     message = "คิวส่ง NextAcc ของใบนี้กำลังประมวลผล — ลองใหม่ภายหลัง";
                     return false;
                 }
-                SetFields(id, "Status = 'VOIDED', Voided_By = @by, Voided_At = GETDATE(), Void_Reason = @r",
-                    new Dictionary<string, object> { { "@by", user }, { "@r", Trunc(reason, 500) } });
+                // ยังไม่ได้ส่ง = marker ว่าง และสถานะไม่เปลี่ยนตั้งแต่อ่าน (กันคิว/อีกหน้าต่างทำงานแทรก)
+                int n = RowCount(
+                    @"UPDATE Credit_Note SET Status = 'VOIDED', Voided_By = @by, Voided_At = GETDATE(), Void_Reason = @r
+                       WHERE ID = @id AND Status = @st AND ISNULL(Nexaacc_Marker, '') = '';",
+                    new Dictionary<string, object> { { "@id", id }, { "@st", rec.Status }, { "@by", user }, { "@r", Trunc(reason, 500) } });
+                if (n <= 0) { message = "สถานะใบเปลี่ยนไปแล้ว (อาจเริ่มส่ง NextAcc แล้ว) — โหลดหน้าใหม่แล้วลองอีกครั้ง"; return false; }
                 UndoLocalEffects(rec);
-                message = "ยกเลิกแล้ว (ยังไม่ได้ส่ง NextAcc)" + (rec.Restock ? " · ⚠ สินค้าที่รับคืนเข้าสต๊อกไม่ถูกตัดออกอัตโนมัติ — ปรับที่หน้า สต๊อก" : "");
+                string rb = restoreBooking ? RestoreCancelledBooking(rec) : "";
+                message = "ยกเลิกแล้ว (ยังไม่ได้ส่ง NextAcc)" + rb + (rec.Restock ? " · ⚠ สินค้าที่รับคืนเข้าสต๊อกไม่ถูกตัดออกอัตโนมัติ — ปรับที่หน้า สต๊อก" : "");
                 return true;
             }
             SetFields(id, "Void_Reason = @r, Voided_By = @by", new Dictionary<string, object> { { "@by", user }, { "@r", Trunc(reason, 500) } });
             long q = sync.EnqueueVoidCreditNote(rec.Id, rec.CnNo, reason);
             if (q <= 0) { message = "เข้าคิวยกเลิกบน NextAcc ไม่สำเร็จ"; return false; }
             UndoLocalEffects(rec);
-            message = "เข้าคิวยกเลิกใบลดหนี้บน NextAcc #" + q + " — สถานะจะเป็น \"ยกเลิกแล้ว\" เมื่อ NextAcc ยืนยัน"
+            string rb2 = restoreBooking ? RestoreCancelledBooking(rec) : "";
+            message = "เข้าคิวยกเลิกใบลดหนี้บน NextAcc #" + q + " — สถานะจะเป็น \"ยกเลิกแล้ว\" เมื่อ NextAcc ยืนยัน" + rb2
                       + (rec.Restock ? " · ⚠ สินค้าที่รับคืนเข้าสต๊อกไม่ถูกตัดออกอัตโนมัติ — ปรับที่หน้า สต๊อก" : "");
             return true;
         }
@@ -1044,6 +1431,33 @@ namespace Take_Time_BangPhra.Integration
             catch { }
         }
 
+        /// <summary>
+        /// ยกเลิกใบลดหนี้ของชุดยกเลิกการจอง (Cancel_Batch) ที่ตั้งสถานะการจองไปแล้ว:
+        ///   · Reservation.Deposit (= เงินที่โรงแรมยังถือ) บวกยอดคืนของใบนี้กลับ — เงินไม่ได้ออกจริง
+        ///   · ใบมัดจำที่ถูกตั้ง Refunded/Forfeit กลับเป็นปกติ (ถ้าไม่มีใบลดหนี้อื่นค้างอยู่) ⇒ ยอดคืนได้กลับมา
+        ///     ทำ "ยกเลิกการจอง + คืนเงิน" ใหม่ได้ (โหมดปิดเงินค้าง — การจองไม่ถูกเปลี่ยนสถานะซ้ำ)
+        /// </summary>
+        private string RestoreCancelledBooking(Record rec)
+        {
+            if (rec == null || string.IsNullOrWhiteSpace(rec.CancelBatch) || rec.ReservationId <= 0) return "";
+            try
+            {
+                if (rec.RefundAmount > 0)
+                    _code.DatabaseInsertSafe(_conn,
+                        "UPDATE Reservation SET Deposit = ISNULL(Deposit, 0) + @r WHERE ID = @id AND [Status] LIKE N'ยกเลิก%'",
+                        new Dictionary<string, object> { { "@id", rec.ReservationId }, { "@r", rec.RefundAmount } });
+                if (rec.SourceDocType == SrcDeposit)
+                    _code.DatabaseInsertSafe(_conn,
+                        @"UPDATE Account_Receipt SET Status = N'Normal'
+                           WHERE ID = @src AND Status IN (N'Refunded', N'Forfeit')
+                             AND NOT EXISTS (SELECT 1 FROM Credit_Note WHERE Source_Receipt_ID = @src AND Status <> 'VOIDED' AND ID <> @cn)",
+                        new Dictionary<string, object> { { "@src", rec.SourceReceiptId }, { "@cn", rec.Id } });
+                return " · เงินของใบนี้กลับเป็นยอดค้างของการจอง #" + rec.ReservationId +
+                       " — คืน/ยึดใหม่ได้ที่ \"ยกเลิกการจอง + คืนเงิน\" (ไม่เปลี่ยนสถานะการจองซ้ำ)";
+            }
+            catch (Exception ex) { return " · ⚠ คืนยอดค้างของการจองไม่สำเร็จ: " + ex.Message; }
+        }
+
         /// <summary>เรียกจากคิวเมื่อ NextAcc ยืนยันการยกเลิกแล้ว</summary>
         internal void MarkVoided(int id)
         {
@@ -1057,35 +1471,53 @@ namespace Take_Time_BangPhra.Integration
             public bool Ok;
             public string Message;
             public readonly List<int> CreditNoteIds = new List<int>();
+            /// <summary>ใบที่ยังเป็นร่าง (รออนุมัติ / อนุมัติไม่สำเร็จ) — เงินยังไม่ออก</summary>
+            public int DraftCount;
+        }
+
+        public CancelResult CancelReservation(int reservationId, decimal refundTotal, string retainedAs, string method,
+            int? paidHowId, string refundRef, string slipPath, string reason)
+        {
+            return CancelReservation(reservationId, refundTotal, retainedAs, method, paidHowId, refundRef, slipPath, reason, false);
         }
 
         /// <summary>
-        /// ยกเลิกการจองพร้อมคืนเงินบางส่วน/ทั้งหมด (แทนปุ่มยกเลิกเดิมเมื่อใช้ "คืนเงินแบบละเอียด"):
-        ///   แบ่งยอดคืนลงใบต้นทาง — มัดจำคงเหลือก่อน (ส่วนที่ไม่คืนของมัดจำ = ยึดเป็นค่าธรรมเนียม → NextAcc realize-deposit)
-        ///   แล้วใบกำกับ (ส่วนที่ไม่คืนของใบกำกับ = รายได้คงเดิม ไม่ออกใบลดหนี้ — audit C §7)
-        /// จากนั้นตั้งสถานะการจอง/ล้างห้องเหมือนปุ่มเดิม แต่ **ไม่** ยิงคิวคืน/ริบ/void แบบเดิม (กันลงบัญชีซ้ำ)
+        /// ยกเลิกการจองพร้อมคืนเงินบางส่วน/ทั้งหมด/ไม่คืน (แทนปุ่มยกเลิกเดิมเมื่อเปิดระบบใบลดหนี้):
+        ///   แบ่งยอดคืนลงใบต้นทาง — มัดจำคงเหลือก่อน (ส่วนที่ไม่คืนของมัดจำ = ยึด → NextAcc realize-deposit ForfeitAs)
+        ///   แล้วใบกำกับของ folio (ส่วนที่ไม่คืน = รายได้คงเดิม ไม่ออกใบลดหนี้ — audit C §7) · ใบอื่นที่แค่ผูกเลขจอง (รูมเซอร์วิส/POS)
+        ///   รวมเฉพาะเมื่อ includeLinked
+        /// ลำดับ (กันสถานะครึ่ง ๆ): ตรวจทั้งหมด → สร้างใบลดหนี้ทั้งชุดเป็น "ร่าง" (ล้ม = ยกเลิกร่างทั้งชุด ไม่มีผลอื่น) →
+        ///   ตั้งสถานะการจอง/ล้างห้องใน transaction เดียวแบบชิงสถานะ (สถานะเปลี่ยนระหว่างทาง = ยกเลิกร่าง) →
+        ///   ชาร์จค้าง/ลิงก์ชำระที่ค้าง → อนุมัติ (คืนผ่านเกตเวย์/เข้าคิว NextAcc ทีหลังสุด) — ต้องอนุมัติ = ร่างรอ ใบมัดจำยังปกติ
+        /// การจองที่ยกเลิกไปแล้ว (เลื่อนวันแล้วยกเลิก / ร่างของชุดเดิมถูกยกเลิก) = โหมดปิดเงินค้าง ไม่เปลี่ยนสถานะ/ห้องซ้ำ
+        /// **ไม่** ยิงคิวคืน/ริบ/void แบบเดิม (กันลงบัญชีซ้ำ)
         /// </summary>
         public CancelResult CancelReservation(int reservationId, decimal refundTotal, string retainedAs, string method,
-            int? paidHowId, string refundRef, string slipPath, string reason)
+            int? paidHowId, string refundRef, string slipPath, string reason, bool includeLinked)
         {
             var res = new CancelResult();
             if (!Enabled(_conn)) { res.Message = "ระบบใบลดหนี้ยังไม่เปิดใช้"; return res; }
             var money = LoadReservationMoney(reservationId);
             if (money == null) { res.Message = "ไม่พบการจอง"; return res; }
-            if ((money.Status ?? "").StartsWith("ยกเลิก", StringComparison.Ordinal)) { res.Message = "การจองนี้ถูกยกเลิกไปแล้ว"; return res; }
-            if ((money.Status ?? "").IndexOf("เช็คอิน", StringComparison.Ordinal) >= 0 || (money.Status ?? "").IndexOf("เช็คเอาท์", StringComparison.Ordinal) >= 0)
-            { res.Message = "เข้าพักแล้ว — ยกเลิกการจองไม่ได้ (ออกใบลดหนี้ manual แทน)"; return res; }
+            var chk = CheckCancellable(money);
+            if (!chk.Allowed) { res.Message = chk.Message; return res; }
+            bool settle = chk.SettleOnly;
+
+            var scope = money.Receipts.Where(x => x.Creditable > 0.005m && (includeLinked || x.IsFolio)).ToList();
+            decimal total = scope.Sum(x => x.Creditable);
             refundTotal = Math.Round(refundTotal, 2, MidpointRounding.AwayFromZero);
-            decimal total = money.TotalCreditable;
             if (refundTotal < 0 || refundTotal > total + 0.01m) { res.Message = $"ยอดคืนต้องอยู่ระหว่าง 0 – {total:N2}"; return res; }
+            if (settle && total <= 0.005m) { res.Message = "ไม่มีเงินค้างของการจองนี้ให้คืน/ยึด (ใบที่เหลือเป็นใบอื่นที่ผูกการจอง — ติ๊ก \"รวมใบอื่น\")"; return res; }
             method = (method ?? MNone).Trim().ToUpperInvariant();
-            if (refundTotal > 0 && method == MNone) { res.Message = "เลือกวิธีคืนเงิน"; return res; }
-            if (refundTotal > 0 && method != MGateway && !paidHowId.HasValue) { res.Message = "เลือกแหล่งเงินที่จ่ายคืน"; return res; }
+            if (method != MTransfer && method != MCash && method != MGateway) method = MNone;
+            if (refundTotal > 0.005m && method == MNone) { res.Message = "เลือกวิธีคืนเงิน"; return res; }
+            if (refundTotal > 0.005m && method != MGateway && !paidHowId.HasValue) { res.Message = "เลือกแหล่งเงินที่จ่ายคืน"; return res; }
+            if (refundTotal <= 0.005m) { refundTotal = 0m; method = MNone; }
 
             string batch = "CXL-" + reservationId + "-" + DateTime.Now.ToString("yyMMddHHmmss", Inv);
             decimal left = refundTotal;
             var reqs = new List<Request>();
-            foreach (var s in money.Receipts.Where(x => x.IsDeposit && x.Creditable > 0.005m))
+            foreach (var s in scope.Where(x => x.IsDeposit))
             {
                 decimal r = Math.Min(s.Creditable, left);
                 left -= r;
@@ -1098,7 +1530,8 @@ namespace Take_Time_BangPhra.Integration
                 });
                 reqs.Add(q);
             }
-            foreach (var s in money.Receipts.Where(x => !x.IsDeposit && x.Creditable > 0.005m))
+            // ใบกำกับของ folio ก่อน แล้วจึงใบอื่นที่ผูกการจอง (เมื่อเลือกรวม)
+            foreach (var s in scope.Where(x => !x.IsDeposit).OrderBy(x => x.IsFolio ? 0 : 1))
             {
                 decimal r = Math.Min(s.Creditable, left);
                 left -= r;
@@ -1109,34 +1542,133 @@ namespace Take_Time_BangPhra.Integration
             }
             if (left > 0.01m) { res.Message = "แบ่งยอดคืนลงใบต้นทางไม่ครบ (คงเหลือ " + left.ToString("N2") + ")"; return res; }
 
-            // ตรวจเกตเวย์ก่อนสร้างอะไรเลย
+            // ตรวจเกตเวย์/แหล่งเงินก่อนสร้างอะไรเลย (เดิมล้มกลางชุดหลังคืนเงินใบแรกไปแล้ว)
             if (method == MGateway)
                 foreach (var q in reqs)
-                    if (q.Lines.Sum(l => l.Amount) > 0 && !FindGatewayTxn(q.SourceReceiptId).HasValue)
+                {
+                    if (q.Lines.Sum(l => l.Amount) <= 0) continue;
+                    if (!FindGatewayTxn(q.SourceReceiptId).HasValue)
                     { res.Message = "ใบ " + q.SourceReceiptId + " ไม่ได้รับเงินผ่านเกตเวย์ — คืนผ่านเกตเวย์ไม่ได้ (เลือกโอน/เงินสด)"; return res; }
+                    var src = scope.First(x => x.Id == q.SourceReceiptId);
+                    if (!src.PaidHowId.HasValue)
+                    { res.Message = "ใบ " + q.SourceReceiptId + " รับชำระด้วย \"" + src.PaidType + "\" ที่ไม่ตรงกับแหล่งเงินในระบบ — คืนผ่านเกตเวย์ไม่ได้ (เลือกโอน/เงินสด)"; return res; }
+                }
 
-            var msgs = new List<string>();
+            string oldStatus = money.Status ?? "";
+            string tgHead = BuildCancelTelegramHead(reservationId, money);   // ก่อนลบแถวห้อง/ตั้งราคา 0
+
+            // 1) สร้างใบลดหนี้ทั้งชุดเป็นร่าง (ยังไม่มีเงินออก/ไม่แตะสต๊อก/ไม่เข้าคิว)
             foreach (var q in reqs)
             {
                 string m;
-                int id = Create(q, true, out m);
+                int id = CreateCore(q, true, false, out m);
                 if (id <= 0)
                 {
-                    // ยังไม่ได้ยกเลิกการจอง — ยกเลิกใบที่สร้างไปแล้วในชุดนี้ (ร่าง/อนุมัติแต่ยังไม่ส่ง) แล้วรายงาน
-                    foreach (int made in res.CreditNoteIds) { string vm; Void(made, "ยกเลิกอัตโนมัติ: สร้างชุดใบลดหนี้ไม่สำเร็จ", out vm); }
-                    res.Message = "สร้างใบลดหนี้ของ " + q.SourceReceiptId + " ไม่สำเร็จ: " + m;
+                    VoidBatchDrafts(res.CreditNoteIds, "ยกเลิกอัตโนมัติ: สร้างชุดใบลดหนี้ไม่สำเร็จ");
+                    res.CreditNoteIds.Clear();
+                    res.Message = "สร้างใบลดหนี้ของ " + q.SourceReceiptId + " ไม่สำเร็จ (ยังไม่ได้ยกเลิกการจอง): " + m;
                     return res;
                 }
                 res.CreditNoteIds.Add(id);
-                msgs.Add(m);
             }
 
-            ApplyReservationCancellation(money, refundTotal, total - refundTotal, reason);
+            // 2) การจอง — transaction เดียว + ชิงสถานะ (กดซ้ำ/สองหน้าต่าง/ปุ่มเดิมจากหน้าเก่า)
+            decimal retained = total - refundTotal;
+            decimal newDeposit = retained + (settle ? PriorRetained(reservationId, batch) : 0m);
+            if (!ApplyReservationCancellation(reservationId, oldStatus, settle, refundTotal, newDeposit))
+            {
+                VoidBatchDrafts(res.CreditNoteIds, "ยกเลิกอัตโนมัติ: สถานะการจองเปลี่ยนระหว่างทำรายการ");
+                res.CreditNoteIds.Clear();
+                res.Message = "สถานะการจองเปลี่ยนระหว่างทำรายการ (อาจถูกยกเลิก/เช็คอินจากอีกหน้าต่าง) — ยังไม่ได้ทำอะไร โหลดหน้าใหม่แล้วตรวจอีกครั้ง";
+                return res;
+            }
+
+            // 3) หลังบันทึกการจอง: ชาร์จค้าง (คืนสต๊อก/กลับ COGS) · ลิงก์ชำระเงินที่ค้าง · เงินประกัน (แจ้งเท่านั้น)
+            var notes = new List<string>();
+            if (!settle) CancelPendingCharges(reservationId);
+            int links = CancelOpenPaymentLinks(reservationId);
+            if (links > 0) notes.Add("ปิดลิงก์ชำระเงินที่ค้าง " + links + " รายการ");
+            string hold = OpenSecurityHoldNote(reservationId);
+            if (hold.Length > 0) notes.Add(hold);
+
+            // 4) อนุมัติ — คืนผ่านเกตเวย์ + เข้าคิว NextAcc หลังสุด (ล้ม = ใบนั้นยังเป็นร่าง อนุมัติซ้ำได้ ไม่คืนซ้ำ)
+            bool canApprove = !RequireApproval(_conn) || CanApproveCurrentUser();
+            var cnNos = new List<string>();
+            foreach (int id in res.CreditNoteIds)
+            {
+                string am = null;
+                bool ok = canApprove && Approve(id, out am);
+                var rec = Load(id);
+                if (rec != null) cnNos.Add(rec.CnNo + (ok ? "" : " (ร่าง)"));
+                if (!ok)
+                {
+                    res.DraftCount++;
+                    if (canApprove) notes.Add("⚠ " + (rec != null ? rec.CnNo : "#" + id) + " อนุมัติไม่สำเร็จ: " + am);
+                }
+            }
+
+            string payName = paidHowId.HasValue ? PaidHowName(paidHowId.Value) : "";
             res.Ok = true;
-            res.Message = (refundTotal > 0 ? $"ยกเลิกการจอง #{reservationId} คืนเงิน {refundTotal:N2}" : $"ยกเลิกการจอง #{reservationId} ไม่คืนเงิน")
-                          + (total - refundTotal > 0.005m ? $" · ยึด {total - refundTotal:N2}" : "")
-                          + (msgs.Count > 0 ? " · " + string.Join(" | ", msgs) : " · ไม่มีเงินรับไว้");
+            res.Message = (settle ? $"ปิดเงินค้างของการจอง #{reservationId} (ยกเลิกไว้แล้ว)" : $"ยกเลิกการจอง #{reservationId}")
+                          + (refundTotal > 0 ? $" คืนเงิน {refundTotal:N2} ({MethodLabel(method)}{(payName.Length > 0 ? " · " + payName : "")})" : " ไม่คืนเงิน")
+                          + (retained > 0.005m ? $" · ยึด {retained:N2}" : "")
+                          + (cnNos.Count > 0 ? " · ใบลดหนี้ " + string.Join(", ", cnNos) : " · ไม่มีเงินรับไว้")
+                          + (res.DraftCount > 0 && !canApprove ? " · รออนุมัติ " + res.DraftCount + " ใบ (Owner/Admin ที่มีสิทธิ์บัญชี) — เงินยังไม่ออกจนกว่าจะอนุมัติ" : "")
+                          + (notes.Count > 0 ? " · " + string.Join(" · ", notes) : "");
+
+            try
+            {
+                string tg = (tgHead ?? ("🆔 การจอง: " + reservationId + "\n👤 ลูกค้า: " + (money.CustomerName ?? "-")))
+                            + "\n💵 คืนเงิน: " + refundTotal.ToString("N2", Inv) + " บาท"
+                            + (refundTotal > 0 ? " (" + MethodLabel(method) + (payName.Length > 0 ? " · " + payName : "") + ")" : "")
+                            + (retained > 0.005m ? "\n🧾 ยึดไว้: " + retained.ToString("N2", Inv) + " บาท" : "")
+                            + (cnNos.Count > 0 ? "\n📄 ใบลดหนี้/ใบคืนเงิน: " + string.Join(", ", cnNos) : "")
+                            + (res.DraftCount > 0 ? "\n⏳ รออนุมัติ " + res.DraftCount + " ใบ — เงินยังไม่ออกจนกว่าจะอนุมัติ" : "")
+                            + (hold.Length > 0 ? "\n🔒 " + hold : "")
+                            + (string.IsNullOrWhiteSpace(reason) ? "" : "\n📝 " + reason);
+                string title = settle ? "💼 *ปิดเงินค้างของการจองที่ยกเลิกแล้ว (ใบลดหนี้)*"
+                             : refundTotal > 0 ? "✅ *ยกเลิกการจอง (คืนเงิน — ใบลดหนี้)*" : "❌ *ยกเลิกการจอง (ไม่คืนเงิน — ใบลดหนี้)*";
+                Notify.Send(Notify.Ev.BookingCancel, title + "\n\n" + tg);
+            }
+            catch { }
+            _code.Logs(_conn, "CreditNote",
+                $"{(settle ? "ปิดเงินค้าง" : "ยกเลิกการจอง")} #{reservationId} ผ่านใบลดหนี้: คืน {refundTotal:N2} ยึด {retained:N2} ร่าง {res.DraftCount} · {string.Join(", ", cnNos)}",
+                CurrentUser());
             return res;
+        }
+
+        private void VoidBatchDrafts(List<int> ids, string reason)
+        {
+            foreach (int made in ids)
+            {
+                string vm;
+                try { VoidCore(made, reason, false, out vm); } catch { }
+            }
+        }
+
+        /// <summary>ยอดยึดของใบลดหนี้ชุดก่อน ๆ ของการจองนี้ (ยังไม่ยกเลิก) — โหมดปิดเงินค้างต้องไม่ทับยอดที่ยึดไว้แล้ว</summary>
+        private decimal PriorRetained(int reservationId, string currentBatch)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_conn,
+                    @"SELECT ISNULL(SUM(Retained_Amount), 0) FROM Credit_Note
+                       WHERE Reservation_ID = @id AND Status <> 'VOIDED' AND ISNULL(Cancel_Batch, '') <> @b",
+                    new Dictionary<string, object> { { "@id", reservationId }, { "@b", currentBatch ?? "" } });
+                return dt != null && dt.Rows.Count > 0 ? Dec(dt.Rows[0][0]) : 0m;
+            }
+            catch { return 0m; }
+        }
+
+        private string PaidHowName(int id)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_conn, "SELECT TOP 1 Paid_How FROM Account_Paid_How WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", id } });
+                return dt != null && dt.Rows.Count > 0 ? Str(dt.Rows[0][0]).Trim() : "";
+            }
+            catch { return ""; }
         }
 
         private static Request NewCancelRequest(ReservationMoney money, SourceReceipt s, decimal refund, decimal retained, string retainedAs,
@@ -1186,76 +1718,138 @@ namespace Take_Time_BangPhra.Integration
             }
         }
 
-        private void ApplyReservationCancellation(ReservationMoney money, decimal refunded, decimal retained, string reason)
+        /// <summary>
+        /// ตั้งสถานะการจองที่ยกเลิก (หรือปิดเงินค้างของใบที่ยกเลิกแล้ว) ใน transaction เดียว:
+        ///   ชิงสถานะ (WHERE Status = สถานะที่อ่านตอนเริ่ม) → TotalPrice = 0 / Deposit = เงินที่โรงแรมยังถือ / สถานะ →
+        ///   Payment_History รับเงิน → CANCELLED, คืนเงิน → REFUNDED → ลบแถวห้อง/รายการ (เหมือนปุ่มเดิม)
+        /// false = สถานะเปลี่ยนไปแล้ว (ไม่มีอะไรถูกแก้)
+        /// ใบมัดจำ → Refunded/Forfeit ตอนใบลดหนี้ของใบนั้นอนุมัติ (MarkDepositReceiptIfSettled) ไม่ใช่ตรงนี้
+        /// </summary>
+        private bool ApplyReservationCancellation(int resId, string oldStatus, bool settle, decimal refunded, decimal newDeposit)
         {
-            int resId = money.ReservationId;
             string status = refunded > 0.005m ? "ยกเลิกคืนเงิน" : "ยกเลิกไม่คืนเงิน";
-            var p = new Dictionary<string, object> { { "@id", resId } };
-            try
-            {
-                _code.DatabaseInsertSafe(_conn,
-                    @"UPDATE Payment_History SET Status = 'CANCELLED', Notes = @n
-                       WHERE Reservation_ID = @id AND Status = 'COMPLETED' AND ISNULL(PaymentType, '') <> 'REFUND'",
-                    new Dictionary<string, object> { { "@id", resId }, { "@n", "ยกเลิกจากการยกเลิกการจอง (ใบลดหนี้) ID: " + resId } });
-            }
-            catch { }
-            _code.DatabaseInsertSafe(_conn,
-                "UPDATE Reservation SET TotalPrice = 0, Deposit = @dep, [Status] = @st WHERE ID = @id",
-                new Dictionary<string, object> { { "@id", resId }, { "@dep", retained }, { "@st", status } });
-            // Payment_History REFUND ที่เพิ่งสร้างตอนอนุมัติ (ถ้ามี) → REFUNDED (การจองยกเลิกแล้ว ไม่นับยอด)
-            try
-            {
-                _code.DatabaseInsertSafe(_conn,
-                    "UPDATE Payment_History SET Status = 'REFUNDED' WHERE Reservation_ID = @id AND PaymentType = 'REFUND' AND Status = 'COMPLETED'", p);
-            }
-            catch { }
+            var dt = _code.DatabaseQuerySafe(_conn,
+                @"SET NOCOUNT ON;
+                  SET XACT_ABORT ON;
+                  DECLARE @n INT = 0;
+                  BEGIN TRAN;
+                  IF @settle = 1
+                      UPDATE Reservation SET Deposit = @dep
+                       WHERE ID = @id AND ISNULL([Status], N'') = @old;
+                  ELSE
+                      UPDATE Reservation SET TotalPrice = 0, Deposit = @dep, [Status] = @st
+                       WHERE ID = @id AND ISNULL([Status], N'') = @old AND ISNULL([Status], N'') NOT LIKE N'ยกเลิก%';
+                  SET @n = @@ROWCOUNT;
+                  IF @n = 0
+                  BEGIN
+                      ROLLBACK;
+                      SELECT 0 AS N;
+                      RETURN;
+                  END
+                  UPDATE Payment_History SET Status = 'CANCELLED', Notes = @note
+                   WHERE Reservation_ID = @id AND Status = 'COMPLETED' AND ISNULL(PaymentType, '') <> 'REFUND';
+                  UPDATE Payment_History SET Status = 'REFUNDED'
+                   WHERE Reservation_ID = @id AND PaymentType = 'REFUND' AND Status = 'COMPLETED';
+                  IF @settle = 0
+                  BEGIN
+                      DELETE FROM Reservation_Accommodation WHERE Reservation_ID = @id;
+                      DELETE FROM Reservation_Items WHERE Reservation_ID = @id;
+                  END
+                  COMMIT;
+                  SELECT @n AS N;",
+                new Dictionary<string, object>
+                {
+                    { "@id", resId }, { "@old", oldStatus ?? "" }, { "@settle", settle ? 1 : 0 },
+                    { "@dep", Math.Max(0m, Math.Round(newDeposit, 2, MidpointRounding.AwayFromZero)) }, { "@st", status },
+                    { "@note", "ยกเลิกจากการยกเลิกการจอง (ใบลดหนี้) ID: " + resId }
+                });
+            return dt != null && dt.Rows.Count > 0 && dt.Rows[0][0] != DBNull.Value && Convert.ToInt32(dt.Rows[0][0]) > 0;
+        }
 
-            // ชาร์จเข้าห้องที่ค้าง (PENDING) — คืนสต๊อก + กลับต้นทุน (เหมือนปุ่มยกเลิกเดิม)
+        /// <summary>ชาร์จเข้าห้องที่ค้าง (PENDING) — คืนสต๊อก + กลับต้นทุน (เหมือนปุ่มยกเลิกเดิม) · ทำหลัง commit การจอง</summary>
+        private void CancelPendingCharges(int resId)
+        {
             try
             {
                 var pend = _code.DatabaseQuerySafe(_conn,
-                    "SELECT ID FROM Reservation_Product_Charges WHERE Reservation_ID = @id AND Status = 'PENDING'", p);
-                if (pend != null && pend.Rows.Count > 0)
-                {
-                    var svc = new Take_Time_BangPhra.RoomChargeService(_conn);
-                    foreach (DataRow r in pend.Rows)
-                        try { svc.CancelRoomCharge(Convert.ToInt64(r["ID"]), CurrentAdminId(), "ยกเลิกการจอง #" + resId); } catch { }
-                }
+                    "SELECT ID FROM Reservation_Product_Charges WHERE Reservation_ID = @id AND Status = 'PENDING'",
+                    new Dictionary<string, object> { { "@id", resId } });
+                if (pend == null || pend.Rows.Count == 0) return;
+                var svc = new Take_Time_BangPhra.RoomChargeService(_conn);
+                foreach (DataRow r in pend.Rows)
+                    try { svc.CancelRoomCharge(Convert.ToInt64(r["ID"]), CurrentAdminId(), "ยกเลิกการจอง #" + resId); } catch { }
             }
             catch { }
+        }
 
-            _code.DatabaseInsertSafe(_conn, "DELETE FROM Reservation_Accommodation WHERE Reservation_ID = @id", p);
-            _code.DatabaseInsertSafe(_conn, "DELETE FROM Reservation_Items WHERE Reservation_ID = @id", p);
-
-            // ใบมัดจำ: คืน (บางส่วน) = 'Refunded' · ยึดทั้งหมด = 'Forfeit' — ไม่ใช่ 'Cancel' (ไม่ void บน NextAcc; ใบลดหนี้จัดการบัญชีแล้ว)
-            foreach (var s in money.Receipts.Where(x => x.IsDeposit))
-            {
-                try
-                {
-                    var c = _code.DatabaseQuerySafe(_conn,
-                        "SELECT ISNULL(SUM(Refund_Amount), 0) AS R, ISNULL(SUM(Retained_Amount), 0) AS K FROM Credit_Note WHERE Source_Receipt_ID = @r AND Status <> 'VOIDED'",
-                        new Dictionary<string, object> { { "@r", s.Id } });
-                    decimal rf = c != null && c.Rows.Count > 0 ? Dec(c.Rows[0]["R"]) : 0m;
-                    decimal kp = c != null && c.Rows.Count > 0 ? Dec(c.Rows[0]["K"]) : 0m;
-                    if (rf <= 0 && kp <= 0) continue;
-                    _code.DatabaseInsertSafe(_conn,
-                        "UPDATE Account_Receipt SET Status = @st WHERE ID = @r AND ISNULL(Status, N'Normal') IN (N'Normal', N'')",
-                        new Dictionary<string, object> { { "@r", s.Id }, { "@st", rf > 0 ? "Refunded" : "Forfeit" } });
-                }
-                catch { }
-            }
-
+        /// <summary>
+        /// ลิงก์/QR ชำระเงินออนไลน์ของการจองที่ยังรอจ่าย → CANCELLED (หน้า Pay ไม่หยิบมาใช้ต่อ)
+        /// ถ้าลูกค้าจ่ายที่เกตเวย์ทีหลังจริง webhook ยังตั้ง PAID ได้ (MarkPaid ไม่กรองสถานะ CANCELLED) — เงินไม่หาย แจ้งให้คืนตามปกติ
+        /// </summary>
+        private int CancelOpenPaymentLinks(int resId)
+        {
             try
             {
-                string msg = (refunded > 0.005m ? "✅ *ยกเลิกการจอง (คืนเงิน — ใบลดหนี้)*" : "❌ *ยกเลิกการจอง (ไม่คืนเงิน — ใบลดหนี้)*")
-                             + "\n🆔 การจอง: " + resId + "\n👤 ลูกค้า: " + (money.CustomerName ?? "-")
-                             + "\n💵 คืนเงิน: " + refunded.ToString("N2", Inv) + " บาท"
-                             + (retained > 0.005m ? "\n🧾 ยึดไว้: " + retained.ToString("N2", Inv) + " บาท" : "")
-                             + (string.IsNullOrWhiteSpace(reason) ? "" : "\n📝 " + reason);
-                Notify.Send(Notify.Ev.BookingCancel, msg);
+                var dt = _code.DatabaseQuerySafe(_conn,
+                    @"IF OBJECT_ID('dbo.Payment_Transaction','U') IS NOT NULL
+                      BEGIN
+                          UPDATE Payment_Transaction
+                             SET [Status] = 'CANCELLED', Fail_Reason = N'การจองถูกยกเลิก', Updated_Date = GETDATE()
+                           WHERE Source_Type = 'RESERVATION' AND Source_ID = @sid AND [Status] IN ('INITIATED', 'PENDING');
+                          SELECT @@ROWCOUNT AS N;
+                      END
+                      ELSE SELECT 0 AS N;",
+                    new Dictionary<string, object> { { "@sid", resId.ToString(Inv) } });
+                return dt != null && dt.Rows.Count > 0 ? Convert.ToInt32(dt.Rows[0][0]) : 0;
             }
-            catch { }
-            _code.Logs(_conn, "CreditNote", $"ยกเลิกการจอง #{resId} ผ่านใบลดหนี้: คืน {refunded:N2} ยึด {retained:N2}", CurrentUser());
+            catch { return 0; }
+        }
+
+        /// <summary>เงินประกันความเสียหายที่ยังถืออยู่ — ไม่ขยับเงินอัตโนมัติ แค่เตือนให้คืน/ปล่อยวงเงินที่หน้าเงินประกัน</summary>
+        private string OpenSecurityHoldNote(int resId)
+        {
+            try
+            {
+                var h = new Take_Time_BangPhra.Payments.SecurityHoldService(_conn).GetOpenHold(resId);
+                if (h == null) return "";
+                return "มีเงินประกันค้าง " + h.Amount.ToString("N2", Inv) + " บาท (" + (h.Provider ?? "-") + ", " + (h.HoldRef ?? "") +
+                       ") — คืน/ปล่อยวงเงินที่หน้าเงินประกัน (ระบบไม่ขยับเงินอัตโนมัติ)";
+            }
+            catch { return ""; }
+        }
+
+        /// <summary>หัวข้อความแจ้งยกเลิก (เบอร์/ห้อง/วันที่/ราคารวม) — ต้องอ่าน "ก่อน" ลบแถวห้องและตั้งราคา 0 · ไม่พบ = null</summary>
+        private string BuildCancelTelegramHead(int resId, ReservationMoney money)
+        {
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_conn,
+                    @"SELECT r.Customer_MobilePhone, c.Name, c.NickName, r.CheckinDate, r.CheckoutDate, r.StayDays, a.AccomName
+                        FROM Reservation r
+                        LEFT JOIN Customer c ON c.MobilePhone = r.Customer_MobilePhone
+                        LEFT JOIN Reservation_Accommodation ra ON ra.Reservation_ID = r.ID
+                        LEFT JOIN Accommodation a ON a.ID = ra.Accommodation_ID
+                       WHERE r.ID = @id",
+                    new Dictionary<string, object> { { "@id", resId } });
+                if (dt == null || dt.Rows.Count == 0) return null;
+                var r0 = dt.Rows[0];
+                decimal total = 0m;
+                try { var b = ReservationBalance.Load(_conn, resId); if (b != null) total = b.Total; } catch { }
+                var rooms = new List<string>();
+                foreach (DataRow r in dt.Rows) { string a = Str(r["AccomName"]).Trim(); if (a.Length > 0 && !rooms.Contains(a)) rooms.Add(a); }
+                Func<object, string> D = o => o == null || o == DBNull.Value ? "-" : Convert.ToDateTime(o).ToString("dd MMMM yyyy");
+                string name = Str(r0["Name"]).Trim();
+                string nick = Str(r0["NickName"]).Trim();
+                return "🆔 การจอง: " + resId
+                       + "\n👤 ลูกค้า: " + (name.Length > 0 ? name + (nick.Length > 0 ? " (" + nick + ")" : "") : (money?.CustomerName ?? "-"))
+                       + "\n📞 โทรศัพท์: " + Str(r0["Customer_MobilePhone"])
+                       + "\n📅 เช็คอิน: " + D(r0["CheckinDate"]) + " · เช็คเอ้าท์: " + D(r0["CheckoutDate"])
+                       + (r0["StayDays"] != DBNull.Value ? " (" + Str(r0["StayDays"]) + " คืน)" : "")
+                       + (rooms.Count > 0 ? "\n🏨 ห้อง: " + string.Join(", ", rooms) : "")
+                       + (total > 0 ? "\n💰 ราคารวม: " + total.ToString("N0", Inv) + " บาท" : "")
+                       + "\n📌 สถานะเดิม: " + (money?.Status ?? "-");
+            }
+            catch { return null; }
         }
 
         // ── พิมพ์ (ใบลดหนี้/หลักฐานการคืนเงินของ TakeTime) ─────────────────────
@@ -1265,8 +1859,12 @@ namespace Take_Time_BangPhra.Integration
             string bizName, bizTax, bizAddr;
             Take_Time_BangPhra.TaxReports.TaxReportKit.BusinessHeader(_conn, out bizName, out bizTax, out bizAddr);
             Func<string, string> H = HttpUtility.HtmlEncode;
-            bool taxCn = rec.SourceDocType == SrcTaxInvoice || rec.VatAmount > 0;
-            string title = taxCn ? "ใบลดหนี้ / Credit Note" : "หลักฐานการคืนเงิน / Refund Voucher";
+            // มัดจำที่ VAT ยังไม่เข้า ภ.พ.30 (โหมด CHECKOUT / RECEIPT+defer → VAT ของใบ = 0) = ใบคืนเงินมัดจำ ไม่ใช่ใบลดหนี้ ม.86/10
+            // มัดจำโหมด RECEIPT ไม่พัก (VAT เข้า ภ.พ.30 ตอนรับมัดจำ) = ใบลดหนี้มี VAT ตามเดิม
+            bool depositNoVat = rec.SourceDocType == SrcDeposit && rec.VatAmount <= 0;
+            bool taxCn = !depositNoVat && (rec.SourceDocType == SrcTaxInvoice || rec.VatAmount > 0);
+            string title = taxCn ? "ใบลดหนี้ / Credit Note"
+                         : depositNoVat ? "ใบคืนเงินมัดจำ / หลักฐานการคืนเงิน" : "หลักฐานการคืนเงิน / Refund Voucher";
             var sb = new StringBuilder();
             sb.Append("<div class='cnp'>");
             sb.Append("<div class='cnp-h'><div><b>").Append(H(bizName)).Append("</b><br/>").Append(H(bizAddr))
@@ -1280,23 +1878,31 @@ namespace Take_Time_BangPhra.Integration
               .Append("<br/>อ้างอิงเอกสารเดิม: <b>").Append(H(rec.SourceReceiptId)).Append("</b>")
               .Append(" · เหตุผล: ").Append(H(ReasonLabel(rec.ReasonCode)))
               .Append(string.IsNullOrWhiteSpace(rec.ReasonText) ? "" : " — " + H(rec.ReasonText)).Append("</p>");
-            sb.Append("<table class='cnp-tb'><tr><th>#</th><th>รายการ</th><th style='text-align:right'>จำนวน</th><th style='text-align:right'>จำนวนเงิน (รวม VAT)</th></tr>");
+            sb.Append("<table class='cnp-tb'><tr><th>#</th><th>รายการ</th><th style='text-align:right'>จำนวน</th><th style='text-align:right'>")
+              .Append(taxCn ? "จำนวนเงิน (รวม VAT)" : "จำนวนเงิน").Append("</th></tr>");
             foreach (var l in rec.Lines)
                 sb.Append("<tr><td>").Append(l.LineNo).Append("</td><td>").Append(H(l.Description)).Append("</td><td style='text-align:right'>")
                   .Append(l.Qty.ToString("#,##0.##", Inv)).Append(' ').Append(H(l.Unit)).Append("</td><td style='text-align:right'>")
                   .Append(l.Amount.ToString("#,##0.00", Inv)).Append("</td></tr>");
             sb.Append("</table>");
             sb.Append("<table class='cnp-sum'>");
-            sb.Append("<tr><td>มูลค่าที่ลดลง (ไม่รวม VAT)</td><td>").Append((rec.AmountGross - rec.VatAmount).ToString("#,##0.00", Inv)).Append("</td></tr>");
-            sb.Append("<tr><td>ภาษีมูลค่าเพิ่ม</td><td>").Append(rec.VatAmount.ToString("#,##0.00", Inv)).Append("</td></tr>");
-            sb.Append("<tr><td><b>รวมลดหนี้</b></td><td><b>").Append(rec.AmountGross.ToString("#,##0.00", Inv)).Append("</b></td></tr>");
+            if (taxCn)
+            {
+                sb.Append("<tr><td>มูลค่าที่ลดลง (ไม่รวม VAT)</td><td>").Append((rec.AmountGross - rec.VatAmount).ToString("#,##0.00", Inv)).Append("</td></tr>");
+                sb.Append("<tr><td>ภาษีมูลค่าเพิ่ม</td><td>").Append(rec.VatAmount.ToString("#,##0.00", Inv)).Append("</td></tr>");
+                sb.Append("<tr><td><b>รวมลดหนี้</b></td><td><b>").Append(rec.AmountGross.ToString("#,##0.00", Inv)).Append("</b></td></tr>");
+            }
+            else
+                sb.Append("<tr><td><b>").Append(depositNoVat ? "รวมเงินมัดจำที่คืน" : "รวมเงินที่คืน").Append("</b></td><td><b>")
+                  .Append(rec.AmountGross.ToString("#,##0.00", Inv)).Append("</b></td></tr>");
             if (rec.RetainedAmount > 0)
                 sb.Append("<tr><td>ยึดไว้เป็นค่าธรรมเนียมยกเลิก</td><td>").Append(rec.RetainedAmount.ToString("#,##0.00", Inv)).Append("</td></tr>");
             sb.Append("<tr><td>คืนเงิน (").Append(H(MethodLabel(rec.RefundMethod)))
               .Append(string.IsNullOrEmpty(rec.RefundPaidHowName) ? "" : " · " + H(rec.RefundPaidHowName)).Append(")</td><td>")
               .Append(rec.RefundAmount.ToString("#,##0.00", Inv)).Append("</td></tr>");
             sb.Append("</table>");
-            if (!string.IsNullOrWhiteSpace(rec.RefundRef)) sb.Append("<p>อ้างอิงการโอน/คืนเงิน: ").Append(H(rec.RefundRef)).Append("</p>");
+            string shownRef = DisplayRefundRef(rec.RefundRef);
+            if (!string.IsNullOrWhiteSpace(shownRef)) sb.Append("<p>อ้างอิงการโอน/คืนเงิน: ").Append(H(shownRef)).Append("</p>");
             if (!taxCn)
                 sb.Append("<p class='cnp-note'>เอกสารนี้เป็นหลักฐานการคืนเงินมัดจำ (มัดจำยังไม่ได้ออกใบกำกับภาษี/ภาษีขายยังไม่ถึงกำหนด) — ไม่ใช่ใบลดหนี้ตาม ม.86/10</p>");
             else if (string.IsNullOrEmpty(rec.NexaaccDocNo))

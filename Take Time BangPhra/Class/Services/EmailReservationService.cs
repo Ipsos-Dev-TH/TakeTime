@@ -2650,8 +2650,13 @@ namespace Take_Time_BangPhra.Services
                 new Dictionary<string, object> { { "@id", resId } });
             if (rcpt?.Rows.Count > 0)
             {
+                bool cnOn = false;
+                try { cnOn = Take_Time_BangPhra.Integration.CreditNoteService.Enabled(_conn); } catch { }
                 string warn = $"⚠️ Booking {bookingId} (จอง #{resId}) มีอีเมลยกเลิก แต่ออกใบเสร็จไปแล้ว ({rcpt.Rows[0][0]}) — " +
-                              "ไม่ยกเลิกอัตโนมัติ กรุณายกเลิกใบเสร็จ/เอกสารบัญชีก่อน แล้วยกเลิกการจองเอง";
+                              (cnOn
+                                  ? $"ไม่ยกเลิกอัตโนมัติ — ยกเลิก + คืน/ยึดเงินที่โรงแรมรับเองที่หน้า ใบลดหนี้: /Account/CreditNotes?cancelRes={resId} " +
+                                    "(ห้าม void ใบเสร็จ · ค่าห้องที่ OTA เก็บ OTA คืนลูกค้าเอง)"
+                                  : "ไม่ยกเลิกอัตโนมัติ กรุณายกเลิกใบเสร็จ/เอกสารบัญชีก่อน แล้วยกเลิกการจองเอง");
                 _code.Logs(_conn, "EmailReservation", warn, "SYSTEM");
                 if (_notifyTelegram) Notify(warn, true);
                 return new Outcome(false, false, true, warn, park: true).Detail(chead, null, resId);

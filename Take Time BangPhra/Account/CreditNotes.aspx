@@ -117,7 +117,7 @@
                                         <td class="num"><%# M(Eval("Vat_Amount")) %></td>
                                         <td class="num"><%# M(Eval("Refund_Amount")) %><%# Convert.ToString(Eval("Refund_Status")) == "PENDING" ? "<br/><span class='cn-chip DRAFT'>รอคืน</span>" : "" %></td>
                                         <td class="num"><%# M(Eval("Retained_Amount")) %></td>
-                                        <td><%# H(Take_Time_BangPhra.Integration.CreditNoteService.MethodLabel(Convert.ToString(Eval("Refund_Method")))) %><br /><span class="cn-note"><%# H(Eval("PaidHowName")) %> <%# H(Eval("Refund_Ref")) %></span></td>
+                                        <td><%# H(Take_Time_BangPhra.Integration.CreditNoteService.MethodLabel(Convert.ToString(Eval("Refund_Method")))) %><br /><span class="cn-note"><%# H(Eval("PaidHowName")) %> <%# H(Take_Time_BangPhra.Integration.CreditNoteService.DisplayRefundRef(Convert.ToString(Eval("Refund_Ref")))) %></span></td>
                                         <td><span class="cn-chip <%# Eval("Status") %>"><%# H(Take_Time_BangPhra.Integration.CreditNoteService.StatusLabel(Convert.ToString(Eval("Status")))) %></span>
                                             <%# string.IsNullOrEmpty(Convert.ToString(Eval("Sync_Error"))) || Convert.ToString(Eval("Status")) == "SYNCED" || Convert.ToString(Eval("Status")) == "VOIDED" ? "" : "<br/><span class='cn-chip ERR' title='" + H(Eval("Sync_Error")) + "'>⚠ ส่งไม่สำเร็จ</span>" %></td>
                                         <td><%# H(Eval("Nexaacc_Doc_No")) %></td>
@@ -237,7 +237,9 @@
                         <h3>คืนเงิน / ยึดเงิน</h3>
                         <div class="cn-row">
                             <div class="cn-field"><label>ยอดคืนลูกค้า (บาท)</label>
-                                <asp:TextBox ID="txtCancelRefund" runat="server" CssClass="form-control" ClientIDMode="Static" /></div>
+                                <asp:TextBox ID="txtCancelRefund" runat="server" CssClass="form-control" ClientIDMode="Static" />
+                                <asp:CheckBox ID="chkIncludeLinked" runat="server" ClientIDMode="Static" CssClass="cn-note"
+                                    Text=" รวมใบอื่นที่ผูกการจอง (รูมเซอร์วิส/POS ชำระทันที) ในยอดคืน" /></div>
                             <div class="cn-field"><label>ส่วนที่ไม่คืน (ยึด)</label>
                                 <div class="cn-sum" id="cnRetainedView">-</div></div>
                             <div class="cn-field"><label>ส่วนที่ยึดถือเป็น</label>
@@ -266,10 +268,13 @@
                         </div>
                         <div class="cn-note">ระบบแบ่งยอดคืนลงใบต้นทางให้: <b>มัดจำคงเหลือก่อน</b> (NextAcc: คืนมัดจำ — กลับหนี้สินมัดจำ + ภาษีขายตามโหมด VAT,
                             ส่วนที่ยึด = รับรู้เป็นรายได้/ออกใบกำกับของยอดที่ยึด) แล้วจึง <b>ใบกำกับ</b> (ใบลดหนี้อ้างใบเดิม) — ส่วนที่ไม่คืนของใบกำกับคงเป็นรายได้
-                            (ไม่ออกใบลดหนี้ส่วนที่ยึด). ไม่ได้ใช้ปุ่มยกเลิกแบบเดิม จึงไม่ยกเลิกใบเสร็จมัดจำ/ไม่ลงรายการคืน-ริบแบบเดิมซ้ำ</div>
+                            (ไม่ออกใบลดหนี้ส่วนที่ยึด). ไม่ได้ใช้ปุ่มยกเลิกแบบเดิม จึงไม่ยกเลิกใบเสร็จมัดจำ/ไม่ลงรายการคืน-ริบแบบเดิมซ้ำ.
+                            ต้องอนุมัติ = การจองถูกยกเลิก (ห้องว่าง) แต่ใบลดหนี้เป็นร่าง เงินยังไม่ออกจนกว่าจะอนุมัติ — ยกเลิกร่างแล้วทำใหม่ได้.
+                            ค่าห้องที่ OTA เก็บ (Channel Collect) OTA เป็นผู้คืนลูกค้า — ไม่อยู่ในยอดนี้</div>
                         <div style="margin-top:12px">
                             <asp:Button ID="btnCancelConfirm" runat="server" Text="ยืนยันยกเลิกการจอง + บันทึกคืนเงิน" CssClass="btn-cn" OnClick="btnCancelConfirm_Click"
-                                OnClientClick="return confirm('ยืนยันยกเลิกการจองและบันทึกคืนเงินตามยอดที่ระบุ?');" />
+                                UseSubmitBehavior="false"
+                                OnClientClick="if(!confirm('ยืนยันยกเลิกการจองและบันทึกคืน/ยึดเงินตามยอดที่ระบุ?'))return false;this.disabled=true;this.value='กำลังบันทึก…';" />
                             <a class="btn-cn2" href="<%= ResolveUrl("~/ReserveTable") %>">ยกเลิก (กลับตารางการจอง)</a>
                         </div>
                     </div>
@@ -308,6 +313,20 @@
         var view = document.getElementById('cnRetainedView');
         if (!inp || !view) return;
         var total = parseFloat(inp.getAttribute('data-total') || '0') || 0;
+        // รวมใบอื่นที่ผูกการจอง: เพดานยอดคืนเปลี่ยน (data-total-all) — ยอดคืนเดิมเท่าเพดาน → ขยับตามเพดานใหม่
+        var chk = document.getElementById('chkIncludeLinked');
+        var folio = total;
+        var all = parseFloat(inp.getAttribute('data-total-all') || String(total)) || total;
+        if (chk) {
+            if (chk.checked) total = all;
+            chk.addEventListener('change', function () {
+                var cur = parseFloat(String(inp.value || '').replace(/,/g, ''));
+                var prev = total;
+                total = chk.checked ? all : folio;
+                if (!isNaN(cur) && Math.abs(cur - prev) < 0.005) inp.value = total.toFixed(2);
+                render();
+            });
+        }
         function render() {
             var v = parseFloat(String(inp.value || '').replace(/,/g, ''));
             if (isNaN(v)) v = 0;

@@ -354,6 +354,15 @@ namespace Take_Time_BangPhra.Account
         protected global::System.Web.UI.WebControls.TextBox txtCancelRefund;
 
         /// <summary>
+        /// chkIncludeLinked control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.CheckBox chkIncludeLinked;
+
+        /// <summary>
         /// ddlRetainedAs control.
         /// </summary>
         /// <remarks>

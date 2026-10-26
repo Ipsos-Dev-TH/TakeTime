@@ -71,14 +71,15 @@ namespace Take_Time_BangPhra.Integration
             try
             {
                 var p = new Dictionary<string, object> { { "@p", "%\"cnNo\":\"" + cnNo.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]") + "\"%" } };
-                var busy = _code.DatabaseQuerySafe(_connectionString,
-                    @"SELECT TOP 1 ID FROM Accounting_Sync_Queue
-                       WHERE Entity_Type = 'CREDIT_NOTE' AND Action_Type = 'CREATE_CREDIT_NOTE' AND Status = 'PROCESSING' AND Payload LIKE @p", p);
-                if (busy != null && busy.Rows.Count > 0) return false;
+                // ถอนก่อน แล้วตรวจว่ามีตัวที่ถูกหยิบไปประมวลผลแล้วหรือไม่ — เดิมตรวจก่อนถอน: คิวหยิบไปแทรกระหว่างสองคำสั่งได้
+                // (ถอนไม่โดน แต่ฝั่งเรายกเลิกใบไปแล้วขณะที่ NextAcc กำลังสร้างเอกสาร)
                 _code.DatabaseInsertSafe(_connectionString,
                     @"UPDATE Accounting_Sync_Queue SET Status = 'CANCELLED', Error_Message = N'ยกเลิก: ใบลดหนี้ถูกยกเลิกก่อนส่ง NextAcc'
                        WHERE Entity_Type = 'CREDIT_NOTE' AND Action_Type = 'CREATE_CREDIT_NOTE' AND Status IN ('PENDING', 'FAILED') AND Payload LIKE @p", p);
-                return true;
+                var busy = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 ID FROM Accounting_Sync_Queue
+                       WHERE Entity_Type = 'CREDIT_NOTE' AND Action_Type = 'CREATE_CREDIT_NOTE' AND Status = 'PROCESSING' AND Payload LIKE @p", p);
+                return busy == null || busy.Rows.Count == 0;
             }
             catch { return false; }
         }
@@ -272,11 +273,28 @@ namespace Take_Time_BangPhra.Integration
             }
             try
             {
+                // "จะคืนภายหลัง" ตอนเริ่มส่ง — ถ้าระหว่างส่งมีคน "บันทึกคืนเงิน" (สถานะยัง APPROVED → RecordRefund ไม่เข้าคิว RFD
+                // เพราะคิดว่าจะลงพร้อมใบ) ขาเงินคืนจะหายไป ⇒ ตรวจซ้ำหลังส่งแล้วเข้าคิว RECORD_CN_REFUND เอง (JE CN-{id}-RFD idempotent)
+                bool refundWasPending = cn.RefundStatus == CreditNoteService.RsPending;
                 string result = cn.SourceDocType == CreditNoteService.SrcDeposit
                     ? await ProcessCnDepositAsync(cn)
                     : await ProcessCnInvoiceAsync(cn);
                 CnSet(cnId, "Status = 'SYNCED', Sync_Error = NULL, Nexaacc_Marker = 'DONE'");
                 _code.Logs(_connectionString, "AccountingSync", $"CreditNote {cn.CnNo}: ส่ง NextAcc สำเร็จ ({result})", "SYSTEM");
+                if (refundWasPending)
+                {
+                    try
+                    {
+                        var after = svc.Load(cnId);
+                        if (after != null && after.RefundStatus == CreditNoteService.RsPaid && after.RefundAmount > 0.004m)
+                        {
+                            long q = EnqueueCreditNoteRefund(cnId, cn.CnNo);
+                            _code.Logs(_connectionString, "AccountingSync",
+                                $"CreditNote {cn.CnNo}: บันทึกคืนเงินระหว่างส่ง → เข้าคิว RECORD_CN_REFUND #{q}", "SYSTEM");
+                        }
+                    }
+                    catch { }
+                }
                 return result;
             }
             catch (Exception ex)

@@ -549,7 +549,8 @@ namespace Take_Time_BangPhra
                 try
                 {
                     ReservationBalance b = ReservationBalance.Load(conn, reservationId);
-                    if (b != null) held = b.LedgerRows > 0 ? b.PaidLedger : b.Received;
+                    // เงินที่ลูกค้าจ่ายโรงแรมจริงสุทธิหลังคืน (PaidHeld — ใบที่มีแต่ Deposit แล้วคืนบางส่วนไม่พลิกเครื่องหมาย)
+                    if (b != null) held = b.IsChannelCollect || b.IsCollectUnknown ? (b.LedgerRows > 0 ? b.PaidLedger : 0m) : b.PaidHeld;
                 }
                 catch { }
 
@@ -571,7 +572,29 @@ namespace Take_Time_BangPhra
                 catch { }
 
                 string msg = "ยกเลิกรายการเลื่อนเข้าพัก #" + reservationId.ToString(EnCulture) + " เรียบร้อยแล้ว";
-                if (held > 0m)
+                bool cnOn = false, cnPerm = false;
+                try
+                {
+                    cnOn = Take_Time_BangPhra.Integration.CreditNoteService.Enabled(conn);
+                    cnPerm = cnOn && Perm.CanAccess(Perm.FinReceipt);
+                }
+                catch { }
+                if (held > 0m && cnPerm)
+                {
+                    // ระบบใบลดหนี้: มัดจำที่ยังถือไว้ต้องคืน/ยึดผ่าน "ยกเลิกการจอง + คืนเงิน" (โหมดปิดเงินค้าง — สถานะไม่เปลี่ยนซ้ำ)
+                    Session["CreditNoteFlash"] = "warn|" + msg + " — มัดจำ " + held.ToString("N2", EnCulture)
+                        + " บาท ยังเป็นเงินรับล่วงหน้า: ระบุยอดคืนลูกค้า (ส่วนที่เหลือ = ยึด) แล้วกดยืนยันด้านล่าง";
+                    Response.Redirect(ResolveUrl("~/Account/CreditNotes?cancelRes=" + reservationId.ToString(EnCulture)), false);
+                    Context.ApplicationInstance.CompleteRequest();
+                    return;
+                }
+                if (held > 0m && cnOn)
+                {
+                    ShowMessage("warn", msg + " — มัดจำ " + held.ToString("N2", EnCulture) + " บาท ยังเป็นเงินรับล่วงหน้า: "
+                        + "แจ้งผู้มีสิทธิ์การเงินให้คืน/ยึดมัดจำที่หน้า \"ใบลดหนี้ / คืนเงินลูกค้า\" (ยกเลิกการจอง #"
+                        + reservationId.ToString(EnCulture) + ")");
+                }
+                else if (held > 0m)
                 {
                     msg += " — มัดจำ " + held.ToString("N2", EnCulture) + " บาท ยังเป็นเงินรับล่วงหน้า (หนี้สินต่อลูกค้า) ในระบบบัญชี"
                         + " หากคืนเงินหรือริบมัดจำ ต้องทำรายการคืนเงิน/บันทึกรายได้แยกต่างหาก";

@@ -37,11 +37,45 @@ namespace Take_Time_BangPhra
             {
                 if (!_creditNoteFlowOn.HasValue)
                 {
-                    try { _creditNoteFlowOn = Take_Time_BangPhra.Integration.CreditNoteService.Enabled(conn) && Perm.CanAccess(Perm.FinReceipt); }
+                    try { _creditNoteFlowOn = CreditNoteOn && Perm.CanAccess(Perm.FinReceipt); }
                     catch { _creditNoteFlowOn = false; }
                 }
                 return _creditNoteFlowOn.Value;
             }
+        }
+
+        // ระบบใบลดหนี้เปิด (ไม่ขึ้นกับสิทธิ์ผู้ใช้) — ปุ่มยกเลิกแบบเดิม (void ใบเสร็จ / JE คืน-ริบ) ถูกปิด:
+        //   "ยกเลิกไม่คืนเงิน" → CreditNoteService.CancelReservation (ยึดผ่าน NextAcc realize-deposit ForfeitAs)
+        //   "ยกเลิกคืนเงิน"   → หน้า Account/CreditNotes?cancelRes= เท่านั้น
+        private bool? _creditNoteOn;
+        protected bool CreditNoteOn
+        {
+            get
+            {
+                if (!_creditNoteOn.HasValue)
+                {
+                    try { _creditNoteOn = Take_Time_BangPhra.Integration.CreditNoteService.Enabled(conn); }
+                    catch { _creditNoteOn = false; }
+                }
+                return _creditNoteOn.Value;
+            }
+        }
+
+        private const string FlashKey = "ReserveTableFlash";
+
+        private void Flash(string msg)
+        {
+            if (!string.IsNullOrEmpty(msg)) Session[FlashKey] = msg;
+        }
+
+        /// <summary>แสดงข้อความค้าง (จากการยกเลิกก่อน redirect) เป็น alert</summary>
+        private void ShowFlash(string msg = null)
+        {
+            string f = msg ?? (Session[FlashKey] as string);
+            if (msg == null) Session.Remove(FlashKey);
+            if (string.IsNullOrEmpty(f)) return;
+            string js = "alert(" + new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(f) + ");";
+            ClientScript.RegisterStartupScript(GetType(), "rtFlash", js, true);
         }
 
         protected void Page_Load(object sender, EventArgs e)
@@ -66,6 +100,7 @@ namespace Take_Time_BangPhra
 
                         // เติมตัวเลือกบัญชีจ่ายคืน (modal ยกเลิกคืนเงิน) — ViewState คงค่าข้าม postback
                         LoadRefundAccountOptions();
+                        ShowFlash();
 
                         // Trigger the selection changed event to load today's reservations
                         Calendar1_SelectionChanged(sender, e);
@@ -75,6 +110,9 @@ namespace Take_Time_BangPhra
                 {
                     Response.Redirect("./Default");
                 }
+                // ระบบใบลดหนี้เปิด: ไม่มีปุ่มยืนยันคืนเงินแบบเดิมใน modal (ไปหน้าใบลดหนี้แทน)
+                ddlRefundAccountModal.Visible = !CreditNoteOn;
+                btnConfirmRefund.Visible = !CreditNoteOn;
             }
             catch (System.Threading.ThreadAbortException) { throw; }   // Response.End ของ AJAX naAction — อย่ากลืน
             catch
@@ -673,7 +711,8 @@ namespace Take_Time_BangPhra
                         // Button8 (จ่ายเพิ่ม), btnCheckout (เช็คเอาท์), Button7 (รายละเอียด) ยังใช้งานได้
 
                         // Owner permissions - สามารถยกเลิกได้แม้หลังเช็คอิน
-                        if (isOwner)
+                        // (ระบบใบลดหนี้เปิด: ไม่ยกเลิกหลังเช็คอิน — ออกก่อนกำหนด/ลดคืน = ใบลดหนี้ manual ต่อใบเสร็จ)
+                        if (isOwner && !CreditNoteOn)
                         {
                             SetButtonEnabled(row, "Button3", true);  // Cancel no refund
                             SetButtonEnabled(row, "Button4", true);  // Cancel with refund
@@ -851,12 +890,18 @@ namespace Take_Time_BangPhra
                     }
                     else if (e.CommandName == "CancelNoRefund")
                     {
-                        await CancelReservation(commandArg, false);
+                        if (CreditNoteOn) Flash(CancelNoRefundViaCreditNote(commandArg));
+                        else Flash(await CancelReservation(commandArg, false));
                         Response.Redirect("./ReserveTable", false);
                     }
                     else if (e.CommandName == "CancelRefund")
                     {
-                        await CancelReservation(commandArg, true);
+                        if (CreditNoteOn)
+                        {
+                            Response.Redirect(ResolveUrl("~/Account/CreditNotes?cancelRes=" + HttpUtility.UrlEncode(commandArg)), false);
+                            break;
+                        }
+                        Flash(await CancelReservation(commandArg, true));
                         Response.Redirect("./ReserveTable", false);
                     }
                     else if (e.CommandName == "CountReserved")
@@ -888,13 +933,43 @@ namespace Take_Time_BangPhra
 
         // refundPaidHowId: null/ว่าง = คืนอัตโนมัติบัญชีเดิม (void ใบเสร็จมัดจำ) / มีค่า = คืนออกบัญชีที่เลือก
         // (คงใบเสร็จมัดจำไว้ + โพสต์รายการคืนเงินแยก) — รองรับรับธนาคารแล้วคืนเงินสด
-        private async Task CancelReservation(string reservationId, bool refund, string refundPaidHowId = null)
+        // คืนค่า: null = สำเร็จ / ข้อความ = ไม่ได้ทำ (แสดงให้ผู้ใช้)
+        private async Task<string> CancelReservation(string reservationId, bool refund, string refundPaidHowId = null)
         {
             string status = refund ? "ยกเลิกคืนเงิน" : "ยกเลิกไม่คืนเงิน";
+
+            // ── ตรวจซ้ำฝั่งเซิร์ฟเวอร์ (หน้าเก่า / ย้อนกลับ / กดซ้ำ / hidden field) ก่อนแตะเงินหรือใบเสร็จ ──
+            int resIdGuard;
+            if (!int.TryParse(reservationId, out resIdGuard) || resIdGuard <= 0) return "เลขการจองไม่ถูกต้อง";
+            DataTable stDt = DatabaseQuery(conn, "SELECT [Status] FROM [dbo].[Reservation] WHERE ID = @id", new SqlParameter("@id", resIdGuard));
+            if (stDt == null || stDt.Rows.Count == 0) return "ไม่พบการจอง #" + reservationId;
+            string oldStatus = stDt.Rows[0]["Status"] == DBNull.Value ? "" : stDt.Rows[0]["Status"].ToString();
+            if (oldStatus.StartsWith("ยกเลิก", StringComparison.Ordinal) || oldStatus.StartsWith("ลบ", StringComparison.Ordinal))
+                return "การจอง #" + reservationId + " ถูกยกเลิก/ย้ายไปแล้ว (สถานะ \"" + oldStatus + "\") — ไม่ได้ทำรายการซ้ำ";
+            if (oldStatus == "เสร็จสิ้น" || oldStatus.StartsWith("เช็คเอาท์", StringComparison.Ordinal) || oldStatus.StartsWith("เช็คเอ้าท์", StringComparison.Ordinal))
+                return "การจอง #" + reservationId + " เช็คเอาท์แล้ว — ยกเลิกไม่ได้";
+            if (oldStatus == "เช็คอินแล้ว" && Session["User"]?.ToString() != "Owner")
+                return "การจอง #" + reservationId + " เช็คอินแล้ว — ยกเลิกหลังเช็คอินได้เฉพาะ Owner";
+            if (Take_Time_BangPhra.Integration.CreditNoteService.HasActiveCreditNotes(conn, resIdGuard))
+                return "การจอง #" + reservationId + " มีใบลดหนี้แล้ว — ยกเลิก/คืนเงินผ่านหน้าใบลดหนี้เท่านั้น " +
+                       "(ปุ่มเดิมจะ void ใบเสร็จที่ลดหนี้ไปแล้ว = กลับรายได้ซ้ำ)";
 
             // ข้อความแจ้งยกเลิก — ต้องสร้าง "ก่อน" แก้ข้อมูล: ด้านล่างยกเลิก Payment_History และตั้ง TotalPrice = 0
             // (เดิมสร้างหลังจากนั้น ⇒ Telegram ขึ้น "ราคารวม 0 / มัดจำที่คืน 0" ทุกครั้ง)
             string cancelMessage = BuildCancelTelegram(reservationId, refund);
+
+            // ชิงสถานะก่อน (atomic): สถานะต้องยังเป็นค่าที่เพิ่งอ่าน — สองคลิก/สองหน้าต่างพร้อมกัน ผ่านได้แค่ครั้งเดียว
+            // (เดิมยกเลิก Payment_History ก่อนแล้วค่อยตั้งสถานะแบบไม่มีเงื่อนไข ⇒ void ใบเสร็จ/ลงริบซ้ำได้)
+            DataTable claim = DatabaseQuery(conn,
+                (refund
+                    ? "UPDATE [dbo].[Reservation] SET TotalPrice = 0, Deposit = 0, [Status] = @Status WHERE ID = @ReservationId AND ISNULL([Status], N'') = @Old;"
+                    : "UPDATE [dbo].[Reservation] SET TotalPrice = 0, [Status] = @Status WHERE ID = @ReservationId AND ISNULL([Status], N'') = @Old;")
+                + " SELECT @@ROWCOUNT AS N;",
+                new SqlParameter("@Status", status),
+                new SqlParameter("@ReservationId", resIdGuard),
+                new SqlParameter("@Old", oldStatus));
+            if (claim == null || claim.Rows.Count == 0 || Convert.ToInt32(claim.Rows[0]["N"]) == 0)
+                return "สถานะการจอง #" + reservationId + " เปลี่ยนระหว่างทำรายการ (อาจถูกยกเลิกจากอีกหน้าต่าง) — ไม่ได้ทำซ้ำ";
 
             // 🔧 FIX: Cancel Payment_History records first
             try
@@ -917,14 +992,7 @@ namespace Take_Time_BangPhra
                 // Continue - this is non-critical
             }
 
-            // Update reservation status
-            string updateCmd = refund ?
-                "UPDATE [dbo].[Reservation] SET TotalPrice = 0, Deposit = 0, [Status] = @Status WHERE ID = @ReservationId" :
-                "UPDATE [dbo].[Reservation] SET TotalPrice = 0, [Status] = @Status WHERE ID = @ReservationId";
-
-            DatabaseInsert(conn, updateCmd,
-                new SqlParameter("@Status", status),
-                new SqlParameter("@ReservationId", reservationId));
+            // (สถานะการจองถูกตั้งตอนชิงสถานะด้านบนแล้ว)
 
             // Send Telegram notification (ข้อความสร้างไว้แล้วก่อนแก้ข้อมูล)
             await SendTelegramNotification(cancelMessage);
@@ -1024,6 +1092,31 @@ namespace Take_Time_BangPhra
                 {
                     try { code2.Logs(conn, "Accounting Sync", $"CancelReservation forfeit enqueue error #{reservationId}: {accEx.Message}", "SYSTEM"); } catch { }
                 }
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// "ยกเลิกไม่คืนเงิน" เมื่อเปิดระบบใบลดหนี้: ยกเลิกผ่าน CreditNoteService (ยอดคืน 0) — มัดจำคงเหลือ = ยึดเป็นค่าธรรมเนียมยกเลิก
+        /// (NextAcc realize-deposit ForfeitAs=PriceOrFee ออกใบกำกับของยอดที่ยึดเอง) · ใบกำกับที่รับไว้ = รายได้คงเดิม (ไม่ออกใบลดหนี้)
+        /// แทน JE ริบมัดจำแบบเดิม (RES-{id}-FORFEIT ที่ทำให้เอกสารมัดจำบน NextAcc ค้าง "outstanding")
+        /// </summary>
+        private string CancelNoRefundViaCreditNote(string reservationId)
+        {
+            int resId;
+            if (!int.TryParse(reservationId, out resId) || resId <= 0) return "เลขการจองไม่ถูกต้อง";
+            try
+            {
+                var svc = new Take_Time_BangPhra.Integration.CreditNoteService(conn);
+                var res = svc.CancelReservation(resId, 0m, Take_Time_BangPhra.Integration.CreditNoteService.RetPriceOrFee,
+                    Take_Time_BangPhra.Integration.CreditNoteService.MNone, null, null, null, "ยกเลิกไม่คืนเงิน (ตารางการจอง)");
+                code2.Logs(conn, "Reserve Cancel", $"ยกเลิกไม่คืนเงิน (ใบลดหนี้) #{resId}: {(res.Ok ? "OK" : "FAIL")} — {res.Message}",
+                    Session["User"]?.ToString() ?? "SYSTEM");
+                return (res.Ok ? "" : "ยกเลิกไม่สำเร็จ: ") + res.Message;
+            }
+            catch (Exception ex)
+            {
+                return "ยกเลิกไม่สำเร็จ: " + ex.Message;
             }
         }
 
@@ -1213,7 +1306,15 @@ namespace Take_Time_BangPhra
             string resId = hfRefundResId.Value;
             string paidHowId = ddlRefundAccountModal.SelectedValue;   // "" = อัตโนมัติ
             if (string.IsNullOrEmpty(resId)) return;
-            await CancelReservation(resId, true, string.IsNullOrEmpty(paidHowId) ? null : paidHowId);
+            if (CreditNoteOn)
+            {
+                // หน้าเก่า (ก่อนเปิดระบบใบลดหนี้) ส่งปุ่มเดิมมา — ไม่ void ใบเสร็จ/ไม่ลง JE คืนแบบเดิม
+                ShowFlash("ระบบใบลดหนี้เปิดอยู่ — ยกเลิกคืนเงินที่หน้า \"ยกเลิกการจอง + คืนเงิน\" (ใบลดหนี้) เท่านั้น");
+                Calendar1_SelectionChanged(sender, e);
+                return;
+            }
+            string err = await CancelReservation(resId, true, string.IsNullOrEmpty(paidHowId) ? null : paidHowId);
+            if (!string.IsNullOrEmpty(err)) ShowFlash(err);
             // รีเฟรชรายการวันที่เลือกอยู่
             Calendar1_SelectionChanged(sender, e);
         }

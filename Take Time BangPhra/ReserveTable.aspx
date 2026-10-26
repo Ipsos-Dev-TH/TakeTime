@@ -556,10 +556,10 @@
                                                 CommandArgument='<%# Eval("ID") %>' CommandName="EditReservation"
                                                 CssClass="btn btn-warning btn-sm mb-1" />
                                             
-                                            <asp:Button ID="Button3" runat="server" Text="ยกเลิกไม่คืนเงิน" 
+                                            <asp:Button ID="Button3" runat="server" Text="ยกเลิกไม่คืนเงิน"
                                                 CommandArgument='<%# Eval("ID") %>' CommandName="CancelNoRefund"
-                                                CssClass="btn btn-danger btn-sm mb-1" 
-                                                onclientclick="return confirm('ยืนยันการยกเลิกไม่คืนเงินหรือไม่');"/>
+                                                CssClass="btn btn-danger btn-sm mb-1" UseSubmitBehavior="false"
+                                                onclientclick="if(!confirm('ยืนยันการยกเลิกไม่คืนเงินหรือไม่'))return false;this.disabled=true;"/>
                                             
                                             <asp:Button ID="Button4" runat="server" Text="ยกเลิกคืนเงิน"
                                                 CssClass="btn btn-secondary btn-sm mb-1"
@@ -1148,19 +1148,27 @@
                     </button>
                 </div>
                 <div class="modal-body">
+                    <% if (!CreditNoteOn) { %>
                     <p style="margin-bottom:8px;">เลือกบัญชีที่ <b>จ่ายเงินคืน</b> ออก:</p>
+                    <% } %>
                     <asp:DropDownList ID="ddlRefundAccountModal" runat="server" CssClass="form-control" />
+                    <% if (!CreditNoteOn) { %>
                     <div class="help-block" style="font-size:12px; color:#777; margin-top:8px;">
                         <b>อัตโนมัติ (บัญชีเดิม)</b> = กลับรายการใบเสร็จมัดจำ เงินคืนออกบัญชีเดิมที่รับเข้ามา (แนะนำ).<br />
                         เลือกบัญชีเจาะจง = คงใบเสร็จมัดจำไว้ + โพสต์รายการคืนเงินแยกออกบัญชีที่เลือก
                         (เช่น รับผ่านธนาคาร คืนเป็นเงินสด).
                     </div>
-                    <% if (CreditNoteFlowOn) { %>
-                    <div style="margin-top:12px; padding:10px 12px; background:#efebe9; border-radius:8px; font-size:13px;">
-                        ต้องการ <b>คืนเงินบางส่วน / หักค่าธรรมเนียมยกเลิก / ออกใบลดหนี้</b> หรือคืนผ่านเกตเวย์?
+                    <% } else if (CreditNoteFlowOn) { %>
+                    <div style="padding:10px 12px; background:#efebe9; border-radius:8px; font-size:13px;">
+                        ระบบใบลดหนี้เปิดอยู่ — ยกเลิกคืนเงิน (เต็ม/บางส่วน/หักค่าธรรมเนียม/คืนผ่านเกตเวย์) ทำที่หน้า
+                        <b>ยกเลิกการจอง + คืนเงิน</b> (ออกใบลดหนี้/ใบคืนเงินมัดจำ และส่ง NextAcc ให้อัตโนมัติ)
                         <a id="cnDetailLink" href="#" data-base="<%= ResolveUrl("~/Account/CreditNotes?cancelRes=") %>"
-                           style="display:inline-block; margin-top:6px; font-weight:700; color:#4e342e;">↪ คืนเงินแบบละเอียด / ออกใบลดหนี้</a>
-                        <div style="font-size:11.5px; color:#6d4c41; margin-top:4px;">ใช้ทางนี้แทนปุ่มยืนยันด้านล่าง (ไม่ใช้ทั้งสองทาง — กันลงบัญชีซ้ำ)</div>
+                           class="btn btn-danger btn-sm" style="display:block; margin-top:10px; font-weight:700;">↪ ไปหน้ายกเลิกการจอง + คืนเงิน</a>
+                    </div>
+                    <% } else { %>
+                    <div style="padding:10px 12px; background:#fff8e1; border-radius:8px; font-size:13px; color:#6d4c00;">
+                        ระบบใบลดหนี้เปิดอยู่ — การยกเลิกแบบคืนเงินต้องทำโดยผู้มีสิทธิ์การเงิน/ใบเสร็จ ที่หน้า "ใบลดหนี้ / คืนเงินลูกค้า"
+                        (แจ้งเลขการจองให้ฝ่ายบัญชี) · ยกเลิกแบบ <b>ไม่คืนเงิน</b> ใช้ปุ่ม "ยกเลิกไม่คืนเงิน" ได้ตามปกติ
                     </div>
                     <% } %>
                 </div>
@@ -1168,8 +1176,8 @@
                     <asp:HiddenField ID="hfRefundResId" runat="server" />
                     <button type="button" class="btn btn-secondary" data-dismiss="modal">ปิด</button>
                     <asp:Button ID="btnConfirmRefund" runat="server" Text="ยืนยันยกเลิกคืนเงิน"
-                        CssClass="btn btn-danger" OnClick="btnConfirmRefund_Click"
-                        OnClientClick="return confirm('ยืนยันการยกเลิกคืนเงินหรือไม่');" />
+                        CssClass="btn btn-danger" OnClick="btnConfirmRefund_Click" UseSubmitBehavior="false"
+                        OnClientClick="if(!confirm('ยืนยันการยกเลิกคืนเงินหรือไม่'))return false;this.disabled=true;" />
                 </div>
             </div>
         </div>

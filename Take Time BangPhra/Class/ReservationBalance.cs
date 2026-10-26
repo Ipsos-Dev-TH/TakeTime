@@ -14,7 +14,8 @@ namespace Take_Time_BangPhra
     /// เต็มยอดบนตารางรายวันจนกว่าจะเช็คอิน และยอดค้างชำระรวมบนหัวตารางสูงเกินจริง
     ///
     /// กติกา (Compute):
-    ///   · ยอดที่รับแล้ว = SUM(Payment_History COMPLETED) ถ้ามีแถว, ไม่มีแถว → ใช้ Reservation.Deposit
+    ///   · ยอดที่รับแล้ว = SUM(Payment_History COMPLETED) ถ้ามีแถวรับเงิน, ไม่มี → Reservation.Deposit + แถวคืนเงิน (PaidHeld)
+    ///   · ใบลดหนี้ที่อนุมัติแล้ว (ไม่ใช่มัดจำ, PHASE19_33) = ราคาที่ลดลง → หักจากยอดรวม (แถวคืนเงินของใบลดหนี้หักจากยอดรับแล้ว)
     ///   · CHANNEL: ค่าห้องถือว่า OTA จ่ายแล้วเสมอ → หน้างานเก็บแค่ค่าใช้จ่ายในห้องที่ยัง PENDING
     ///     ยอดที่ OTA ครอบคลุม = OtaCoverageAmount (gross เมื่อราคาห้องตั้งจาก gross, ไม่งั้น OtaAmount net-first)
     ///   · UNKNOWN (ใบ OTA ที่ "ไม่รู้ว่าใครเก็บ" — ระบบรับอีเมลเดาให้ หรือไม่มีข้อมูล): ยังไม่ถือว่า OTA จ่าย
@@ -50,9 +51,16 @@ namespace Take_Time_BangPhra
         public decimal RoomTotal;        // Reservation.TotalPrice
         public decimal Charges;          // SUM(Reservation_Product_Charges.TotalAmount) Status <> 'CANCELLED'
         public decimal PendingCharges;   // same, Status = 'PENDING'
-        public decimal Total;            // RoomTotal + Charges
+        public decimal Total;            // RoomTotal + Charges − CreditNoteTotal
         public decimal PaidLedger;       // SUM(Payment_History.PaymentAmount) Status='COMPLETED' (refund rows are negative)
         public int LedgerRows;           // COUNT of those rows
+        public decimal RefundLedger;     // ส่วนของ PaidLedger ที่เป็นแถวคืนเงิน (PaymentType='REFUND', ≤ 0)
+        public int RefundRows;           // COUNT แถวคืนเงิน (รวมอยู่ใน LedgerRows)
+        /// <summary>
+        /// ใบลดหนี้ที่มีผลแล้ว (APPROVED/SYNCED) ของใบกำกับ/ใบเสร็จที่ไม่ใช่มัดจำ (Credit_Note.Amount_Gross, PHASE19_33)
+        /// = มูลค่าที่ลดลงของการจอง → หักออกจากยอดรวม (ไม่งั้นแถวคืนเงินติดลบทำให้ยอดค้างกลับขึ้นมา / ลดหนี้ไม่คืนเงินไม่ลดยอดที่ต้องจ่าย)
+        /// </summary>
+        public decimal CreditNoteTotal;
         public decimal Deposit;          // Reservation.Deposit
         public decimal OtaCovered;       // CHANNEL: ยอดที่ OTA เก็บแทนโรงแรม (ไม่เกินยอดรวม); else 0
         /// <summary>
@@ -76,6 +84,18 @@ namespace Take_Time_BangPhra
         public bool IsChannelCollect { get { return CollectMode == ModeChannel; } }
         public bool IsCollectUnknown { get { return CollectMode == ModeUnknown; } }
 
+        /// <summary>
+        /// เงินที่ลูกค้าจ่ายโรงแรม "สุทธิหลังคืน" — มีแถวรับเงิน (ไม่นับแถวคืน) → PaidLedger (รวมแถวคืนติดลบแล้ว)
+        /// ไม่มีแถวรับเงินเลย → Reservation.Deposit + แถวคืน (เดิม LedgerRows > 0 ? PaidLedger : Deposit ⇒ ใบที่มีแต่ Deposit
+        /// แล้วคืนเงินผ่านใบลดหนี้ "พลิกเครื่องหมาย" เหลือแค่ยอดคืนติดลบ)
+        /// </summary>
+        public decimal PaidHeld { get { return HeldOf(LedgerRows, RefundRows, PaidLedger, RefundLedger, Deposit); } }
+
+        private static decimal HeldOf(int ledgerRows, int refundRows, decimal paidLedger, decimal refundLedger, decimal deposit)
+        {
+            return ledgerRows - refundRows > 0 ? paidLedger : deposit + refundLedger;
+        }
+
         /// <summary>เศษต่างที่ยอมให้ถือว่า "ครบแล้ว" (System_Config / Web.config: Balance_Rounding_Tolerance, ค่าเริ่มต้น 1.00)</summary>
         public static decimal RoundingTolerance
         {
@@ -97,7 +117,8 @@ namespace Take_Time_BangPhra
         /// <summary>คำนวณยอด — ไม่แตะฐานข้อมูล (ยกเว้นอ่านค่า tolerance ผ่าน AppCfg ที่ cache ไว้)</summary>
         public static ReservationBalance Compute(int reservationId, string collectMode, decimal roomTotal, decimal charges,
             decimal pendingCharges, decimal paidLedger, int ledgerRows, decimal deposit, decimal otaAmount = -1m,
-            bool unknownDepositIsReal = false, int nights = 0, decimal otaGross = -1m)
+            bool unknownDepositIsReal = false, int nights = 0, decimal otaGross = -1m,
+            decimal creditNoteTotal = 0m, decimal refundLedger = 0m, int refundRows = 0)
         {
             var b = new ReservationBalance();
             b.ReservationId = reservationId;
@@ -108,6 +129,11 @@ namespace Take_Time_BangPhra
             b.PaidLedger = paidLedger;
             b.LedgerRows = ledgerRows;
             b.Deposit = deposit;
+            if (refundRows < 0 || refundRows > ledgerRows) refundRows = 0;
+            b.RefundRows = refundRows;
+            b.RefundLedger = refundRows > 0 ? refundLedger : 0m;
+            b.CreditNoteTotal = creditNoteTotal > 0m ? creditNoteTotal : 0m;
+            decimal cn = b.CreditNoteTotal;
             // Hotel Collect: ราคาต่อคืนเก็บเป็นบาทเต็ม (ปัดลง) → ราคาห้องในระบบต่ำกว่ายอดตามอีเมล OTA ≤ 1 บาท/คืน
             // (3 × 539 = 1,617 vs 1,619.01) หน้าเช็คอินเพิ่มบรรทัดปรับเศษให้ลูกค้าจ่ายตามยอด OTA — ยอดที่ต้องจ่ายต้องเป็น
             // ยอด OTA ด้วย ไม่งั้นหลังจ่ายแล้วขึ้น "จ่ายเกิน 2.01" (เงื่อนไขเดียวกับหน้าเช็คอิน: 0 < ส่วนต่าง ≤ จำนวนคืน)
@@ -117,11 +143,13 @@ namespace Take_Time_BangPhra
                 roomTotal = otaAmount;
                 b.RoomTotal = roomTotal;
             }
-            b.Total = roomTotal + charges;
+            // ใบลดหนี้ (ไม่ใช่มัดจำ) = มูลค่าการจองที่ลดลง — หักจากยอดรวม; แถวคืนเงินของใบลดหนี้ยังหักจากยอดรับแล้ว
+            // ⇒ ลดหนี้+คืนเงิน: ยอดค้างไม่เปลี่ยน · ลดหนี้ไม่คืน/รอคืน: ยอดค้างลด (หรือเป็นเครดิตลูกค้า)
+            b.Total = roomTotal + charges - cn;
             // ค่าเริ่มต้นสำหรับผู้เรียก Compute ตรง ๆ — LoadMany ตั้งค่าจริงทับให้อีกที
             b.IsOta = b.CollectMode != ModeNone;
 
-            decimal paid = ledgerRows > 0 ? paidLedger : deposit;
+            decimal paid = HeldOf(ledgerRows, b.RefundRows, paidLedger, b.RefundLedger, deposit);
 
             decimal due;
             bool channel = b.CollectMode == ModeChannel;
@@ -136,8 +164,9 @@ namespace Take_Time_BangPhra
                 b.OtaCovered = 0m;
                 // ยกเว้นใบ OTA ที่ไม่มีเครื่องหมายเก็บเงินเลย (ไม่ได้มาจากการเดาของระบบรับอีเมล เช่น เจ้าหน้าที่คีย์เอง /
                 // Channel Manager) — Deposit ของใบพวกนี้คือมัดจำที่รับจริง ต้องนับเหมือนเดิม ไม่งั้นใบเก่าขึ้นค้างเต็มยอด
-                decimal paidByGuest = ledgerRows > 0 ? paidLedger : (unknownDepositIsReal ? deposit : 0m);
-                due = roomTotal + charges - paidByGuest;
+                decimal paidByGuest = ledgerRows - b.RefundRows > 0 ? paidLedger
+                                    : (unknownDepositIsReal ? deposit : 0m) + b.RefundLedger;
+                due = roomTotal + charges - cn - paidByGuest;
             }
             else if (channel)
             {
@@ -157,7 +186,7 @@ namespace Take_Time_BangPhra
                 b.OtaCoverageAmount = coverage;
                 b.OtaCovered = Math.Min(coverage, b.Total);
                 decimal paidByGuest = ledgerRows > 0 ? paidLedger : 0m;   // Deposit ของใบ OTA = เงิน OTA ไม่ใช่ลูกค้าจ่าย
-                due = roomTotal + charges - coverage - paidByGuest;
+                due = roomTotal + charges - cn - coverage - paidByGuest;
                 // ค่าชาร์จที่ยัง PENDING = ยังไม่ได้จ่ายแน่นอน — ต้องไม่ถูกกลบโดยแถว "เงินสดปลอม" ที่หน้าเช็คอินรุ่นเก่า
                 // บังคับลงเต็มยอดค่าห้อง (Payment_History ของใบ OTA ที่เช็คอินก่อนแก้)
                 if (due < pendingCharges) due = pendingCharges;
@@ -165,7 +194,7 @@ namespace Take_Time_BangPhra
             else
             {
                 b.OtaCovered = 0m;
-                due = roomTotal + charges - paid;
+                due = roomTotal + charges - cn - paid;
             }
 
             due = Math.Round(due, 2, MidpointRounding.AwayFromZero);
@@ -227,20 +256,21 @@ namespace Take_Time_BangPhra
             bool withCh = schema.HasOtaChannel;
             bool withBk = schema.HasOtaBookingId;
             bool withCollect = schema.HasCollectMode;
+            bool withCn = schema.HasCreditNote;
 
             DataTable dt;
             try
             {
                 dt = db.DatabaseQuerySafe(conn,
-                    BuildSql(where, withOta, withCharges, withPayments, withCh, withBk, withCollect), p);
+                    BuildSql(where, withOta, withCharges, withPayments, withCh, withBk, withCollect, withCn), p);
             }
             catch
             {
                 // ส่วนเสริม (คอลัมน์/ตารางจาก migration รุ่นหลัง) ทำให้ query พัง → ลองแบบพื้นฐานอีกครั้ง
                 // ถ้าไม่มีส่วนเสริมอยู่แล้ว แปลว่าเงื่อนไขหลักพังจริง → โยนต่อให้ผู้เรียกจัดการ
-                if (!withOta && !withCharges && !withPayments && !withCh && !withBk && !withCollect) throw;
+                if (!withOta && !withCharges && !withPayments && !withCh && !withBk && !withCollect && !withCn) throw;
                 InvalidateSchema();
-                dt = db.DatabaseQuerySafe(conn, BuildSql(where, false, false, false, false, false, false), p);
+                dt = db.DatabaseQuerySafe(conn, BuildSql(where, false, false, false, false, false, false, false), p);
             }
 
             if (dt == null) return result;
@@ -251,6 +281,8 @@ namespace Take_Time_BangPhra
             bool hasOtaBk = dt.Columns.Contains("OTA_Booking_ID");
             bool hasCMode = dt.Columns.Contains("OTA_Collect_Mode");
             bool hasCSrc = dt.Columns.Contains("OTA_Collect_Source");
+            bool hasRefund = dt.Columns.Contains("RefundLedger") && dt.Columns.Contains("RefundRows");
+            bool hasCnTot = dt.Columns.Contains("CnTotal");
 
             foreach (DataRow row in dt.Rows)
             {
@@ -291,7 +323,10 @@ namespace Take_Time_BangPhra
                     hasOtaAmt && row["OtaAmount"] != DBNull.Value ? Dec(row["OtaAmount"]) : -1m,
                     source != SourceGuess,
                     dt.Columns.Contains("StayDays") && row["StayDays"] != DBNull.Value ? Convert.ToInt32(row["StayDays"]) : 0,
-                    hasOtaGross && row["OtaGross"] != DBNull.Value ? Dec(row["OtaGross"]) : -1m);
+                    hasOtaGross && row["OtaGross"] != DBNull.Value ? Dec(row["OtaGross"]) : -1m,
+                    hasCnTot ? Dec(row["CnTotal"]) : 0m,
+                    hasRefund ? Dec(row["RefundLedger"]) : 0m,
+                    hasRefund && row["RefundRows"] != DBNull.Value ? Convert.ToInt32(row["RefundRows"]) : 0);
                 b.CollectSource = source;
                 b.IsOta = isOta;
 
@@ -303,7 +338,7 @@ namespace Take_Time_BangPhra
                 if (status.StartsWith("ยกเลิก", StringComparison.Ordinal)
                     || status.StartsWith("ลบ", StringComparison.Ordinal))
                 {
-                    decimal paidActual = b.LedgerRows > 0 ? b.PaidLedger : b.Deposit;
+                    decimal paidActual = b.PaidHeld;
                     b.Due = 0m;
                     b.Credit = 0m;
                     b.Received = paidActual;
@@ -618,13 +653,14 @@ namespace Take_Time_BangPhra
         }
 
         private static string BuildSql(string where, bool withOta, bool withCharges, bool withPayments,
-            bool withCh, bool withBk, bool withCollect)
+            bool withCh, bool withBk, bool withCollect, bool withCn)
         {
             string chargeCols = withCharges
                 ? "ISNULL(rbc.Charges, 0) AS Charges, ISNULL(rbc.PendingCharges, 0) AS PendingCharges"
                 : "CAST(0 AS decimal(18,2)) AS Charges, CAST(0 AS decimal(18,2)) AS PendingCharges";
             string payCols = withPayments
-                ? "ISNULL(rbp.PaidLedger, 0) AS PaidLedger, ISNULL(rbp.LedgerRows, 0) AS LedgerRows"
+                ? "ISNULL(rbp.PaidLedger, 0) AS PaidLedger, ISNULL(rbp.LedgerRows, 0) AS LedgerRows," +
+                  " ISNULL(rbp.RefundLedger, 0) AS RefundLedger, ISNULL(rbp.RefundRows, 0) AS RefundRows"
                 : "CAST(0 AS decimal(18,2)) AS PaidLedger, 0 AS LedgerRows";
 
             string sql =
@@ -634,7 +670,8 @@ namespace Take_Time_BangPhra
                 (withCh ? ", r.OTA_Channel" : "") +
                 (withBk ? ", r.OTA_Booking_ID" : "") +
                 (withCollect ? ", r.OTA_Collect_Mode, r.OTA_Collect_Source" : "") +
-                ", " + chargeCols + ", " + payCols + @"
+                ", " + chargeCols + ", " + payCols +
+                (withCn ? ", ISNULL(rbn.CnTotal, 0) AS CnTotal" : "") + @"
                   FROM Reservation r";
 
             // ChargeType 'IMMEDIATE' = ขายหน้าร้านแบบ "ชำระทันที" ให้แขกในห้อง (POS PAY_NOW) — จ่ายด้วยใบเสร็จของตัวเองแล้ว
@@ -648,9 +685,19 @@ namespace Take_Time_BangPhra
 
             if (withPayments)
                 sql += @"
-                  OUTER APPLY (SELECT SUM(rby.PaymentAmount) AS PaidLedger, COUNT(*) AS LedgerRows
+                  OUTER APPLY (SELECT SUM(rby.PaymentAmount) AS PaidLedger, COUNT(*) AS LedgerRows,
+                                      SUM(CASE WHEN rby.PaymentType = 'REFUND' THEN rby.PaymentAmount ELSE 0 END) AS RefundLedger,
+                                      SUM(CASE WHEN rby.PaymentType = 'REFUND' THEN 1 ELSE 0 END) AS RefundRows
                                  FROM Payment_History rby
                                 WHERE rby.Reservation_ID = r.ID AND rby.Status = 'COMPLETED') rbp";
+
+            // ใบลดหนี้ที่มีผลแล้ว (อนุมัติ/ส่งแล้ว) ของใบกำกับ/ใบเสร็จ — มัดจำไม่นับ (คืนมัดจำไม่ได้ลดราคา; ออกได้เฉพาะตอนยกเลิกการจอง)
+            if (withCn)
+                sql += @"
+                  OUTER APPLY (SELECT SUM(rbz.Amount_Gross) AS CnTotal
+                                 FROM Credit_Note rbz
+                                WHERE rbz.Reservation_ID = r.ID AND rbz.Status IN ('APPROVED', 'SYNCED', 'FAILED')
+                                  AND ISNULL(rbz.Source_Doc_Type, '') <> 'DEPOSIT') rbn";
 
             sql += @"
                  WHERE " + where;
@@ -684,14 +731,14 @@ namespace Take_Time_BangPhra
         private sealed class SchemaInfo
         {
             public bool HasOtaPaymentType, HasProductCharges, HasPaymentHistory;
-            public bool HasOtaChannel, HasOtaBookingId, HasCollectMode;
+            public bool HasOtaChannel, HasOtaBookingId, HasCollectMode, HasCreditNote;
             public DateTime CheckedAt;
             public bool Complete
             {
                 get
                 {
                     return HasOtaPaymentType && HasProductCharges && HasPaymentHistory
-                        && HasOtaChannel && HasOtaBookingId && HasCollectMode;
+                        && HasOtaChannel && HasOtaBookingId && HasCollectMode && HasCreditNote;
                 }
             }
         }
@@ -722,7 +769,10 @@ namespace Take_Time_BangPhra
                              COL_LENGTH('Reservation', 'OTA_Collect_Mode') AS CMode,
                              COL_LENGTH('Reservation', 'OTA_Collect_Source') AS CSrc,
                              OBJECT_ID('Reservation_Product_Charges') AS Rpc,
-                             OBJECT_ID('Payment_History') AS Ph");
+                             OBJECT_ID('Payment_History') AS Ph,
+                             COL_LENGTH('Credit_Note', 'Amount_Gross') AS CnAmt,
+                             COL_LENGTH('Credit_Note', 'Reservation_ID') AS CnRes,
+                             COL_LENGTH('Credit_Note', 'Source_Doc_Type') AS CnSrc");
                 if (dt != null && dt.Rows.Count > 0)
                 {
                     s.HasOtaPaymentType = dt.Rows[0]["OtaPay"] != DBNull.Value;
@@ -731,6 +781,9 @@ namespace Take_Time_BangPhra
                     s.HasCollectMode = dt.Rows[0]["CMode"] != DBNull.Value && dt.Rows[0]["CSrc"] != DBNull.Value;
                     s.HasProductCharges = dt.Rows[0]["Rpc"] != DBNull.Value;
                     s.HasPaymentHistory = dt.Rows[0]["Ph"] != DBNull.Value;
+                    // ใบลดหนี้ PHASE19_33 (ตรวจคอลัมน์ ไม่ใช่แค่ชื่อตาราง — กันตาราง Credit_Note รุ่นเก่าที่โครงสร้างต่างกัน)
+                    s.HasCreditNote = dt.Rows[0]["CnAmt"] != DBNull.Value && dt.Rows[0]["CnRes"] != DBNull.Value
+                                      && dt.Rows[0]["CnSrc"] != DBNull.Value;
                 }
             }
             catch
@@ -743,6 +796,7 @@ namespace Take_Time_BangPhra
                 s.HasOtaChannel = true;
                 s.HasOtaBookingId = true;
                 s.HasCollectMode = false;
+                s.HasCreditNote = false;
                 s.CheckedAt = DateTime.MinValue;   // อย่าถือเป็นผลถาวร
                 return s;
             }

@@ -410,6 +410,16 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    - อนุมัติ (`CreditNote_Require_Approval`=1: Owner / Admin+SYS_ACCOUNTING): คืนผ่านเกตเวย์ `OnlinePaymentService.RefundTransaction` (ล้ม = กลับเป็นร่าง) →
      คืนสต๊อก → `Payment_History` REFUND ติดลบ (การจองยกเลิกแล้ว = REFUNDED ไม่นับยอด) → เข้าคิว. รายงาน: `TaxReportKit.LoadCreditNotes` = ยอดขาย/VAT ติดลบ
      ช่องทาง `CREDIT_NOTE` (DailySalesTaxSummary) + หักฝั่ง NextAcc ใน NextAccReconciliation. ยังไม่ทำ: e-Tax ของใบลดหนี้, Idempotency-Key header.
+   - **ยกเลิก/คืนเงินการจอง (เชื่อมครบ):** เปิดระบบ = ปุ่มเดิมใน ReserveTable ไม่ทำบัญชีเอง — "ไม่คืนเงิน" → `CancelReservation(ยอด 0)` (ยึดผ่าน
+     realize-deposit) · "คืนเงิน" → หน้า `?cancelRes=` เท่านั้น · ปุ่มเดิม (ปิดระบบ) ตรวจสถานะซ้ำ + ชิงสถานะ atomic + ปฏิเสธเมื่อมีใบลดหนี้.
+     `CheckCancellable`: เข้าพักแล้ว (`IsArrivedStatus` = เช็คอินแล้ว/เสร็จสิ้น/เช็คเอ้าท์) = ใบลดหนี้ manual · ยกเลิกแล้ว = โหมด**ปิดเงินค้าง**
+     (เลื่อนวันแล้วยกเลิก หรือเคยมีชุด `CXL-{id}-` และไม่มีคิว REFUND/FORFEIT_DEPOSIT เดิม — PostponeList ส่งต่อมาหน้านี้) · สลิปลูกค้ารอตรวจ = บล็อก.
+     ลำดับ: ตรวจทั้งหมด → สร้างร่างทั้งชุด (หัว+บรรทัด+เพดานต่อใบต้นทางใน transaction เดียว) → การจองใน transaction + `WHERE Status=เดิม` →
+     ชาร์จค้าง/ลิงก์ชำระค้าง (CANCELLED)/แจ้งเงินประกัน → อนุมัติ (เกตเวย์หลังสุด, `Refund_Ref` = `GWPRE:{ยอดคืนสะสมก่อนสั่ง}|` กันคืนซ้ำ).
+     ร่าง = ใบมัดจำยังปกติ; Refunded/Forfeit เมื่ออนุมัติครบ (เฉพาะชุดยกเลิก — คืนมัดจำส่วนเกินตอนเช็คเอาท์ไม่แตะสถานะ); ยกเลิกร่าง → Deposit
+     บวกคืน + ใบมัดจำกลับปกติ → ปิดเงินค้างใหม่ได้. ยอดคืนเริ่มต้น = ใบของ folio (มัดจำ/มี Payment_History/บรรทัดค่าห้อง) — ใบอื่นติ๊กรวมเอง ·
+     ตัดใบ OTA_RECLASS/`RECLASS-` (OTA คืนลูกค้าเอง). มัดจำโหมด CHECKOUT/RECEIPT+defer: VAT ใบ = 0 พิมพ์ "ใบคืนเงินมัดจำ". `ReservationBalance`:
+     ยอดรวม − ใบลดหนี้ที่อนุมัติ (ไม่ใช่มัดจำ) และ `PaidHeld` (Deposit + แถวคืน เมื่อไม่มีแถวรับเงิน) ⇒ คืนเงินไม่ทำให้ยอดค้างกลับขึ้น.
 
 ## Queue resilience (ส.ค. 2026 — หลังเคส NextAcc ล่มทั้งแอป)
 

@@ -387,19 +387,33 @@ namespace Take_Time_BangPhra.Account
             if (money == null) { btnCancelConfirm.Enabled = false; return; }
 
             string st = money.Status ?? "";
-            bool blocked = st.StartsWith("ยกเลิก", StringComparison.Ordinal) || st.IndexOf("เช็คอิน", StringComparison.Ordinal) >= 0 || st.IndexOf("เช็คเอาท์", StringComparison.Ordinal) >= 0;
+            var svc = Svc;
+            var chk = svc.CheckCancellable(money);
+            bool blocked = !chk.Allowed;
             var sb = new StringBuilder();
             sb.Append("<p>การจอง <b>#").Append(resId).Append("</b> · ลูกค้า <b>").Append(H(money.CustomerName)).Append("</b> · สถานะ ").Append(H(st)).Append("</p>");
-            if (blocked) sb.Append("<div class='cn-alert err'>การจองนี้ยกเลิก/เข้าพักแล้ว — ยกเลิกจากหน้านี้ไม่ได้ (ออกใบลดหนี้ manual แทน)</div>");
+            if (blocked) sb.Append("<div class='cn-alert err'>").Append(H(chk.Message)).Append("</div>");
+            else if (chk.SettleOnly) sb.Append("<div class='cn-alert warn'>").Append(H(chk.Message)).Append("</div>");
+            if (money.IsChannelCollect || money.CollectMode == ReservationBalance.ModeUnknown)
+                sb.Append("<div class='cn-alert info'>ใบ OTA (")
+                  .Append(money.IsChannelCollect ? "Channel Collect — OTA เก็บค่าห้องไปแล้ว" : "ยังไม่ระบุว่าใครเก็บเงิน")
+                  .Append("): ค่าห้องที่ OTA เก็บ <b>OTA เป็นผู้คืนลูกค้าตามนโยบาย OTA</b> — โรงแรมไม่คืนจากบัญชีโรงแรม. ")
+                  .Append("ยอดด้านล่างคือเงินที่โรงแรมรับเองเท่านั้น</div>");
+            string rev = (money.OtaRevenueRef ?? "").Trim();
+            if (rev.StartsWith("OTADOC-", StringComparison.OrdinalIgnoreCase) || rev.StartsWith("OTA-", StringComparison.OrdinalIgnoreCase))
+                sb.Append("<div class='cn-alert warn'>รายได้ค่าห้อง OTA ของการจองนี้ลงบัญชีแล้ว (").Append(H(rev))
+                  .Append(") — ถ้า OTA ยกเลิก/คืนเงินลูกค้า ให้ยกเลิกเอกสาร OTA ที่ Admin → Accounting Integration → \"ยกเลิกเอกสาร OTA\" (ไม่ใช่ใบลดหนี้หน้านี้)</div>");
+            foreach (string ex in money.Excluded)
+                sb.Append("<div class='cn-note'>ไม่นำมาคืน: ").Append(H(ex)).Append("</div>");
             sb.Append("<div class='cn-scroll'><table class='cn-t' style='min-width:760px'><tr><th>ใบเสร็จ</th><th>วันที่</th><th>ชนิด</th><th>รับชำระด้วย</th>")
               .Append("<th class='num'>ยอดใบ</th><th class='num'>หักไปใบอื่น/ลดหนี้แล้ว</th><th class='num'>คืนได้</th><th>NextAcc</th></tr>");
-            var svc = Svc;
             var sync = new AccountingSyncService(conn);
             foreach (var r in money.Receipts)
             {
                 bool gw = svc.FindGatewayTxn(r.Id).HasValue;
                 sb.Append("<tr><td>").Append(H(r.Id)).Append("</td><td>").Append(r.Date.ToString("dd/MM/yyyy", Inv)).Append("</td><td>")
-                  .Append(r.IsDeposit ? "มัดจำ (คืนมัดจำ/ยึด)" : "ใบเสร็จ/ใบกำกับ (ใบลดหนี้)").Append("</td><td>").Append(H(r.PaidType)).Append(gw ? " · เกตเวย์" : "")
+                  .Append(r.IsDeposit ? "มัดจำ (คืนมัดจำ/ยึด)" : r.IsFolio ? "ใบเสร็จ/ใบกำกับ (ใบลดหนี้)" : "ใบอื่นที่ผูกการจอง (ไม่รวมโดยปริยาย)")
+                  .Append("</td><td>").Append(H(r.PaidType)).Append(gw ? " · เกตเวย์" : "")
                   .Append("</td><td class='num'>").Append(M(r.Total)).Append("</td><td class='num'>").Append(M(r.Total - r.Creditable))
                   .Append("</td><td class='num'><b>").Append(M(r.Creditable)).Append("</b></td><td>");
                 string state;
@@ -407,11 +421,19 @@ namespace Take_Time_BangPhra.Account
                 sb.Append(H(state)).Append("</td></tr>");
             }
             if (money.Receipts.Count == 0) sb.Append("<tr><td colspan='8'>ไม่มีใบเสร็จที่รับเงินไว้ (ยกเลิกได้โดยไม่มีการคืนเงิน)</td></tr>");
-            sb.Append("<tr><td colspan='6' style='text-align:right'><b>รวมเงินที่คืนได้</b></td><td class='num'><b>").Append(M(money.TotalCreditable)).Append("</b></td><td></td></tr></table></div>");
+            sb.Append("<tr><td colspan='6' style='text-align:right'><b>รวมเงินที่คืนได้ (ใบของการจอง)</b></td><td class='num'><b>").Append(M(money.FolioCreditable)).Append("</b></td><td></td></tr>");
+            bool hasLinked = money.TotalCreditable - money.FolioCreditable > 0.005m;
+            if (hasLinked)
+                sb.Append("<tr><td colspan='6' style='text-align:right'>รวมใบอื่นที่ผูกการจอง (ติ๊กเพื่อรวม)</td><td class='num'>").Append(M(money.TotalCreditable)).Append("</td><td></td></tr>");
+            sb.Append("</table></div>");
             litCancelInfo.Text = sb.ToString();
 
-            txtCancelRefund.Text = money.TotalCreditable.ToString("0.00", Inv);
-            txtCancelRefund.Attributes["data-total"] = money.TotalCreditable.ToString("0.00", Inv);
+            chkIncludeLinked.Visible = hasLinked;
+            decimal def = chkIncludeLinked.Checked && hasLinked ? money.TotalCreditable : money.FolioCreditable;
+            txtCancelRefund.Text = def.ToString("0.00", Inv);
+            txtCancelRefund.Attributes["data-total"] = money.FolioCreditable.ToString("0.00", Inv);
+            txtCancelRefund.Attributes["data-total-all"] = money.TotalCreditable.ToString("0.00", Inv);
+            btnCancelConfirm.Text = chk.SettleOnly ? "ยืนยันบันทึกคืน/ยึดเงินค้าง (การจองยกเลิกไว้แล้ว)" : "ยืนยันยกเลิกการจอง + บันทึกคืนเงิน";
             var latest = money.Receipts.LastOrDefault();
             LoadPaidHow(ddlCancelPaidHow, latest != null ? latest.PaidHowId : null);
             if (!money.HasGateway)
@@ -432,9 +454,9 @@ namespace Take_Time_BangPhra.Account
             string slip = SaveSlip(fuCancelSlip, out slipErr);
             if (slipErr != null) { Msg("err", slipErr); InitCancel(); return; }
             var res = Svc.CancelReservation(resId, refund, ddlRetainedAs.SelectedValue, refund > 0 ? ddlCancelMethod.SelectedValue : CreditNoteService.MNone,
-                SelectedInt(ddlCancelPaidHow), txtCancelRef.Text, slip, txtCancelReason.Text);
+                SelectedInt(ddlCancelPaidHow), txtCancelRef.Text, slip, txtCancelReason.Text, chkIncludeLinked.Checked);
             if (!res.Ok) { Msg("err", res.Message); InitCancel(); return; }
-            Flash("ok", res.Message);
+            Flash(res.DraftCount > 0 ? "warn" : "ok", res.Message);
             Go(ResolveUrl("~/Account/CreditNotes?q=" + resId));
         }
 
