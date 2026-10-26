@@ -410,6 +410,16 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    - อนุมัติ (`CreditNote_Require_Approval`=1: Owner / Admin+SYS_ACCOUNTING): คืนผ่านเกตเวย์ `OnlinePaymentService.RefundTransaction` (ล้ม = กลับเป็นร่าง) →
      คืนสต๊อก → `Payment_History` REFUND ติดลบ (การจองยกเลิกแล้ว = REFUNDED ไม่นับยอด) → เข้าคิว. รายงาน: `TaxReportKit.LoadCreditNotes` = ยอดขาย/VAT ติดลบ
      ช่องทาง `CREDIT_NOTE` (DailySalesTaxSummary) + หักฝั่ง NextAcc ใน NextAccReconciliation. ยังไม่ทำ: e-Tax ของใบลดหนี้, Idempotency-Key header.
+   - **การเชื่อมส่วนอื่น** (`Class/Accounting/CreditNoteGuards.cs` — อ่าน `Credit_Note` ตรง, guarded ไม่มีตาราง = เดิม): ใบเสร็จที่มีใบลดหนี้อ้าง
+     (หรือ e-Tax Submitted/Accepted เมื่อเปิดระบบ — NextAcc `DocumentVoidPreconditions.cs:21-29,91-94`) **ยกเลิก/ลบ/แก้ไข/repost/reset ไม่ได้**
+     (Receipt/CheckDocument(_New)/Voucher/ReceiptService + `EnqueueVoidReceipt`/`RepostReceiptWithCurrentLogic`/`ResetReservationAccounting` +
+     admin resync/คืน-ริบมัดจำ) → ชี้ไป `CreditNotes?new=1&src=`. **เช็คเอาท์จ่ายเกิน**: `CheckoutService` กันส่วนเกิน (Credit − รูมเซอร์วิสเข้าห้อง − ค่าเสียหาย)
+     ไว้ในเงินรับล่วงหน้า (ไม่ตัดเป็นรายได้ — เฉพาะเมื่อเปิดระบบ) → หน้า `Account/OverpayRefund?res=` ออกใบลดหนี้มัดจำ (`Create(fromCancellation:true)`
+     = เส้น refund-deposit, ไม่ยกเลิกการจอง). คืนเงินเกตเวย์จากหน้า Admin/แดชบอร์ด (webhook Omise `refund.*`/`dispute.*`, Payso `Payso_Status_Refunded`
+     + ฟิลด์ `refundedAmount`) = บันทึก `Refunded_Amount` + Telegram ไม่ลงบัญชีเอง (ไม่เขียน Payment_History — ใบลดหนี้ "คืนภายหลัง → บันทึกการคืนเงิน"
+     ด้วยแหล่งเงินเกตเวย์เขียนให้). ตรวจสุขภาพข้อ 9 + Telegram poll (Global.asax, 15 นาที) ร่างรออนุมัติ/คืนเกตเวย์ไม่มีใบลดหนี้. สวิตช์ 2 ตัวใน
+     Accounting Integration. ProfitLoss หักใบลดหนี้ + บวกส่วนที่ยึด; PaymentHistory การ์ด/ตัวกรอง REFUND. PHASE19_33 เปลี่ยนชื่อ `Credit_Note` schema เก่าเป็น
+     `Credit_Note_Legacy_yyyyMMdd`. โค้ดใบลดหนี้เก่าใน `Class/AccountingService.cs` ลบแล้ว.
 
 ## Queue resilience (ส.ค. 2026 — หลังเคส NextAcc ล่มทั้งแอป)
 

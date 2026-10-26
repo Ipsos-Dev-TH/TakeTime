@@ -20,6 +20,47 @@
 -- ════════════════════════════════════════════════════════════════════════════
 SET NOCOUNT ON;
 
+-- 0) ตาราง Credit_Note / Credit_Note_Line รุ่นเก่า (schema ของโค้ดเก่า Class/AccountingService.cs ที่ลบแล้ว: CreditNoteNumber,
+--    OriginalReceipt_ID, BIGINT id, รายการอยู่ที่ Credit_Note_Detail) — ถ้ามีอยู่ migration นี้จะ "ข้าม" การสร้างตาราง แล้ว
+--    Credit_Note_Line (FK INT) จะล้ม/โค้ดใหม่ insert ไม่ได้ ⇒ ตรวจคอลัมน์หลักของ schema ใหม่ ถ้าไม่มี = เปลี่ยนชื่อตารางเก่าเป็น
+--    <ชื่อ>_Legacy_yyyyMMdd (ข้อมูลเดิมเก็บไว้ครบ ไม่ลบ) + เปลี่ยนชื่อ constraint ที่จะชนกับชื่อของตารางใหม่ แล้วสร้างตารางใหม่ด้านล่าง
+DECLARE @t SYSNAME, @key SYSNAME, @legacy SYSNAME, @c SYSNAME;
+DECLARE @tables TABLE (T SYSNAME, K SYSNAME);
+INSERT INTO @tables VALUES (N'Credit_Note', N'CN_No'), (N'Credit_Note_Line', N'CN_ID');
+DECLARE tcur CURSOR LOCAL FAST_FORWARD FOR SELECT T, K FROM @tables;
+OPEN tcur;
+FETCH NEXT FROM tcur INTO @t, @key;
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    IF OBJECT_ID(N'dbo.' + @t, 'U') IS NOT NULL AND COL_LENGTH(N'dbo.' + @t, @key) IS NULL
+    BEGIN
+        SET @legacy = @t + N'_Legacy_' + CONVERT(NVARCHAR(8), GETDATE(), 112);
+        IF OBJECT_ID(N'dbo.' + @legacy, 'U') IS NOT NULL
+            SET @legacy = @legacy + N'_' + REPLACE(CONVERT(NVARCHAR(8), GETDATE(), 108), N':', N'');
+        -- ชื่อ constraint อยู่ระดับ schema: PK_Credit_Note / DF_CN_* / FK_Credit_Note_* ของตารางเก่าจะชนกับตารางใหม่
+        DECLARE ccur CURSOR LOCAL FAST_FORWARD FOR
+            SELECT name FROM sys.objects
+             WHERE parent_object_id = OBJECT_ID(N'dbo.' + @t) AND type IN ('PK', 'D', 'UQ', 'F', 'C')
+               AND (name LIKE N'PK[_]Credit[_]Note%' OR name LIKE N'DF[_]CN%' OR name LIKE N'FK[_]Credit[_]Note%' OR name LIKE N'UX[_]Credit[_]Note%');
+        OPEN ccur;
+        FETCH NEXT FROM ccur INTO @c;
+        WHILE @@FETCH_STATUS = 0
+        BEGIN
+            DECLARE @from NVARCHAR(300) = N'dbo.' + QUOTENAME(@c), @to SYSNAME = LEFT(@c + N'_Legacy', 128);
+            EXEC sp_rename @from, @to, N'OBJECT';
+            FETCH NEXT FROM ccur INTO @c;
+        END
+        CLOSE ccur; DEALLOCATE ccur;
+        DECLARE @tfrom NVARCHAR(300) = N'dbo.' + QUOTENAME(@t);
+        EXEC sp_rename @tfrom, @legacy;
+        PRINT N'⚠ พบตาราง ' + @t + N' รุ่นเก่า (ไม่มีคอลัมน์ ' + @key + N') — เปลี่ยนชื่อเป็น dbo.' + @legacy
+            + N' (ข้อมูลเดิมยังอยู่ครบ) แล้วสร้างตารางใหม่ · ใบลดหนี้เก่าในตารางนั้นไม่ถูกย้าย ให้ผู้ทำบัญชีตรวจ/ลงใหม่ถ้าจำเป็น';
+    END
+    FETCH NEXT FROM tcur INTO @t, @key;
+END
+CLOSE tcur; DEALLOCATE tcur;
+GO
+
 IF OBJECT_ID('dbo.Credit_Note', 'U') IS NULL
 BEGIN
     CREATE TABLE dbo.Credit_Note (

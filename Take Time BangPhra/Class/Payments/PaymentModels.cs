@@ -149,6 +149,10 @@ namespace Take_Time_BangPhra.Payments
         public string CardBrand { get; set; }
         public string CardLast4 { get; set; }
         public string Message { get; set; }
+        /// <summary>ยอดคืนสะสมของรายการนี้ตามเกตเวย์ (บาท) — null = เกตเวย์ไม่ได้บอก · ใช้จับการคืนเงินที่ทำจากแดชบอร์ดเกตเวย์</summary>
+        public decimal? RefundedAmount { get; set; }
+        /// <summary>เหตุการณ์ข้อพิพาท/chargeback (Omise dispute.*) — แจ้งเตือนอย่างเดียว ไม่เปลี่ยนสถานะ/ไม่ลงบัญชี</summary>
+        public bool IsDispute { get; set; }
     }
 
     /// <summary>รายการชำระเงินหนึ่งแถวใน Payment_Transaction</summary>

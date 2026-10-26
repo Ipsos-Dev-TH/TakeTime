@@ -624,6 +624,7 @@
     <Content Include="Resource\EDocument_PDFAExtensionSchema.xml" />
     <Content Include="Resource\sRGB Color Space Profile.icm" />
     <Content Include="Checkout.aspx" />
+    <Content Include="Account\OverpayRefund.aspx" />
     <Content Include="Payment\MakePayment.aspx" />
     <Content Include="Payment\Pay.aspx" />
     <Content Include="Payment\Card.aspx" />
@@ -966,6 +967,7 @@
     <Compile Include="Class\Integration\AccountingModels.cs" />
     <Compile Include="Class\Integration\AccountingDataMapper.cs" />
     <Compile Include="Class\CheckoutService.cs" />
+    <Compile Include="Class\Accounting\CreditNoteGuards.cs" />
     <Compile Include="Class\DatabaseHelper.cs" />
     <Compile Include="Class\EmailService.cs" />
     <Compile Include="Class\ExcelCreator.cs" />
@@ -1820,6 +1822,13 @@
     </Compile>
     <Compile Include="Checkout.aspx.designer.cs">
       <DependentUpon>Checkout.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Account\OverpayRefund.aspx.cs">
+      <DependentUpon>OverpayRefund.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Account\OverpayRefund.aspx.designer.cs">
+      <DependentUpon>OverpayRefund.aspx</DependentUpon>
     </Compile>
     <Compile Include="Payment\MakePayment.aspx.cs">
       <DependentUpon>MakePayment.aspx</DependentUpon>

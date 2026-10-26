@@ -87,6 +87,16 @@ namespace Take_Time_BangPhra.Payment
         protected global::System.Web.UI.WebControls.Label lblCompletedRecords;
 
         /// <summary>
+        /// pnlRefundCard control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlRefundCard;
+
+        /// <summary>
+        /// lblRefundTotal control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Label lblRefundTotal;
+
+        /// <summary>
         /// txtReservationID control.
         /// </summary>
         /// <remarks>

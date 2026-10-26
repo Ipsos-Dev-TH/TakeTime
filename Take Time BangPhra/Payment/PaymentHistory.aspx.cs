@@ -154,6 +154,18 @@ namespace Take_Time_BangPhra.Payment
                     lblPendingRecords.Text = row["PendingCount"].ToString();
                     lblCompletedRecords.Text = row["CompletedCount"].ToString();
                 }
+
+                // เงินที่จ่ายคืนลูกค้า (แถว REFUND ติดลบ จากใบลดหนี้ — การจองยกเลิกแล้วสถานะเป็น REFUNDED ซึ่งรายงานที่นับเฉพาะ COMPLETED มองไม่เห็น)
+                try
+                {
+                    DataTable rf = codeInstance.DatabaseQuerySafe(connectionString,
+                        @"SELECT COUNT(*) AS N, ISNULL(SUM(PaymentAmount), 0) AS A FROM Payment_History
+                           WHERE PaymentType = 'REFUND' AND Status IN ('COMPLETED', 'REFUNDED')", null);
+                    int n = rf != null && rf.Rows.Count > 0 ? Convert.ToInt32(rf.Rows[0]["N"]) : 0;
+                    pnlRefundCard.Visible = n > 0;
+                    if (n > 0) lblRefundTotal.Text = Convert.ToDecimal(rf.Rows[0]["A"]).ToString("N2") + " (" + n + " รายการ)";
+                }
+                catch { pnlRefundCard.Visible = false; }
             }
             catch
             {

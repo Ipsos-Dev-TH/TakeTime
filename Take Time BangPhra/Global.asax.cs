@@ -216,6 +216,15 @@ namespace Take_Time_BangPhra
                 }
                 catch (Exception hx) { System.Diagnostics.Trace.TraceError($"SecurityHold sweep error: {(hx.InnerException ?? hx).Message}"); }
 
+                // ใบลดหนี้รออนุมัติ / คืนเงินผ่านเกตเวย์ที่ยังไม่มีใบลดหนี้ → Telegram (ตรวจทุก 15 นาที ส่งซ้ำเมื่อเปลี่ยนหรือครบรอบ)
+                // — no-op ถ้ายังไม่รัน PHASE19_33 / CreditNote_Enabled ≠ 1
+                try
+                {
+                    string cnConn = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                    Take_Time_BangPhra.Integration.CreditNoteGuards.NotifyPendingIfDue(cnConn);
+                }
+                catch (Exception cnx) { System.Diagnostics.Trace.TraceError($"CreditNote alert error: {(cnx.InnerException ?? cnx).Message}"); }
+
                 // รวมรีวิวหลายแพลตฟอร์ม (Google/OTA/อีเมลแจ้งรีวิว): ดึงแหล่งที่ถึงรอบ + AI วิเคราะห์ภายใต้งบ token
                 // — no-op ถ้า Review_Aggregation_Enabled = 0 / ยังไม่รัน PHASE19_26; รันใน background task ไม่บล็อก tick นี้
                 try

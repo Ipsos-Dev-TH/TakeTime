@@ -280,11 +280,52 @@ namespace Take_Time_BangPhra.Admin.Report
             };
 
             DataTable dt = codeInstance.DatabaseQuerySafe(conn, query, parameters);
-            return dt != null && dt.Rows.Count > 0 ? Convert.ToDecimal(dt.Rows[0]["TotalRevenue"]) : 0;
+            decimal total = dt != null && dt.Rows.Count > 0 ? Convert.ToDecimal(dt.Rows[0]["TotalRevenue"]) : 0;
+
+            // ใบลดหนี้ (PHASE19_33): หักยอดลดหนี้ + บวกมัดจำที่ยึดไว้ (ใบมัดจำหลุดจากสถานะ Normal ตอนยกเลิก) — ไม่มีตาราง = เดิม
+            decimal credited, retained;
+            LoadCreditNoteAdjustments(startDate, endDate, false, out credited, out retained);
+            return total - credited + retained;
+        }
+
+        /// <summary>
+        /// ปรับรายได้ตามใบลดหนี้ที่อนุมัติ/ส่งแล้ว ตามวันที่ใบลดหนี้ (ม.82/10 — ลดยอดขายเดือนที่ออกใบลดหนี้):
+        ///   credited = ยอดลดหนี้ของใบต้นทางที่ยังนับเป็นรายได้อยู่ (Account_Receipt สถานะ Normal)
+        ///   retained = ส่วนที่ยึดจากมัดจำ (ค่าธรรมเนียมยกเลิก = รายได้ที่โรงแรมเก็บไว้) ของใบมัดจำที่ถูกตั้งเป็น Refunded/Forfeit
+        ///              ตอนยกเลิกผ่านใบลดหนี้ (ใบนั้นไม่อยู่ในยอด Normal แล้ว)
+        /// ไม่มีตาราง Credit_Note รุ่นปัจจุบัน → 0, 0
+        /// </summary>
+        private void LoadCreditNoteAdjustments(DateTime startDate, DateTime endDate, bool reservationOnly, out decimal credited, out decimal retained)
+        {
+            credited = 0m; retained = 0m;
+            try
+            {
+                if (!Take_Time_BangPhra.Integration.CreditNoteGuards.SchemaReady(conn)) return;
+                DataTable dt = codeInstance.DatabaseQuerySafe(conn,
+                    @"SELECT ISNULL(SUM(CASE WHEN ISNULL(ar.Status, N'Normal') IN (N'Normal', N'') THEN cn.Amount_Gross ELSE 0 END), 0) AS Cr,
+                             ISNULL(SUM(CASE WHEN ar.ID IS NOT NULL AND ISNULL(ar.Status, N'Normal') NOT IN (N'Normal', N'') THEN cn.Retained_Amount ELSE 0 END), 0) AS Ret
+                        FROM Credit_Note cn
+                        LEFT JOIN Account_Receipt ar ON ar.ID = cn.Source_Receipt_ID
+                       WHERE cn.Status IN ('APPROVED', 'SYNCED')
+                         AND CAST(cn.CN_Date AS DATE) >= CAST(@StartDate AS DATE)
+                         AND CAST(cn.CN_Date AS DATE) <= CAST(@EndDate AS DATE)"
+                    + (reservationOnly ? " AND cn.Reservation_ID IS NOT NULL" : ""),
+                    new Dictionary<string, object> { { "@StartDate", startDate }, { "@EndDate", endDate } });
+                if (dt != null && dt.Rows.Count > 0)
+                {
+                    credited = Convert.ToDecimal(dt.Rows[0]["Cr"]);
+                    retained = Convert.ToDecimal(dt.Rows[0]["Ret"]);
+                }
+            }
+            catch { credited = 0m; retained = 0m; }
         }
 
         private decimal GetAccommodationRevenue(DateTime startDate, DateTime endDate)
         {
+            // ยกเลิกคืนเงินผ่านใบลดหนี้ = ใบเสร็จยังนับ (หักด้วยใบลดหนี้) — มีตารางใบลดหนี้เท่านั้น
+            string cnCancelled = Take_Time_BangPhra.Integration.CreditNoteGuards.SchemaReady(conn)
+                ? " OR EXISTS (SELECT 1 FROM Credit_Note cn WHERE cn.Reservation_ID = r.ID AND cn.Status IN ('APPROVED', 'SYNCED'))"
+                : "";
             // Revenue from room bookings
             string query = @"
                 SELECT ISNULL(SUM(ar.Total_Amount), 0) as AccomRevenue
@@ -293,7 +334,9 @@ namespace Take_Time_BangPhra.Admin.Report
                 WHERE CAST(ar.Created_Date AS DATE) >= CAST(@StartDate AS DATE)
                   AND CAST(ar.Created_Date AS DATE) <= CAST(@EndDate AS DATE)
                   AND ar.Status = 'Normal'
-                  AND r.Status NOT IN (N'ยกเลิกคืนเงิน', N'ยกเลิกไม่คืนเงิน')";
+                  AND (r.Status <> N'ยกเลิกคืนเงิน'" + cnCancelled + ")";
+            // เดิมตัดการจองที่ "ยกเลิกไม่คืนเงิน" ทิ้งด้วย ⇒ มัดจำที่โรงแรมยึดไว้ (ใบเสร็จยัง Normal) หายจากรายได้ห้องพัก — นับคืน
+            // ยกเลิกคืนเงินผ่านใบลดหนี้: ใบเสร็จคงสถานะ Normal แล้วหักด้วยยอดใบลดหนี้ด้านล่าง (แบบเดิม void ใบเสร็จ → ไม่อยู่ในยอดอยู่แล้ว)
 
             var parameters = new Dictionary<string, object>
             {
@@ -302,7 +345,10 @@ namespace Take_Time_BangPhra.Admin.Report
             };
 
             DataTable dt = codeInstance.DatabaseQuerySafe(conn, query, parameters);
-            return dt != null && dt.Rows.Count > 0 ? Convert.ToDecimal(dt.Rows[0]["AccomRevenue"]) : 0;
+            decimal accom = dt != null && dt.Rows.Count > 0 ? Convert.ToDecimal(dt.Rows[0]["AccomRevenue"]) : 0;
+            decimal credited, retained;
+            LoadCreditNoteAdjustments(startDate, endDate, true, out credited, out retained);
+            return accom - credited + retained;
         }
 
         private decimal GetProductRevenue(DateTime startDate, DateTime endDate)

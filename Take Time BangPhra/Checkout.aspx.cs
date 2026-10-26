@@ -274,7 +274,9 @@ namespace Take_Time_BangPhra
                         remainingBalance = Math.Round(bal.Due - bal.Credit + roomServiceCharges, 2, MidpointRounding.AwayFromZero);
                         if (Math.Abs(remainingBalance) <= ReservationBalance.RoundingTolerance) remainingBalance = 0m;
                     }
-                    if (remainingBalance < 0m) remainingBalance = 0m;   // จ่ายเกิน = ครบแล้ว
+                    // จ่ายเกิน = ครบแล้ว — แต่ส่วนเกินเป็นเงินของลูกค้า ต้องคืน (ไม่ใช่รายได้) ⇒ แจ้งให้เห็นก่อนเช็คเอาท์
+                    decimal overpaidPreview = remainingBalance < 0m ? -remainingBalance : 0m;
+                    if (remainingBalance < 0m) remainingBalance = 0m;
 
                     // สินค้าชาร์จเข้าห้องที่ยังค้าง (ใช้แสดงคำเตือน)
                     decimal pendingCharges = bal.PendingCharges;
@@ -321,6 +323,13 @@ namespace Take_Time_BangPhra
                     if (pendingRSCount > 0)
                     {
                         warningMessages += $"🍽️ มี Room Service {pendingRSCount} รายการที่ยังไม่ได้จัดส่ง (฿{pendingRoomService:N0})<br/>";
+                    }
+                    if (overpaidPreview > ReservationBalance.RoundingTolerance)
+                    {
+                        warningMessages += $"💰 ลูกค้าจ่ายเกิน {overpaidPreview:N2} บาท (ก่อนหักค่าเสียหาย ถ้ามี) — ส่วนเกินเป็นเงินที่ต้องคืนลูกค้า "
+                            + (OverpayRefundOn()
+                                ? "ระบบจะไม่ตัดเป็นรายได้ เช็คเอาท์แล้วกด \"คืนเงินส่วนเกิน\" เพื่อออกใบลดหนี้/คืนเงิน<br/>"
+                                : "(ระบบใบลดหนี้ปิดอยู่ — คืนเงินตามขั้นตอนเดิม)<br/>");
                     }
                     if (!string.IsNullOrEmpty(warningMessages))
                     {
@@ -525,18 +534,31 @@ namespace Take_Time_BangPhra
                     // Accounting sync is handled inside CheckoutService.ProcessCheckout()
                     // which reads TotalPaid from Payment_History for the deposit amount.
 
+                    // จ่ายเกิน → บอกยอดที่ต้องคืน + ลิงก์คืนเงินผ่านใบลดหนี้ (ไม่ redirect อัตโนมัติ ให้พนักงานเห็นก่อน)
+                    string overpayHtml = "";
+                    if (result.OverpaidAmount > 0m)
+                    {
+                        string refundUrl = ResolveUrl("~/Account/OverpayRefund?res=" + reservationId + "&amt="
+                            + result.OverpaidAmount.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture));
+                        overpayHtml = result.OverpaidHeldForRefund
+                            ? $"<br/><br/>💰 <b>เงินเกิน {result.OverpaidAmount:N2} บาท — คืนเงิน</b> (ส่วนเกินคงเป็นเงินรับล่วงหน้า ไม่ลงเป็นรายได้)<br/>"
+                              + "<a class='btn btn-warning' href='" + System.Web.HttpUtility.HtmlAttributeEncode(refundUrl) + "'>คืนเงินส่วนเกิน (ใบลดหนี้)</a>"
+                            : $"<br/><br/>💰 <b>เงินเกิน {result.OverpaidAmount:N2} บาท</b> — ระบบใบลดหนี้ปิดอยู่ ส่วนเกินถูกตัดเป็นรายได้ตามเดิม: คืนเงินและปรับบัญชีตามขั้นตอนเดิม";
+                    }
+
                     ShowSuccess($"เช็คเอาท์สำเร็จ!<br/>" +
                                $"รหัสการจอง: {reservationId}<br/>" +
                                $"เวลาเช็คเอาท์: {DateTime.Now:dd/MM/yyyy HH:mm}<br/>" +
                                $"คะแนนความพึงพอใจ: {rating}/5 ดาว<br/><br/>" +
-                               $"ขอบคุณที่ใช้บริการ!");
+                               $"ขอบคุณที่ใช้บริการ!" + overpayHtml);
 
                     // Disable form
                     btnCheckout.Enabled = false;
                     DisableChecklistItems();
 
-                    // Redirect after 1.5 seconds (faster response)
-                    Response.AddHeader("REFRESH", "1;URL=ReserveTable.aspx");
+                    // Redirect after 1.5 seconds (faster response) — จ่ายเกินไม่ redirect (ต้องกดคืนเงินก่อน)
+                    if (result.OverpaidAmount <= 0m)
+                        Response.AddHeader("REFRESH", "1;URL=ReserveTable.aspx");
                 }
                 else
                 {
@@ -547,6 +569,17 @@ namespace Take_Time_BangPhra
             {
                 ShowError("เกิดข้อผิดพลาด: " + ex.Message);
             }
+        }
+
+        /// <summary>คืนเงินส่วนเกินผ่านใบลดหนี้ได้ (PHASE19_33 + CreditNote_Enabled)</summary>
+        private bool OverpayRefundOn()
+        {
+            try
+            {
+                return Take_Time_BangPhra.Integration.CreditNoteGuards.SchemaReady(connectionString)
+                    && Take_Time_BangPhra.Integration.CreditNoteService.Enabled(connectionString);
+            }
+            catch { return false; }
         }
 
         private int SelectedDamagePaidHowId()

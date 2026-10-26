@@ -1426,6 +1426,16 @@ namespace Take_Time_BangPhra.Voucher
                 receiptByUidParams);
 
             string id = dtRec.Rows[0]["ID"].ToString();
+
+            // ใบที่มีใบลดหนี้อ้าง / ส่ง e-Tax ถึงกรมสรรพากรแล้ว → ยกเลิกไม่ได้ (NextAcc ปฏิเสธ void → สองระบบไม่ตรงกัน)
+            string cnBlock = Integration.CreditNoteGuards.VoidBlockReason(conn, id);
+            if (cnBlock != null)
+            {
+                ClientScript.RegisterStartupScript(this.GetType(), "cnBlockCancel",
+                    "alert('" + System.Web.HttpUtility.JavaScriptStringEncode("⚠ " + cnBlock) + "');", true);
+                return;
+            }
+
             for (int i = 0; i < dtRec.Rows.Count; i++)
             {
                 // SECURE: Receipt UPDATE with parameterized query

@@ -92,6 +92,10 @@ namespace Take_Time_BangPhra
                     outstanding = Math.Max(0m, bal.Due + damageCharge + missingItemsCharge - bal.Credit);
                 else
                     outstanding = Math.Max(0m, expectedPayable - totalPaid);
+
+                // จ่ายเกิน (ไม่ใช่ใบ OTA Channel/ไม่รู้ผู้เก็บ): ส่วนที่เกินยอดห้อง+ชาร์จ+รูมเซอร์วิสเข้าห้อง+ค่าเสียหาย = เงินของลูกค้า (หนี้สิน)
+                // ไม่ใช่รายได้ — เดิมตัดมัดจำทั้งก้อนเป็นรายได้ (เสีย VAT และไม่เคยคืน) ⇒ จำกัดยอดตัดมัดจำ + ให้คืนผ่านใบลดหนี้
+                decimal overpaid = ComputeOverpaid(reservationId, bal, damageCharge + missingItemsCharge);
                 if (outstanding > 0.01m)
                 {
                     var validation = AccountingArithmeticValidator.ValidationResult.Fail(
@@ -142,7 +146,14 @@ namespace Take_Time_BangPhra
                     {
                         // ตัดมัดจำออกจากเจ้าหนี้ (ADVANCE_DEPOSIT) → รับรู้รายได้ห้องพัก (ROOM_REVENUE)
                         // ถ้ามีค่าเสียหาย/ของหาย ระบบจะแบ่ง credit ระหว่าง Room Revenue และ Other Income
-                        decimal clearedForDamage = TryEnqueueDepositClearing(reservationId, depositAmt, customerName, damageCharge + missingItemsCharge);
+                        bool capOverpay = overpaid > 0m && CreditNoteRefundAvailable();
+                        decimal clearedForDamage = TryEnqueueDepositClearing(reservationId, depositAmt, customerName, damageCharge + missingItemsCharge,
+                            capOverpay ? overpaid : 0m);
+                        if (overpaid > 0m)
+                            _code.Logs(_connectionString, "Checkout",
+                                $"Reservation #{reservationId} จ่ายเกิน {overpaid:N2} บาท — " + (capOverpay
+                                    ? "ไม่ตัดส่วนเกินเป็นรายได้ (คงเป็นเงินรับล่วงหน้า) รอคืนผ่านใบลดหนี้"
+                                    : "ระบบใบลดหนี้ปิด: ตัดมัดจำตามเดิม (ส่วนเกินเป็นรายได้) — คืนเงินตามขั้นตอนเดิม"), "SYSTEM");
 
                         // ค่าเสียหาย/ของหายส่วนที่มัดจำ (ตัดตอนเช็คเอาท์) และเงินประกัน (หักแล้ว — ออกใบเสร็จค่าเสียหายตาม
                         // CLAUDE.md ข้อ 14) ไม่ครอบคลุม → รายได้ค่าเสียหายตามนโยบายเอกสารขาย (เดิมหายเงียบ)
@@ -155,7 +166,9 @@ namespace Take_Time_BangPhra
                             Success = true,
                             Message = "เช็คเอาท์สำเร็จ",
                             CheckoutId = Convert.ToInt64(row["CheckoutID"]),
-                            CheckoutDate = DateTime.Now
+                            CheckoutDate = DateTime.Now,
+                            OverpaidAmount = overpaid,
+                            OverpaidHeldForRefund = capOverpay
                         };
                     }
                     else
@@ -283,7 +296,8 @@ namespace Take_Time_BangPhra
         /// ความล้มเหลวจะ log แต่ไม่ throw — เช็คเอาท์ต้องผ่านได้ถึงแม้ accounting sync มีปัญหา
         /// </summary>
         /// <returns>ยอดมัดจำที่เข้าคิวตัดตอนเช็คเอาท์ (ส่วนนี้ครอบคลุมค่าเสียหายได้ — mapper แยกเป็นรายได้ค่าเสียหาย), 0 = ไม่ได้ตัด</returns>
-        private decimal TryEnqueueDepositClearing(int reservationId, decimal depositAmt, string customerName, decimal damageAmt)
+        private decimal TryEnqueueDepositClearing(int reservationId, decimal depositAmt, string customerName, decimal damageAmt,
+            decimal overpaidHold = 0m)
         {
             if (depositAmt <= 0)
             {
@@ -296,6 +310,15 @@ namespace Take_Time_BangPhra
             // จะสร้าง adjustment journal ตอนสร้างใบเสร็จเอง — ไม่ต้องคลิยร์ซ้ำ
             decimal alreadyApplied = LookupDepositAlreadyAppliedInReceipts(reservationId);
             decimal toClear = depositAmt - alreadyApplied;
+            if (overpaidHold > 0m && toClear > 0.01m)
+            {
+                // ส่วนที่ลูกค้าจ่ายเกินคงไว้ในเงินรับล่วงหน้า (ADVANCE_DEPOSIT) — คืนด้วยใบลดหนี้มัดจำ (refund-deposit) ภายหลัง
+                decimal hold = Math.Min(overpaidHold, toClear);
+                toClear -= hold;
+                _code.Logs(_connectionString, "Checkout",
+                    $"TryEnqueueDepositClearing: Reservation #{reservationId} กันยอดจ่ายเกิน {hold:N2} ไว้ในเงินรับล่วงหน้า (ไม่ตัดเป็นรายได้) — ตัดเหลือ {Math.Max(0m, toClear):N2}",
+                    "SYSTEM");
+            }
             if (toClear <= 0.01m)
             {
                 _code.Logs(_connectionString, "Checkout",
@@ -390,6 +413,39 @@ namespace Take_Time_BangPhra
             }
         }
 
+        /// <summary>
+        /// ยอดที่ลูกค้าจ่ายเกิน ณ เช็คเอาท์ = ReservationBalance.Credit − รูมเซอร์วิสชาร์จเข้าห้อง (หน้าเช็คเอาท์บวกเพิ่มจากสูตรกลาง)
+        /// − ค่าเสียหาย/ของหาย · ใบ OTA Channel/ไม่รู้ผู้เก็บ = 0 (สูตรกลางไม่รายงานจ่ายเกิน) · ไม่ throw
+        /// </summary>
+        private decimal ComputeOverpaid(int reservationId, ReservationBalance bal, decimal damageTotal)
+        {
+            try
+            {
+                if (bal == null || bal.Credit <= 0m || bal.IsChannelCollect || bal.IsCollectUnknown) return 0m;
+                decimal rs = 0m;
+                try
+                {
+                    var dt = _code.DatabaseQuerySafe(_connectionString,
+                        @"IF OBJECT_ID('dbo.Guest_Room_Service_Orders','U') IS NOT NULL
+                            SELECT ISNULL(SUM(Total_Amount), 0) FROM Guest_Room_Service_Orders
+                             WHERE Reservation_ID = @rid AND Payment_Method = 'CHARGE_TO_ROOM' AND Order_Status <> 'CANCELLED'",
+                        new Dictionary<string, object> { { "@rid", reservationId } });
+                    if (dt != null && dt.Rows.Count > 0 && dt.Rows[0][0] != DBNull.Value) rs = Convert.ToDecimal(dt.Rows[0][0]);
+                }
+                catch { }
+                decimal over = Math.Round(bal.Credit - rs - Math.Max(0m, damageTotal), 2, MidpointRounding.AwayFromZero);
+                return over > ReservationBalance.RoundingTolerance ? over : 0m;
+            }
+            catch { return 0m; }
+        }
+
+        /// <summary>คืนส่วนเกินผ่านใบลดหนี้ได้ (PHASE19_33 + CreditNote_Enabled) — ไม่ได้ = พฤติกรรมเดิม (ตัดมัดจำทั้งก้อน)</summary>
+        private bool CreditNoteRefundAvailable()
+        {
+            try { return CreditNoteGuards.SchemaReady(_connectionString) && CreditNoteService.Enabled(_connectionString); }
+            catch { return false; }
+        }
+
         private decimal LookupDepositAlreadyAppliedInReceipts(int reservationId)
         {
             try
@@ -433,5 +489,9 @@ namespace Take_Time_BangPhra
         public string Message { get; set; }
         public long CheckoutId { get; set; }
         public DateTime CheckoutDate { get; set; }
+        /// <summary>ยอดที่ลูกค้าจ่ายเกิน (บาท) — 0 = ไม่เกิน</summary>
+        public decimal OverpaidAmount { get; set; }
+        /// <summary>ส่วนเกินถูกกันไว้ในเงินรับล่วงหน้า (ไม่ตัดเป็นรายได้) รอคืนผ่านใบลดหนี้</summary>
+        public bool OverpaidHeldForRefund { get; set; }
     }
 }

@@ -383,6 +383,14 @@
                     <asp:Label ID="lblCompletedRecords" runat="server" Text="0"></asp:Label>
                 </div>
             </div>
+
+            <asp:Panel ID="pnlRefundCard" runat="server" CssClass="summary-card orange" Visible="false"
+                ToolTip="แถว REFUND ใน Payment_History (ใบลดหนี้/คืนเงินลูกค้า) — ยอดติดลบ = เงินที่จ่ายคืน">
+                <div class="summary-label">คืนเงินลูกค้า (ใบลดหนี้)</div>
+                <div class="summary-value">
+                    <asp:Label ID="lblRefundTotal" runat="server" Text="0.00"></asp:Label> ฿
+                </div>
+            </asp:Panel>
         </div>
 
         <!-- Filter Section -->
@@ -423,6 +431,7 @@
                         <asp:ListItem Value="COMPLETED">สำเร็จ</asp:ListItem>
                         <asp:ListItem Value="PENDING">รอดำเนินการ</asp:ListItem>
                         <asp:ListItem Value="CANCELLED">ยกเลิก</asp:ListItem>
+                        <asp:ListItem Value="REFUNDED">คืนเงินแล้ว (ใบลดหนี้ — การจองยกเลิก)</asp:ListItem>
                         <asp:ListItem Value="OTA_RECLASS">OTA เก็บ (ไม่ใช่เงินสดรับ)</asp:ListItem>
                     </asp:DropDownList>
                 </div>

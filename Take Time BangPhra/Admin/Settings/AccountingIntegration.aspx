@@ -345,6 +345,22 @@
                     </div>
                 </div>
                 <div class="config-item">
+                    <label>ใบลดหนี้ / คืนเงินลูกค้า (PHASE19_33)</label>
+                    <label style="font-weight:normal;display:block">
+                        <input type="checkbox" id="cfgCreditNoteEnabled" onchange="this.setAttribute('data-loaded','1');" />
+                        เปิดระบบใบลดหนี้ (CreditNote_Enabled)
+                    </label>
+                    <label style="font-weight:normal;display:block">
+                        <input type="checkbox" id="cfgCreditNoteRequireApproval" onchange="this.setAttribute('data-loaded','1');" />
+                        พนักงานสร้างเป็นร่าง → Owner / Admin ที่มีสิทธิ์บัญชีต้องอนุมัติก่อนคืนเงิน/ลงบัญชี (CreditNote_Require_Approval)
+                    </label>
+                    <div class="help-text" id="cfgCreditNoteHelp">
+                        เปิด = ยกเลิกการจอง/คืนเงินผ่านหน้า <a href="/Account/CreditNotes" target="_blank">ใบลดหนี้ / คืนเงินลูกค้า</a>
+                        (ใบเสร็จที่มีใบลดหนี้อ้างจะยกเลิก/ลบ/แก้ไขไม่ได้). ปิด = ใช้ปุ่มยกเลิกการจองแบบเดิม.
+                        ใบลดหนี้รออนุมัติจะแจ้งเตือนทาง Telegram (หัวข้อ "คิวบัญชี NextAcc") — ตรวจความพร้อมด้วยปุ่มตรวจสุขภาพ
+                    </div>
+                </div>
+                <div class="config-item">
                     <label>
                         <input type="checkbox" id="cfgDepositDrivesJournal" />
                         ลง JE หักมัดจำไว้ในใบกำกับ/ใบเสร็จเช็คเอาท์ใบเดียว (NextAcc "โหมดขับ JE")
@@ -1527,6 +1543,17 @@
                 document.getElementById('cfgAttachFiles').value = cfg.attachFiles ? 'true' : 'false';
                 if (cfg.depositVatRecognition) document.getElementById('cfgDepositVatRecognition').value = cfg.depositVatRecognition;
                 document.getElementById('cfgDepositDeferOutputVat').checked = !!cfg.depositDeferOutputVat;
+                var cnEn = document.getElementById('cfgCreditNoteEnabled'), cnAp = document.getElementById('cfgCreditNoteRequireApproval');
+                if (cnEn && cnAp) {
+                    cnEn.checked = !!cfg.creditNoteEnabled; cnAp.checked = !!cfg.creditNoteRequireApproval;
+                    cnEn.setAttribute('data-loaded', '1'); cnAp.setAttribute('data-loaded', '1');
+                    if (!cfg.creditNoteTableReady) {
+                        cnEn.disabled = true; cnAp.disabled = true;
+                        cnEn.removeAttribute('data-loaded'); cnAp.removeAttribute('data-loaded');
+                        var cnHelp = document.getElementById('cfgCreditNoteHelp');
+                        if (cnHelp) cnHelp.textContent = 'ยังไม่ได้รัน Database/PHASE19_Migration_33_Credit_Notes.sql — รันก่อนจึงจะเปิดใช้ได้ (ระหว่างนี้ปุ่มยกเลิกการจองแบบเดิมทำงานตามปกติ)';
+                    }
+                }
                 document.getElementById('cfgDepositDrivesJournal').checked = !!cfg.depositDrivesJournal;
                 document.getElementById('cfgDepositDrivesJournalRef').checked = !!cfg.depositDrivesJournalRef;
                 document.getElementById('cfgAutoRecoverDeposit').checked = !!cfg.autoRecoverDeposit;
@@ -1684,6 +1711,9 @@
             if (rhtEl && rhtEl.getAttribute('data-loaded') === '1') data.receiptHeaderType = rhtEl.value;
             var odmEl = document.getElementById('cfgOtaDocumentMode');
             if (odmEl && odmEl.getAttribute('data-loaded') === '1') data.otaDocumentMode = odmEl.value;
+            var cnEnEl = document.getElementById('cfgCreditNoteEnabled'), cnApEl = document.getElementById('cfgCreditNoteRequireApproval');
+            if (cnEnEl && cnEnEl.getAttribute('data-loaded') === '1') data.creditNoteEnabled = cnEnEl.checked;
+            if (cnApEl && cnApEl.getAttribute('data-loaded') === '1') data.creditNoteRequireApproval = cnApEl.checked;
             postAction(data, 'syncTestResult');
         }
 

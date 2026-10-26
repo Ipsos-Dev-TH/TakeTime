@@ -339,6 +339,15 @@ namespace Take_Time_BangPhra.Account
                 }
                 if (docType == "REC")
                 {
+                    // ใบที่มีใบลดหนี้อ้าง / ส่ง e-Tax ถึงกรมสรรพากรแล้ว → ลบไม่ได้ (NextAcc ปฏิเสธ void + ใบลดหนี้จะอ้างใบที่หายไป)
+                    string cnBlockDel = CreditNoteGuards.VoidBlockReason(conn, docNum);
+                    if (cnBlockDel != null)
+                    {
+                        ClientScript.RegisterStartupScript(this.GetType(), "cnBlockDel",
+                            "alert('" + HttpUtility.JavaScriptStringEncode("⚠ " + cnBlockDel) + "');", true);
+                        return;
+                    }
+
                     string path = AppCfg.Get("ReceiptFolderPath").ToString() + "\\" + docYear + "\\" + docMonth;
 
                     // 🔧 FIX: Update Reservation.Deposit before deleting Payment_History

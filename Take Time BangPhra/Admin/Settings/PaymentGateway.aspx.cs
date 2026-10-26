@@ -657,6 +657,26 @@ namespace Take_Time_BangPhra.Admin.Settings
 
             bool ok = result.StartsWith("คืนเงิน") && result.Contains("สำเร็จ");
             Msg(ok ? "ok" : "err", Server.HtmlEncode(result));
+            // คืนเงินจากหน้านี้ไม่ลงบัญชีให้ (เงินออกแล้ว แต่รายได้/ภาษีขายยังอยู่) — รายการที่บันทึกเข้าระบบแล้วต้องออกใบลดหนี้คู่กัน
+            // (ไม่บันทึก Payment_History ที่นี่: ใบลดหนี้ "คืนภายหลัง → บันทึกการคืนเงิน" บันทึก REFUND ให้เอง — บันทึกสองที่ = คืนซ้อน)
+            // ยังไม่มีใบลดหนี้ → ขึ้นในปุ่มตรวจสุขภาพ (Accounting Integration) + Telegram จนกว่าจะออก
+            if (ok)
+            {
+                try
+                {
+                    PaymentTransaction t = new PaymentTransactionStore(_conn).GetById((int)id);
+                    string follow = t == null ? null : Take_Time_BangPhra.Integration.CreditNoteGuards.GatewayRefundFollowUp(_conn, t.AppliedAt.HasValue);
+                    if (follow != null)
+                    {
+                        string html = "⚠ " + Server.HtmlEncode(follow);
+                        if (Take_Time_BangPhra.Integration.CreditNoteGuards.SchemaReady(_conn) && Take_Time_BangPhra.Integration.CreditNoteService.Enabled(_conn))
+                            html += " — <a href=\"" + Server.HtmlEncode(ResolveUrl("~" + Take_Time_BangPhra.Integration.CreditNoteGuards
+                                        .GatewayRefundCnUrl(_conn, t.ReceiptId, t.SourceType, t.SourceId))) + "\" target=\"_blank\"><b>ออกใบลดหนี้</b></a>";
+                        Msg("warn", html, true);
+                    }
+                }
+                catch { }
+            }
             pnlRefund.Visible = !ok;
             BindTxn();
         }
