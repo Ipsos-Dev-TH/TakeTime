@@ -783,6 +783,15 @@ namespace Take_Time_BangPhra.Account
                 var sync = new AccountingSyncService(conn);
                 long queueId = -1;
 
+                // ใบเสร็จที่เคยขึ้น NextAcc สำเร็จแล้ว → เส้น Repost (แก้ในที่ / void ที่ยืนยันแล้วจึงสร้างใหม่) ไม่ใช่สร้างซ้ำ (PHASE19_35)
+                if (docType == "REC" && sync.HasCompletedReceiptCreate(docId))
+                {
+                    var (repostRc, repostMsg, _) = sync.ResyncSingleReceipt(docId);
+                    ClientScript.RegisterStartupScript(this.GetType(), "syncRepost",
+                        "alert('" + System.Web.HttpUtility.JavaScriptStringEncode(repostMsg ?? "") + "');", true);
+                    return;
+                }
+
                 // Cancel existing pending/failed entries so we always create fresh
                 sync.PrepareResync(docId);
 

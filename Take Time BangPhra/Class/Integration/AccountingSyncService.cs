@@ -2982,7 +2982,7 @@ namespace Take_Time_BangPhra.Integration
         /// (JE/payment) ให้ครบ. receiptNumber ใน payload = เลขเอกสาร NextAcc (ไม่มีใบ local ให้อ้าง —
         /// ขั้นกลับรายการมัดจำ/มาร์คฝั่ง local จะหาไม่เจอและข้ามไปเอง ซึ่งถูกต้องเพราะไม่มีข้อมูล local)
         /// </summary>
-        public long EnqueueVoidReceiptByNexaaccId(string nexaaccId, string documentNumber, string reason)
+        public long EnqueueVoidReceiptByNexaaccId(string nexaaccId, string documentNumber, string reason, int reservationId = 0)
         {
             if (!_config.IsConfigured) return -1;
             if (string.IsNullOrEmpty(nexaaccId) || !Guid.TryParse(nexaaccId, out _)) return -1;
@@ -2990,13 +2990,16 @@ namespace Take_Time_BangPhra.Integration
             long existing = FindPendingEntry("RECEIPT", "VOID_RECEIPT", "nexaaccId", nexaaccId);
             if (existing > 0) return existing;
 
-            return InsertQueue("RECEIPT", 0, "VOID_RECEIPT", new Dictionary<string, object>
+            var payload = new Dictionary<string, object>
             {
                 { "receiptNumber", documentNumber ?? "" },
                 { "documentNumber", documentNumber ?? "" },
                 { "nexaaccId", nexaaccId },
                 { "reason", reason ?? "ยกเลิกจากหน้าเอกสาร (NextAcc-only)" }
-            });
+            };
+            // ตัวตรวจเทียบ (PHASE19_35) ใช้หาคิว VOID ของเอกสารกำพร้าตามการจอง (ProcessVoidReceipt ไม่อ่านค่านี้)
+            if (reservationId > 0) payload["reservationId"] = reservationId;
+            return InsertQueue("RECEIPT", 0, "VOID_RECEIPT", payload);
         }
 
         // ══════════════════════════════════════════════════════════════════════
@@ -4747,6 +4750,95 @@ namespace Take_Time_BangPhra.Integration
             return Guid.Empty;
         }
 
+        /// <summary>
+        /// GUID เอกสาร NextAcc ทุกตัวที่ TakeTime "เคยรู้" ว่าเป็นของใบเสร็จนี้ (ใหม่สุดก่อน, ไม่ซ้ำ):
+        /// Account_Receipt.Nexaacc_Doc_Id (PHASE18_32) → คิว CREATE_RECEIPT_DOCUMENT ที่ COMPLETED **และ SUPERSEDED**
+        /// (เดิม LookupNexaaccDocIdByReceipt ดูแค่ COMPLETED → หลัง PrepareResync mark SUPERSEDED แล้วหาไม่เจอ
+        /// = "สร้างใหม่" ทั้งที่เอกสารเดิมยัง active — ต้นเหตุ TIV ซ้ำเคส #149286). ไม่ยิง NextAcc
+        /// </summary>
+        private List<Guid> LookupKnownDocIdsForReceipt(string receiptNumber)
+        {
+            var list = new List<Guid>();
+            if (string.IsNullOrWhiteSpace(receiptNumber)) return list;
+            try
+            {
+                var link = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 Nexaacc_Doc_Id FROM Account_Receipt WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", receiptNumber.Trim() } });
+                Guid g;
+                if (link != null && link.Rows.Count > 0 && link.Rows[0][0] != DBNull.Value
+                    && Guid.TryParse(link.Rows[0][0].ToString(), out g) && g != Guid.Empty)
+                    list.Add(g);
+            }
+            catch { /* ยังไม่รัน PHASE18_32 */ }
+            try
+            {
+                string esc = receiptNumber.Trim().Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]");
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 10 Nexaacc_Response_Id FROM Accounting_Sync_Queue
+                      WHERE Action_Type = 'CREATE_RECEIPT_DOCUMENT'
+                        AND Status IN ('COMPLETED', 'SUPERSEDED')
+                        AND Nexaacc_Response_Id IS NOT NULL AND Nexaacc_Response_Id NOT LIKE 'SKIPPED%'
+                        AND Payload LIKE @p
+                      ORDER BY ID DESC",
+                    new Dictionary<string, object> { { "@p", "%\"receiptNumber\":\"" + esc + "\"%" } });
+                if (dt != null)
+                    foreach (DataRow r in dt.Rows)
+                    {
+                        Guid g = ExtractGuid(r[0]?.ToString());
+                        if (g != Guid.Empty && !list.Contains(g)) list.Add(g);
+                    }
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync", $"LookupKnownDocIdsForReceipt {receiptNumber}: {ex.Message}", "SYSTEM");
+            }
+            return list;
+        }
+
+        /// <summary>ผลตรวจเอกสารเดิมที่รู้จักของใบเสร็จ: state 0 = ไม่รู้จักเอกสารใดเลย · 1 = ทุกใบถูกยกเลิก/ลบแล้ว
+        /// (ยืนยันจาก NextAcc) · 2 = ยังมีใบที่ใช้งานอยู่ (activeId/activeNumber/activeStatus). error ชั่วคราวจาก NextAcc
+        /// (เน็ต/5xx) โยนต่อ → คิว retry ทีหลัง (ห้ามเดาว่า "ไม่มี" แล้วสร้างซ้ำ)</summary>
+        private async Task<(int state, Guid activeId, string activeNumber, int activeStatus)> ProbeKnownReceiptDocsAsync(List<Guid> candidates)
+        {
+            if (candidates == null || candidates.Count == 0) return (0, Guid.Empty, null, -1);
+            foreach (Guid id in candidates)
+            {
+                try
+                {
+                    var d = await _apiClient.GetDocumentAsync(id);
+                    if (d?.data == null) continue;
+                    int st = d.data.Status;
+                    if (st == NexaaccDocumentStatus.Voided || st == NexaaccDocumentStatus.Rejected) continue;
+                    return (2, id, d.data.DocumentNumber, st);
+                }
+                catch (AccountingApiException ax) when (ax.StatusCode == 404 || ax.StatusCode == 410) { /* ถูกลบแล้ว */ }
+            }
+            return (1, Guid.Empty, null, -1);
+        }
+
+        /// <summary>
+        /// ด่านกันเอกสารซ้ำ "ก่อนสร้าง" (marker ว่าง/VOIDED): ถ้าใบนี้ยังมีเอกสารเดิมบน NextAcc ที่ใช้งานอยู่ →
+        /// Draft/รออนุมัติ = คืน id ให้ผู้เรียกใช้ต่อ (เทียบเท่า marker DOC:) · โพสต์แล้ว = โยน ArgumentException ให้คนตรวจ
+        /// (ไม่สร้างใบที่สองเงียบ ๆ). Guid.Empty = ไม่มีเอกสารเดิมที่ยังใช้งาน → สร้างใหม่ได้
+        /// </summary>
+        private async Task<Guid> GuardNoActivePriorDocAsync(string receiptNumber, string flow)
+        {
+            var probe = await ProbeKnownReceiptDocsAsync(LookupKnownDocIdsForReceipt(receiptNumber));
+            if (probe.state != 2) return Guid.Empty;
+            if (probe.activeStatus == NexaaccDocumentStatus.Draft || probe.activeStatus == NexaaccDocumentStatus.WaitingApproval)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"{flow}: receipt={receiptNumber} พบ draft เดิม {probe.activeId} (status={probe.activeStatus}) → ใช้ต่อแทนสร้างใหม่", "SYSTEM");
+                return probe.activeId;
+            }
+            throw new ArgumentException(
+                $"⛔ กันเอกสารซ้ำ: ใบ {receiptNumber} ยังมีเอกสาร NextAcc เดิมที่ใช้งานอยู่ ({probe.activeNumber ?? probe.activeId.ToString()}) " +
+                "แต่สถานะฝั่ง TakeTime บอกว่ายังไม่มีเอกสาร — ระบบไม่สร้างใบที่สองให้ (เดิมจะได้เอกสารซ้ำ). " +
+                "ถ้าเอกสารเดิมถูกต้อง: Admin → Accounting Integration → ผูกใบเสร็จ↔เอกสาร (ใส่เลขเอกสารเดิม) · " +
+                "ถ้าต้องแทนด้วยยอดใหม่: หน้าตารางจอง → ปุ่ม NextAcc → 🔁 Resync ใบนี้ (void เดิมที่ยืนยันแล้วจึงสร้างใหม่)");
+        }
+
         /// <summary>เอกสาร GUID นี้ถูก "ใบเสร็จอื่น" (คนละ receiptNumber) อ้างเป็น Nexaacc_Response_Id ด้วยไหม
         /// (COMPLETED). true = เลขเอกสารชนจากบั๊กก่อน fix (หลายใบของการจองเดียวยุบเป็นเอกสารเดียว) →
         /// ไม่ควรเปิด PDF เอกสารนี้ให้ใบที่ขอ (เป็นของอีกใบ). ตรวจจากคิวโดยไม่ต้องยิง NextAcc.</summary>
@@ -5069,6 +5161,10 @@ namespace Take_Time_BangPhra.Integration
                     }
                 }
 
+                // Idempotency-Key ของ POST สร้างรายการทุกตัวในรายการนี้ผูกกับ "แถวคิวนี้" (retry แถวเดิม = คีย์เดิม →
+                // NextAcc replay ไม่สร้างซ้ำ; void ที่ยืนยันแล้ว→CREATE ใหม่ = แถวใหม่ = คีย์ใหม่) — ดู AccountingApiClient.BuildIdempotencyKey
+                _apiClient.IdempotencyContext = BuildQueueIdempotencyContext(queueId, payload);
+
                 try
                 {
                     _lastDocNumber = null;
@@ -5206,8 +5302,45 @@ namespace Take_Time_BangPhra.Integration
                 }
             }
 
+            _apiClient.IdempotencyContext = null;
             NotifyQueueHealthIfNeeded(serverDown);
             return processed;
+        }
+
+        /// <summary>บริบทคีย์กันซ้ำของแถวคิว: "{เลขใบ/เลขเอกสาร}-q{queueId}-g{รุ่น}" (ASCII ล้วน — ตัวอื่นถูกแทนด้วย _ ใน client).
+        /// รุ่น (generation) = จำนวน VOID_RECEIPT ที่สำเร็จของเลขใบนี้ — หลัง void ที่ยืนยันแล้ว แม้ Retry แถวคิวเดิมด้วย body เดิม
+        /// ก็ได้คีย์ใหม่ (ไม่ replay เอกสารที่ถูก void ไปแล้วภายใน 24 ชม. ของ NextAcc)</summary>
+        private string BuildQueueIdempotencyContext(long queueId, string payloadJson)
+        {
+            string refPart = null;
+            int gen = 0;
+            try
+            {
+                var m = System.Text.RegularExpressions.Regex.Match(payloadJson ?? "",
+                    "\"(receiptNumber|documentNumber|stockRef|externalRunRef)\"\\s*:\\s*\"([^\"]{1,60})\"");
+                if (m.Success) refPart = m.Groups[2].Value;
+                if (m.Success && m.Groups[1].Value == "receiptNumber")
+                {
+                    string esc = refPart.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]");
+                    var g = _code.DatabaseQuerySafe(_connectionString,
+                        @"SELECT COUNT(*) FROM Accounting_Sync_Queue
+                          WHERE Action_Type = 'VOID_RECEIPT' AND Status = 'COMPLETED' AND Payload LIKE @p",
+                        new Dictionary<string, object> { { "@p", "%\"receiptNumber\":\"" + esc + "\"%" } });
+                    if (g != null && g.Rows.Count > 0 && g.Rows[0][0] != DBNull.Value) gen = Convert.ToInt32(g.Rows[0][0]);
+                }
+            }
+            catch { }
+            return (string.IsNullOrEmpty(refPart) ? $"q{queueId}" : $"{refPart}-q{queueId}") + (gen > 0 ? $"-g{gen}" : "");
+        }
+
+        /// <summary>ตรวจแล้วว่าเอกสารเดิมถูกยกเลิก/ลบบน NextAcc (เช่น void มือ) และกำลังจะสร้างใหม่ในแถวคิวเดิม →
+        /// เปลี่ยนบริบทคีย์ (ผูกกับ id เอกสารที่หาย — คงที่ข้าม retry) กัน NextAcc replay คำตอบเก่าที่ชี้เอกสารที่ถูกยกเลิกแล้ว</summary>
+        private void BumpIdempotencyAfterGone(Guid goneDocId)
+        {
+            if (goneDocId == Guid.Empty || string.IsNullOrEmpty(_apiClient.IdempotencyContext)) return;
+            string tag = "-x" + goneDocId.ToString("N").Substring(0, 8);
+            if (!_apiClient.IdempotencyContext.EndsWith(tag, StringComparison.Ordinal))
+                _apiClient.IdempotencyContext += tag;
         }
 
         /// <summary>
@@ -5223,8 +5356,18 @@ namespace Take_Time_BangPhra.Integration
             try
             {
                 // ลบเป็นก้อนเล็ก กันล็อกตารางนาน
+                // ⚠ เว้นแถวที่ "ผลตรวจเทียบที่ยังไม่ปิด" (Accounting_Reconcile_Finding, PHASE19_35) อ้างถึง —
+                //   คำตอบดิบของ NextAcc ตอนสร้างเอกสารซ้ำ/กำพร้าคือหลักฐานเดียวว่าเกิดจากคิวไหน (เคส #149286)
+                //   ไม่มีตาราง = ลบตามอายุเหมือนเดิม
                 _code.DatabaseInsertSafe(_connectionString,
-                    @"DELETE TOP (5000) FROM Accounting_Sync_Log WHERE Created_Date < DATEADD(DAY, -@d, GETDATE())",
+                    @"IF OBJECT_ID(N'dbo.Accounting_Reconcile_Finding', N'U') IS NULL
+                          DELETE TOP (5000) FROM Accounting_Sync_Log WHERE Created_Date < DATEADD(DAY, -@d, GETDATE())
+                      ELSE
+                          DELETE TOP (5000) l FROM Accounting_Sync_Log l
+                           WHERE l.Created_Date < DATEADD(DAY, -@d, GETDATE())
+                             AND NOT EXISTS (SELECT 1 FROM dbo.Accounting_Reconcile_Finding f
+                                              WHERE f.Resolved_At IS NULL AND f.Nexaacc_Doc_Id IS NOT NULL
+                                                AND l.Response_Payload LIKE N'%' + CAST(f.Nexaacc_Doc_Id AS NVARCHAR(36)) + N'%')",
                     new Dictionary<string, object> { { "@d", days } });
             }
             catch { /* best effort */ }
@@ -5255,7 +5398,28 @@ namespace Take_Time_BangPhra.Integration
 
                 int dead = dt.Rows[0]["Dead"] != DBNull.Value ? Convert.ToInt32(dt.Rows[0]["Dead"]) : 0;
                 int stale = dt.Rows[0]["Stale"] != DBNull.Value ? Convert.ToInt32(dt.Rows[0]["Stale"]) : 0;
-                if (dead == 0 && stale == 0 && !serverDown) return;
+                // ผลตรวจเทียบเอกสาร NextAcc (PHASE19_35) ที่ "พบใหม่" ในรอบเตือนนี้ + ที่ยังเปิดทั้งหมด
+                int recNew = 0, recOpen = 0;
+                string recSample = null;
+                try
+                {
+                    var rf = _code.DatabaseQuerySafe(_connectionString,
+                        @"IF OBJECT_ID(N'dbo.Accounting_Reconcile_Finding', N'U') IS NOT NULL
+                          SELECT SUM(CASE WHEN First_Seen >= DATEADD(HOUR, -@h, GETDATE()) THEN 1 ELSE 0 END) AS NewN,
+                                 COUNT(*) AS OpenN,
+                                 (SELECT TOP 1 N'#' + CAST(Reservation_ID AS NVARCHAR(20)) + N' ' + Finding_Type
+                                    FROM dbo.Accounting_Reconcile_Finding WHERE Resolved_At IS NULL ORDER BY First_Seen DESC) AS Sample
+                            FROM dbo.Accounting_Reconcile_Finding WHERE Resolved_At IS NULL",
+                        new Dictionary<string, object> { { "@h", Math.Max(1, _config.QueueAlertHours) } });
+                    if (rf != null && rf.Rows.Count > 0)
+                    {
+                        recNew = rf.Rows[0]["NewN"] != DBNull.Value ? Convert.ToInt32(rf.Rows[0]["NewN"]) : 0;
+                        recOpen = rf.Rows[0]["OpenN"] != DBNull.Value ? Convert.ToInt32(rf.Rows[0]["OpenN"]) : 0;
+                        recSample = rf.Rows[0]["Sample"] == DBNull.Value ? null : rf.Rows[0]["Sample"]?.ToString();
+                    }
+                }
+                catch { /* ยังไม่รัน PHASE19_35 */ }
+                if (dead == 0 && stale == 0 && !serverDown && recNew == 0) return;
 
                 var sb = new System.Text.StringBuilder();
                 sb.AppendLine("<b>⚠️ คิวบัญชี NextAcc ต้องตรวจสอบ</b>");
@@ -5266,6 +5430,10 @@ namespace Take_Time_BangPhra.Integration
                     sb.AppendLine($"❌ <b>ล้มเหลวจนหมด retry:</b> {dead} รายการ (ต้องกด Retry เอง)");
                 if (stale > 0)
                     sb.AppendLine($"🕐 <b>ค้างคิวเกิน 6 ชม.:</b> {stale} รายการ");
+                if (recNew > 0)
+                    sb.AppendLine($"🧾 <b>เอกสาร NextAcc ไม่ตรงกับใบเสร็จ (พบใหม่):</b> {recNew} รายการ · ค้างทั้งหมด {recOpen}"
+                        + (string.IsNullOrEmpty(recSample) ? "" : $" (เช่น การจอง {System.Net.WebUtility.HtmlEncode(recSample)})")
+                        + "\n     เปิดหน้าตารางจอง → ปุ่ม NextAcc ของการจองนั้น → ส่วน \"เอกสารบน NextAcc ที่ไม่ผูกใบเสร็จ\"");
                 sb.AppendLine();
                 sb.Append("<i>ดูรายละเอียด: Admin → ตั้งค่า → NextAcc → คิว</i>");
 
@@ -6556,6 +6724,7 @@ namespace Take_Time_BangPhra.Integration
                     if (chkStatus == NexaaccDocumentStatus.Voided || chkStatus == NexaaccDocumentStatus.Rejected)
                     {
                         // เอกสารถูก void/ปฏิเสธไปแล้ว (เช่น flow re-post void ของเก่า) → สร้างใหม่ทั้งใบ
+                        BumpIdempotencyAfterGone(finalId);
                         SetReceiptPaymentMarker(receiptNumber, null);
                         docId = Guid.Empty; approved = false; adjDone = false;
                         _code.Logs(_connectionString, "AccountingSync",
@@ -6573,6 +6742,7 @@ namespace Take_Time_BangPhra.Integration
                 catch (AccountingApiException gx) when (gx.StatusCode == 404)
                 {
                     // เอกสารไม่อยู่บน NextAcc → รีเซ็ต marker แล้วสร้างใหม่
+                    BumpIdempotencyAfterGone(finalId);
                     SetReceiptPaymentMarker(receiptNumber, null);
                     docId = Guid.Empty; approved = false; adjDone = false;
                     _code.Logs(_connectionString, "AccountingSync",
@@ -6600,6 +6770,7 @@ namespace Take_Time_BangPhra.Integration
                 catch { /* อ่านไม่ได้ชั่วคราว → ปล่อยตาม flow เดิม (approve จะ throw ถ้าหายจริง) */ }
                 if (docGone)
                 {
+                    BumpIdempotencyAfterGone(docId);
                     SetReceiptPaymentMarker(receiptNumber, null);
                     docId = Guid.Empty; approved = false; adjDone = false;
                     _code.Logs(_connectionString, "AccountingSync",
@@ -6612,13 +6783,28 @@ namespace Take_Time_BangPhra.Integration
             if (docId != Guid.Empty && !approved && !isFinal)
                 await RefreshStaleDraftAsync(docId, doc, receiptNumber, draftTotal);
 
-            // 1) สร้างเอกสาร (company /document ไม่ dedupe → marker กันสร้างซ้ำ)
+            // 0b) ด่านกันเอกสารซ้ำก่อนสร้าง (PHASE19_35): marker ว่าง/ถูก reset แต่เอกสารเดิมของใบนี้ยังใช้งานอยู่บน NextAcc
+            //     (เช่น marker ถูกล้างก่อน void จะสำเร็จจริง — เส้น repost/ล้างทั้งหมดรุ่นเก่า) → draft = ใช้ต่อ / โพสต์แล้ว = หยุดให้คนตรวจ
+            if (docId == Guid.Empty)
+            {
+                Guid draft = await GuardNoActivePriorDocAsync(receiptNumber, "SettleReceiptDoc");
+                if (draft != Guid.Empty)
+                {
+                    docId = draft; approved = false; adjDone = false;
+                    SetReceiptPaymentMarker(receiptNumber, "DOC:" + docId);
+                    await RefreshStaleDraftAsync(docId, doc, receiptNumber, null);
+                }
+            }
+
+            // 1) สร้างเอกสาร (company /document ไม่ dedupe → marker กันสร้างซ้ำ + Idempotency-Key ต่อแถวคิว)
             if (docId == Guid.Empty)
             {
                 var createResult = await _apiClient.CreateDocumentAsync(doc);
                 docId = RequireValidDocId(createResult?.data?.Id, $"CreateDocument (receipt) receipt={receiptNumber}");
                 _lastDocNumber = createResult?.data?.DocumentNumber;
                 SetReceiptPaymentMarker(receiptNumber, "DOC:" + docId);
+                // ผูกคู่ทันทีหลังสร้าง (ไม่รอคิว COMPLETED) — ขั้นถัดไปล้มก็ยังหาเอกสารนี้เจอ
+                try { SetReceiptNextAccDoc(receiptNumber, docId.ToString(), _lastDocNumber); } catch { }
             }
 
             // 2) อนุมัติ (auto-post GL)
@@ -6758,11 +6944,32 @@ namespace Take_Time_BangPhra.Integration
             }
             else if (!string.IsNullOrEmpty(marker))
             {
-                // เฟส settle เริ่ม/จบแล้ว (ADJ:/NOCASH/paymentId) → เอกสารมีอยู่แล้วแน่นอน
-                docId = LookupNexaaccDocIdByReceipt(receiptNumber);
-                if (docId != Guid.Empty) return docId;
+                // เฟส settle เริ่ม/จบแล้ว (ADJ:/NOCASH/paymentId) → เอกสาร "เคยมี" แน่นอน ⇒ ห้ามสร้างใหม่เงียบ ๆ.
+                // หา id จาก Nexaacc_Doc_Id + คิว COMPLETED/SUPERSEDED (เดิมดูแค่ COMPLETED → หลัง PrepareResync
+                // mark SUPERSEDED หาไม่เจอแล้ว "สร้างใหม่" = TIV ซ้ำ เคส #149286) แล้วถาม NextAcc ว่ายังใช้งานอยู่ไหม
+                var known = LookupKnownDocIdsForReceipt(receiptNumber);
+                if (known.Count == 0)
+                    throw new ArgumentException(
+                        $"⛔ กันเอกสารซ้ำ: ใบ {receiptNumber} มี marker '{marker}' (ลงรับชำระ/ตัดมัดจำไปแล้ว) แต่หา id เอกสาร NextAcc เดิมไม่เจอ " +
+                        "— ระบบไม่สร้างใหม่ให้อัตโนมัติ (เดิมจะได้ใบกำกับซ้ำ). ตรวจบน NextAcc แล้วผูกเอกสารเดิมที่ " +
+                        "Admin → Accounting Integration → ผูกใบเสร็จ↔เอกสาร หรือดูหน้าตารางจอง → ปุ่ม NextAcc → \"เอกสารบน NextAcc ที่ไม่ผูกใบเสร็จ\"");
+                var probe = await ProbeKnownReceiptDocsAsync(known);   // error ชั่วคราว → throw → retry ทีหลัง
+                if (probe.state == 2) return probe.activeId;
+                // ทุกใบที่รู้จักถูกยกเลิก/ลบแล้วจริง (ยืนยันจาก NextAcc) → สร้างใหม่ได้โดยไม่ซ้ำ
+                BumpIdempotencyAfterGone(known[0]);
+                SetReceiptPaymentMarker(receiptNumber, null);
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"EnsureRevenueDoc: marker={marker} แต่หา doc id จาก queue ไม่เจอ receipt={receiptNumber} → สร้างใหม่", "SYSTEM");
+                    $"EnsureRevenueDoc: marker={marker} แต่เอกสารเดิมทุกใบ ({known.Count}) ถูกยกเลิก/ลบบน NextAcc แล้ว receipt={receiptNumber} → สร้างใหม่", "SYSTEM");
+            }
+            else
+            {
+                // marker ว่าง/VOIDED: ด่านสุดท้ายก่อนสร้าง — เอกสารเดิมที่ยังใช้งานอยู่ = ห้ามสร้างซ้ำ (draft = ใช้ต่อ)
+                Guid draft = await GuardNoActivePriorDocAsync(receiptNumber, "EnsureRevenueDoc");
+                if (draft != Guid.Empty)
+                {
+                    docId = draft;
+                    SetReceiptPaymentMarker(receiptNumber, "DOC:" + docId);
+                }
             }
 
             // ใบกำกับ draft ที่ค้างจากรอบก่อน (DOC:) — ใบอาจถูกแก้ยอดระหว่างนั้น → ทับด้วยบรรทัดปัจจุบันก่อนอนุมัติ
@@ -6775,6 +6982,8 @@ namespace Take_Time_BangPhra.Integration
                 docId = RequireValidDocId(createResult?.data?.Id, $"CreateDocument (tax-invoice) receipt={receiptNumber}");
                 _lastDocNumber = createResult?.data?.DocumentNumber;
                 SetReceiptPaymentMarker(receiptNumber, "DOC:" + docId);
+                // ผูกคู่ทันทีหลังสร้าง (ไม่รอคิว COMPLETED) — ขั้นถัดไปล้ม/คิวถูก supersede ก็ยังหาเอกสารนี้เจอ ไม่สร้างซ้ำ
+                try { SetReceiptNextAccDoc(receiptNumber, docId.ToString(), _lastDocNumber); } catch { }
             }
 
             if (!approved)
@@ -10967,14 +11176,21 @@ namespace Take_Time_BangPhra.Integration
                     }
                     catch { }
 
-                    try
+                    // void แล้ว "ยืนยันจากปลายทาง" เสมอ (PHASE19_35) — เดิมกลืน 400 ทุกตัวที่มีคำว่า Posted/Draft/Cancelled
+                    // (IsAlreadyPostedOrTerminal) และ 409 (IsAlreadyVoided ด้านล่าง) แล้ว mark COMPLETED/"VOIDED" ทั้งที่
+                    // NextAcc ปฏิเสธจริง (e-Tax ถึงกรมสรรพากร RD-ETAX-REACHED-VOID / รายงานภาษี Filed / 50ทวิ ยื่นแล้ว —
+                    // DocumentService.cs:9528-9581) ⇒ เอกสารเดิมค้าง active + CREATE ใหม่วิ่งต่อ = เอกสารซ้ำ
+                    if (!docAlreadyGone)
                     {
-                        await _apiClient.VoidDocumentAsync(docId);
-                    }
-                    catch (AccountingApiException ex) when (IsAlreadyPostedOrTerminal(ex))
-                    {
-                        _code.Logs(_connectionString, "AccountingSync",
-                            $"ProcessVoidReceipt(doc): doc {docId} already voided/terminal receipt={receiptNumber} ({ex.StatusCode})", "SYSTEM");
+                        string voidErr = null;
+                        try { await _apiClient.VoidDocumentAsync(docId); }
+                        catch (AccountingApiException ex)
+                        {
+                            voidErr = $"HTTP {ex.StatusCode}: {DecodeUnicodeEscapes(ex.ResponseBody ?? ex.Message)}";
+                            _code.Logs(_connectionString, "AccountingSync",
+                                $"ProcessVoidReceipt(doc): void doc {docId} ตอบ error receipt={receiptNumber} — {voidErr} → ตรวจสถานะจริงก่อนตัดสิน", "SYSTEM");
+                        }
+                        await RequireDocumentVoidedAsync(docId, receiptNumber, voidErr);   // ไม่ Voided/404 = throw (คิว FAILED เห็นเหตุผล)
                     }
 
                     // เอกสารถูกลบ/void มือบน NextAcc แล้ว → ผู้ใช้เคลียร์เอง (รวม journal ปรับปรุง)
@@ -10985,7 +11201,7 @@ namespace Take_Time_BangPhra.Integration
                         SetReceiptPaymentMarker(receiptNumber, "VOIDED");
                         _code.Logs(_connectionString, "AccountingSync",
                             $"ProcessVoidReceipt: doc {docId} ถูกลบ/void บน NextAcc แล้ว receipt={receiptNumber} — ข้ามการกลับรายการ (เคลียร์มือ)", "SYSTEM");
-                        return $"VOIDED:{nexaaccId}";
+                        return $"VOIDED:{nexaaccId}" + AfterVerifiedReceiptVoid(p, receiptNumber, docId);
                     }
 
                     // จด "void สำเร็จแล้ว กำลังกลับรายการประกอบ" ก่อนเริ่มกลับ — ถ้าขั้นใดล้ม รอบ retry จะรู้ว่า
@@ -11096,7 +11312,7 @@ namespace Take_Time_BangPhra.Integration
                     SetReceiptPaymentMarker(receiptNumber, "VOIDED");
                     _code.Logs(_connectionString, "AccountingSync",
                         $"ProcessVoidReceipt(RECEIPT doc): voided receipt={receiptNumber} docId={docId}", "SYSTEM");
-                    return $"VOIDED:{nexaaccId}";
+                    return $"VOIDED:{nexaaccId}" + AfterVerifiedReceiptVoid(p, receiptNumber, docId);
                 }
                 else if (_config.IsReceiptDocumentMode)
                 {
@@ -11147,7 +11363,8 @@ namespace Take_Time_BangPhra.Integration
                         _code.Logs(_connectionString, "AccountingSync",
                             $"ProcessVoidReceipt(DOCUMENT): voided via integration endpoint receipt={receiptNumber} nexaaccId={nexaaccId}",
                             "SYSTEM");
-                        return $"VOIDED:{nexaaccId}";
+                        // integration void ตอบสำเร็จ (ล้ม = exception ไม่ถึงตรงนี้) → นับเป็นยืนยันแล้ว
+                        return $"VOIDED:{nexaaccId}" + AfterVerifiedReceiptVoid(p, receiptNumber, docId);
                     }
                     catch (AccountingApiException voidEx) when (voidEx.StatusCode == 404)
                     {
@@ -11192,7 +11409,7 @@ namespace Take_Time_BangPhra.Integration
                                 // credit-note fallback ไม่ cascade payment → ต้อง void payment ที่บันทึกรับชำระเอง
                                 await VoidRecordedReceiptPaymentAsync(receiptNumber, alreadyCascaded: false);
 
-                                return $"CREDIT_NOTE:{cnId}";
+                                return $"CREDIT_NOTE:{cnId}" + AfterVerifiedReceiptVoid(p, receiptNumber, docId);
                             }
                         }
 
@@ -11217,23 +11434,129 @@ namespace Take_Time_BangPhra.Integration
                         _code.Logs(_connectionString, "AccountingSync",
                             $"ProcessVoidReceipt(JOURNAL): reversed {nexaaccId} → {reverseResult.data?.Id}",
                             "SYSTEM");
-                        return $"REVERSED:{nexaaccId} → {reverseResult.data?.Id}";
+                        return $"REVERSED:{nexaaccId} → {reverseResult.data?.Id}" + AfterVerifiedReceiptVoid(p, receiptNumber, docId);
                     }
                     catch (AccountingApiException reverseEx) when (IsAlreadyVoided(reverseEx))
                     {
                         _code.Logs(_connectionString, "AccountingSync",
                             $"ProcessVoidReceipt(JOURNAL): {nexaaccId} already reversed in NextAcc — treating as success",
                             "SYSTEM");
-                        return $"REVERSED:{nexaaccId} (already)";
+                        return $"REVERSED:{nexaaccId} (already)" + AfterVerifiedReceiptVoid(p, receiptNumber, docId);
                     }
                 }
             }
-            catch (AccountingApiException ex) when (IsAlreadyVoided(ex))
+            catch (AccountingApiException ex) when (IsAlreadyVoided(ex) && !IsVoidBlockedByRule(ex))
             {
                 _code.Logs(_connectionString, "AccountingSync",
                     $"ProcessVoidReceipt: nexaaccId={nexaaccId} already voided/reversed — treating as success",
                     "SYSTEM");
-                return $"VOIDED:{nexaaccId} (already voided)";
+                return $"VOIDED:{nexaaccId} (already voided)" + AfterVerifiedReceiptVoid(p, receiptNumber, docId);
+            }
+        }
+
+        /// <summary>409/400 ที่เป็น "กฎห้ามยกเลิก" ของ NextAcc ไม่ใช่ "ยกเลิกไปแล้ว" — ห้ามนับเป็นสำเร็จ
+        /// (DocumentService.VoidDocumentAsync :9541-9581: SETTLEMENT-ARTIFACT-VOID / RD-50TWI-FILED / ภ.พ.36 /
+        /// รายงานภาษี Filed / RD-ETAX-REACHED-VOID / มีเอกสารลูก-ใบลดหนี้อ้าง)</summary>
+        private static bool IsVoidBlockedByRule(AccountingApiException ex)
+        {
+            string b = DecodeUnicodeEscapes(ex?.ResponseBody ?? "");
+            return b.IndexOf("RD-ETAX", StringComparison.OrdinalIgnoreCase) >= 0
+                || b.IndexOf("RD-50TWI", StringComparison.OrdinalIgnoreCase) >= 0
+                || b.IndexOf("SETTLEMENT-ARTIFACT", StringComparison.OrdinalIgnoreCase) >= 0
+                || b.IndexOf("PP36", StringComparison.OrdinalIgnoreCase) >= 0
+                || b.Contains("Filed") || b.Contains("ภ.พ.36")
+                || b.Contains("ยกเลิกไม่ได้") || b.Contains("e-Tax");
+        }
+
+        /// <summary>ยืนยันว่าเอกสารถูกยกเลิกแล้วจริง (GET: Voided หรือ 404) — ไม่ใช่ = throw Exception (ไม่ใช่
+        /// AccountingApiException เพื่อไม่ให้ catch IsAlreadyVoided ภายนอกกลืน) พร้อมเหตุผลจาก NextAcc + ทางไปต่อ.
+        /// อ่านสถานะไม่ได้ชั่วคราว = throw เช่นกัน (คิว retry) — ห้ามสรุปว่า void สำเร็จ</summary>
+        private async Task RequireDocumentVoidedAsync(Guid docId, string label, string voidErr)
+        {
+            bool gone;
+            try
+            {
+                var chk = await _apiClient.GetDocumentAsync(docId);
+                gone = chk?.data != null && chk.data.Status == NexaaccDocumentStatus.Voided;
+            }
+            catch (AccountingApiException cx) when (cx.StatusCode == 404 || cx.StatusCode == 410) { gone = true; }
+            catch (AccountingApiException cx)
+            {
+                throw new Exception($"ตรวจสถานะหลังยกเลิกเอกสาร {docId} ไม่ได้ (HTTP {cx.StatusCode}) — ยังไม่ถือว่ายกเลิกสำเร็จ ({label})");
+            }
+            if (!gone)
+                throw new Exception($"ยกเลิกเอกสาร NextAcc {docId} ({label}) ไม่สำเร็จ — สถานะยังไม่เป็น Voided" +
+                    (string.IsNullOrEmpty(voidErr) ? "" : " · " + voidErr) +
+                    " · ถ้าส่ง e-Tax ถึงกรมสรรพากรแล้ว/รายงานภาษียื่นแล้ว NextAcc ห้ามยกเลิก → ออกใบลดหนี้ที่ Account/CreditNotes แทน" +
+                    " (คิวนี้จะไม่สร้างเอกสารใหม่ซ้อนจนกว่ายกเลิกสำเร็จ)");
+        }
+
+        /// <summary>
+        /// หลัง void ใบเสร็จ "ยืนยันแล้ว" (PHASE19_35): ปลดการผูก Nexaacc_Doc_Id (เฉพาะเมื่อยังชี้เอกสารนี้) และ —
+        /// ถ้า payload มี <c>recreateFromQueueId</c> (repost fallback = void→สร้างใหม่) — ค่อย supersede คิวเก่า + reset
+        /// marker + เข้าคิว CREATE ใหม่ "ตอนนี้" (เดิมทำก่อน void จะวิ่ง ⇒ void ล้ม/ถูกยกเลิก = เอกสารเก่าค้าง + ใบใหม่ซ้อน).
+        /// คืนข้อความต่อท้ายผลคิว "สั้นที่สุด" (" →Q{id}" หรือ "") — ผลคิวไปลง Nexaacc_Response_Id NVARCHAR(100)
+        /// (PHASE9_01:158) ยาวเกิน = UPDATE ล้ม → คิวค้าง PROCESSING → วิ่งซ้ำ; รายละเอียดอยู่ใน log. idempotent:
+        /// มีคิว CREATE ใหม่กว่าต้นทางอยู่แล้ว = ไม่ใส่ซ้ำ
+        /// </summary>
+        private string AfterVerifiedReceiptVoid(Dictionary<string, object> p, string receiptNumber, Guid voidedDocId)
+        {
+            if (string.IsNullOrEmpty(receiptNumber)) return "";
+            try
+            {
+                _code.DatabaseInsertSafe(_connectionString,
+                    @"UPDATE Account_Receipt SET Nexaacc_Doc_Id = NULL, Nexaacc_Doc_Number = NULL, Nexaacc_Doc_LinkedAt = NULL
+                      WHERE ID = @id AND Nexaacc_Doc_Id = @g",
+                    new Dictionary<string, object> { { "@id", receiptNumber }, { "@g", voidedDocId } });
+            }
+            catch { /* ยังไม่รัน PHASE18_32 */ }
+
+            long fromQ = 0;
+            if (p != null && p.ContainsKey("recreateFromQueueId") && p["recreateFromQueueId"] != null)
+                long.TryParse(p["recreateFromQueueId"].ToString(), out fromQ);
+            if (fromQ <= 0) return "";
+            Action<string> warn = m => _code.Logs(_connectionString, "AccountingSync",
+                $"⚠ AfterVerifiedReceiptVoid {receiptNumber} (void {voidedDocId} ยืนยันแล้ว): {m} — กด Resync ใบนี้อีกครั้งเพื่อสร้างใหม่", "SYSTEM");
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT TOP 1 Action_Type, Payload FROM Accounting_Sync_Queue WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", fromQ } });
+                if (dt == null || dt.Rows.Count == 0
+                    || (dt.Rows[0]["Action_Type"]?.ToString()) != "CREATE_RECEIPT_DOCUMENT")
+                { warn($"ไม่พบคิว CREATE ต้นทาง #{fromQ}"); return ""; }
+                var cp = _serializer.Deserialize<Dictionary<string, object>>(dt.Rows[0]["Payload"]?.ToString() ?? "{}");
+                string cpRn = cp != null && cp.ContainsKey("receiptNumber") ? cp["receiptNumber"]?.ToString() : null;
+                if (!string.Equals(cpRn, receiptNumber, StringComparison.Ordinal))
+                { warn($"คิวต้นทาง #{fromQ} เป็นของใบ {cpRn}"); return ""; }
+                if (CreditNoteGuards.VoidBlockReason(_connectionString, receiptNumber) != null)
+                { warn("ใบนี้มีใบลดหนี้อ้าง/ส่ง e-Tax แล้ว — ไม่สร้างใหม่อัตโนมัติ"); return ""; }
+
+                // idempotent: รอบก่อนของ VOID นี้ใส่ CREATE ไปแล้ว (เช่น อัปเดตสถานะคิวล้มแล้ววิ่งซ้ำ) → ไม่ใส่ซ้ำ
+                string esc = receiptNumber.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]");
+                var newer = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 1 ID FROM Accounting_Sync_Queue
+                      WHERE Action_Type = 'CREATE_RECEIPT_DOCUMENT' AND ID > @from
+                        AND Status IN ('PENDING', 'PROCESSING', 'FAILED', 'COMPLETED') AND Payload LIKE @p
+                      ORDER BY ID DESC",
+                    new Dictionary<string, object> { { "@from", fromQ }, { "@p", "%\"receiptNumber\":\"" + esc + "\"%" } });
+                if (newer != null && newer.Rows.Count > 0)
+                    return $" →Q{newer.Rows[0]["ID"]}";
+
+                PrepareResync(receiptNumber, enqueueVoid: false);   // supersede COMPLETED + ยกเลิกคิวค้าง (ไม่แตะ VOID)
+                ClearReceiptPdfCache(receiptNumber);
+                SetReceiptPaymentMarker(receiptNumber, null);        // state machine เริ่มใหม่ (void ยืนยันแล้ว)
+                int resId = cp.ContainsKey("reservationId") && cp["reservationId"] != null ? Convert.ToInt32(cp["reservationId"]) : 0;
+                long newQ = InsertQueue("RECEIPT", resId, "CREATE_RECEIPT_DOCUMENT", cp);
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"AfterVerifiedReceiptVoid: {receiptNumber} void {voidedDocId} ยืนยันแล้ว → เข้าคิวสร้างใหม่ #{newQ} (จากคิว #{fromQ})", "SYSTEM");
+                if (newQ <= 0) { warn("เข้าคิวสร้างใหม่ไม่สำเร็จ"); return ""; }
+                return $" →Q{newQ}";
+            }
+            catch (Exception ex)
+            {
+                warn("เข้าคิวสร้างใหม่ล้มเหลว " + ex.Message);
+                return "";
             }
         }
 
@@ -11304,15 +11627,19 @@ namespace Take_Time_BangPhra.Integration
                         _code.Logs(_connectionString, "AccountingSync",
                             $"ProcessVoidVoucher(DOCUMENT): integration void หาเอกสารไม่เจอ — ลองผ่าน company endpoint doc={documentNumber} id={docId}",
                             "SYSTEM");
+                        string vErr = null;
                         try
                         {
                             await _apiClient.VoidDocumentAsync(docId);
                         }
-                        catch (AccountingApiException cx) when (IsAlreadyPostedOrTerminal(cx))
+                        catch (AccountingApiException cx)
                         {
+                            // เดิมกลืนทุก 400 ที่มีคำว่า Posted/Draft (IsAlreadyPostedOrTerminal) — ตรวจสถานะจริงแทน
+                            vErr = $"HTTP {cx.StatusCode}: {DecodeUnicodeEscapes(cx.ResponseBody ?? cx.Message)}";
                             _code.Logs(_connectionString, "AccountingSync",
-                                $"ProcessVoidVoucher(DOCUMENT): doc {docId} ถูกยกเลิกไปแล้ว doc={documentNumber} ({cx.StatusCode})", "SYSTEM");
+                                $"ProcessVoidVoucher(DOCUMENT): void doc {docId} ตอบ error doc={documentNumber} — {vErr} → ตรวจสถานะจริง", "SYSTEM");
                         }
+                        await RequireDocumentVoidedAsync(docId, documentNumber, vErr);
                         SetVoucherDocMarker(documentNumber, "VOIDED");
                         return $"VOIDED:{nexaaccId}";
                     }
@@ -14278,35 +14605,54 @@ namespace Take_Time_BangPhra.Integration
                 }
 
                 // void "เอกสาร" (TIV/REC) ของการจองนี้ด้วย — ไม่ใช่แค่ JE (GL) — ให้กดทีเดียวจบจริง
-                int docsVoided = 0, docsFailed = 0;
+                // PHASE19_35: ครบทุกใบจาก NextAcc by-booking + id ที่ TakeTime รู้ (รวมคิว SUPERSEDED/ใบที่ลบแล้ว) และ
+                // ยืนยัน Voided รายใบ — เดิม void แค่ "ตัวชี้" ต่อใบเสร็จ แล้วล้าง marker ทุกใบแม้ void ล้ม ⇒ Resync รอบถัดไป
+                // สร้างเอกสารใหม่ข้างใบที่ยังไม่ถูก void (เอกสารกำพร้าจาก churn เก่าไม่ถูกแตะเลย)
+                ReservationDocVoidReport vr = null;
                 try
                 {
-                    var vr = System.Threading.Tasks.Task.Run(() =>
+                    vr = System.Threading.Tasks.Task.Run(() =>
                         VoidReservationDocumentsAsync(reservationId)).GetAwaiter().GetResult();
-                    docsVoided = vr.voided; docsFailed = vr.failed;
                 }
                 catch (Exception vex)
                 {
                     _code.Logs(_connectionString, "AccountingSync",
                         $"ResetReservationAccounting: void เอกสารล้มเหลว {vex.Message}", "SYSTEM");
                 }
+                int docsVoided = vr?.Voided ?? 0, docsFailed = vr?.Failed ?? 0, docsAlready = vr?.AlreadyVoided ?? 0;
 
-                // reset marker → re-sync สะอาดได้ (settle/drives เริ่มใหม่)
+                // reset marker เฉพาะใบเสร็จที่ "ไม่มีเอกสารค้าง" (ทุกใบของมันยืนยัน Voided แล้ว/ไม่มีเลย) — ใบที่ void ล้ม
+                // คง marker ไว้ ⇒ CREATE รอบถัดไปไม่สร้างใบที่สองข้างเอกสารที่ยังใช้งานอยู่
+                int markersReset = 0;
+                var keptMarkers = new List<string>();
                 try
                 {
-                    _code.DatabaseInsertSafe(_connectionString,
-                        "UPDATE Account_Receipt SET Nexaacc_Receipt_Payment_Id = NULL WHERE Reservation_ID = @rid",
+                    var rcs = _code.DatabaseQuerySafe(_connectionString,
+                        "SELECT ID FROM Account_Receipt WHERE Reservation_ID = @rid",
                         new Dictionary<string, object> { { "@rid", reservationId } });
+                    if (rcs != null)
+                        foreach (System.Data.DataRow r in rcs.Rows)
+                        {
+                            string rn = r["ID"]?.ToString();
+                            if (string.IsNullOrEmpty(rn)) continue;
+                            if (vr == null || vr.ReceiptsWithActiveDoc.Contains(rn)) { keptMarkers.Add(rn); continue; }
+                            SetReceiptPaymentMarker(rn, null);
+                            try { SetReceiptNextAccDoc(rn, null, null); } catch { }
+                            markersReset++;
+                        }
                 }
                 catch { }
 
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"ResetReservationAccounting #{reservationId}: กลับ {reversed} JE, void {docsVoided} เอกสาร (fail {docsFailed}), reset marker แล้ว", "SYSTEM");
-                return (reversed,
+                    $"ResetReservationAccounting #{reservationId}: กลับ {reversed} JE, void {docsVoided} เอกสาร (เดิม void แล้ว {docsAlready}, fail {docsFailed}), " +
+                    $"reset marker {markersReset} ใบ, คงไว้ {keptMarkers.Count} ใบ ({string.Join(",", keptMarkers)})", "SYSTEM");
+                return (docsFailed > 0 && reversed == 0 && docsVoided == 0 ? -1 : reversed,
                     $"รีเซ็ตบัญชีการจอง #{reservationId} — กลับ {reversed} รายการ GL (มัดจำ/ใบกำกับ/ตัดมัดจำ/churn) + void {docsVoided} เอกสาร" +
-                    (docsFailed > 0 ? $" (void ไม่สำเร็จ {docsFailed} ใบ — อาจถูกลบไปแล้ว/ผูก payment ต้องเคลียร์เพิ่ม)" : "") + ". " +
-                    "✅ ตรวจ 21510/21913/ลูกหนี้ บน NextAcc → ควรเป็น 0. ยังไม่ 0 = กดซ้ำได้ (ไม่เบิ้ล). " +
-                    "reset marker แล้ว → re-sync ได้สะอาด (หลัง isCashSale deploy)");
+                    (docsAlready > 0 ? $" (ยกเลิกไว้ก่อนแล้ว {docsAlready})" : "") +
+                    (docsFailed > 0 ? $" · ❌ void ไม่สำเร็จ {docsFailed} ใบ — ใบเสร็จของเอกสารนั้นคงสถานะเดิม (ไม่สร้างซ้ำ)" : "") + ". " +
+                    $"reset marker {markersReset} ใบ" + (keptMarkers.Count > 0 ? $" · คงไว้ {keptMarkers.Count} ใบ ({string.Join(", ", keptMarkers)})" : "") + ". " +
+                    "✅ ตรวจ 21510/21913/ลูกหนี้ บน NextAcc → ควรเป็น 0. ยังไม่ 0 = กดซ้ำได้ (ไม่เบิ้ล)." +
+                    (vr != null && vr.Lines.Count > 0 ? "\nรายเอกสาร:\n" + string.Join("\n", vr.Lines) : ""));
             }
             catch (Exception ex)
             {
@@ -14316,13 +14662,26 @@ namespace Take_Time_BangPhra.Integration
             }
         }
 
-        /// <summary>void "เอกสาร" NextAcc ทุกใบของการจอง (TIV/REC/มัดจำ) — คู่กับ ResetReservationAccounting
-        /// (ที่กลับ JE). idempotent: ข้ามใบที่ voided แล้ว. ลอง company void ก่อน → fallback integration void.
-        /// คืน (จำนวน void สำเร็จ, จำนวน fail).</summary>
-        private async Task<(int voided, int failed)> VoidReservationDocumentsAsync(int reservationId)
+        /// <summary>ผล void เอกสารทั้งการจอง (ResetReservationAccounting)</summary>
+        private class ReservationDocVoidReport
         {
-            int voided = 0, failed = 0;
-            var docIds = new HashSet<Guid>();
+            public int Voided, Failed, AlreadyVoided, Skipped;
+            public List<string> Lines = new List<string>();
+            /// <summary>ใบเสร็จ (local) ที่ยังมีเอกสารใช้งานอยู่หลังรอบนี้ — ห้ามล้าง marker</summary>
+            public HashSet<string> ReceiptsWithActiveDoc = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        /// <summary>void "เอกสาร" NextAcc ทุกใบของการจอง (TIV/REC/มัดจำ) — คู่กับ ResetReservationAccounting (ที่กลับ JE).
+        /// ชุดเอกสาร = NextAcc <c>GET document/by-booking/RES-{id}</c> (DocumentController.cs:515-521; non-void เท่านั้น)
+        /// ∪ id ที่ TakeTime รู้ (Nexaacc_Doc_Id + คิว CREATE ทุกสถานะที่มี GUID ของใบเสร็จการจองนี้). ทุกใบ: GET →
+        /// void → GET ยืนยัน Voided (ไม่เชื่อ error ที่กลืนได้). ข้ามเอกสาร OTA (OTADOC-, ต้องใช้ "ยกเลิกเอกสาร OTA")
+        /// idempotent: ใบที่ Voided แล้วนับเป็น AlreadyVoided</summary>
+        private async Task<ReservationDocVoidReport> VoidReservationDocumentsAsync(int reservationId)
+        {
+            var rep = new ReservationDocVoidReport();
+            // docId → เลขใบเสร็จ local ที่ผูก (null = ไม่รู้ว่าของใบไหน)
+            var owner = new Dictionary<Guid, string>();
+            var receipts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             try
             {
                 var rc = _code.DatabaseQuerySafe(_connectionString,
@@ -14333,42 +14692,104 @@ namespace Take_Time_BangPhra.Integration
                     {
                         string rn = r["ID"]?.ToString();
                         if (string.IsNullOrEmpty(rn)) continue;
-                        Guid id = LookupNexaaccDocIdByReceipt(rn);
-                        if (id != Guid.Empty) docIds.Add(id);
+                        receipts.Add(rn);
+                        if (IsOtaSalesDocRef(rn)) continue;
+                        foreach (Guid id in LookupKnownDocIdsForReceipt(rn))
+                            if (!owner.ContainsKey(id)) owner[id] = rn;
+                        Guid q = LookupNexaaccDocIdByReceipt(rn);
+                        if (q != Guid.Empty && !owner.ContainsKey(q)) owner[q] = rn;
                     }
             }
             catch (Exception ex)
             {
                 _code.Logs(_connectionString, "AccountingSync",
-                    $"VoidReservationDocuments #{reservationId}: หาเอกสารล้มเหลว {ex.Message}", "SYSTEM");
-                return (0, 0);
+                    $"VoidReservationDocuments #{reservationId}: หาเอกสารฝั่ง TakeTime ล้มเหลว {ex.Message}", "SYSTEM");
             }
 
-            foreach (Guid docId in docIds)
+            // ฝั่ง NextAcc: ทุกใบที่ผูกเลขจองนี้ (รวมใบกำพร้าที่ TakeTime ไม่รู้จัก)
+            var otaDocs = new HashSet<Guid>();
+            foreach (string rn in receipts)
+                if (IsOtaSalesDocRef(rn)) { Guid o = LookupOtaSalesDocId(rn); if (o != Guid.Empty) otaDocs.Add(o); }
+            try
             {
+                var bb = await _apiClient.GetDocumentsByBookingAsync($"RES-{reservationId}");
+                if (bb?.data != null)
+                    foreach (var d in bb.data)
+                        if (d != null && d.Id != Guid.Empty && !owner.ContainsKey(d.Id) && !otaDocs.Contains(d.Id))
+                            owner[d.Id] = null;
+            }
+            catch (Exception bx)
+            {
+                rep.Lines.Add($"⚠ อ่านเอกสารตามเลขจองจาก NextAcc ไม่ได้ ({bx.Message}) — void เฉพาะใบที่ TakeTime รู้จัก");
+            }
+
+            foreach (var kv in owner)
+            {
+                Guid docId = kv.Key;
+                string rn = kv.Value;
+                string label = rn ?? "ไม่ผูกใบเสร็จ";
+                string num = null;
                 try
                 {
-                    // ข้ามใบที่ voided แล้ว (idempotent — กดซ้ำไม่ error)
+                    int st = -1;
                     try
                     {
                         var doc = await _apiClient.GetDocumentAsync(docId);
-                        if (doc?.data != null && doc.data.Status == NexaaccDocumentStatus.Voided) continue;
+                        num = doc?.data?.DocumentNumber;
+                        st = doc?.data?.Status ?? -1;
+                        if (doc?.data != null && !string.IsNullOrEmpty(doc.data.EtaxStatus)
+                            && (doc.data.EtaxStatus.Equals("Submitted", StringComparison.OrdinalIgnoreCase)
+                                || doc.data.EtaxStatus.Equals("Accepted", StringComparison.OrdinalIgnoreCase)))
+                        {
+                            rep.Failed++;
+                            if (rn != null) rep.ReceiptsWithActiveDoc.Add(rn);
+                            rep.Lines.Add($"❌ {num ?? docId.ToString()} ({label}): ส่ง e-Tax ถึงกรมสรรพากรแล้ว ({doc.data.EtaxStatus}) — ยกเลิกไม่ได้ ออกใบลดหนี้แทน");
+                            continue;
+                        }
                     }
-                    catch { /* GetDocument fail (อาจถูกลบไปแล้ว) → ลอง void ต่อ */ }
+                    catch (AccountingApiException gx) when (gx.StatusCode == 404 || gx.StatusCode == 410)
+                    {
+                        rep.AlreadyVoided++;
+                        rep.Lines.Add($"✓ {docId} ({label}): ไม่มีบน NextAcc แล้ว");
+                        continue;
+                    }
+                    if (st == NexaaccDocumentStatus.Voided)
+                    {
+                        rep.AlreadyVoided++;
+                        continue;
+                    }
+                    if (st < 0)
+                    {
+                        rep.Skipped++;
+                        if (rn != null) rep.ReceiptsWithActiveDoc.Add(rn);
+                        rep.Lines.Add($"⚠ {docId} ({label}): อ่านสถานะไม่ได้ — ข้าม (กดซ้ำภายหลัง)");
+                        continue;
+                    }
 
-                    await _apiClient.VoidDocumentAsync(docId);
-                    voided++;
+                    string vErr = null;
+                    try { await _apiClient.VoidDocumentAsync(docId); }
+                    catch (AccountingApiException vx) { vErr = $"HTTP {vx.StatusCode}: {DecodeUnicodeEscapes(vx.ResponseBody ?? vx.Message)}"; }
+                    await RequireDocumentVoidedAsync(docId, label, vErr);
+                    rep.Voided++;
+                    rep.Lines.Add($"✓ void {num ?? docId.ToString()} ({label})");
                     _code.Logs(_connectionString, "AccountingSync",
-                        $"VoidReservationDocuments #{reservationId}: void เอกสาร {docId}", "SYSTEM");
+                        $"VoidReservationDocuments #{reservationId}: void เอกสาร {num} {docId} ({label}) ยืนยันแล้ว", "SYSTEM");
                 }
                 catch (Exception ex)
                 {
-                    failed++;
+                    rep.Failed++;
+                    if (rn != null) rep.ReceiptsWithActiveDoc.Add(rn);
+                    string m = ex.Message.Length > 300 ? ex.Message.Substring(0, 300) + "…" : ex.Message;
+                    rep.Lines.Add($"❌ {num ?? docId.ToString()} ({label}): {m}");
                     _code.Logs(_connectionString, "AccountingSync",
-                        $"VoidReservationDocuments #{reservationId}: void {docId} ล้มเหลว {ex.Message}", "SYSTEM");
+                        $"VoidReservationDocuments #{reservationId}: void {docId} ({label}) ล้มเหลว {ex.Message}", "SYSTEM");
                 }
             }
-            return (voided, failed);
+            if (otaDocs.Count > 0)
+                rep.Lines.Add($"ข้ามเอกสาร OTA {otaDocs.Count} ใบ — ใช้ Admin → Accounting Integration → \"ยกเลิกเอกสาร OTA\"");
+            // ใบเสร็จ OTA ไม่ล้าง marker (ไม่ได้ถูก void ในรอบนี้)
+            foreach (string rn in receipts) if (IsOtaSalesDocRef(rn)) rep.ReceiptsWithActiveDoc.Add(rn);
+            return rep;
         }
 
         // ── DTOs สำหรับหน้า "ดู JE + เอกสาร" (CheckDocument_New) ──
@@ -14647,6 +15068,9 @@ namespace Take_Time_BangPhra.Integration
             public decimal DepositPaid { get; set; }
             public decimal DepositAppliedTotal { get; set; }
             public List<ReservationReceiptSyncInfo> Receipts { get; set; }
+            /// <summary>ตัวตรวจเทียบเอกสาร NextAcc ↔ ใบเสร็จ (PHASE19_35) — null = ตรวจไม่ได้ (ดู ReconcileError)</summary>
+            public ReservationReconciliation Reconciliation { get; set; }
+            public string ReconcileError { get; set; }
         }
 
         /// <summary>คิว CREATE ล่าสุดของใบเสร็จ: สถานะ + Nexaacc_Document_Type — คืน (null,null) ถ้าไม่เคยเข้าคิว</summary>
@@ -14699,6 +15123,13 @@ namespace Take_Time_BangPhra.Integration
                 {
                     ov.Success = true;
                     ov.Message = "การจองนี้ไม่มีใบเสร็จในระบบ";
+                    // ใบเสร็จถูกลบหมดแล้ว แต่เอกสารบน NextAcc อาจยังค้าง (ORPHAN_DELETED_LOCAL) — ตรวจเทียบด้วย
+                    try
+                    {
+                        ov.Reconciliation = await GetReservationReconciliationAsync(reservationId);
+                        if (ov.Reconciliation != null && ov.Reconciliation.Success) SaveReconcileFindings(ov.Reconciliation);
+                    }
+                    catch (Exception rex) { ov.ReconcileError = rex.Message; }
                     return ov;
                 }
 
@@ -14743,7 +15174,8 @@ namespace Take_Time_BangPhra.Integration
                     if (info.IsDeposit && info.LocalStatus == "Normal") ov.DepositPaid += info.Amount;
                     if (!info.IsDeposit && info.LocalStatus == "Normal") ov.DepositAppliedTotal += info.DepositApplied;
 
-                    try { info.SlipCount = LookupReceiptAttachments(rn, reservationId)?.Count ?? 0; } catch { }
+                    // นับด้วยกฎเดียวกับตอน sync (PDF ของใบเอง + สลิปที่ผูกใบนี้) แต่ไม่อ่านเนื้อไฟล์
+                    try { info.SlipCount = LookupReceiptAttachmentFiles(rn, reservationId).Count; } catch { }
                     var qInfo = LookupLatestCreateQueueInfoByReceipt(rn);
                     info.QueueStatus = qInfo.status;
                     info.DocType = qInfo.docType;
@@ -14843,6 +15275,14 @@ namespace Take_Time_BangPhra.Integration
                     ov.Receipts.Add(info);
                 }
 
+                // ตัวตรวจเทียบ (PHASE19_35): เอกสาร NextAcc ทุกใบของการจอง ↔ ใบเสร็จ/คิว — หาใบกำพร้า/ซ้ำ/void ค้าง
+                try
+                {
+                    ov.Reconciliation = await GetReservationReconciliationAsync(reservationId);
+                    if (ov.Reconciliation != null && ov.Reconciliation.Success) SaveReconcileFindings(ov.Reconciliation);
+                }
+                catch (Exception rex) { ov.ReconcileError = rex.Message; }
+
                 ov.Success = true;
                 return ov;
             }
@@ -14921,6 +15361,13 @@ namespace Take_Time_BangPhra.Integration
         }
 
         /// <summary>คิว COMPLETED CREATE_RECEIPT_DOCUMENT ล่าสุดของใบเสร็จ — จุดเข้า RepostReceiptWithCurrentLogic</summary>
+        /// <summary>ใบเสร็จนี้เคยสร้างเอกสารบน NextAcc สำเร็จแล้ว (มีคิว CREATE COMPLETED) — ปุ่ม Retry/Sync หน้าเอกสาร
+        /// ต้องไปเส้น Repost (แก้ในที่/void ที่ยืนยันแล้ว→สร้างใหม่) ไม่ใช่ PrepareResync+Enqueue (= เอกสารซ้ำ, PHASE19_35)</summary>
+        public bool HasCompletedReceiptCreate(string receiptNumber)
+        {
+            return !string.IsNullOrWhiteSpace(receiptNumber) && LookupLatestCompletedCreateQueueId(receiptNumber.Trim()) > 0;
+        }
+
         private long LookupLatestCompletedCreateQueueId(string receiptNumber)
         {
             try
@@ -15087,7 +15534,7 @@ namespace Take_Time_BangPhra.Integration
                 bool wasDeleted = detail.IndexOf("ถูกลบ", StringComparison.Ordinal) >= 0;
                 if (wasDeleted)
                     return (rc, $"🔄 เอกสารเดิมถูกลบบน NextAcc → เข้าคิวสร้างใหม่ (#{rc}, เลขใหม่) ยอด/JE ถูกต้อง — sync ใน ~1-2 นาที. {detail}", "RECREATE");
-                return (rc, $"⚠ NextAcc ไม่ให้แก้ in-place → void เอกสารเดิมแล้วเข้าคิวสร้างใหม่ (#{rc}) — เลขเอกสารจะเปลี่ยน. {detail}", "FALLBACK");
+                return (rc, $"⚠ NextAcc ไม่ให้แก้ in-place → เข้าคิวยกเลิกเอกสารเดิม (#{rc}) แล้วจึงสร้างใหม่เมื่อยืนยันว่ายกเลิกสำเร็จ — เลขเอกสารจะเปลี่ยน. {detail}", "FALLBACK");
             }
             return (-1, string.IsNullOrEmpty(detail) ? "Resync ไม่สำเร็จ (ติด guard/ผิดพลาด)" : detail, "FAIL");
         }
@@ -15395,7 +15842,7 @@ namespace Take_Time_BangPhra.Integration
                             }
                         }
 
-                        PrepareResync(receiptNumber);          // เคลียร์คิวเก่า mark SUPERSEDED
+                        PrepareResync(receiptNumber, enqueueVoid: false);   // เคลียร์คิวเก่า mark SUPERSEDED (เอกสารเดิมหายแล้ว — ไม่ต้อง void)
                         ClearReceiptPdfCache(receiptNumber);   // ล้าง PDF cache (GUID ใหม่)
                         SetReceiptPaymentMarker(receiptNumber, null);   // reset → settle/drives เริ่มใหม่
                         LastRepostMessage = "🔄 เอกสารเดิมถูกลบบน NextAcc → เก็บกวาดใบรับเงิน orphan + สร้างเอกสารใหม่ (ยอดถูกต้อง, อ้างใบมัดจำเดิม)";
@@ -15615,24 +16062,41 @@ namespace Take_Time_BangPhra.Integration
                     oldNexaaccId = mk;
             }
 
-            // 1) void เอกสารเก่า (ถ้ามี) — ProcessVoidReceipt กลืน already-gone เอง + กลับรายการหักมัดจำให้
+            // 1) void เอกสารเก่า (ถ้ามี) แล้ว "รอ" — CREATE ใหม่ถูกใส่คิวโดย ProcessVoidReceipt หลังยืนยันว่า Voided แล้ว
+            //    เท่านั้น (AfterVerifiedReceiptVoid ผ่าน recreateFromQueueId) พร้อม supersede คิวเก่า + reset marker ตอนนั้น.
+            //    เดิมทำ 3 อย่างนั้น "ก่อน" void จะวิ่ง ⇒ void ล้มถาวร (e-Tax/ภ.พ.30) หรือถูกยกเลิก = เอกสารเก่ามองไม่เห็น
+            //    + CREATE ใหม่ซ้อน (ต้นเหตุเอกสารซ้ำเคส #149286, PHASE19_35)
             if (!string.IsNullOrEmpty(oldNexaaccId) && Guid.TryParse(oldNexaaccId, out _))
             {
+                string unsentSt;
+                long existingVoid = FindUnsentEntry("RECEIPT", "VOID_RECEIPT", "nexaaccId", oldNexaaccId, out unsentSt);
+                if (existingVoid > 0)
+                {
+                    LastRepostMessage = $"มีคิวยกเลิกเอกสารเดิมอยู่แล้ว #{existingVoid} ({unsentSt}) — แก้/Retry ที่รายการนั้นก่อน " +
+                                        "(ยังไม่สร้างเอกสารใหม่ซ้อนจนกว่ายกเลิกสำเร็จ)";
+                    return existingVoid;
+                }
                 // สำคัญ: ProcessVoidReceipt อ่าน "receiptNumber" — ถ้าส่งแต่ documentNumber
                 // void จะวิ่งแบบ null → ข้ามกลับรายการหักมัดจำ → CREATE ใหม่โพสต์ซ้ำ (เบิล)
-                InsertQueue("RECEIPT", 0, "VOID_RECEIPT", new Dictionary<string, object>
+                long voidQ = InsertQueue("RECEIPT", 0, "VOID_RECEIPT", new Dictionary<string, object>
                 {
                     { "receiptNumber", receiptNumber },
                     { "documentNumber", receiptNumber },
                     { "nexaaccId", oldNexaaccId },
                     { "reason", "Re-post ตามหลักการบัญชีปัจจุบัน" },
                     // ยอดที่ลงไว้จริงกับเอกสารเก่า (ก่อน CREATE ใหม่เขียนยอดใหม่ทับ)
-                    { "depositAppliedPosted", LookupPostedDepositApplied(receiptNumber) }
+                    { "depositAppliedPosted", LookupPostedDepositApplied(receiptNumber) },
+                    // void ยืนยันแล้ว → สร้างใหม่จาก payload ของคิวนี้ (ดู AfterVerifiedReceiptVoid)
+                    { "recreateFromQueueId", queueId }
                 });
+                ClearReceiptPdfCache(receiptNumber);
+                LastRepostMessage = $"⏳ เข้าคิวยกเลิกเอกสารเดิม (#{voidQ}) — ระบบจะสร้างเอกสารใหม่ให้อัตโนมัติ \"หลังยืนยันว่ายกเลิกสำเร็จ\" " +
+                                    "(เลขเอกสาร NextAcc จะเปลี่ยน). ถ้ายกเลิกไม่ได้ (ส่ง e-Tax/ยื่นภาษีแล้ว) จะไม่มีเอกสารซ้อน — ออกใบลดหนี้แทน";
+                return voidQ;
             }
 
-            // 2) เคลียร์คิวเก่า + ล้าง PDF cache (PrepareResync ในโหมด journal จะ enqueue void ซ้ำ —
-            //    ไม่เป็นไร ProcessVoidReceipt idempotent/กลืนเอกสารที่ void แล้ว)
+            // 2) ไม่รู้ GUID เอกสารเดิม (คิวเก่าเก็บมาร์ค/ไม่มี) → เส้นเดิม: เคลียร์คิวเก่า + ล้าง PDF cache + สร้างใหม่.
+            //    ปลอดภัยจากเอกสารซ้ำเพราะด่าน GuardNoActivePriorDocAsync ตอนสร้าง (Nexaacc_Doc_Id + คิว SUPERSEDED)
             PrepareResync(receiptNumber);
             ClearReceiptPdfCache(receiptNumber);   // PrepareResync ล้างเฉพาะฝั่งจ่าย — ล้างฝั่งรับด้วย
 
@@ -15927,12 +16391,20 @@ namespace Take_Time_BangPhra.Integration
         /// Prepare for re-sync:
         ///   1. Find existing COMPLETED entry with Nexaacc_Response_Id and enqueue a VOID
         ///      so the old Nexaacc journal/document is reversed (avoids duplicates).
-        ///      This is only needed for Journal mode — Document mode handles void+create
-        ///      atomically via ReplaceExistingForSource on the request body.
+        ///      Journal mode: receipts + vouchers. Document mode: **receipts too** (PHASE19_35) —
+        ///      the old assumption "Document mode handles void+create atomically via
+        ///      ReplaceExistingForSource" is false for company /document (TaxInvoice/Receipt), which
+        ///      NextAcc never de-duplicates ⇒ SUPERSEDE without VOID left the old doc active and the
+        ///      next CREATE made a second one (TIV-20260904-0002/-0003, reservation #149286).
+        ///      Vouchers in Document mode keep their own marker (Nexaacc_Voucher_Doc_Marker) → unchanged.
+        ///      The CREATE that follows waits for this VOID (FindUnsentVoidBefore) and ProcessVoidReceipt
+        ///      GET-verifies Voided before COMPLETED.
         ///   2. Mark old COMPLETED entries as SUPERSEDED.
-        ///   3. Cancel any PENDING/PROCESSING/FAILED entries.
+        ///   3. Cancel any PENDING/PROCESSING/FAILED entries (never VOID_*).
+        /// <paramref name="enqueueVoid"/> = false: caller already verified the old document is gone
+        /// (repost "deleted on NextAcc" path / chain after a verified void).
         /// </summary>
-        public int PrepareResync(string documentNumber)
+        public int PrepareResync(string documentNumber, bool enqueueVoid = true)
         {
             if (string.IsNullOrEmpty(documentNumber)) return 0;
 
@@ -15942,9 +16414,8 @@ namespace Take_Time_BangPhra.Integration
                 { "@patternReceipt", $"%\"receiptNumber\":\"{documentNumber}\"%" }
             };
 
-            // Step 1: For journal mode, enqueue VOID for old Nexaacc journal.
-            // (Document mode uses ReplaceExistingForSource so no separate VOID needed.)
-            if (!_config.IsDocumentMode)
+            // Step 1: enqueue VOID for the old Nexaacc journal/document (see summary).
+            if (enqueueVoid)
             {
                 var completedDt = _code.DatabaseQuerySafe(_connectionString,
                     @"SELECT TOP 1 ID, Entity_Type, Nexaacc_Response_Id
@@ -15952,9 +16423,10 @@ namespace Take_Time_BangPhra.Integration
                       WHERE (Payload LIKE @pattern OR Payload LIKE @patternReceipt)
                         AND Status = 'COMPLETED'
                         AND Nexaacc_Response_Id IS NOT NULL
-                        AND (Action_Type = 'CREATE_VOUCHER_JOURNAL' OR Action_Type = 'CREATE_RECEIPT_DOCUMENT')
+                        AND Nexaacc_Response_Id NOT LIKE 'SKIPPED%'
+                        AND ((@docMode = 0 AND Action_Type = 'CREATE_VOUCHER_JOURNAL') OR Action_Type = 'CREATE_RECEIPT_DOCUMENT')
                       ORDER BY ID DESC",
-                    lookupParams);
+                    new Dictionary<string, object>(lookupParams) { { "@docMode", _config.IsDocumentMode ? 1 : 0 } });
 
                 if (completedDt?.Rows.Count > 0)
                 {
@@ -16170,71 +16642,8 @@ namespace Take_Time_BangPhra.Integration
             var attachments = new List<IntegrationAttachment>();
             try
             {
-                string basePath = AppCfg.Get("ReceiptFolderPath")
-                    ?? AppCfg.Get("BaseFolderPath");
-                if (string.IsNullOrEmpty(basePath)) return null;
-
-                // Search in Documents/Receipt/{Year}/{Month}/ for receipt PDFs
-                string receiptBaseDir = Path.Combine(basePath, "Documents", "Receipt");
-                if (!Directory.Exists(receiptBaseDir))
-                    receiptBaseDir = basePath;
-
-                if (Directory.Exists(receiptBaseDir))
-                {
-                    // Search recent year/month directories
-                    var now = DateTime.Now;
-                    for (int monthOffset = 0; monthOffset <= 2; monthOffset++)
-                    {
-                        var dt = now.AddMonths(-monthOffset);
-                        string dir = Path.Combine(receiptBaseDir, dt.Year.ToString(), dt.Month.ToString());
-                        if (!Directory.Exists(dir)) continue;
-
-                        foreach (var file in Directory.GetFiles(dir, "*.pdf"))
-                        {
-                            string fn = Path.GetFileNameWithoutExtension(file);
-                            // Skip cancelled receipts
-                            if (fn.EndsWith("_Cancel", StringComparison.OrdinalIgnoreCase)) continue;
-                            // Skip e-tax duplicates
-                            if (fn.EndsWith("_etax", StringComparison.OrdinalIgnoreCase)) continue;
-
-                            var fi = new FileInfo(file);
-                            if (fi.Length > 0 && fi.Length <= MaxAttachmentSize)
-                            {
-                                attachments.Add(FileToAttachment(fi));
-                                break;
-                            }
-                        }
-                        if (attachments.Count > 0) break;
-                    }
-                }
-
-                // Also look for payment slips linked to this reservation
-                if (reservationId > 0)
-                {
-                    try
-                    {
-                        string slipBasePath = AppCfg.Get("BaseFolderPath") ?? basePath;
-                        var dt = _code.DatabaseQuerySafe(_connectionString,
-                            "SELECT TOP 2 SlipFileURL, FileName, FileType FROM Payment_Slips WHERE Reservation_ID = @id AND VerificationStatus != 'REJECTED'",
-                            new Dictionary<string, object> { { "@id", reservationId } });
-                        if (dt?.Rows.Count > 0)
-                        {
-                            foreach (DataRow row in dt.Rows)
-                            {
-                                string slipUrl = row["SlipFileURL"]?.ToString();
-                                if (string.IsNullOrEmpty(slipUrl)) continue;
-                                string slipPath = Path.Combine(slipBasePath, slipUrl.TrimStart('/', '\\'));
-                                if (File.Exists(slipPath))
-                                {
-                                    var fi = new FileInfo(slipPath);
-                                    if (fi.Length > 0 && fi.Length <= MaxAttachmentSize)
-                                        attachments.Add(FileToAttachment(fi));
-                                }
-                            }
-                        }
-                    }
-                    catch { }
-                }
+                foreach (var fi in LookupReceiptAttachmentFiles(receiptNumber, reservationId))
+                    attachments.Add(FileToAttachment(fi));
             }
             catch (Exception ex)
             {
@@ -16248,6 +16657,143 @@ namespace Take_Time_BangPhra.Integration
                     $"LookupReceiptAttachments: found {attachments.Count} file(s) for receipt={receiptNumber}", "SYSTEM");
             }
             return attachments.Count > 0 ? attachments : null;
+        }
+
+        /// <summary>
+        /// ไฟล์แนบของ "ใบเสร็จใบนี้เท่านั้น" (PHASE19_35 — เคส #149286 ทุกใบขึ้น "📎 3 ไฟล์" ผิดใบ):
+        ///   (1) PDF ของใบเอง: ชื่อ {receiptNumber}.pdf / {receiptNumber}_{uid}.pdf (ReceiptService.GetPdfFilePath) ในโฟลเดอร์
+        ///       ปี/เดือนของ Account_Receipt.Created_Date (±1 เดือน, เดือนแบบ 1 และ 01) — เดิมหยิบ "PDF ไฟล์แรก" ในโฟลเดอร์ของ
+        ///       "เดือนปัจจุบัน" ไม่กรองเลขใบ = แนบใบเสร็จของแขกคนอื่นได้
+        ///   (2) สลิป: Payment_Slips WHERE Account_Receipt_ID = ใบนี้ — เดิมดึงสลิปทั้งการจอง (TOP 2 ไม่มี ORDER BY) แนบทุกใบ
+        ///       ใช้สลิประดับการจองเฉพาะเมื่อการจองมีใบเสร็จใบเดียว (ไม่มีทางแนบผิดใบ)
+        /// ใช้ทั้งตอน sync และนับ "📎 ไฟล์" ในหน้าต่าง NextAcc ของการจอง (ไม่อ่านเนื้อไฟล์)
+        /// </summary>
+        private List<FileInfo> LookupReceiptAttachmentFiles(string receiptNumber, int reservationId)
+        {
+            var files = new List<FileInfo>();
+            if (string.IsNullOrWhiteSpace(receiptNumber)) return files;
+            string rn = receiptNumber.Trim();
+            string basePath = AppCfg.Get("ReceiptFolderPath") ?? AppCfg.Get("BaseFolderPath");
+
+            // ── (1) PDF ของใบเอง ──
+            if (!string.IsNullOrEmpty(basePath))
+            {
+                try
+                {
+                    DateTime created = DateTime.MinValue;
+                    var rd = _code.DatabaseQuerySafe(_connectionString,
+                        "SELECT TOP 1 Created_Date FROM Account_Receipt WHERE ID = @id",
+                        new Dictionary<string, object> { { "@id", rn } });
+                    if (rd != null && rd.Rows.Count > 0 && rd.Rows[0][0] != DBNull.Value)
+                        created = Convert.ToDateTime(rd.Rows[0][0]);
+                    if (created != DateTime.MinValue)
+                    {
+                        var roots = new List<string>();
+                        string docRoot = Path.Combine(basePath, "Documents", "Receipt");
+                        if (Directory.Exists(docRoot)) roots.Add(docRoot);
+                        if (Directory.Exists(basePath)) roots.Add(basePath);
+                        FileInfo best = null;
+                        foreach (string root in roots)
+                        {
+                            foreach (int off in new[] { 0, 1, -1 })
+                            {
+                                var d = created.AddMonths(off);
+                                foreach (string mm in new[] { d.Month.ToString(), d.Month.ToString("00") }.Distinct())
+                                {
+                                    string dir = Path.Combine(root, d.Year.ToString(), mm);
+                                    if (!Directory.Exists(dir)) continue;
+                                    foreach (var path in Directory.GetFiles(dir, rn + "*.pdf"))
+                                    {
+                                        string fn = Path.GetFileNameWithoutExtension(path);
+                                        bool own = string.Equals(fn, rn, StringComparison.OrdinalIgnoreCase)
+                                            || fn.StartsWith(rn + "_", StringComparison.OrdinalIgnoreCase);
+                                        if (!own) continue;   // REC2608190011 ≠ REC260819001
+                                        if (fn.EndsWith("_Cancel", StringComparison.OrdinalIgnoreCase)) continue;
+                                        if (fn.EndsWith("_etax", StringComparison.OrdinalIgnoreCase)) continue;
+                                        var fi = new FileInfo(path);
+                                        if (fi.Length <= 0 || fi.Length > MaxAttachmentSize) continue;
+                                        if (best == null || fi.LastWriteTime > best.LastWriteTime) best = fi;
+                                    }
+                                }
+                            }
+                            if (best != null) break;
+                        }
+                        if (best != null) files.Add(best);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _code.Logs(_connectionString, "AccountingSync", $"LookupReceiptAttachmentFiles: PDF {rn}: {ex.Message}", "SYSTEM");
+                }
+            }
+
+            // ── (2) สลิปของใบนี้ ──
+            try
+            {
+                string slipBasePath = AppCfg.Get("BaseFolderPath") ?? basePath;
+                if (!string.IsNullOrEmpty(slipBasePath))
+                {
+                    DataTable dt = QuerySlipsForReceipt(rn);
+                    if ((dt == null || dt.Rows.Count == 0) && reservationId > 0)
+                    {
+                        // การจองมีใบเสร็จใบเดียว → สลิประดับการจองเป็นของใบนี้แน่นอน
+                        var cnt = _code.DatabaseQuerySafe(_connectionString,
+                            "SELECT COUNT(*) FROM Account_Receipt WHERE Reservation_ID = @rid",
+                            new Dictionary<string, object> { { "@rid", reservationId } });
+                        int n = cnt != null && cnt.Rows.Count > 0 && cnt.Rows[0][0] != DBNull.Value ? Convert.ToInt32(cnt.Rows[0][0]) : 0;
+                        if (n == 1)
+                            dt = _code.DatabaseQuerySafe(_connectionString,
+                                @"SELECT TOP 5 SlipFileURL FROM Payment_Slips
+                                  WHERE Reservation_ID = @rid AND ISNULL(VerificationStatus, '') <> 'REJECTED'
+                                  ORDER BY ID",
+                                new Dictionary<string, object> { { "@rid", reservationId } });
+                    }
+                    if (dt != null)
+                        foreach (DataRow row in dt.Rows)
+                        {
+                            string slipUrl = row["SlipFileURL"]?.ToString();
+                            if (string.IsNullOrEmpty(slipUrl)) continue;
+                            string slipPath = Path.Combine(slipBasePath, slipUrl.TrimStart('/', '\\'));
+                            if (!File.Exists(slipPath)) continue;
+                            var fi = new FileInfo(slipPath);
+                            if (fi.Length > 0 && fi.Length <= MaxAttachmentSize
+                                && !files.Any(f => string.Equals(f.FullName, fi.FullName, StringComparison.OrdinalIgnoreCase)))
+                                files.Add(fi);
+                        }
+                }
+            }
+            catch (Exception ex)
+            {
+                _code.Logs(_connectionString, "AccountingSync", $"LookupReceiptAttachmentFiles: slips {rn}: {ex.Message}", "SYSTEM");
+            }
+            return files;
+        }
+
+        /// <summary>สลิปที่ผูกใบเสร็จนี้ (Payment_Slips.Account_Receipt_ID = เลขใบ) ไม่นับที่ถูกปฏิเสธ/ปิดใช้งาน.
+        /// เทียบเป็นข้อความ (คอลัมน์ในฐานจริงเก็บเลขใบแบบ REC…; schema แรก PHASE1_05 เป็น bigint) · ไม่มีคอลัมน์ IsActive = ไม่กรอง</summary>
+        private DataTable QuerySlipsForReceipt(string receiptNumber)
+        {
+            var prm = new Dictionary<string, object> { { "@rn", receiptNumber } };
+            try
+            {
+                return _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT TOP 5 SlipFileURL FROM Payment_Slips
+                      WHERE CONVERT(NVARCHAR(50), Account_Receipt_ID) = @rn
+                        AND ISNULL(VerificationStatus, '') <> 'REJECTED' AND ISNULL(IsActive, 1) = 1
+                      ORDER BY ID", prm);
+            }
+            catch
+            {
+                try
+                {
+                    return _code.DatabaseQuerySafe(_connectionString,
+                        @"SELECT TOP 5 SlipFileURL FROM Payment_Slips
+                          WHERE CONVERT(NVARCHAR(50), Account_Receipt_ID) = @rn
+                            AND ISNULL(VerificationStatus, '') <> 'REJECTED'
+                          ORDER BY ID", prm);
+                }
+                catch { return null; }
+            }
         }
 
         private static IntegrationAttachment FileToAttachment(FileInfo fi)

@@ -457,6 +457,16 @@ namespace Take_Time_BangPhra
                                 else result = new { Success = false, Message = "NextAcc ตอบช้าเกิน 120 วินาที — ลองใหม่อีกครั้ง" };
                                 break;
                             }
+                        case "voidNaDoc":
+                            {
+                                // เอกสารบน NextAcc ที่ไม่ผูกใบเสร็จ (ตัวตรวจเทียบ PHASE19_35) — ด่านตรวจอยู่ใน service
+                                string naMsg;
+                                long qv = sync.EnqueueVoidOrphanNextAccDoc(resId, Request.QueryString["docId"],
+                                    Session["User"]?.ToString(), out naMsg);
+                                code2.Logs(conn, "AccountingSync", $"voidNaDoc #{resId} doc={Request.QueryString["docId"]} → {qv} {naMsg}", Session["User"]?.ToString());
+                                result = new { Success = qv > 0, Message = naMsg };
+                                break;
+                            }
                         case "voidReceipt":
                             {
                                 long q = sync.EnqueueVoidReceipt(doc);

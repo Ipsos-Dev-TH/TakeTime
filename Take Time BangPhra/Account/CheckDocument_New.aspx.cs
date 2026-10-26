@@ -2506,6 +2506,17 @@ namespace Take_Time_BangPhra.Account
                 var sync = new AccountingSyncService(conn);
                 long queueId = -1;
 
+                // ใบเสร็จที่เคยสร้างเอกสารบน NextAcc สำเร็จแล้ว (คิว CREATE COMPLETED) → ห้าม PrepareResync+Enqueue
+                // (เดิม supersede ตัวชี้โดยไม่ void → CREATE รอบใหม่ "หาเอกสารเดิมไม่เจอ" แล้วสร้างใบที่สอง = TIV ซ้ำ
+                // เคส #149286) — ไปเส้น Repost: แก้ในที่ (คงเลข) หรือ void ที่ยืนยันแล้ว → ค่อยสร้างใหม่ (PHASE19_35)
+                if (docType == "REC" && sync.HasCompletedReceiptCreate(docId))
+                {
+                    var (repostRc, repostMsg, _) = sync.ResyncSingleReceipt(docId);
+                    _syncStatusCache = null;
+                    if (repostRc >= 0) ShowInfo(repostMsg); else ShowError(repostMsg);
+                    return;
+                }
+
                 // Cancel existing pending/failed entries so we always create fresh
                 sync.PrepareResync(docId);
 

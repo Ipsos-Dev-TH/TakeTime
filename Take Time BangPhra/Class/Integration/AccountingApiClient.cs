@@ -66,6 +66,85 @@ namespace Take_Time_BangPhra.Integration
         /// NextAcc จะ resolve เป็น user จริงในบริษัท เพื่อแสดงชื่อผู้สร้างเอกสาร
         /// </summary>
         public string ActingUser { get; set; }
+
+        /// <summary>
+        /// บริบทของ "งานเชิงตรรกะ" ที่กำลังยิง (คิวตั้งให้ต่อรายการ: <c>{เลขใบ}-q{queueId}</c>) — ใช้ประกอบหัว
+        /// <c>Idempotency-Key</c> แบบคงที่: retry รายการคิวเดิม = คีย์เดิม (NextAcc replay ผลเดิม ไม่สร้างซ้ำ) ·
+        /// หลัง void ที่ยืนยันแล้วแล้วสร้างใหม่ = แถวคิวใหม่ = คีย์ใหม่ (ไม่ replay เอกสารที่ถูก void ไปแล้ว).
+        /// null = ไม่มีบริบท → คีย์สุ่มต่อการเรียก 1 ครั้ง (กันเฉพาะการยิงซ้ำภายใน retry loop ของ HTTP)
+        /// </summary>
+        public string IdempotencyContext { get; set; }
+
+        /// <summary>เส้นทาง POST ที่ "สร้าง" รายการบน NextAcc (เอกสาร/การรับชำระ/JV/คืน-ยึดมัดจำ/ใบลดหนี้ ฯลฯ) —
+        /// ยิงซ้ำ = ได้รายการซ้ำ ⇒ ต้องมี Idempotency-Key. ไม่รวม approve/void/post (replay ผลเก่าของ action
+        /// เหล่านี้อาจบังสถานะจริงได้ 24 ชม.) และ upsert ตาม ExternalId (customers/products/contacts)</summary>
+        private static readonly System.Text.RegularExpressions.Regex CreateRouteRegex = new System.Text.RegularExpressions.Regex(
+            @"^/api/(integration/(invoices|invoices/multipart|expenses|expenses/multipart|payment-vouchers|payments|journals|journals/reverse|credit-notes|debit-notes|batch|daily-summary|certificates-in-lieu)"
+            + @"|companies/[^/]+/(document|document/payments|document/[^/]+/(refund-deposit|realize-deposit|apply-deposit|convert)"
+            + @"|ocr/[^/]+/create-document|payroll/runs|payroll/runs/import|withholding-tax-certs/auto-generate|product/stock/adjust|accounting/journals))/?$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+        /// <summary>true = POST นี้สร้างรายการใหม่บน NextAcc (ดู <see cref="CreateRouteRegex"/>)</summary>
+        internal static bool IsCreateRoute(HttpMethod method, string path)
+        {
+            if (method != HttpMethod.Post || string.IsNullOrEmpty(path)) return false;
+            int q = path.IndexOf('?');
+            return CreateRouteRegex.IsMatch(q >= 0 ? path.Substring(0, q) : path);
+        }
+
+        /// <summary>
+        /// หัว Idempotency-Key ของ POST สร้างรายการ — null = ไม่ส่ง (ไม่ใช่เส้นสร้าง / ปิดด้วย Nexaacc_Idempotency_Keys=0).
+        /// รูป <c>TT-{บริบท}-{ปลายทาง}-{hash}</c>: hash = SHA-256 ของ method+path+body (body เดิม = งานเดิม;
+        /// body ต่าง เช่น ใบถูกแก้ยอด = คำขอใหม่ ตามหลัก "คีย์เดียวต้องพารามิเตอร์เดียว"). ยาว ≤128 ASCII (NextAcc รับ 8-128)
+        /// </summary>
+        internal string BuildIdempotencyKey(HttpMethod method, string path, string jsonBody)
+        {
+            if (!_config.IdempotencyKeysEnabled || !IsCreateRoute(method, path)) return null;
+            string ctx = SanitizeKeyPart(IdempotencyContext, 70);
+            if (string.IsNullOrEmpty(ctx))
+                return "TT-X-" + Guid.NewGuid().ToString("N");   // ต่อการเรียก 1 ครั้ง — ครอบ retry loop ด้านล่างเท่านั้น
+            string p = path;
+            int qi = p.IndexOf('?');
+            if (qi >= 0) p = p.Substring(0, qi);
+            string[] segs = p.Trim('/').Split('/');
+            string tag = segs.Length > 0 ? segs[segs.Length - 1] : "x";
+            Guid ignored;
+            if (Guid.TryParse(tag, out ignored) && segs.Length > 1) tag = segs[segs.Length - 2];
+            tag = SanitizeKeyPart(tag, 20);
+            string hash;
+            using (var sha = System.Security.Cryptography.SHA256.Create())
+            {
+                byte[] h = sha.ComputeHash(Encoding.UTF8.GetBytes(method.Method + " " + path + "\n" + (jsonBody ?? "")));
+                var sb = new StringBuilder(24);
+                for (int i = 0; i < 10; i++) sb.Append(h[i].ToString("x2"));
+                hash = sb.ToString();
+            }
+            string key = $"TT-{ctx}-{tag}-{hash}";
+            return key.Length > 128 ? key.Substring(key.Length - 128) : key;
+        }
+
+        private static string SanitizeKeyPart(string s, int max)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return "";
+            var sb = new StringBuilder(s.Length);
+            foreach (char c in s.Trim())
+                sb.Append((c < 128 && (char.IsLetterOrDigit(c) || c == '-' || c == '_' || c == '.')) ? c : '_');
+            string r = sb.ToString();
+            return r.Length > max ? r.Substring(0, max) : r;
+        }
+
+        /// <summary>NextAcc ตอบ 409 เพราะคีย์เดียวกัน "กำลังประมวลผลอยู่" (IdempotencyMiddleware.cs:132-143:
+        /// Retry-After: 5 + ข้อความ "กำลังประมวลผลอยู่") — รอแล้วยิงซ้ำด้วยคีย์เดิมจะได้ผลเดิม (ไม่ใช่ business 409)</summary>
+        private static bool IsIdempotencyInFlight(HttpResponseMessage response, string body)
+        {
+            if (response == null || (int)response.StatusCode != 409) return false;
+            if (!response.Headers.Contains("Retry-After")) return false;
+            string b = body ?? "";
+            return b.IndexOf("Idempotency", StringComparison.OrdinalIgnoreCase) >= 0
+                || b.Contains("กำลังประมวลผลอยู่")
+                || b.IndexOf("\\u0E01\\u0E33\\u0E25\\u0E31\\u0E07\\u0E1B\\u0E23\\u0E30\\u0E21\\u0E27\\u0E25\\u0E1C\\u0E25", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
         private static readonly object _authLock = new object();
         private static readonly TimeSpan AuthCooldownPeriod = TimeSpan.FromMinutes(5);
 
@@ -394,6 +473,13 @@ namespace Take_Time_BangPhra.Integration
             var url = $"{_config.BaseUrl.TrimEnd('/')}{path}";
             Exception lastException = null;
 
+            // Idempotency-Key: คำนวณครั้งเดียวก่อน loop → ทุก attempt ใช้คีย์เดียวกัน (ยิงซ้ำหลัง timeout =
+            // NextAcc replay ผลเดิม/ตอบ 409 กำลังทำ — ไม่สร้างเอกสารซ้ำ). เส้นสร้างที่ "ไม่มีคีย์" (ปิดสวิตช์) →
+            // ห้ามยิงซ้ำอัตโนมัติเมื่อ timeout/เน็ตหลุด/502/504 เพราะปลายทางอาจทำสำเร็จไปแล้ว
+            bool isCreate = IsCreateRoute(method, path);
+            string idemKey = BuildIdempotencyKey(method, path, jsonBody);
+            bool noBlindRetry = isCreate && idemKey == null;
+
             for (int attempt = 0; attempt <= MaxRetries; attempt++)
             {
                 if (attempt > 0)
@@ -426,6 +512,8 @@ namespace Take_Time_BangPhra.Integration
                             request.Headers.Add("X-Acting-User", ActingUser);
                     }
                     request.Headers.Add("Accept", "application/json");
+                    if (idemKey != null)
+                        request.Headers.TryAddWithoutValidation("Idempotency-Key", idemKey);
 
                     if (jsonBody != null)
                     {
@@ -437,12 +525,23 @@ namespace Take_Time_BangPhra.Integration
                     var durationMs = (int)(DateTime.Now - startTime).TotalMilliseconds;
                     var responseBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
 
-                    // Log the API call
-                    LogApiCall(method.Method, path, jsonBody, responseBody, (int)response.StatusCode, response.IsSuccessStatusCode, durationMs);
+                    // Log the API call (replay จาก NextAcc = งานเดิมที่ทำไปแล้ว — ติดป้ายให้ตรวจย้อนหลังได้)
+                    bool replayed = idemKey != null && response.Headers.Contains("Idempotency-Replayed");
+                    LogApiCall(method.Method, replayed ? path + " [idem-replay " + idemKey + "]" : path,
+                        jsonBody, responseBody, (int)response.StatusCode, response.IsSuccessStatusCode, durationMs);
 
                     if (!response.IsSuccessStatusCode)
                     {
                         int status = (int)response.StatusCode;
+
+                        // 409 "คีย์นี้กำลังประมวลผลอยู่" (รอบก่อน timeout แต่ NextAcc ยังทำต่อ) → รอแล้วยิงคีย์เดิม = ได้ผลเดิม
+                        if (idemKey != null && IsIdempotencyInFlight(response, responseBody))
+                            throw new HttpRequestException($"Idempotency in-flight 409 (key {idemKey}) — รอผลเดิมจาก NextAcc");
+
+                        // เส้นสร้างไม่มีคีย์: 502/504 = proxy ตัดระหว่างทาง ปลายทางอาจสร้างไปแล้ว → ไม่ยิงซ้ำ
+                        if (noBlindRetry && (status == 502 || status == 504))
+                            throw new AccountingApiException($"NextAcc ตอบ {status} ระหว่างสร้างรายการ [{method.Method} {path}] — ไม่ยิงซ้ำอัตโนมัติ "
+                                + "(อาจสร้างสำเร็จไปแล้ว) ตรวจบน NextAcc ก่อนกด Retry", status, responseBody);
 
                         // 401/403 = auth failure
                         if (status == 401 || status == 403)
@@ -533,6 +632,10 @@ namespace Take_Time_BangPhra.Integration
                 catch (TaskCanceledException tcEx)
                 {
                     lastException = new Exception($"Request timeout after {_httpClient.Timeout.TotalSeconds}s: {tcEx.Message}", tcEx);
+                    // POST สร้างรายการที่ไม่มี Idempotency-Key: timeout ≠ ไม่สำเร็จ (NextAcc อาจสร้างไปแล้ว) → ห้ามยิงซ้ำเอง
+                    if (noBlindRetry)
+                        throw new Exception($"Request timeout ระหว่างสร้างรายการ [{method.Method} {path}] — ไม่ยิงซ้ำอัตโนมัติเพราะไม่มี "
+                            + "Idempotency-Key (Nexaacc_Idempotency_Keys=0) — ตรวจบน NextAcc ก่อนกด Retry: " + tcEx.Message, tcEx);
                     if (attempt >= MaxRetries) break;
                 }
                 catch (HttpRequestException httpEx)
@@ -551,6 +654,11 @@ namespace Take_Time_BangPhra.Integration
                     }
 
                     lastException = new Exception($"Network error: {httpEx.Message} | Inner: {innerMsg}", httpEx);
+                    // เน็ตหลุดกลางคำขอสร้างรายการที่ไม่มีคีย์ → ไม่รู้ว่าถึงปลายทางหรือยัง → ไม่ยิงซ้ำเอง
+                    // (5xx ที่ไม่ใช่ 502/504 ยังยิงซ้ำได้ — NextAcc rollback ธุรกรรมเมื่อ throw)
+                    if (noBlindRetry && !httpEx.Message.StartsWith("Server error", StringComparison.Ordinal))
+                        throw new Exception($"Network error ระหว่างสร้างรายการ [{method.Method} {path}] — ไม่ยิงซ้ำอัตโนมัติเพราะไม่มี "
+                            + "Idempotency-Key — ตรวจบน NextAcc ก่อนกด Retry: " + httpEx.Message + " | " + innerMsg, httpEx);
                     if (attempt >= MaxRetries) break;
                 }
                 catch (Exception ex)
@@ -808,6 +916,16 @@ namespace Take_Time_BangPhra.Integration
         public async Task<ApiResponse<DocumentResponse>> GetDocumentAsync(Guid documentId)
         {
             return await GetAsync<ApiResponse<DocumentResponse>>($"{CompanyPath}/document/{documentId}");
+        }
+
+        /// <summary>เอกสารทุกใบที่ผูกเลขจองเดียวกัน (ไม่รวม Voided) — NextAcc
+        /// <c>GET /api/companies/{cid}/document/by-booking/{bookingNumber}</c> (DocumentController.cs:515-521 →
+        /// DocumentService.GetDocumentsByBookingAsync :5398-5411: BookingNumber == key && Status != Voided, เรียงวันที่เอกสาร).
+        /// TakeTime ตั้ง BookingNumber = "RES-{reservationId}" ทั้ง company doc และ integration invoice (AccountingDataMapper)</summary>
+        public async Task<ApiResponse<List<DocumentResponse>>> GetDocumentsByBookingAsync(string bookingNumber)
+        {
+            return await GetAsync<ApiResponse<List<DocumentResponse>>>(
+                $"{CompanyPath}/document/by-booking/{Uri.EscapeDataString(bookingNumber ?? "")}");
         }
 
         /// <summary>ลบใบเสร็จหลักฐานรับเงิน (settlement receipt) ที่ "orphan" — parent TaxInvoice ถูกลบ/void.
@@ -1070,6 +1188,8 @@ namespace Take_Time_BangPhra.Integration
 
                 var request = new HttpRequestMessage(HttpMethod.Post, url);
                 request.Headers.Add("X-Integration-Key", _config.ApiKey);
+                string idemKey = BuildIdempotencyKey(HttpMethod.Post, "/api/integration/expenses/multipart", json);
+                if (idemKey != null) request.Headers.TryAddWithoutValidation("Idempotency-Key", idemKey);
                 request.Content = form;
 
                 var response = await _httpClient.SendAsync(request).ConfigureAwait(false);
@@ -1737,6 +1857,8 @@ namespace Take_Time_BangPhra.Integration
                 var request = new HttpRequestMessage(HttpMethod.Post, url);
                 // /api/integration/invoices/multipart → X-Integration-Key เท่านั้น
                 request.Headers.Add("X-Integration-Key", _config.ApiKey);
+                string idemKey = BuildIdempotencyKey(HttpMethod.Post, "/api/integration/invoices/multipart", json);
+                if (idemKey != null) request.Headers.TryAddWithoutValidation("Idempotency-Key", idemKey);
                 request.Content = form;
 
                 var response = await _httpClient.SendAsync(request).ConfigureAwait(false);
