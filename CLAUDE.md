@@ -454,6 +454,15 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    ตั้งค่า: `Admin/Settings/SlipCheckSettings` (สถานะ/โควต้าเดือนนี้/บัญชีรับเงิน/ทดสอบด้วยสลิป). **Deploy:** NuGet restore ZXing.Net 0.16.11; ติดตั้ง Tesseract 5
    (UB Mannheim, เลือกภาษา Thai) ที่ `C:\Program Files\Tesseract-OCR` หรือวาง `tesseract.exe`+DLL ที่ `~/App_Data/tesseract` และ `tha/eng.traineddata`
    (tessdata_fast) ที่ `~/App_Data/tessdata`; App Pool identity ต้อง execute ได้ + เขียน `%TEMP%`; VC++ 2015-2022 x64 (ตัวติดตั้งใส่ให้). ไม่มีอะไรเลย = ข้ามการตรวจ.
+   - **ยอดล็อกตามสลิป (PHASE19_36):** `SlipVerificationService.GetAmountLock` (ที่เดียว) = SlipOK มีข้อมูลธนาคาร (ไม่นับ 1012) หรือ OCR ในเครื่อง (อ่านแบบไม่อิงยอดที่กรอก)
+     ≥ `SlipVerify_Lock_Min_Confidence` (85) → ยอดที่บันทึก = ยอดสลิปเสมอ: UI ใส่ให้+readonly (`SlipAmountLockUi`, `Scripts/slip-amount-lock.js`; Reserve หลังปุ่มอัปโหลด,
+     MakePayment AJAX `X-Slip-Preview`) และเซิร์ฟเวอร์บังคับซ้ำ (`VerifyWithLock` ใน Reserve `RunSlipGate`/`GateUploadedSlip`, `Decide` ตั้ง UseAmount=ยอดสลิป +
+     ปิด override ยอดไม่ตรง, `ApproveReservationSlip` ไม่สน amountOverride, `SubmitReservationSlip*` Claimed=ยอดสลิป, กิจกรรม/รูมเซอร์วิส `VerifyFixedTotal`: เกิน=ผ่าน ขาด=ชำระไม่ครบ).
+     โอนเกินยอดค้าง = บันทึกเต็มยอด (ก่อนเข้าพัก = ใบมัดจำ; หลังเข้าพัก = ปฏิเสธ ให้ไปเช็คเอาท์+ใบลดหนี้). แบ่งสลิป: ติ๊กแบ่ง = กรอกส่วนของการจอง < ยอดสลิป,
+     การจองถัดไป ≤ ยอดคงเหลือ. ไม่ล็อก = พนักงานกรอกเองได้เสมอ (คำใบ้ HintAmount). **ลูกค้าทำเอง** (`EvaluateCustomerSlip`, `SlipVerify_Customer_Fail_Mode`):
+     ตรวจไม่ผ่าน (อ่านไม่ได้/ไม่มั่นใจ/ยอดไม่ตรง/ไม่ใช่สลิป/NO_QR/NOT_FOUND/ผู้รับผิด/ขัดข้อง) → `CONTACT_ADMIN` ไม่รับ (จองห้อง = ไม่บันทึกการจอง, Pay/กิจกรรม/รูมเซอร์วิส =
+     ไม่สร้างรายการ; เก็บไฟล์ + log + Telegram กันถี่) · `ALLOW_MANUAL` รับเป็นรอพนักงานตรวจ (`Customer_Manual_Amount`); สลิปซ้ำ = ไม่รับเสมอ. ผู้รับ QR ร้านค้า:
+     `SlipVerify_Receiver_Biller_Ids`/`_Merchant_Ids` เทียบ proxy BILLERID/ref1-3/toMerchantId (`MatchesBillerOrMerchant`).
 19. **กันเอกสารซ้ำ + ตัวตรวจเทียบ (ต.ค. 2026, PHASE19_35 — เคส #149286: REC-…0001/0002 + TIV-…0002/0003 ซ้อน ไม่มีใบถูก void):**
    - **แนบไฟล์:** `LookupReceiptAttachmentFiles` = PDF ของใบเอง (`{เลขใบ}[_uid].pdf` โฟลเดอร์ปี/เดือนของ `Created_Date` ±1) + สลิป
      `Payment_Slips.Account_Receipt_ID = ใบนี้` (สลิประดับการจองเฉพาะเมื่อการจองมีใบเดียว) — ใช้ทั้ง sync และ "📎 ไฟล์" ในหน้าต่างการจอง.

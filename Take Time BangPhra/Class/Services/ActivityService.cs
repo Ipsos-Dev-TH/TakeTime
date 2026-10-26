@@ -599,7 +599,9 @@ namespace Take_Time_BangPhra.Services
                         SourceType = "ACTIVITY", SourceId = bookingId,
                         User = Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.CurrentUserName()
                     };
-                    slipCheck = Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.VerifyFile(b["SlipFileURL"].ToString(), amount, ctx);
+                    // ยอดตายตัว (ราคากิจกรรม) + ยอดล็อกตามสลิป (PHASE19_36): อ่านยอดได้น่าเชื่อถือ = เทียบยอดสลิปกับราคา
+                    //   (โอนเกิน = ผ่าน "รับเกิน" · ขาด = ชำระไม่ครบ) · อ่านไม่ได้ = ตรวจแบบเดิม
+                    slipCheck = Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.VerifyFileFixedTotal(b["SlipFileURL"].ToString(), amount, ctx);
                     if (slipCheck.IsBlocking)
                     {
                         // หน้านี้ไม่มีช่องเหตุผล → Owner/Admin กด "อนุมัติ" ซ้ำภายใน 10 นาที = ยืนยันแล้ว (สลิปซ้ำยืนยันไม่ได้)
@@ -633,7 +635,8 @@ namespace Take_Time_BangPhra.Services
                 string revNote = newPayStatus == "PAID" ? RecordActivityRevenue(bookingId, null, adminId) : null;
                 return (true, "ยืนยันการจองแล้ว" + (newPayStatus == "PAID" ? " (บันทึกว่าชำระเงินแล้ว)" : "")
                     + (string.IsNullOrEmpty(revNote) ? "" : " · " + revNote)
-                    + (slipCheck == null ? "" : " · สลิป: " + slipCheck.ShortText()));
+                    + (slipCheck == null ? "" : " · สลิป: " + slipCheck.ShortText()
+                        + (slipCheck.AmountLocked ? " · " + slipCheck.AmountLock.BadgeText() : "")));
             }
 
             _code.DatabaseInsertSafe(_conn,

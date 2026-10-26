@@ -222,7 +222,18 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
                 r.ReceiverName = PartyName(rc);
                 r.ReceiverAcctMasked = Acct(rc, "account");
                 r.ReceiverProxyMasked = Acct(rc, "proxy");
+                var px = Dict(rc, "proxy");
+                string pt = Str(px, "type");
+                r.ReceiverProxyType = string.IsNullOrWhiteSpace(pt) ? null : pt.Trim().ToUpperInvariant();
+                // บางรูปแบบคำตอบใส่ร้านค้าไว้ใต้ receiver
+                if (string.IsNullOrEmpty(r.ToMerchantId)) r.ToMerchantId = NonEmpty(Str(rc, "merchantId"));
             }
+            // จ่ายบิล/QR ร้านค้า (Biller) — SlipOK API Guide v1.13 หน้า 8: เทียบ proxy (BILLERID) + ref1 (+ toMerchantId)
+            r.Ref1 = NonEmpty(Str(d, "ref1"));
+            r.Ref2 = NonEmpty(Str(d, "ref2"));
+            r.Ref3 = NonEmpty(Str(d, "ref3"));
+            string tm = NonEmpty(Str(d, "toMerchantId"));
+            if (!string.IsNullOrEmpty(tm)) r.ToMerchantId = tm;
             r.HasData = r.Amount.HasValue || !string.IsNullOrEmpty(r.TransRef);
         }
 
@@ -234,6 +245,8 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
             if (v is double) return ((double)v).ToString("R", CultureInfo.InvariantCulture);
             return Convert.ToString(v, CultureInfo.InvariantCulture);
         }
+
+        private static string NonEmpty(string s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
 
         private static Dictionary<string, object> Dict(Dictionary<string, object> d, string key)
         {

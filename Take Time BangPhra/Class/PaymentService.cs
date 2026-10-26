@@ -56,7 +56,10 @@ namespace Take_Time_BangPhra
 
                 // 2. Calculate remaining balance
                 decimal remaining = _paymentDA.GetRemainingBalance(reservationId);
-                if (amount > remaining + 0.01m) // Allow small rounding
+                // ยอดล็อกตามสลิป (PHASE19_36): มีสลิปแนบ + เปิดล็อก → เทียบเพดานหลังตรวจสลิป (ยอดอาจถูกแทนด้วยยอดสลิป)
+                bool lockMayApply = slipFile != null && slipFile.ContentLength > 0
+                                    && SlipCheck.SlipVerificationService.AmountLockActive;
+                if (!lockMayApply && amount > remaining + 0.01m) // Allow small rounding
                 {
                     return new PaymentResult
                     {
@@ -80,6 +83,25 @@ namespace Take_Time_BangPhra
                 string slipBlock = GateUploadedSlip(slipFile, ref amount, remaining, reservationId, paymentMethod, out slipCheck, out slipGate);
                 if (slipBlock != null)
                     return new PaymentResult { Success = false, Message = slipBlock };
+                if (amount > remaining + 0.01m)
+                {
+                    if (LastSlipLocked && !_lockedOverpayDelegated)
+                    {
+                        // ยอดสลิป (ล็อก) เกินยอดค้าง → ใช้เส้นกลาง ProcessReservationPayment ที่รับเกินเป็นมัดจำ/รับล่วงหน้าได้
+                        _lockedOverpayDelegated = true;
+                        try
+                        {
+                            return ProcessReservationPayment(reservationId, amount, paymentMethod, slipFile, adminId, customerPhone, notes);
+                        }
+                        finally { _lockedOverpayDelegated = false; }
+                    }
+                    return new PaymentResult
+                    {
+                        Success = false,
+                        Message = $"จำนวนเงินเกินยอดค้างชำระ (ค้าง: {remaining:N2} บาท"
+                            + (LastSlipLocked ? $" · ยอดจากสลิป {amount:N2} — {SlipCheck.SlipVerificationService.OverpayText(amount, remaining)}" : "") + ")"
+                    };
+                }
 
                 // 3. Upload slip (if provided)
                 long? slipId = null;
@@ -373,13 +395,33 @@ namespace Take_Time_BangPhra
                     if (slipBlock != null)
                         return new PaymentResult { Success = false, Message = slipBlock };
                 }
+                bool arrivedNow = status == "เช็คอินแล้ว" || status == "เสร็จสิ้น"
+                                  || status.StartsWith("เช็คเอาท์", StringComparison.Ordinal)
+                                  || status.StartsWith("เช็คเอ้าท์", StringComparison.Ordinal);
+                string overpayNote = null;
+                bool lockedOverpay = false;
                 if (amount > due + tol)
                 {
-                    return new PaymentResult
+                    // ยอดล็อกตามสลิป (PHASE19_36): ลูกค้าโอนเกิน = บันทึกเต็มยอดสลิป (แก้ยอดไม่ได้) — ก่อนเข้าพัก = มัดจำ/รับล่วงหน้า
+                    // (ส่วนเกินคงอยู่ในเงินรับล่วงหน้า → เช็คเอาท์/ใบลดหนี้คืนส่วนเกินตามขั้นตอนเดิม) · หลังเข้าพักแล้วไม่ออกอัตโนมัติ
+                    if (LastSlipLocked && !arrivedNow)
                     {
-                        Success = false,
-                        Message = $"จำนวนเงินเกินยอดค้างชำระ (ค้าง: {due:N2} บาท)"
-                    };
+                        lockedOverpay = true;
+                        overpayNote = SlipCheck.SlipVerificationService.OverpayText(amount, due);
+                        _code.Logs(_connectionString, "SlipVerify",
+                            $"การจอง {reservationId}: ยอดล็อกตามสลิป {amount:N2} เกินยอดค้าง {due:N2} — {overpayNote} บันทึกเป็นมัดจำ/รับล่วงหน้า", "SYSTEM");
+                    }
+                    else
+                    {
+                        return new PaymentResult
+                        {
+                            Success = false,
+                            Message = $"จำนวนเงินเกินยอดค้างชำระ (ค้าง: {due:N2} บาท)"
+                                + (LastSlipLocked
+                                    ? $" — ยอดจากสลิป {amount:N2} บาท ({SlipCheck.SlipVerificationService.OverpayText(amount, due)}) แก้ยอดไม่ได้เพราะล็อกตามสลิป: เข้าพักแล้วให้รับเงินที่หน้าเช็คเอาท์ แล้วคืนส่วนเกินด้วยใบลดหนี้"
+                                    : "")
+                        };
+                    }
                 }
 
                 // ── ค่าใช้จ่ายในห้องที่ยอดนี้ปิดได้ (เก่าสุดก่อน) ──
@@ -417,7 +459,7 @@ namespace Take_Time_BangPhra
                                || status.StartsWith("เช็คเอ้าท์", StringComparison.Ordinal);
                 // รับก่อนเข้าพักแต่ไม่ครบยอด = มัดจำเสมอ (เดิมมีเงื่อนไข covered.Count == 0 → ยอดที่เผอิญปิดค่าบริการได้
                 // กลายเป็นใบเสร็จรายได้ก่อนเข้าพัก ไม่ตรงกับหน้าแก้ไขการจองที่ใช้ Deposit < totalPrice)
-                bool isDeposit = !coversAll && !arrived;
+                bool isDeposit = (!coversAll && !arrived) || lockedOverpay;
 
                 // ── สลิป / ใบเสร็จ ──
                 long? slipId = existingSlipId;   // สลิปที่ลูกค้าแนบไว้แล้วและพนักงานเพิ่งอนุมัติ (ApproveReservationSlip)
@@ -552,7 +594,8 @@ namespace Take_Time_BangPhra
                 return new PaymentResult
                 {
                     Success = true,
-                    Message = isDeposit ? "ชำระเงินมัดจำสำเร็จ" : (coversAll ? "ชำระเงินครบแล้ว" : "ชำระเงินสำเร็จ"),
+                    Message = (isDeposit ? "ชำระเงินมัดจำสำเร็จ" : (coversAll ? "ชำระเงินครบแล้ว" : "ชำระเงินสำเร็จ"))
+                        + (string.IsNullOrEmpty(overpayNote) ? "" : " · " + overpayNote + " (บันทึกเป็นมัดจำ/รับล่วงหน้า)"),
                     PaymentId = paymentId,
                     ReceiptId = receiptId,
                     RemainingBalance = remainingAfter
@@ -598,7 +641,7 @@ namespace Take_Time_BangPhra
         /// คืน null = ยังไม่รัน PHASE19_25 (ไม่มี Claimed_Amount) → ผู้เรียกตัดสินใจเอง (ห้าม PromoteIfPending)
         /// </summary>
         public PaymentResult SubmitReservationSlipForVerification(int reservationId, decimal amount,
-            HttpPostedFile slipFile, string customerPhone, string notes)
+            HttpPostedFile slipFile, string customerPhone, string notes, bool customerManualAmount = false)
         {
             if (!HasSlipClaimColumn()) return null;
             try
@@ -617,9 +660,36 @@ namespace Take_Time_BangPhra
                     || status == "Cancel" || status == "CANCELLED")
                     return new PaymentResult { Success = false, Message = "การจองนี้ถูกยกเลิกแล้ว กรุณาติดต่อเจ้าหน้าที่" };
 
+                // ยอดล็อกตามสลิป (PHASE19_36): อ่านยอดได้น่าเชื่อถือ → ยอดที่แจ้ง (Claimed_Amount) = ยอดสลิป (โอนเกิน = รับไว้ตามสลิป)
+                bool slipLocked = false;
+                if (!customerManualAmount && SlipCheck.SlipVerificationService.AmountLockActive)
+                {
+                    try
+                    {
+                        byte[] sb;
+                        using (var ms = new MemoryStream())
+                        {
+                            slipFile.InputStream.Position = 0;
+                            slipFile.InputStream.CopyTo(ms);
+                            sb = ms.ToArray();
+                            slipFile.InputStream.Position = 0;
+                        }
+                        var lk = SlipCheck.SlipVerificationService.InspectAmountLock(sb, slipFile.FileName);
+                        if (lk.Locked && lk.Amount.HasValue && lk.Amount.Value > 0m)
+                        {
+                            if (Math.Abs(lk.Amount.Value - amount) > 0.005m)
+                                notes = (string.IsNullOrEmpty(notes) ? "" : notes + " · ") + "ยอดล็อกตามสลิป " + lk.Amount.Value.ToString("N2")
+                                    + " (หน้าแจ้ง " + amount.ToString("N2") + ")";
+                            amount = lk.Amount.Value;
+                            slipLocked = true;
+                        }
+                    }
+                    catch { }
+                }
+
                 ReservationBalance bal = null;
                 try { bal = ReservationBalance.Load(_connectionString, reservationId); } catch { bal = null; }
-                if (bal != null && amount > bal.Due + Math.Max(0.01m, ReservationBalance.RoundingTolerance))
+                if (!slipLocked && bal != null && amount > bal.Due + Math.Max(0.01m, ReservationBalance.RoundingTolerance))
                     return new PaymentResult { Success = false, Message = $"จำนวนเงินเกินยอดค้างชำระ (ค้าง: {bal.Due:N2} บาท)" };
 
                 long slipId = UploadPaymentSlip(reservationId, slipFile, customerPhone, null);
@@ -642,9 +712,16 @@ namespace Take_Time_BangPhra
                     }
                     catch { }
                 }
+                if (customerManualAmount)
+                {
+                    SlipCheck.SlipVerificationService.MarkCustomerManualAmount(slipId, notes);
+                    verifyNote += "\n✏️ ลูกค้ากรอกยอดเอง (ระบบอ่านยอดจากสลิปไม่ได้/ตรวจไม่ผ่าน)";
+                }
+                string overNote = slipLocked && bal != null ? SlipCheck.SlipVerificationService.OverpayText(amount, bal.Due) : null;
+                if (!string.IsNullOrEmpty(overNote)) verifyNote += "\nยอดสลิปมากกว่ายอดค้าง — " + overNote;
 
                 _code.Logs(_connectionString, "Payment Slip",
-                    $"การจอง {reservationId}: ลูกค้าแนบสลิป #{slipId} ยอด {amount:N2} — รอเจ้าหน้าที่ตรวจ (ยังไม่ลงรับเงิน/ใบเสร็จ/บัญชี)", "SYSTEM");
+                    $"การจอง {reservationId}: ลูกค้าแนบสลิป #{slipId} ยอด {amount:N2}{(slipLocked ? " (ล็อกตามสลิป)" : "")}{(customerManualAmount ? " (ลูกค้ากรอกยอดเอง)" : "")} — รอเจ้าหน้าที่ตรวจ (ยังไม่ลงรับเงิน/ใบเสร็จ/บัญชี)", "SYSTEM");
                 try
                 {
                     Notify.Send(Notify.Ev.PaymentOnline,
@@ -656,7 +733,9 @@ namespace Take_Time_BangPhra
                 return new PaymentResult
                 {
                     Success = true,
-                    Message = "ได้รับสลิปแล้ว รอเจ้าหน้าที่ตรวจสอบ",
+                    Message = "ได้รับสลิปแล้ว รอเจ้าหน้าที่ตรวจสอบ"
+                        + (slipLocked ? " · ยอดตามสลิป " + amount.ToString("N2") + " บาท" : "")
+                        + (string.IsNullOrEmpty(overNote) ? "" : " (" + overNote + ")"),
                     PaymentId = 0,
                     ReceiptId = null,
                     RemainingBalance = bal != null ? bal.Due : 0m
@@ -675,14 +754,28 @@ namespace Take_Time_BangPhra
         /// คืน null = ยังไม่รัน PHASE19_25 → ผู้เรียกทำแบบเดิม
         /// </summary>
         public PaymentResult SubmitReservationSlipFileForVerification(int reservationId, decimal amount, string physicalPath,
-            string customerPhone, string notes)
+            string customerPhone, string notes, bool customerManualAmount = false)
         {
             if (!HasSlipClaimColumn()) return null;
             try
             {
-                if (amount <= 0) return new PaymentResult { Success = false, Message = "จำนวนเงินต้องมากกว่า 0" };
                 if (string.IsNullOrEmpty(physicalPath) || !File.Exists(physicalPath))
                     return new PaymentResult { Success = false, Message = "กรุณาแนบสลิปการโอนเงิน" };
+                // ยอดล็อกตามสลิป (PHASE19_36) — ยอดที่แจ้ง = ยอดสลิปเมื่ออ่านได้น่าเชื่อถือ
+                bool slipLocked = false;
+                if (!customerManualAmount && SlipCheck.SlipVerificationService.AmountLockActive)
+                {
+                    var lk = SlipCheck.SlipVerificationService.InspectAmountLockFile(physicalPath);
+                    if (lk.Locked && lk.Amount.HasValue && lk.Amount.Value > 0m)
+                    {
+                        if (Math.Abs(lk.Amount.Value - amount) > 0.005m)
+                            notes = (string.IsNullOrEmpty(notes) ? "" : notes + " · ") + "ยอดล็อกตามสลิป " + lk.Amount.Value.ToString("N2")
+                                + " (หน้าแจ้ง " + amount.ToString("N2") + ")";
+                        amount = lk.Amount.Value;
+                        slipLocked = true;
+                    }
+                }
+                if (amount <= 0) return new PaymentResult { Success = false, Message = "จำนวนเงินต้องมากกว่า 0" };
 
                 string ext = (Path.GetExtension(physicalPath) ?? ".jpg").ToLowerInvariant();
                 if (ext != ".jpg" && ext != ".jpeg" && ext != ".png") ext = ".jpg";
@@ -724,9 +817,14 @@ namespace Take_Time_BangPhra
                     if (vr != null) verifyNote = "\nผลตรวจสลิป: " + System.Web.HttpUtility.HtmlEncode(vr.ShortText());
                 }
                 catch { }
+                if (customerManualAmount)
+                {
+                    SlipCheck.SlipVerificationService.MarkCustomerManualAmount(slipId, notes);
+                    verifyNote += "\n✏️ ลูกค้ากรอกยอดเอง (ระบบอ่านยอดจากสลิปไม่ได้/ตรวจไม่ผ่าน)";
+                }
 
                 _code.Logs(_connectionString, "Payment Slip",
-                    $"การจอง {reservationId}: ลูกค้าแนบสลิป #{slipId} ยอด {amount:N2} ตอนจอง — รอเจ้าหน้าที่ตรวจ (ยังไม่ออกใบเสร็จ)", "SYSTEM");
+                    $"การจอง {reservationId}: ลูกค้าแนบสลิป #{slipId} ยอด {amount:N2}{(slipLocked ? " (ล็อกตามสลิป)" : "")}{(customerManualAmount ? " (ลูกค้ากรอกยอดเอง)" : "")} ตอนจอง — รอเจ้าหน้าที่ตรวจ (ยังไม่ออกใบเสร็จ)", "SYSTEM");
                 try
                 {
                     Notify.Send(Notify.Ev.PaymentOnline,
@@ -787,6 +885,22 @@ namespace Take_Time_BangPhra
                 {
                     decimal expected = amountOverride.HasValue && amountOverride.Value > 0m ? amountOverride.Value : claimed;
                     var vr = SlipCheck.SlipVerificationService.VerifySlipRow(slipId, expected, false, false);
+                    // ยอดล็อกตามสลิป (PHASE19_36): อ่านยอดได้น่าเชื่อถือ = ลงรับเงินตามยอดสลิปเท่านั้น (ไม่ใช้ยอดที่แจ้ง/ยอดที่พนักงานกด)
+                    if (vr != null && vr.AmountLocked && !vr.IsAllocationContinuation)
+                    {
+                        decimal lockAmt = vr.AmountLock.Amount.Value;
+                        if (Math.Abs(lockAmt - expected) > 0.005m)
+                        {
+                            _code.Logs(_connectionString, "SlipVerify",
+                                $"อนุมัติสลิป #{slipId}: ยอดล็อกตามสลิป {lockAmt:N2} (แจ้ง {claimed:N2}"
+                                + (amountOverride.HasValue ? $", กด {amountOverride.Value:N2}" : "") + ")", "SYSTEM");
+                            var lockedVr = vr.AmountLock;
+                            vr = SlipCheck.SlipVerificationService.VerifySlipRow(slipId, lockAmt, false, false) ?? vr;
+                            if (vr.AmountLock == null) vr.AmountLock = lockedVr;
+                        }
+                        expected = lockAmt;
+                        _lastSlipLock = vr.AmountLock;
+                    }
                     if (vr != null)
                     {
                         bool canOv = SlipCheck.SlipVerificationService.CanOverrideCurrentUser();
@@ -861,6 +975,7 @@ namespace Take_Time_BangPhra
         {
             result = null;
             decision = null;
+            _lastSlipLock = null;
             try
             {
                 if (!SlipCheck.SlipVerificationService.IsEnabled || slipFile == null || slipFile.ContentLength <= 0) return null;
@@ -873,10 +988,13 @@ namespace Take_Time_BangPhra
                     bytes = ms.ToArray();
                     slipFile.InputStream.Position = 0;
                 }
-                result = SlipCheck.SlipVerificationService.Verify(bytes, slipFile.FileName, amount, new SlipCheck.SlipVerifyContext
+                // ยอดล็อกตามสลิป (PHASE19_36): อ่านยอดได้น่าเชื่อถือ = ยอดที่บันทึกคือยอดสลิป ไม่ว่าหน้าส่งยอดอะไรมา
+                SlipCheck.SlipAmountLock lk;
+                decimal? lockedRecord;
+                result = SlipCheck.SlipVerificationService.VerifyWithLock(bytes, slipFile.FileName, amount, new SlipCheck.SlipVerifyContext
                 {
                     SourceType = "RESERVATION", SourceId = reservationId, User = SlipCheck.SlipVerificationService.CurrentUserName()
-                });
+                }, false, out lk, out lockedRecord);
                 decision = SlipCheck.SlipVerificationService.Decide(result, false, false, false, null, false);
                 if (!decision.Proceed)
                 {
@@ -885,7 +1003,15 @@ namespace Take_Time_BangPhra
                     _code.Logs(_connectionString, "SlipVerify", $"การจอง {reservationId}: ไม่ออกใบเสร็จ — {result.ShortText()}", "SYSTEM");
                     return "ตรวจสลิปไม่ผ่าน: " + decision.BlockMessage;
                 }
-                if (decision.UseAmount.HasValue && decision.UseAmount.Value > 0m && decision.UseAmount.Value <= maxAmount + 0.001m)
+                if (lk != null && lk.Locked && decision.UseAmount.HasValue && decision.UseAmount.Value > 0m)
+                {
+                    _lastSlipLock = lk;
+                    if (Math.Abs(decision.UseAmount.Value - amount) > 0.005m)
+                        _code.Logs(_connectionString, "SlipVerify",
+                            $"การจอง {reservationId}: ยอดล็อกตามสลิป {decision.UseAmount.Value:N2} (ส่งมา {amount:N2}) — {lk.BadgeText()}", "SYSTEM");
+                    amount = decision.UseAmount.Value;   // ไม่จำกัดเพดาน — เกินยอดค้างให้ผู้เรียกจัดการ (รับเกิน)
+                }
+                else if (decision.UseAmount.HasValue && decision.UseAmount.Value > 0m && decision.UseAmount.Value <= maxAmount + 0.001m)
                     amount = decision.UseAmount.Value;
             }
             catch (Exception ex)
@@ -897,6 +1023,13 @@ namespace Take_Time_BangPhra
             }
             return null;
         }
+
+        /// <summary>ผลล็อกยอดของสลิปล่าสุดในรายการนี้ (PHASE19_36) — null = ไม่ได้ล็อก</summary>
+        private SlipCheck.SlipAmountLock _lastSlipLock;
+        private bool _lockedOverpayDelegated;
+
+        /// <summary>ยอดของรายการนี้มาจากสลิปที่ล็อกยอด (อนุญาตรับเกินยอดค้าง)</summary>
+        private bool LastSlipLocked => _lastSlipLock != null && _lastSlipLock.Locked;
 
         /// <summary>ค่าใช้จ่ายในห้องที่ยัง PENDING เรียงเก่าสุดก่อน (ตารางไม่มี = ว่าง)</summary>
         private DataTable LoadPendingChargesOldestFirst(int reservationId)

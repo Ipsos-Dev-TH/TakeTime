@@ -76,6 +76,13 @@ namespace Take_Time_BangPhra.Account
                 : "CAST(NULL AS DECIMAL(18,2)) AS Slip_Amount, CAST(NULL AS NVARCHAR(40)) AS Slip_TransRef, CAST(NULL AS NVARCHAR(20)) AS Verify_Status, "
                   + "CAST(NULL AS NVARCHAR(20)) AS Verify_Source, CAST(NULL AS NVARCHAR(1000)) AS Verify_Message, "
                   + "CAST(NULL AS NVARCHAR(100)) AS Override_By, CAST(NULL AS NVARCHAR(500)) AS Override_Reason,";
+            // ยอดล็อกตามสลิป + ลูกค้ากรอกยอดเอง (PHASE19_36) — ยังไม่รัน migration = คอลัมน์ว่าง
+            verifyCols += Payments.SlipCheck.SlipVerificationService.AmountLockSchemaReady
+                ? " ps.Amount_Locked, ps.Lock_Confidence, ps.Lock_Source,"
+                : " CAST(NULL AS BIT) AS Amount_Locked, CAST(NULL AS INT) AS Lock_Confidence, CAST(NULL AS NVARCHAR(20)) AS Lock_Source,";
+            verifyCols += Payments.SlipCheck.SlipVerificationService.ManualAmountSchemaReady
+                ? " ps.Customer_Manual_Amount,"
+                : " CAST(NULL AS BIT) AS Customer_Manual_Amount,";
             string query = @"
                 SELECT
                     ps.ID AS SlipID,
@@ -334,6 +341,16 @@ namespace Take_Time_BangPhra.Account
                 sb.Append("<b style='color:").Append(color).Append("'>")
                   .Append(Server.HtmlEncode(Payments.SlipCheck.SlipVerifyStatus.Thai(st))).Append("</b>");
                 if (r["Slip_Amount"] != DBNull.Value) sb.Append("<br/>สลิป ").Append(Convert.ToDecimal(r["Slip_Amount"]).ToString("N2"));
+                if (IsAmountLocked(r))
+                {
+                    // 🔒 ยอดล็อกตามสลิป — อนุมัติแล้วลงรับเงินตามยอดสลิปเท่านั้น
+                    bool bank = Convert.ToString(r["Lock_Source"]) == Payments.SlipCheck.SlipVerifySource.SlipOk;
+                    sb.Append("<br/><span style='color:#1b5e20;font-weight:600'>🔒 ")
+                      .Append(Server.HtmlEncode(bank ? "ยอดจากสลิป ✓ (SlipOK ธนาคารยืนยัน)"
+                          : "ยอดจากสลิป (อ่านอัตโนมัติ " + Convert.ToString(r["Lock_Confidence"]) + "%)")).Append("</span>");
+                }
+                if (r.Row.Table.Columns.Contains("Customer_Manual_Amount") && r["Customer_Manual_Amount"] != DBNull.Value && Convert.ToBoolean(r["Customer_Manual_Amount"]))
+                    sb.Append("<br/><span style='color:#e65100;font-weight:600'>✏️ ลูกค้ากรอกยอดเอง — ตรวจยอดกับสลิป/บัญชีธนาคาร</span>");
                 sb.Append("<br/><small>").Append(Server.HtmlEncode(Payments.SlipCheck.SlipVerifySource.Thai(Convert.ToString(r["Verify_Source"])))).Append("</small>");
                 if (r["Override_By"] != DBNull.Value)
                     sb.Append("<br/><small style='color:#6a1b9a'>ยืนยันโดย ").Append(Server.HtmlEncode(r["Override_By"].ToString()))
@@ -349,6 +366,15 @@ namespace Take_Time_BangPhra.Account
 
         protected bool SlipVerifyOn => Payments.SlipCheck.SlipVerificationService.IsEnabled;
 
+        private static bool IsAmountLocked(DataRowView r)
+        {
+            try
+            {
+                return r.Row.Table.Columns.Contains("Amount_Locked") && r["Amount_Locked"] != DBNull.Value && Convert.ToBoolean(r["Amount_Locked"]);
+            }
+            catch { return false; }
+        }
+
         /// <summary>แสดงปุ่ม "อนุมัติตามยอดสลิป" เมื่อยอดสลิปต่างจากยอดที่แจ้ง</summary>
         protected bool ShowApproveSlipAmount(object item)
         {
@@ -356,6 +382,7 @@ namespace Take_Time_BangPhra.Account
             {
                 var r = (DataRowView)item;
                 if (r["VerificationStatus"].ToString() != "PENDING" || r["Slip_Amount"] == DBNull.Value || r["PaymentAmount"] == DBNull.Value) return false;
+                if (IsAmountLocked(r)) return false;   // ยอดล็อกตามสลิป: ปุ่มอนุมัติปกติใช้ยอดสลิปอยู่แล้ว
                 return Convert.ToString(r["Verify_Status"]) != "DUPLICATE"
                     && Math.Abs(Convert.ToDecimal(r["Slip_Amount"]) - Convert.ToDecimal(r["PaymentAmount"])) > 0.009m;
             }

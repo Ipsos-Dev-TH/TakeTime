@@ -109,6 +109,14 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
         public string ReceiverName;
         public string ReceiverAcctMasked;
         public string ReceiverProxyMasked;
+        /// <summary>ชนิด proxy ของผู้รับ (BILLERID / MSISDN / NATID / EWALLETID …) — จ่ายผ่าน QR ร้านค้า (Biller) = BILLERID</summary>
+        public string ReceiverProxyType;
+        /// <summary>รหัสอ้างอิงของรายการจ่ายบิล/QR ร้านค้า (SlipOK API Guide v1.13 หน้า 8 — เทียบ ref1 แทนเลขบัญชี)</summary>
+        public string Ref1;
+        public string Ref2;
+        public string Ref3;
+        /// <summary>รหัสร้านค้าผู้รับ (เช่น KB000001813229 ของ K PLUS SHOP)</summary>
+        public string ToMerchantId;
         public long ElapsedMs;
     }
 
@@ -176,8 +184,17 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
         public bool CanOverride;
         public bool CanAllocate;
         public List<string> Notes = new List<string>();
+        /// <summary>ยอดล็อกตามสลิป (PHASE19_36) — null = ปิดฟีเจอร์/ไม่ได้คำนวณ</summary>
+        public SlipAmountLock AmountLock;
+        /// <summary>ยอดที่ผู้ใช้กรอก (เมื่อถูกแทนด้วยยอดจากสลิป)</summary>
+        public decimal? TypedAmount;
+        /// <summary>ชนิดคำตอบของ SlipOK (SlipVendorResponse.Kind*) — null = ไม่ได้เรียก</summary>
+        public string VendorKind;
+        /// <summary>รูปเป็น QR รับเงิน (PromptPay) ไม่ใช่สลิปโอน</summary>
+        public bool NotASlip;
 
         public bool IsBlocking => SlipVerifyStatus.IsBlocking(Status) && !IsAllocationContinuation;
+        public bool AmountLocked => AmountLock != null && AmountLock.Locked;
         public bool BankConfirmed => Source == SlipVerifySource.SlipOk;
 
         public static string BankName(string code)
@@ -251,6 +268,8 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
                 sb.Append("<br/>ยอดคงเหลือของสลิปที่ยังไม่ได้ใช้: <b>").Append(AllocationRemaining.Value.ToString("N2")).Append("</b>");
             if (!string.IsNullOrEmpty(Message))
                 sb.Append("<div style='margin-top:4px;color:").Append(color).Append("'>").Append(E(Message)).Append("</div>");
+            if (AmountLock != null && AmountLock.Active)
+                sb.Append(AmountLock.ToHtml());
             sb.Append("</div>");
             return sb.ToString();
         }
@@ -268,5 +287,77 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
         public bool OverrideUsed;
         public string OverrideReason;
         public bool AllocationUsed;
+    }
+
+    /// <summary>
+    /// ยอดล็อกตามสลิป (CLAUDE.md ข้อ 18 "ยอดล็อกตามสลิป" — PHASE19_36): อ่านยอดได้น่าเชื่อถือ = ใช้ยอดจากสลิปเท่านั้น ห้ามแก้มือ ·
+    /// อ่านไม่ได้/ความมั่นใจต่ำ = แก้ยอดเองได้ (มี HintAmount เป็นค่าที่ระบบเดา — ไม่ใส่ให้อัตโนมัติ)
+    /// ตัดสินที่ SlipVerificationService.GetAmountLock ที่เดียว
+    /// </summary>
+    public class SlipAmountLock
+    {
+        public bool Active;                // เปิดตรวจสลิป + มี PHASE19_34 (ไม่งั้นทุกหน้าแบบเดิม)
+        public bool Locked;
+        public decimal? Amount;            // ยอดที่ล็อก (Locked เท่านั้น)
+        public string Source = SlipVerifySource.None;
+        public int Confidence;             // 100 = SlipOK (ธนาคาร) · LOCAL_OCR = คะแนนผู้อ่าน
+        public string Reason;              // ทำไมล็อก/ไม่ล็อก (ภาษาไทย)
+        public decimal? HintAmount;        // ไม่ล็อก: ยอดที่ระบบเดา (แสดงเป็นคำใบ้)
+        public int HintConfidence;
+
+        public static SlipAmountLock Inactive()
+        {
+            return new SlipAmountLock { Active = false, Reason = "ไม่ได้เปิดล็อกยอดตามสลิป" };
+        }
+
+        public string BadgeText()
+        {
+            if (!Locked) return null;
+            return Source == SlipVerifySource.SlipOk
+                ? "ยอดจากสลิป ✓ (SlipOK ธนาคารยืนยัน)"
+                : "ยอดจากสลิป (อ่านอัตโนมัติ " + Confidence + "%)";
+        }
+
+        /// <summary>ข้อความใต้ช่องยอด: ล็อก = ป้ายยอดจากสลิป · ไม่ล็อก = ให้กรอกยอดตามสลิป (+ คำใบ้)</summary>
+        public string NoticeText()
+        {
+            if (Locked) return BadgeText() + " — " + Amount.GetValueOrDefault().ToString("N2") + " บาท (แก้ไม่ได้)";
+            string s = HintConfidence > 0
+                ? "อ่านยอดจากสลิปไม่ได้/ความมั่นใจต่ำ (" + HintConfidence + "%) — กรอกยอดตามสลิป"
+                : "อ่านยอดจากสลิปไม่ได้ — กรอกยอดตามสลิป";
+            if (HintAmount.HasValue)
+                s += " (ระบบอ่านได้ประมาณ " + HintAmount.Value.ToString("N2") + " บาท — ตรวจให้ตรงสลิปก่อนบันทึก)";
+            return s;
+        }
+
+        public string ToHtml()
+        {
+            if (!Active) return "";
+            string color = Locked ? "#1b5e20" : "#e65100";
+            string bg = Locked ? "#e8f5e9" : "#fff8e1";
+            return "<div class='slip-lock-badge' style='margin-top:6px;padding:6px 10px;border-radius:6px;font-weight:600;color:" + color
+                + ";background:" + bg + ";border:1px dashed " + color + ";'>" + (Locked ? "🔒 " : "✏️ ")
+                + HttpUtility.HtmlEncode(NoticeText()) + "</div>";
+        }
+    }
+
+    /// <summary>
+    /// ผลตรวจสลิปของช่องทางลูกค้าทำเอง (จองห้อง / หน้าชำระเงิน / จองกิจกรรม / รูมเซอร์วิส) ตามโหมด SlipVerify_Customer_Fail_Mode
+    /// </summary>
+    public class CustomerSlipOutcome
+    {
+        public const string ModeContactAdmin = "CONTACT_ADMIN";
+        public const string ModeAllowManual = "ALLOW_MANUAL";
+
+        public bool Accept = true;          // รับสลิปนี้ได้ (ไปต่อ — อาจพักรอพนักงานตรวจ)
+        public bool Blocked;                // ไม่รับ (สลิปซ้ำ หรือ ตรวจไม่ผ่าน + โหมดติดต่อเจ้าหน้าที่)
+        public bool Failed;                 // ตรวจไม่ผ่าน (อ่านไม่ได้/ยอดไม่ตรง/ไม่ใช่สลิป/ไม่พบรายการ/ผู้รับผิด/ตรวจไม่ได้)
+        public bool ManualAmount;           // ลูกค้ากรอกยอดเอง (ALLOW_MANUAL + ไม่ล็อก) → ติดธง "ลูกค้ากรอกยอดเอง"
+        public string Mode = ModeContactAdmin;
+        public string Reason;               // เหตุผลภาษาคน
+        public string Message;              // ข้อความเต็มที่แสดงลูกค้า (ไม่มี HTML)
+        public decimal? Amount;             // ยอดที่ใช้ (ล็อก = ยอดสลิป)
+        public SlipVerifyResult Result;
+        public SlipAmountLock Lock;
     }
 }

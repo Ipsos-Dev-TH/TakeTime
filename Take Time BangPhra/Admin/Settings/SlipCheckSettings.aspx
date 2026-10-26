@@ -83,6 +83,32 @@
         </div>
 
         <div class="sc-card">
+            <h3>ยอดล็อกตามสลิป &amp; ลูกค้าแนบสลิปเอง (PHASE19_36)</h3>
+            <div class="sub">อ่านยอดจากสลิปได้น่าเชื่อถือ = ใส่ยอดให้อัตโนมัติและแก้ไม่ได้ (ธนาคารยืนยันผ่าน SlipOK หรืออ่านจากรูปได้ความมั่นใจถึงเกณฑ์) ·
+                อ่านไม่ได้/ความมั่นใจต่ำ = พนักงานกรอกยอดเองได้เสมอ</div>
+            <div class="sc-row"><div>ความมั่นใจขั้นต่ำที่ล็อกยอด (%)<small>ยอดที่อ่านจากรูปเอง (OCR) — ต่ำกว่านี้ให้กรอกยอดเอง · ค่าเริ่มต้น 85</small></div>
+                <div><asp:TextBox ID="txtLockMinConf" runat="server" CssClass="sc-in" TextMode="Number" min="1" max="100" /></div></div>
+            <div class="sc-row"><div>ลูกค้าแนบสลิปแล้วตรวจไม่ผ่าน<small>อ่านไม่ได้/ยอดไม่ตรง/ไม่ใช่สลิป/ธนาคารไม่พบรายการ/โอนเข้าบัญชีอื่น — ใช้กับหน้าจองของลูกค้า หน้าชำระเงิน จองกิจกรรม รูมเซอร์วิส (สลิปซ้ำ = ไม่รับเสมอ)</small></div>
+                <div><asp:DropDownList ID="ddlCustomerFailMode" runat="server" CssClass="sc-in">
+                    <asp:ListItem Value="CONTACT_ADMIN" Text="แจ้งให้ติดต่อเจ้าหน้าที่ (ไม่ให้ผ่าน)" />
+                    <asp:ListItem Value="ALLOW_MANUAL" Text="ให้ลูกค้ากรอกยอดเอง (รอเจ้าหน้าที่ตรวจ)" />
+                </asp:DropDownList></div></div>
+            <div class="sc-row"><div>ช่องทางติดต่อที่แสดงลูกค้า<small>ว่าง = เบอร์โทรจากข้อมูลกิจการ + LINE OA ที่ตั้งไว้</small></div>
+                <div><asp:TextBox ID="txtCustomerContact" runat="server" CssClass="sc-in" MaxLength="300" placeholder="เช่น โทร 038-xxx-xxx · LINE @taketime" /></div></div>
+        </div>
+
+        <div class="sc-card">
+            <h3>QR ร้านค้า / Biller (ตรวจผู้รับ)</h3>
+            <div class="sub">ลูกค้าส่วนใหญ่จ่ายผ่าน QR ร้านค้า (เช่น K PLUS SHOP) — ผู้รับในสลิปเป็น Biller ID/รหัสร้านค้า ไม่ใช่เลขบัญชี
+                (SlipOK API Guide v1.13 หน้า 8: เทียบ proxy BILLERID + ref1 / toMerchantId) · คั่นหลายค่าด้วยจุลภาค · เทียบเฉพาะตัวเลข (Biller ID)
+                / ไม่สนตัวพิมพ์ (รหัสร้านค้า) · ว่างทั้งสองช่อง = ข้ามการตรวจผู้รับของสลิป QR ร้านค้า</div>
+            <div class="sc-row"><div>Biller ID<small>เช่น 010753600031508 (พิมพ์บนสลิปเป็น 010-753-6-0003150-8)</small></div>
+                <div><asp:TextBox ID="txtBillerIds" runat="server" CssClass="sc-in" MaxLength="500" /></div></div>
+            <div class="sc-row"><div>รหัสร้านค้า (Merchant ID)<small>เช่น KB000001813229 (รหัสธุรกรรม KPS004KB000001813229 ก็ตรง)</small></div>
+                <div><asp:TextBox ID="txtMerchantIds" runat="server" CssClass="sc-in" MaxLength="500" /></div></div>
+        </div>
+
+        <div class="sc-card">
             <h3>บัญชีรับเงินของร้าน (ตรวจผู้รับ)</h3>
             <div class="sub">
                 ใส่รหัสธนาคาร 3 หลัก (004 กสิกร · 014 ไทยพาณิชย์ · 006 กรุงไทย · 002 กรุงเทพ · 025 กรุงศรี · 011 ทีทีบี · 030 ออมสิน)

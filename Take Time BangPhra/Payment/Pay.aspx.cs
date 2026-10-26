@@ -517,9 +517,18 @@ namespace Take_Time_BangPhra.Payment
             // ลูกค้าชำระค่าจองเอง: สลิปคือหลักฐานเดียวที่เจ้าหน้าที่ใช้ตรวจก่อนลงรับเงิน → บังคับแนบเสมอ
             bool customerReservation = SourceType == PaymentSource.Reservation && !IsStaff();
             if (customerReservation) requireSlip = true;
-            if (requireSlip && !fuSlip.HasFile)
+            // ตรวจสลิปไม่ผ่าน + โหมด ALLOW_MANUAL: สลิปที่แนบไว้รอบก่อน (ไม่ต้องเลือกไฟล์ซ้ำ) + ยอดที่ลูกค้ากรอก
+            string pendingSlip = !fuSlip.HasFile && customerReservation ? ViewState["pendSlip"] as string : null;
+            bool customerLock = !IsStaff() && Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.AmountLockActive;
+            if (requireSlip && !fuSlip.HasFile && string.IsNullOrEmpty(pendingSlip))
             {
                 ShowInfo(pnlManual, "กรุณาแนบสลิปการโอนเงินก่อนกดยืนยัน", true);
+                return;
+            }
+
+            if (!string.IsNullOrEmpty(pendingSlip) && customerLock)
+            {
+                SubmitCustomerManualAmount(pendingSlip);
                 return;
             }
 
@@ -529,6 +538,42 @@ namespace Take_Time_BangPhra.Payment
                 string err;
                 slipUrl = SaveSlip(out err);
                 if (slipUrl == null) { ShowInfo(pnlManual, err, true); return; }
+                ViewState.Remove("pendSlip");
+            }
+
+            // 🔎 ลูกค้าแนบสลิปเอง (PHASE19_36): ตรวจก่อนรับ — ตรวจไม่ผ่าน = ติดต่อเจ้าหน้าที่ หรือ ให้กรอกยอดเอง ตามค่าตั้ง
+            //    สลิปซ้ำ = ไม่รับเสมอ · ผ่าน = ยอดที่แจ้ง = ยอดสลิป (ล็อก) · พนักงาน = ไม่ใช้กฎนี้ (บังคับยอดสลิปใน PaymentService)
+            Take_Time_BangPhra.Payments.SlipCheck.CustomerSlipOutcome custOutcome = null;
+            if (customerLock && slipUrl != null && (customerReservation || SourceType == PaymentSource.Activity))
+            {
+                long sid0;
+                long.TryParse(SourceId, out sid0);
+                custOutcome = Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.EvaluateCustomerSlipFile(slipUrl, Amount,
+                    SourceType == PaymentSource.Activity,
+                    new Take_Time_BangPhra.Payments.SlipCheck.SlipVerifyContext
+                    {
+                        SourceType = SourceType == PaymentSource.Activity ? "ACTIVITY" : "RESERVATION",
+                        SourceId = sid0 > 0 ? (long?)sid0 : null
+                    });
+                if (custOutcome.Blocked)
+                {
+                    LogPay("สลิปลูกค้าตรวจไม่ผ่าน " + SourceType + " " + SourceId + " (" + custOutcome.Mode + "): " + custOutcome.Reason + " · ไฟล์ " + slipUrl);
+                    ShowInfo(pnlManual, custOutcome.Message, true);
+                    return;
+                }
+                if (customerReservation && custOutcome.ManualAmount)
+                {
+                    // ALLOW_MANUAL + อ่านยอดไม่ได้ → ให้ลูกค้ากรอกยอดตามสลิป แล้วกดยืนยันอีกครั้ง (ไม่ต้องแนบไฟล์ซ้ำ)
+                    ViewState["pendSlip"] = slipUrl;   // URL ในเว็บ (ไม่ส่ง path จริงของเซิร์ฟเวอร์ไปกับหน้า)
+                    pnlManualAmount.Visible = true;
+                    var hint = custOutcome.Lock != null ? custOutcome.Lock.HintAmount : null;
+                    txtManualAmount.Text = "";
+                    litManualHint.Text = Server.HtmlEncode("สาเหตุ: " + custOutcome.Reason
+                        + (hint.HasValue ? " · ระบบอ่านได้ประมาณ " + hint.Value.ToString("N2") + " บาท (ตรวจให้ตรงสลิป)" : "")
+                        + " — กรอกยอดแล้วกด \"ยืนยันการชำระเงิน\" อีกครั้ง เจ้าหน้าที่จะตรวจสอบให้");
+                    ShowInfo(pnlManual, custOutcome.Message, true);
+                    return;
+                }
             }
 
             try
@@ -552,13 +597,20 @@ namespace Take_Time_BangPhra.Payment
                     // → PaymentService.ApproveReservationSlip ลงรับเงิน + ใบเสร็จ + บัญชี + PromoteIfPending
                     if (customerReservation)
                     {
+                        decimal claim = custOutcome != null && custOutcome.Amount.HasValue && custOutcome.Amount.Value > 0m
+                            ? custOutcome.Amount.Value : Amount;
                         PaymentResult sr = ps.SubmitReservationSlipForVerification(
-                            int.Parse(SourceId), Amount, fuSlip.PostedFile, CustomerPhone,
-                            "ชำระผ่านหน้าชำระเงินออนไลน์ (สแกน QR แนบสลิป)");
+                            int.Parse(SourceId), claim, fuSlip.PostedFile, CustomerPhone,
+                            "ชำระผ่านหน้าชำระเงินออนไลน์ (สแกน QR แนบสลิป)"
+                            + (custOutcome != null && custOutcome.Failed ? " · ตรวจสลิปอัตโนมัติไม่ผ่าน: " + custOutcome.Reason : ""));
                         if (sr != null)
                         {
                             if (!sr.Success) { ShowInfo(pnlManual, sr.Message, true); return; }
-                            Done("ได้รับสลิปแล้ว เจ้าหน้าที่จะตรวจสอบและยืนยันการชำระเงินให้โดยเร็วที่สุด");
+                            Done("ได้รับสลิปแล้ว เจ้าหน้าที่จะตรวจสอบและยืนยันการชำระเงินให้โดยเร็วที่สุด"
+                                + (custOutcome != null && custOutcome.Lock != null && custOutcome.Lock.Locked
+                                    ? " (ยอดตามสลิป " + claim.ToString("N2") + " บาท"
+                                      + (claim > Amount + 0.009m ? " · มากกว่ายอดที่ต้องชำระ " + (claim - Amount).ToString("N2") + " บาท" : "") + ")"
+                                    : ""));
                             return;
                         }
                         // sr == null: ยังไม่รัน migration PHASE19_25 (ไม่มี Payment_Slips.Claimed_Amount) → ลงรับเงินแบบเดิม
@@ -596,6 +648,55 @@ namespace Take_Time_BangPhra.Payment
                 ShowInfo(pnlManual, IsStaff()
                     ? "เกิดข้อผิดพลาด: " + ex.Message
                     : "บันทึกการชำระเงินไม่สำเร็จ กรุณาลองใหม่อีกครั้ง หรือติดต่อเจ้าหน้าที่", true);
+            }
+        }
+
+        /// <summary>
+        /// ALLOW_MANUAL รอบสอง: ลูกค้ากรอกยอดตามสลิปเอง (ระบบอ่านยอดไม่ได้) → เก็บสลิปรอเจ้าหน้าที่ตรวจ ติดธง "ลูกค้ากรอกยอดเอง"
+        /// ไม่ลงรับเงิน/ไม่ออกใบเสร็จ/ไม่ยืนยันการจอง จนกว่าเจ้าหน้าที่อนุมัติที่หน้า ตรวจสอบสลิป
+        /// </summary>
+        private void SubmitCustomerManualAmount(string slipUrl)
+        {
+            decimal amt;
+            string physicalPath = null;
+            try
+            {
+                if (!string.IsNullOrEmpty(slipUrl) && slipUrl.StartsWith("/Images/PaymentSlips/", StringComparison.OrdinalIgnoreCase)
+                    && slipUrl.IndexOf("..", StringComparison.Ordinal) < 0)
+                    physicalPath = Server.MapPath("~" + slipUrl);
+            }
+            catch { physicalPath = null; }
+            if (physicalPath == null || !File.Exists(physicalPath))
+            {
+                ViewState.Remove("pendSlip");
+                ShowInfo(pnlManual, "ไม่พบสลิปที่แนบไว้ กรุณาแนบสลิปอีกครั้ง", true);
+                return;
+            }
+            pnlManualAmount.Visible = true;
+            if (!decimal.TryParse((txtManualAmount.Text ?? "").Trim(), System.Globalization.NumberStyles.Number,
+                    System.Globalization.CultureInfo.InvariantCulture, out amt) || amt <= 0m || amt > 10000000m)
+            {
+                ShowInfo(pnlManual, "กรุณากรอกยอดเงินตามสลิปให้ถูกต้อง", true);
+                return;
+            }
+            try
+            {
+                var ps = new PaymentService(_conn);
+                PaymentResult sr = ps.SubmitReservationSlipFileForVerification(int.Parse(SourceId), amt, physicalPath, CustomerPhone,
+                    "ชำระผ่านหน้าชำระเงินออนไลน์ (สแกน QR แนบสลิป) · ลูกค้ากรอกยอดเอง " + amt.ToString("N2"), true);
+                if (sr == null)
+                {
+                    ShowInfo(pnlManual, "ระบบยังไม่พร้อมรับสลิปรอตรวจ กรุณาติดต่อเจ้าหน้าที่", true);
+                    return;
+                }
+                if (!sr.Success) { ShowInfo(pnlManual, sr.Message, true); return; }
+                ViewState.Remove("pendSlip");
+                Done("ได้รับสลิปและยอดที่แจ้ง " + amt.ToString("N2") + " บาทแล้ว เจ้าหน้าที่จะตรวจสอบและยืนยันการชำระเงินให้โดยเร็วที่สุด");
+            }
+            catch (Exception ex)
+            {
+                LogPay("บันทึกสลิป (ลูกค้ากรอกยอดเอง) ไม่สำเร็จ " + SourceId + ": " + ex.Message);
+                ShowInfo(pnlManual, "บันทึกการชำระเงินไม่สำเร็จ กรุณาลองใหม่อีกครั้ง หรือติดต่อเจ้าหน้าที่", true);
             }
         }
 

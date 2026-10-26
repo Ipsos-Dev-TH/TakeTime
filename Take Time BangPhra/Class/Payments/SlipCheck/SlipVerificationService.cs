@@ -136,6 +136,7 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
             {
                 SlipInspection insp = Inspect(bytes, fileName, ctx.ForceRefresh);
                 SlipVerifyResult r = Evaluate(insp, expected, ctx);
+                AttachAmountLock(r, insp);   // PHASE19_36 — ข้อมูลประกอบ (ไม่เปลี่ยนผลตัดสิน)
                 TryLog(ctx, r, false);
                 return r;
             }
@@ -228,6 +229,8 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
             decimal tol = Tolerance;
             SlipVendorResponse v = insp.Vendor;
             bool vendorData = v != null && v.HasData && v.Amount.HasValue;
+            r.VendorKind = v != null ? v.Kind : null;
+            r.NotASlip = insp.Qr != null && insp.Qr.IsPaymentQr;
 
             if (insp.Qr != null && insp.Qr.IsSlip)
             {
@@ -370,6 +373,17 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
         public static SlipGateDecision Decide(SlipVerifyResult r, bool customerSelfService, bool allocateRequested,
             bool overrideRequested, string overrideReason, bool canOverride)
         {
+            var d = DecideCore(r, customerSelfService, allocateRequested, overrideRequested, overrideReason, canOverride);
+            // ยอดล็อกตามสลิป (PHASE19_36): ผ่านด่านแล้ว = ยอดที่บันทึกต้องเป็นยอดจากสลิปเสมอ (ยกเว้นแบ่งสลิปหลายการจอง)
+            if (r != null && d.Proceed && !d.HoldForStaff && !d.AllocationUsed && !r.IsAllocationContinuation
+                && r.AmountLocked && r.AmountLock.Amount.HasValue && r.AmountLock.Amount.Value > 0m)
+                d.UseAmount = r.AmountLock.Amount.Value;
+            return d;
+        }
+
+        private static SlipGateDecision DecideCore(SlipVerifyResult r, bool customerSelfService, bool allocateRequested,
+            bool overrideRequested, string overrideReason, bool canOverride)
+        {
             var d = new SlipGateDecision();
             if (r == null) return d;
             if (customerSelfService)
@@ -392,6 +406,14 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
                     return d;
                 case SlipVerifyStatus.Mismatch:
                     if (allocateRequested && r.CanAllocate) { d.AllocationUsed = true; return d; }
+                    if (r.AmountLocked)
+                    {
+                        // ยอดล็อกตามสลิป: ยืนยันยอดอื่นด้วยเหตุผลไม่ได้ — ต้องใช้ยอดสลิป หรือแบ่งสลิปหลายการจอง
+                        d.Proceed = false;
+                        d.BlockMessage = r.Message + " — ยอดล็อกตามสลิป " + r.AmountLock.Amount.GetValueOrDefault().ToString("N2")
+                            + " บาท" + (r.CanAllocate ? " (ถ้าโอนรวมหลายการจอง ให้ติ๊ก \"แบ่งสลิปนี้กับหลายการจอง\")" : "");
+                        return d;
+                    }
                     if (overrideRequested && canOverride && reason.Length >= 3) { d.OverrideUsed = true; d.OverrideReason = reason; return d; }
                     d.Proceed = false;
                     d.BlockMessage = r.Message + (r.CanAllocate
@@ -610,6 +632,19 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
         private static int? MatchReceiver(SlipVendorResponse v, out string why)
         {
             why = null;
+            // ── QR ร้านค้า / จ่ายบิล (Biller) — SlipOK API Guide v1.13 หน้า 8: เทียบ proxy BILLERID + ref1/toMerchantId (PHASE19_36) ──
+            var billers = ReceiverBillerIds;
+            var merchants = ReceiverMerchantIds;
+            if (MatchesBillerOrMerchant(v, billers, merchants)) return null;   // ผู้รับ = QR ร้านค้าของร้าน → ผ่าน
+            bool billerSlip = string.Equals(v.ReceiverProxyType, "BILLERID", StringComparison.OrdinalIgnoreCase)
+                              || !string.IsNullOrEmpty(v.ToMerchantId);
+            if (billerSlip)
+            {
+                if (billers.Count == 0 && merchants.Count == 0) return null;   // ยังไม่ได้ตั้ง Biller ID/รหัสร้านค้า → ตัดสินไม่ได้ (ข้าม)
+                why = "Biller ID/รหัสร้านค้าในสลิป (" + (v.ReceiverProxyMasked ?? v.ToMerchantId ?? v.Ref1 ?? "-")
+                    + ") ไม่ตรงกับที่ตั้งไว้ในหน้าตั้งค่าตรวจสลิป";
+                return null;
+            }
             var accounts = LoadReceiverAccounts();
             if (accounts.Count == 0)
             {
@@ -760,6 +795,9 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
                         r.TransRef = keepRef;
                         overridden = false;
                     }
+
+                    // ยอดล็อกตามสลิป (PHASE19_36) — บันทึกว่ายอดมาจากสลิปแบบล็อก + แหล่ง/ความมั่นใจ
+                    SaveAmountLock(con, slipId, r.AmountLock);
 
                     // OCR ในเครื่อง → เติมคอลัมน์ OCR เดิม (PHASE2) ให้หน้า SlipVerification แสดง
                     if (r.Source == SlipVerifySource.LocalOcr && OcrColsReady)
@@ -1096,6 +1134,618 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
                     con.Open();
                     cmd.ExecuteNonQuery();
                 }
+            }
+            catch { }
+        }
+
+        // ══ ยอดล็อกตามสลิป (PHASE19_36 / CLAUDE.md ข้อ 18) ══════════════════════
+        //  กฎเจ้าของ: อ่านยอดจากสลิปได้น่าเชื่อถือ → ใส่ยอดอัตโนมัติและห้ามแก้มือ · อ่านไม่ได้/ความมั่นใจต่ำ → แก้ยอดเองได้
+        //  "น่าเชื่อถือ" ตัดสินที่ GetAmountLock ที่เดียว: SlipOK มีข้อมูลธนาคาร (100) หรือ OCR ในเครื่อง ≥ SlipVerify_Lock_Min_Confidence
+        //  ปิดตรวจสลิป / ยังไม่รัน PHASE19_34 = ไม่ล็อก (พฤติกรรมเดิม)
+
+        public const string CfgLockMinConfidence = "SlipVerify_Lock_Min_Confidence";
+        public const string CfgBillerIds = "SlipVerify_Receiver_Biller_Ids";
+        public const string CfgMerchantIds = "SlipVerify_Receiver_Merchant_Ids";
+        public const string CfgCustomerFailMode = "SlipVerify_Customer_Fail_Mode";
+        public const string CfgCustomerContact = "SlipVerify_Customer_Contact";
+
+        public static int LockMinConfidence
+        {
+            get
+            {
+                int v;
+                try { v = AppCfg.GetInt(CfgLockMinConfidence, 85); } catch { v = 85; }
+                return v < 1 ? 1 : v > 100 ? 100 : v;
+            }
+        }
+
+        /// <summary>ล็อกยอดทำงานเมื่อเปิดตรวจสลิป + มีคอลัมน์ PHASE19_34</summary>
+        public static bool AmountLockActive
+        {
+            get { try { return IsEnabled && SchemaReady; } catch { return false; } }
+        }
+
+        private static bool LockColsReady => Has("lockcol", "SELECT COL_LENGTH('dbo.Payment_Slips','Amount_Locked')");
+        private static bool ManualColReady => Has("manualcol", "SELECT COL_LENGTH('dbo.Payment_Slips','Customer_Manual_Amount')");
+        /// <summary>มีคอลัมน์ Amount_Locked/Lock_Confidence/Lock_Source (PHASE19_36)</summary>
+        public static bool AmountLockSchemaReady => LockColsReady;
+        /// <summary>มีคอลัมน์ Customer_Manual_Amount (PHASE19_36)</summary>
+        public static bool ManualAmountSchemaReady => ManualColReady;
+
+        /// <summary>ตัดสินล็อกยอดจากข้อเท็จจริงของรูป (ค่าความมั่นใจขั้นต่ำจากค่าตั้ง)</summary>
+        public static SlipAmountLock GetAmountLock(SlipInspection insp)
+        {
+            return GetAmountLock(insp, LockMinConfidence);
+        }
+
+        /// <summary>
+        /// ตัดสินล็อกยอด (pure — ไม่เรียกเน็ต/DB): SlipOK มีข้อมูลธนาคารพร้อมยอด = ล็อก (100) — ยกเว้น 1012 (SlipOK เคยเห็นสลิปนี้แล้ว)
+        /// ที่ไม่ล็อก (ให้ฐานข้อมูลของเราตัดสินสลิปซ้ำ) · OCR ในเครื่อง ≥ minConfidence = ล็อก · นอกนั้นไม่ล็อก (มีคำใบ้ถ้าอ่านได้บ้าง)
+        /// OCR อ่านแบบไม่อิงยอดที่ลง (expected = null) — ยอดที่ผู้ใช้กรอกต้องไม่มีผลกับการล็อก
+        /// </summary>
+        public static SlipAmountLock GetAmountLock(SlipInspection insp, int minConfidence)
+        {
+            var lk = new SlipAmountLock { Active = true };
+            if (insp == null) { lk.Reason = "ไม่มีรูปสลิป"; return lk; }
+            if (insp.Qr != null && insp.Qr.IsPaymentQr) { lk.Reason = "รูปนี้เป็น QR รับเงิน ไม่ใช่สลิปโอน"; return lk; }
+
+            SlipVendorResponse v = insp.Vendor;
+            if (v != null && v.HasData && v.Amount.HasValue && v.Amount.Value > 0m)
+            {
+                if (v.Kind == SlipVendorResponse.KindDuplicate)
+                {
+                    lk.HintAmount = v.Amount;
+                    lk.HintConfidence = 100;
+                    lk.Reason = "SlipOK แจ้งว่าเคยตรวจสลิปนี้แล้ว (1012) — ไม่ล็อกยอด ตรวจสลิปซ้ำจากฐานข้อมูลของร้าน";
+                    return lk;
+                }
+                lk.Locked = true;
+                lk.Amount = v.Amount;
+                lk.Source = SlipVerifySource.SlipOk;
+                lk.Confidence = 100;
+                lk.Reason = "ธนาคารยืนยันยอดผ่าน SlipOK";
+                return lk;
+            }
+
+            if (!string.IsNullOrEmpty(insp.OcrText))
+            {
+                int conf; string why;
+                decimal? amt = null;
+                try { amt = LocalSlipAmountReader.ExtractAmount(insp.OcrText, null, out conf, out why); }
+                catch (Exception ex) { conf = 0; why = ex.GetType().Name; }
+                if (amt.HasValue && amt.Value > 0m && conf >= minConfidence)
+                {
+                    lk.Locked = true;
+                    lk.Amount = amt;
+                    lk.Source = SlipVerifySource.LocalOcr;
+                    lk.Confidence = conf;
+                    lk.Reason = "อ่านยอดจากรูปได้ชัดเจน (" + conf + "% ≥ " + minConfidence + "%)";
+                    return lk;
+                }
+                if (amt.HasValue && amt.Value > 0m)
+                {
+                    lk.HintAmount = amt;
+                    lk.HintConfidence = Math.Max(1, conf);
+                    lk.Reason = "ความมั่นใจในการอ่านยอดต่ำ (" + conf + "% < " + minConfidence + "%)";
+                }
+                else lk.Reason = "อ่านยอดจากรูปไม่ได้" + (string.IsNullOrEmpty(why) ? "" : " (" + why + ")");
+                return lk;
+            }
+            lk.Reason = !string.IsNullOrEmpty(insp.OcrError) ? insp.OcrError
+                : !string.IsNullOrEmpty(insp.VendorSkipReason) ? insp.VendorSkipReason + " และอ่านยอดจากรูปไม่ได้"
+                : "อ่านยอดจากสลิปไม่ได้";
+            return lk;
+        }
+
+        private static void AttachAmountLock(SlipVerifyResult r, SlipInspection insp)
+        {
+            try
+            {
+                if (r == null || r.AmountLock != null || !AmountLockActive) return;
+                r.AmountLock = GetAmountLock(insp);
+            }
+            catch { }
+        }
+
+        /// <summary>ตรวจรูปแล้วคืนเฉพาะผลล็อกยอด (หน้าแสดงผลทันทีหลังอัปโหลด) — ปิดฟีเจอร์ = Inactive</summary>
+        public static SlipAmountLock InspectAmountLock(byte[] bytes, string fileName)
+        {
+            if (bytes == null || bytes.Length == 0 || !AmountLockActive) return SlipAmountLock.Inactive();
+            try { return GetAmountLock(Inspect(bytes, fileName, false)); }
+            catch (Exception ex)
+            {
+                Log("InspectAmountLock: " + ex.GetType().Name + " " + ex.Message);
+                return new SlipAmountLock { Active = true, Reason = "ตรวจสลิปไม่ได้ (" + ex.GetType().Name + ")" };
+            }
+        }
+
+        public static SlipAmountLock InspectAmountLockFile(string pathOrUrl)
+        {
+            byte[] bytes; string name;
+            return ReadSlipFile(pathOrUrl, out bytes, out name) ? InspectAmountLock(bytes, name) : SlipAmountLock.Inactive();
+        }
+
+        private static bool ReadSlipFile(string pathOrUrl, out byte[] bytes, out string name)
+        {
+            bytes = null; name = null;
+            try
+            {
+                string p = MapSlipPath(pathOrUrl);
+                if (!string.IsNullOrEmpty(p) && File.Exists(p)) { bytes = File.ReadAllBytes(p); name = Path.GetFileName(p); }
+            }
+            catch { }
+            return bytes != null;
+        }
+
+        /// <summary>
+        /// ตรวจสลิปแบบยอดล็อก (ช่องยอดที่ผู้ใช้กรอกได้ — หน้าจอง/รับเงินเพิ่ม/ชำระเงิน):
+        ///   ไม่ล็อก = ตรวจเทียบยอดที่กรอกแบบเดิม (recordAmount = typed)
+        ///   ล็อก = ตรวจที่ยอดสลิป recordAmount = ยอดสลิป ไม่ว่าผู้ใช้กรอกอะไรมา (ต่าง = log) ยกเว้น
+        ///     · ใช้ยอดคงเหลือของสลิปที่แบ่งไว้ (การจองถัดไป) — ยอดที่กรอกต้องไม่เกินยอดคงเหลือ
+        ///     · allocateRequested (แบ่งสลิปครั้งแรก) — ยอดที่กรอกต้องน้อยกว่ายอดสลิป (ส่วนที่เหลือใช้กับการจองอื่น)
+        ///   ปิดฟีเจอร์ = Verify แบบเดิม
+        /// </summary>
+        public static SlipVerifyResult VerifyWithLock(byte[] bytes, string fileName, decimal? typed, SlipVerifyContext ctx,
+            bool allocateRequested, out SlipAmountLock amountLock, out decimal? recordAmount)
+        {
+            amountLock = SlipAmountLock.Inactive();
+            recordAmount = typed;
+            ctx = ctx ?? new SlipVerifyContext();
+            if (!AmountLockActive) return Verify(bytes, fileName, typed, ctx);
+            try
+            {
+                SlipInspection insp = Inspect(bytes, fileName, ctx.ForceRefresh);
+                SlipAmountLock lk = GetAmountLock(insp);
+                amountLock = lk;
+                SlipVerifyResult r;
+                decimal? rec;
+                if (!lk.Locked) { r = Evaluate(insp, typed, ctx); rec = typed; }
+                else r = PlanLocked(insp, lk, typed, ctx, allocateRequested, out rec);
+                r.AmountLock = lk;
+                recordAmount = rec;
+                TryLog(ctx, r, false);
+                return r;
+            }
+            catch (Exception ex)
+            {
+                Log("SlipVerify(lock) error: " + ex.GetType().Name + " " + ex.Message);
+                return new SlipVerifyResult
+                {
+                    Status = SlipVerifyStatus.UnverifiedBypass,
+                    ExpectedAmount = typed,
+                    AmountLock = amountLock,
+                    Message = "ตรวจสลิปไม่ได้ (" + ex.GetType().Name + ") — ข้ามการตรวจ ใช้ยอดที่ลง และติดธงให้ตรวจภายหลัง"
+                };
+            }
+        }
+
+        private static SlipVerifyResult PlanLocked(SlipInspection insp, SlipAmountLock lk, decimal? typed, SlipVerifyContext ctx,
+            bool allocateRequested, out decimal? rec)
+        {
+            decimal slip = lk.Amount.Value;
+            if (typed.HasValue && typed.Value > 0m && Math.Abs(typed.Value - slip) > 0.005m)
+            {
+                SlipVerifyResult rt = Evaluate(insp, typed, ctx);
+                // ① ยอดคงเหลือของสลิปที่แบ่งไว้กับการจองอื่น — ยอดรายการนี้ต้องไม่เกินยอดคงเหลือ (รวมทุกส่วน = ยอดสลิป)
+                if (rt.IsAllocationContinuation)
+                {
+                    decimal remaining = rt.AllocationRemaining ?? 0m;
+                    if (typed.Value > remaining + 0.005m)
+                    {
+                        rt.IsAllocationContinuation = false;
+                        rt.Status = SlipVerifyStatus.Duplicate;
+                        rt.CanOverride = false;
+                        rt.Message = "ยอดที่แบ่ง " + typed.Value.ToString("N2") + " บาท เกินยอดคงเหลือของสลิป "
+                            + remaining.ToString("N2") + " บาท (ยอดสลิปทั้งหมด " + slip.ToString("N2") + ")";
+                    }
+                    else
+                    {
+                        rt.Message += " · เหลือหลังรายการนี้ " + (remaining - typed.Value).ToString("N2") + " บาท";
+                    }
+                    rec = typed;
+                    return rt;
+                }
+                // ② แบ่งสลิปครั้งแรก (ติ๊กแบ่งสลิป) — ยอดรายการนี้ < ยอดสลิป ส่วนที่เหลือต้องแบ่งให้การจองอื่นให้ครบ
+                if (allocateRequested && typed.Value < slip)
+                {
+                    if (rt.Status == SlipVerifyStatus.Mismatch)
+                    {
+                        rt.CanAllocate = true;
+                        rt.CanOverride = false;
+                        rt.AllocationRemaining = slip - typed.Value;
+                        rt.Message = "แบ่งสลิป: ใช้ " + typed.Value.ToString("N2") + " จากยอดสลิป " + slip.ToString("N2")
+                            + " บาท — เหลือ " + (slip - typed.Value).ToString("N2") + " บาท ต้องแบ่งให้การจองอื่นจนครบยอดสลิป";
+                    }
+                    rec = typed;
+                    return rt;
+                }
+            }
+
+            // ③ ล็อก: ยอดที่บันทึก = ยอดจากสลิป
+            SlipVerifyResult r = Evaluate(insp, slip, ctx);
+            rec = slip;
+            if (typed.HasValue && Math.Abs(typed.Value - slip) > 0.005m)
+            {
+                r.TypedAmount = typed;
+                r.Notes.Add("ยอดที่กรอก " + typed.Value.ToString("N2") + " ถูกแทนด้วยยอดจากสลิป " + slip.ToString("N2"));
+                r.Message = (r.Message ?? "") + " [ยอดที่กรอก " + typed.Value.ToString("N2") + " → ใช้ยอดจากสลิป " + slip.ToString("N2") + "]";
+                Log("ยอดล็อกตามสลิป: กรอก " + typed.Value.ToString("N2") + " → " + slip.ToString("N2") + " (" + lk.Source + " " + lk.Confidence
+                    + "%) " + (ctx.SourceType ?? "") + " #" + (ctx.SourceId.HasValue ? ctx.SourceId.Value.ToString() : "-"));
+            }
+            return r;
+        }
+
+        /// <summary>
+        /// ตรวจสลิปของรายการยอดตายตัว (กิจกรรม/รูมเซอร์วิส — ยอดคือราคาออเดอร์ ไม่มีช่องกรอก):
+        /// ล็อก = ตรวจที่ยอดสลิปแล้วเทียบกับยอดที่ต้องชำระเอง — มากกว่า = ผ่าน (รับเกิน) · น้อยกว่าเกิน tolerance = MISMATCH (ชำระไม่ครบ)
+        /// ไม่ล็อก = เหมือนเดิม
+        /// </summary>
+        public static SlipVerifyResult VerifyFixedTotal(byte[] bytes, string fileName, decimal? total, SlipVerifyContext ctx)
+        {
+            ctx = ctx ?? new SlipVerifyContext();
+            if (!AmountLockActive) return Verify(bytes, fileName, total, ctx);
+            try
+            {
+                SlipInspection insp = Inspect(bytes, fileName, ctx.ForceRefresh);
+                SlipAmountLock lk = GetAmountLock(insp);
+                SlipVerifyResult r;
+                if (!lk.Locked || !total.HasValue)
+                {
+                    r = Evaluate(insp, total, ctx);
+                    r.AmountLock = lk;
+                    TryLog(ctx, r, false);
+                    return r;
+                }
+                decimal slip = lk.Amount.Value;
+                r = Evaluate(insp, slip, ctx);
+                r.AmountLock = lk;
+                ApplyFixedTotal(r, slip, total.Value, Tolerance);
+                TryLog(ctx, r, false);
+                return r;
+            }
+            catch (Exception ex)
+            {
+                Log("SlipVerify(fixed) error: " + ex.GetType().Name + " " + ex.Message);
+                return new SlipVerifyResult
+                {
+                    Status = SlipVerifyStatus.UnverifiedBypass,
+                    ExpectedAmount = total,
+                    Message = "ตรวจสลิปไม่ได้ (" + ex.GetType().Name + ") — ข้ามการตรวจ และติดธงให้ตรวจภายหลัง"
+                };
+            }
+        }
+
+        public static SlipVerifyResult VerifyFileFixedTotal(string pathOrUrl, decimal? total, SlipVerifyContext ctx)
+        {
+            byte[] bytes; string name;
+            if (!ReadSlipFile(pathOrUrl, out bytes, out name)) return VerifyFile(pathOrUrl, total, ctx);
+            return VerifyFixedTotal(bytes, name, total, ctx);
+        }
+
+        /// <summary>เทียบยอดสลิปที่ล็อกกับยอดตายตัว (pure — ทดสอบได้) — r ต้องตรวจที่ยอดสลิปมาแล้ว</summary>
+        public static void ApplyFixedTotal(SlipVerifyResult r, decimal slip, decimal total, decimal tol)
+        {
+            if (r == null) return;
+            r.ExpectedAmount = total;
+            decimal diff = slip - total;
+            r.Difference = diff;
+            if (r.Status != SlipVerifyStatus.Verified) return;   // ซ้ำ/ผู้รับผิด/ฯลฯ คงผลเดิม
+            if (diff < -tol)
+            {
+                r.Status = SlipVerifyStatus.Mismatch;
+                r.CanOverride = true;     // รับยอดไม่ครบ = Owner/Admin ยืนยันซ้ำได้ (ไม่ใช่การแก้ยอด)
+                r.CanAllocate = false;
+                r.Message = "ยอดจากสลิป " + slip.ToString("N2") + " บาท น้อยกว่ายอดที่ต้องชำระ " + total.ToString("N2")
+                    + " — ชำระไม่ครบ (ขาด " + (-diff).ToString("N2") + " บาท)";
+            }
+            else if (diff > tol)
+            {
+                r.Message = "ยอดจากสลิป " + slip.ToString("N2") + " บาท มากกว่ายอดที่ต้องชำระ " + total.ToString("N2")
+                    + " — รับเกิน " + diff.ToString("N2") + " บาท";
+            }
+        }
+
+        /// <summary>ข้อความ "รับเกิน X บาท" (null = ไม่เกิน)</summary>
+        public static string OverpayText(decimal amount, decimal due)
+        {
+            decimal over = amount - due;
+            return over > 0.009m ? "รับเกิน " + over.ToString("N2") + " บาท" : null;
+        }
+
+        private static void SaveAmountLock(SqlConnection con, long slipId, SlipAmountLock lk)
+        {
+            if (lk == null || !lk.Active || slipId <= 0 || !LockColsReady) return;
+            try
+            {
+                using (var cmd = new SqlCommand("UPDATE Payment_Slips SET Amount_Locked = @l, Lock_Confidence = @c, Lock_Source = @s WHERE ID = @id", con))
+                {
+                    cmd.Parameters.AddWithValue("@id", slipId);
+                    cmd.Parameters.AddWithValue("@l", lk.Locked);
+                    cmd.Parameters.AddWithValue("@c", lk.Locked ? lk.Confidence : lk.HintConfidence);
+                    cmd.Parameters.AddWithValue("@s", lk.Locked ? (object)lk.Source : DBNull.Value);
+                    cmd.ExecuteNonQuery();
+                }
+            }
+            catch (Exception ex) { Log("SaveAmountLock #" + slipId + ": " + ex.Message); }
+        }
+
+        /// <summary>ติดธง "ลูกค้ากรอกยอดเอง" ที่แถวสลิป (โหมด ALLOW_MANUAL) — ไม่มีคอลัมน์ = เขียนใน Verify_Message แทน</summary>
+        public static void MarkCustomerManualAmount(long slipId, string reason)
+        {
+            if (slipId <= 0 || !SchemaReady) return;
+            try
+            {
+                bool col = ManualColReady;
+                using (var con = new SqlConnection(ConnStr))
+                using (var cmd = new SqlCommand("UPDATE Payment_Slips SET "
+                    + (col ? "Customer_Manual_Amount = 1, " : "")
+                    + "Verify_Message = LEFT(N'ลูกค้ากรอกยอดเอง: ' + ISNULL(@r, N'') + N' · ' + ISNULL(Verify_Message, N''), 1000) WHERE ID = @id", con))
+                {
+                    cmd.Parameters.AddWithValue("@id", slipId);
+                    cmd.Parameters.AddWithValue("@r", (object)Cut(reason, 300) ?? DBNull.Value);
+                    con.Open();
+                    cmd.ExecuteNonQuery();
+                }
+            }
+            catch (Exception ex) { Log("MarkCustomerManualAmount #" + slipId + ": " + ex.Message); }
+        }
+
+        // ── ผู้รับแบบ QR ร้านค้า / Biller ─────────────────────────────────────
+
+        public static List<string> ReceiverBillerIds => ParseIdList(SafeCfg(CfgBillerIds));
+        public static List<string> ReceiverMerchantIds => ParseIdList(SafeCfg(CfgMerchantIds));
+
+        private static string SafeCfg(string key)
+        {
+            try { return AppCfg.Get(key, "") ?? ""; } catch { return ""; }
+        }
+
+        public static List<string> ParseIdList(string s)
+        {
+            return (s ?? "").Split(new[] { ',', ';', '\n', '\r', '\t', ' ', '|' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(x => x.Trim()).Where(x => x.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        }
+
+        /// <summary>ผู้รับในสลิปเป็น Biller ID / รหัสร้านค้าของร้าน (pure — ทดสอบได้)</summary>
+        public static bool MatchesBillerOrMerchant(SlipVendorResponse v, IList<string> billerIds, IList<string> merchantIds)
+        {
+            if (v == null) return false;
+            if (billerIds != null)
+                foreach (string b in billerIds)
+                    if (IdMatch(v.ReceiverProxyMasked, b, true) || IdMatch(v.ReceiverAcctMasked, b, true)
+                        || IdMatch(v.Ref1, b, true) || IdMatch(v.ToMerchantId, b, true))
+                        return true;
+            if (merchantIds != null)
+                foreach (string m in merchantIds)
+                    if (IdMatch(v.ToMerchantId, m, false) || IdMatch(v.Ref1, m, false) || IdMatch(v.Ref2, m, false)
+                        || IdMatch(v.Ref3, m, false) || IdMatch(v.ReceiverProxyMasked, m, false) || IdMatch(v.ReceiverAcctMasked, m, false))
+                        return true;
+            return false;
+        }
+
+        /// <summary>
+        /// เทียบรหัส (ค่าที่ปิดบังบางส่วนได้: x * •) — digitsOnly: เทียบเฉพาะตัวเลข (Biller ID 010-753-6-0003150-8 = 010753600031508)
+        /// ไม่งั้นเทียบตัวอักษร+ตัวเลขแบบไม่สนตัวพิมพ์ (KB000001813229) · ยาวเท่ากัน = รายตำแหน่ง · ค่ายาวกว่าแต่มีรหัสเต็มอยู่ข้างใน =
+        /// ตรง (เช่น KPS004KB000001813229) · ค่าที่ปิดบังสั้นกว่า = ช่วงที่เห็นยาวสุด ≥ 6 ต้องอยู่ในรหัส
+        /// </summary>
+        public static bool IdMatch(string value, string configured, bool digitsOnly)
+        {
+            if (string.IsNullOrWhiteSpace(value) || string.IsNullOrWhiteSpace(configured)) return false;
+            Func<char, bool> keep = digitsOnly ? (Func<char, bool>)char.IsDigit : char.IsLetterOrDigit;
+            string cfg = new string(configured.ToUpperInvariant().Where(c => keep(c)).ToArray());
+            if (cfg.Length < 4) return false;
+            var sb = new StringBuilder();
+            foreach (char ch in value.ToUpperInvariant())
+            {
+                if (ch == '*' || ch == '•' || (ch == 'X' && (digitsOnly || !cfg.Contains('X')))) sb.Append('?');
+                else if (keep(ch)) sb.Append(ch);
+            }
+            string val = sb.ToString();
+            if (val.Length == 0) return false;
+            if (val.IndexOf('?') < 0) return val == cfg || val.Contains(cfg);
+            if (val.Length == cfg.Length)
+            {
+                int seen = 0;
+                for (int i = 0; i < val.Length; i++)
+                {
+                    if (val[i] == '?') continue;
+                    if (val[i] != cfg[i]) return false;
+                    seen++;
+                }
+                return seen >= 4;
+            }
+            string longest = val.Split('?').OrderByDescending(x => x.Length).FirstOrDefault();
+            return !string.IsNullOrEmpty(longest) && longest.Length >= 6 && cfg.Contains(longest);
+        }
+
+        // ── ช่องทางลูกค้าทำเอง: ตรวจไม่ผ่าน → ติดต่อเจ้าหน้าที่ หรือ ให้กรอกยอดเอง (SlipVerify_Customer_Fail_Mode) ──
+
+        public static string CustomerFailMode
+        {
+            get
+            {
+                string m = (SafeCfg(CfgCustomerFailMode) ?? "").Trim().ToUpperInvariant();
+                return m == CustomerSlipOutcome.ModeAllowManual ? CustomerSlipOutcome.ModeAllowManual : CustomerSlipOutcome.ModeContactAdmin;
+            }
+        }
+
+        /// <summary>
+        /// ตรวจสลิปที่ลูกค้าแนบเอง (ไม่ใช่พนักงาน) แล้วตัดสินตามโหมด:
+        ///   ผ่าน (ล็อกยอดได้ + ตรวจแล้ว + ผู้รับถูก) → Accept (ยอด = ยอดสลิป)
+        ///   สลิปซ้ำ → Blocked เสมอ
+        ///   ตรวจไม่ผ่าน → CONTACT_ADMIN = Blocked (ข้อความให้ติดต่อเจ้าหน้าที่ + แจ้ง Telegram) · ALLOW_MANUAL = Accept แต่ต้องรอพนักงานตรวจ
+        ///     (ManualAmount = ลูกค้ากรอกยอดเอง เมื่อไม่ล็อกและเป็นช่องที่กรอกยอดได้)
+        /// fixedTotal = ยอดตายตัว (กิจกรรม/รูมเซอร์วิส/หน้าชำระเงินที่ไม่มีช่องกรอก) · ปิดฟีเจอร์ = Accept แบบเดิม
+        /// </summary>
+        public static CustomerSlipOutcome EvaluateCustomerSlip(byte[] bytes, string fileName, decimal? amount, bool fixedTotal,
+            SlipVerifyContext ctx, string fileRef)
+        {
+            var o = new CustomerSlipOutcome { Mode = CustomerFailMode, Amount = amount };
+            if (!AmountLockActive || bytes == null || bytes.Length == 0) return o;
+            ctx = ctx ?? new SlipVerifyContext();
+            ctx.CustomerSelfService = true;
+            SlipVerifyResult r;
+            SlipAmountLock lk;
+            try
+            {
+                if (fixedTotal)
+                {
+                    r = VerifyFixedTotal(bytes, fileName, amount, ctx);
+                    lk = r.AmountLock ?? SlipAmountLock.Inactive();
+                }
+                else
+                {
+                    decimal? rec;
+                    r = VerifyWithLock(bytes, fileName, amount, ctx, false, out lk, out rec);
+                    if (lk.Locked && rec.HasValue && rec.Value > 0m) o.Amount = rec;
+                }
+            }
+            catch (Exception ex)
+            {
+                r = new SlipVerifyResult { Status = SlipVerifyStatus.UnverifiedBypass, ExpectedAmount = amount, Message = ex.GetType().Name };
+                lk = new SlipAmountLock { Active = true, Reason = "ตรวจสลิปไม่ได้" };
+            }
+            o.Result = r;
+            o.Lock = lk;
+            return FinishCustomerOutcome(o, fixedTotal, ctx, fileRef);
+        }
+
+        /// <summary>แบบเดียวกับ EvaluateCustomerSlip แต่อ่านไฟล์ที่บันทึกแล้ว (URL ในเว็บ/ path จริง) — อ่านไฟล์ไม่ได้ = Accept แบบเดิม</summary>
+        public static CustomerSlipOutcome EvaluateCustomerSlipFile(string pathOrUrl, decimal? amount, bool fixedTotal, SlipVerifyContext ctx)
+        {
+            byte[] bytes; string name;
+            if (!AmountLockActive || !ReadSlipFile(pathOrUrl, out bytes, out name))
+                return new CustomerSlipOutcome { Mode = CustomerFailMode, Amount = amount };
+            return EvaluateCustomerSlip(bytes, name, amount, fixedTotal, ctx, pathOrUrl);
+        }
+
+        /// <summary>ตัดสินผลลูกค้า (pure ส่วนใหญ่ — แยกไว้ให้ทดสอบ) แล้ว log/แจ้งเตือนเมื่อไม่ผ่าน</summary>
+        public static CustomerSlipOutcome FinishCustomerOutcome(CustomerSlipOutcome o, bool fixedTotal, SlipVerifyContext ctx, string fileRef)
+        {
+            SlipVerifyResult r = o.Result;
+            SlipAmountLock lk = o.Lock ?? SlipAmountLock.Inactive();
+            if (r == null) return o;
+            if (r.Status == SlipVerifyStatus.Duplicate && !r.IsAllocationContinuation)
+            {
+                o.Accept = false; o.Blocked = true; o.Failed = true;
+                o.Reason = "สลิปนี้เคยใช้ชำระไปแล้ว";
+                o.Message = "สลิปนี้ถูกใช้ชำระไปแล้ว ไม่สามารถใช้ซ้ำได้ กรุณาติดต่อเจ้าหน้าที่" + CustomerContactText();
+                NotifyCustomerFail(o, ctx, fileRef);
+                return o;
+            }
+            string reason = CustomerFailReason(r, lk, fixedTotal);
+            if (reason == null) return o;   // ผ่าน
+            o.Failed = true;
+            o.Reason = reason;
+            if (o.Mode == CustomerSlipOutcome.ModeAllowManual)
+            {
+                o.Accept = true;
+                o.ManualAmount = !fixedTotal && !lk.Locked;
+                o.Message = "ระบบตรวจสลิปอัตโนมัติไม่ผ่าน (" + reason + ") — "
+                    + (o.ManualAmount ? "กรุณากรอกยอดตามสลิป " : "")
+                    + "เจ้าหน้าที่จะตรวจสอบและยืนยันให้";
+                NotifyCustomerFail(o, ctx, fileRef);
+                return o;
+            }
+            o.Accept = false;
+            o.Blocked = true;
+            o.Message = "ระบบตรวจสอบสลิปไม่ผ่าน กรุณาติดต่อเจ้าหน้าที่\nสาเหตุ: " + reason + CustomerContactText();
+            NotifyCustomerFail(o, ctx, fileRef);
+            return o;
+        }
+
+        /// <summary>เหตุผลที่ "ไม่ผ่าน" สำหรับลูกค้า (null = ผ่าน) — pure</summary>
+        public static string CustomerFailReason(SlipVerifyResult r, SlipAmountLock lk, bool fixedTotal)
+        {
+            if (r == null) return "ตรวจสลิปไม่ได้";
+            lk = lk ?? SlipAmountLock.Inactive();
+            if (r.NotASlip) return "รูปที่แนบไม่ใช่สลิปโอนเงิน (เป็น QR รับเงิน)";
+            if (r.VendorKind == SlipVendorResponse.KindNoQr) return "ไม่พบ QR ของสลิปในรูป (รูปไม่ชัดหรือถูกครอป)";
+            if (r.VendorKind == SlipVendorResponse.KindNotFound) return "ธนาคารไม่พบรายการโอนนี้ หรือ QR ในสลิปหมดอายุ";
+            if (r.Status == SlipVerifyStatus.WrongReceiver) return "โอนเข้าบัญชีที่ไม่ใช่บัญชีของโรงแรม";
+            if (r.Status == SlipVerifyStatus.Mismatch)
+                return fixedTotal && r.Amount.HasValue && r.ExpectedAmount.HasValue
+                    ? "ยอดในสลิป " + r.Amount.Value.ToString("N2") + " บาท ไม่ครบยอดที่ต้องชำระ " + r.ExpectedAmount.Value.ToString("N2") + " บาท"
+                    : "ยอดในสลิปไม่ตรงกับยอดที่ต้องชำระ";
+            if (r.Status == SlipVerifyStatus.PendingBank) return "ธนาคารยังไม่ยืนยันรายการ (เพิ่งโอนเสร็จ) — ลองใหม่อีกครู่";
+            if (!lk.Locked)
+                return lk.HintConfidence > 0 ? "อ่านยอดเงินในสลิปได้ไม่ชัดเจน (ความมั่นใจ " + lk.HintConfidence + "%)" : "อ่านยอดเงินในสลิปไม่ได้";
+            if (r.Status == SlipVerifyStatus.UnverifiedBypass) return "ระบบตรวจสลิปขัดข้องชั่วคราว";
+            return null;
+        }
+
+        /// <summary>ช่องทางติดต่อโรงแรม: ค่าตั้ง SlipVerify_Customer_Contact → Business_Info.Phone_Number + LINE OA (LineLogin_BotBasicId)</summary>
+        public static string CustomerContactText()
+        {
+            const string key = "slipcust:contact";
+            try
+            {
+                var c = HttpRuntime.Cache[key] as string;
+                if (c != null) return c;
+            }
+            catch { }
+            string text = "";
+            try
+            {
+                string custom = SafeCfg(CfgCustomerContact).Trim();
+                if (custom.Length > 0) text = "\nติดต่อ: " + custom;
+                else
+                {
+                    var parts = new List<string>();
+                    try
+                    {
+                        using (var con = new SqlConnection(ConnStr))
+                        using (var cmd = new SqlCommand("SELECT TOP 1 Phone_Number FROM Business_Info WHERE ISNULL(Phone_Number,'') <> '' ORDER BY ID", con))
+                        {
+                            con.Open();
+                            object o = cmd.ExecuteScalar();
+                            if (o != null && o != DBNull.Value && o.ToString().Trim().Length > 0) parts.Add("โทร " + o.ToString().Trim());
+                        }
+                    }
+                    catch { }
+                    try
+                    {
+                        string line = new Take_Time_BangPhra.Services.LineLoginService(ConnStr).BotBasicId;
+                        if (!string.IsNullOrWhiteSpace(line)) parts.Add("LINE " + (line.Trim().StartsWith("@") ? line.Trim() : "@" + line.Trim()));
+                    }
+                    catch { }
+                    if (parts.Count > 0) text = "\nติดต่อเจ้าหน้าที่: " + string.Join(" · ", parts);
+                }
+            }
+            catch { }
+            try { HttpRuntime.Cache.Insert(key, text, null, DateTime.UtcNow.AddMinutes(10), Cache.NoSlidingExpiration); } catch { }
+            return text;
+        }
+
+        public static void InvalidateContactCache()
+        {
+            try { HttpRuntime.Cache.Remove("slipcust:contact"); } catch { }
+        }
+
+        private static void NotifyCustomerFail(CustomerSlipOutcome o, SlipVerifyContext ctx, string fileRef)
+        {
+            try
+            {
+                SlipVerifyResult r = o.Result;
+                string src = (ctx != null ? SourceThai(ctx.SourceType) : "") + (ctx != null && ctx.SourceId.HasValue ? " #" + ctx.SourceId.Value : "");
+                string mode = o.Blocked ? (r != null && r.Status == SlipVerifyStatus.Duplicate ? "ไม่รับ (สลิปซ้ำ)" : "ไม่รับ — ให้ติดต่อเจ้าหน้าที่")
+                    : "รับไว้รอตรวจ" + (o.ManualAmount ? " (ลูกค้ากรอกยอดเอง)" : "");
+                Log("ลูกค้าแนบสลิปตรวจไม่ผ่าน " + src + " → " + mode + " · " + o.Reason + (r != null ? " · " + r.ShortText() : "")
+                    + (string.IsNullOrEmpty(fileRef) ? "" : " · ไฟล์ " + fileRef));
+                // Telegram (กันถี่: รูปเดียวกัน 1 ครั้ง/30 นาที)
+                string tkey = "slipcustfail:" + (r != null && !string.IsNullOrEmpty(r.FileHash) ? r.FileHash : (fileRef ?? src));
+                try
+                {
+                    if (HttpRuntime.Cache[tkey] != null) return;
+                    HttpRuntime.Cache.Insert(tkey, DateTime.Now, null, DateTime.UtcNow.AddMinutes(30), Cache.NoSlidingExpiration);
+                }
+                catch { }
+                Notify.Send(Notify.Ev.PaymentOnline, "⚠️ <b>ลูกค้าแนบสลิป ตรวจไม่ผ่าน</b> — " + HttpUtility.HtmlEncode(mode)
+                    + (src.Trim().Length > 0 ? "\n" + HttpUtility.HtmlEncode(src.Trim()) : "")
+                    + "\nสาเหตุ: " + HttpUtility.HtmlEncode(o.Reason ?? "-")
+                    + (r != null ? "\n" + HttpUtility.HtmlEncode(r.ShortText()) : "")
+                    + (string.IsNullOrEmpty(fileRef) ? "" : "\nไฟล์: " + HttpUtility.HtmlEncode(fileRef))
+                    + "\nกรุณาติดต่อลูกค้า/ตรวจกับบัญชีธนาคาร");
             }
             catch { }
         }

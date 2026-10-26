@@ -282,6 +282,16 @@ namespace Take_Time_BangPhra.Guest
                 {
                     slipUrl = SaveSlip();
                     if (slipUrl == null) return;   // SaveSlip แสดง error เองแล้ว
+
+                    // 🔎 ผู้เข้าพักแนบสลิปเอง (PHASE19_36): ตรวจก่อนรับ — ตรวจไม่ผ่าน = ติดต่อเจ้าหน้าที่ (ไม่สร้างการจอง)
+                    //    หรือรับไว้รอเจ้าหน้าที่ตรวจ ตาม SlipVerify_Customer_Fail_Mode · สลิปซ้ำ = ไม่รับเสมอ · ยอด = ราคากิจกรรม (ตายตัว)
+                    var oc = Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.EvaluateCustomerSlipFile(slipUrl, amount, true,
+                        new Take_Time_BangPhra.Payments.SlipCheck.SlipVerifyContext { SourceType = "ACTIVITY" });
+                    if (oc.Blocked)
+                    {
+                        ShowMsg(oc.Message, false);
+                        return;
+                    }
                 }
 
                 var req = new ActivityService.BookingRequest

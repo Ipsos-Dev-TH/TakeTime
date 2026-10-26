@@ -120,6 +120,21 @@ namespace Take_Time_BangPhra.Payment
         protected global::System.Web.UI.WebControls.FileUpload fuSlip;
 
         /// <summary>
+        /// pnlManualAmount control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlManualAmount;
+
+        /// <summary>
+        /// txtManualAmount control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtManualAmount;
+
+        /// <summary>
+        /// litManualHint control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Literal litManualHint;
+
+        /// <summary>
         /// btnManualConfirm control.
         /// </summary>
         protected global::System.Web.UI.WebControls.Button btnManualConfirm;

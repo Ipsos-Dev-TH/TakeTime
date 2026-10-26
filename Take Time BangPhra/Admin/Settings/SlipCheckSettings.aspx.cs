@@ -62,6 +62,13 @@ namespace Take_Time_BangPhra.Admin.Settings
             chkLocalOcr.Checked = AppCfg.GetBool("SlipVerify_Local_Ocr", true);
             txtTessPath.Text = AppCfg.Get("SlipVerify_Tesseract_Path", "");
             txtTessdata.Text = AppCfg.Get("SlipVerify_Tessdata_Dir", "");
+            // ยอดล็อกตามสลิป / ลูกค้าตรวจไม่ผ่าน / QR ร้านค้า (PHASE19_36)
+            txtLockMinConf.Text = SlipVerificationService.LockMinConfidence.ToString(CultureInfo.InvariantCulture);
+            string mode = SlipVerificationService.CustomerFailMode;
+            if (ddlCustomerFailMode.Items.FindByValue(mode) != null) ddlCustomerFailMode.SelectedValue = mode;
+            txtCustomerContact.Text = AppCfg.Get(SlipVerificationService.CfgCustomerContact, "");
+            txtBillerIds.Text = string.Join(", ", SlipVerificationService.ReceiverBillerIds);
+            txtMerchantIds.Text = string.Join(", ", SlipVerificationService.ReceiverMerchantIds);
         }
 
         private void RenderStatus()
@@ -171,6 +178,15 @@ namespace Take_Time_BangPhra.Admin.Settings
                 AppCfg.Set("SlipVerify_Local_Ocr", chkLocalOcr.Checked ? "1" : "0", AdminId);
                 AppCfg.Set("SlipVerify_Tesseract_Path", (txtTessPath.Text ?? "").Trim(), AdminId);
                 AppCfg.Set("SlipVerify_Tessdata_Dir", (txtTessdata.Text ?? "").Trim(), AdminId);
+                int lockConf;
+                if (int.TryParse(txtLockMinConf.Text, out lockConf) && lockConf >= 1 && lockConf <= 100)
+                    AppCfg.Set(SlipVerificationService.CfgLockMinConfidence, lockConf.ToString(CultureInfo.InvariantCulture), AdminId);
+                AppCfg.Set(SlipVerificationService.CfgCustomerFailMode,
+                    ddlCustomerFailMode.SelectedValue == CustomerSlipOutcome.ModeAllowManual ? CustomerSlipOutcome.ModeAllowManual : CustomerSlipOutcome.ModeContactAdmin, AdminId);
+                AppCfg.Set(SlipVerificationService.CfgCustomerContact, (txtCustomerContact.Text ?? "").Trim(), AdminId);
+                SlipVerificationService.InvalidateContactCache();
+                AppCfg.Set(SlipVerificationService.CfgBillerIds, string.Join(",", SlipVerificationService.ParseIdList(txtBillerIds.Text)), AdminId);
+                AppCfg.Set(SlipVerificationService.CfgMerchantIds, string.Join(",", SlipVerificationService.ParseIdList(txtMerchantIds.Text)), AdminId);
 
                 int accounts = SaveReceivers();
                 AppCfg.Invalidate();

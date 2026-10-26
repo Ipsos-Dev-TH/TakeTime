@@ -256,6 +256,8 @@
                 <label class="form-label">จำนวนเงินที่ต้องการชำระ (บาท) <span style="color: red;">*</span></label>
                 <asp:TextBox ID="txtPaymentAmount" runat="server" CssClass="form-control" TextMode="Number"
                     min="1" step="0.01" placeholder="กรอกจำนวนเงิน"></asp:TextBox>
+                <%-- 🔒 ยอดล็อกตามสลิป (PHASE19_36): เลือกไฟล์สลิปแล้วระบบอ่านยอดให้ — อ่านได้ชัด = ล็อก, อ่านไม่ได้ = กรอกเอง --%>
+                <span id="mpSlipLockMsg" class="slip-lock-msg" style="display:none;"></span>
                 <asp:RequiredFieldValidator ID="rfvAmount" runat="server" ControlToValidate="txtPaymentAmount"
                     ErrorMessage="กรุณากรอกจำนวนเงิน" ForeColor="Red" Display="Dynamic"></asp:RequiredFieldValidator>
                 <asp:RangeValidator ID="rvAmount" runat="server" ControlToValidate="txtPaymentAmount"

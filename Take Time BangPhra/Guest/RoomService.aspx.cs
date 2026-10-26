@@ -352,6 +352,17 @@ namespace Take_Time_BangPhra.Guest
                         return;
                     }
                     paymentSlipPath = slip.WebPath;
+
+                    // 🔎 ผู้เข้าพักแนบสลิปเอง (PHASE19_36): ตรวจก่อนรับออเดอร์ — ตรวจไม่ผ่าน = ติดต่อเจ้าหน้าที่ (ไม่สร้างออเดอร์)
+                    //    หรือรับไว้รอเจ้าหน้าที่ตรวจ ตาม SlipVerify_Customer_Fail_Mode · สลิปซ้ำ = ไม่รับเสมอ · ยอด = ยอดออเดอร์ (ตายตัว)
+                    var oc = Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.EvaluateCustomerSlipFile(paymentSlipPath, totalAmount, true,
+                        new Take_Time_BangPhra.Payments.SlipCheck.SlipVerifyContext { SourceType = "ROOM_SERVICE" });
+                    if (oc.Blocked)
+                    {
+                        ScriptManager.RegisterStartupScript(this, GetType(), "slipBlock",
+                            "alert('" + System.Web.HttpUtility.JavaScriptStringEncode(oc.Message) + "');", true);
+                        return;
+                    }
                 }
 
                 // Create order

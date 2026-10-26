@@ -27,6 +27,15 @@ namespace Take_Time_BangPhra.Payment
             paymentService = new PaymentService(connectionString);
             paymentDataAccess = new PaymentDataAccess(connectionString);
 
+            // 🔒 ยอดล็อกตามสลิป (PHASE19_36): เลือกไฟล์สลิป → ตรวจทันที (AJAX) ใส่ยอดจากสลิปและล็อกช่องยอด
+            if (Payments.SlipCheck.SlipVerificationService.AmountLockActive)
+            {
+                decimal? dueForPreview = null;
+                try { int rid0 = GetReservationId(); if (rid0 > 0) dueForPreview = paymentDataAccess.GetRemainingBalance(rid0); } catch { }
+                if (Payments.SlipCheck.SlipAmountLockUi.TryHandlePreview(Context, dueForPreview)) return;
+                Payments.SlipCheck.SlipAmountLockUi.BindPreview(this, fuPaymentSlip, txtPaymentAmount, "mpSlipLockMsg");
+            }
+
             if (!IsPostBack)
             {
                 LoadPaymentMethods();
@@ -183,7 +192,26 @@ namespace Take_Time_BangPhra.Payment
 
                 // Validate payment amount
                 decimal remainingBalance = decimal.Parse(lblRemainingBalance.Text.Replace(",", ""));
-                if (paymentAmount > remainingBalance)
+
+                // 🔒 ยอดล็อกตามสลิป (PHASE19_36): อ่านยอดจากสลิปได้น่าเชื่อถือ → ยอดที่บันทึก = ยอดสลิป (ไม่เชื่อช่องที่โพสต์มา)
+                //    โอนเกินยอดค้าง = บันทึกเต็มยอดสลิป (PaymentService จัดเป็นมัดจำ/รับล่วงหน้าก่อนเข้าพัก)
+                bool slipLocked = false;
+                if (fuPaymentSlip.HasFile && Payments.SlipCheck.SlipVerificationService.AmountLockActive
+                    && Payments.SlipCheck.SlipVerificationService.IsTransferPaidHow(ddlPaymentMethod.SelectedValue, paymentMethod))
+                {
+                    var lk = Payments.SlipCheck.SlipVerificationService.InspectAmountLock(fuPaymentSlip.FileBytes, fuPaymentSlip.FileName);
+                    if (lk.Locked && lk.Amount.HasValue && lk.Amount.Value > 0m)
+                    {
+                        if (Math.Abs(lk.Amount.Value - paymentAmount) > 0.005m)
+                            codeInstance.Logs(connectionString, "SlipVerify",
+                                $"MakePayment การจอง {reservationId}: ยอดล็อกตามสลิป {lk.Amount.Value:N2} (กรอก {paymentAmount:N2}) — {lk.BadgeText()}",
+                                Session["UserName"]?.ToString() ?? "SYSTEM");
+                        paymentAmount = lk.Amount.Value;
+                        slipLocked = true;
+                    }
+                }
+
+                if (!slipLocked && paymentAmount > remainingBalance)
                 {
                     ShowError($"จำนวนเงินที่ชำระ ({paymentAmount:N2}) มากกว่ายอดคงเหลือ ({remainingBalance:N2})");
                     return;
@@ -220,7 +248,9 @@ namespace Take_Time_BangPhra.Payment
 
                 if (result.Success)
                 {
-                    ShowSuccess($"ชำระเงินสำเร็จ! จำนวน {paymentAmount:N2} บาท<br/>" +
+                    string overTxt = slipLocked ? Payments.SlipCheck.SlipVerificationService.OverpayText(paymentAmount, remainingBalance) : null;
+                    ShowSuccess($"ชำระเงินสำเร็จ! จำนวน {paymentAmount:N2} บาท" + (slipLocked ? " (ยอดจากสลิป)" : "")
+                               + (overTxt != null ? " · " + System.Web.HttpUtility.HtmlEncode(overTxt) : "") + "<br/>" +
                                $"เลขที่ใบเสร็จ: {result.ReceiptId}<br/>" +
                                $"ยอดคงเหลือ: {result.RemainingBalance:N2} บาท");
 

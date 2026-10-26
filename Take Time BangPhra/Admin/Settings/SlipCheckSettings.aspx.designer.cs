@@ -19,6 +19,11 @@ namespace Take_Time_BangPhra.Admin.Settings
         protected global::System.Web.UI.WebControls.CheckBox chkLocalOcr;
         protected global::System.Web.UI.WebControls.TextBox txtTessPath;
         protected global::System.Web.UI.WebControls.TextBox txtTessdata;
+        protected global::System.Web.UI.WebControls.TextBox txtLockMinConf;
+        protected global::System.Web.UI.WebControls.DropDownList ddlCustomerFailMode;
+        protected global::System.Web.UI.WebControls.TextBox txtCustomerContact;
+        protected global::System.Web.UI.WebControls.TextBox txtBillerIds;
+        protected global::System.Web.UI.WebControls.TextBox txtMerchantIds;
         protected global::System.Web.UI.WebControls.Literal litReceivers;
         protected global::System.Web.UI.WebControls.Button btnSave;
         protected global::System.Web.UI.WebControls.Button btnResetQuota;

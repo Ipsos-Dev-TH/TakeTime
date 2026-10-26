@@ -428,7 +428,8 @@ namespace Take_Time_BangPhra.Admin.RoomService
                     SourceType = "ROOM_SERVICE", SourceId = orderId,
                     User = Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.CurrentUserName()
                 };
-                var r = Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.VerifyFile(path, amount > 0m ? (decimal?)amount : null, ctx);
+                // ยอดตายตัว (ยอดออเดอร์) + ยอดล็อกตามสลิป (PHASE19_36): โอนเกิน = ผ่าน (รับเกิน) · ขาด = ชำระไม่ครบ · อ่านไม่ได้ = แบบเดิม
+                var r = Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.VerifyFileFixedTotal(path, amount > 0m ? (decimal?)amount : null, ctx);
                 if (r.IsBlocking)
                 {
                     bool canOv = Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.CanOverrideCurrentUser();
@@ -444,7 +445,8 @@ namespace Take_Time_BangPhra.Admin.RoomService
                         "ยืนยันซ้ำที่หน้าจัดการรูมเซอร์วิส (ออเดอร์ #" + orderId + ")", ctx.User);
                 }
                 Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.TryLog(ctx, r, true);   // กันใช้สลิปเดิมซ้ำ
-                _code.Logs(_connectionString, "RoomService", "ตรวจสลิปออเดอร์ #" + orderId + ": " + r.ShortText(),
+                _code.Logs(_connectionString, "RoomService", "ตรวจสลิปออเดอร์ #" + orderId + ": " + r.ShortText()
+                    + (r.AmountLocked ? " · " + r.AmountLock.BadgeText() : ""),
                     Session["username"]?.ToString() ?? "Unknown");
             }
             catch (Exception ex)

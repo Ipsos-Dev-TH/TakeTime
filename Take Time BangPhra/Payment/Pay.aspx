@@ -114,6 +114,14 @@
                     <asp:FileUpload ID="fuSlip" runat="server" accept="image/*,.pdf" />
                 </div>
 
+                <%-- ตรวจสลิปไม่ผ่าน + โหมด "ให้ลูกค้ากรอกยอดเอง" (SlipVerify_Customer_Fail_Mode = ALLOW_MANUAL, PHASE19_36) --%>
+                <asp:Panel ID="pnlManualAmount" runat="server" CssClass="field" Visible="false">
+                    <label>ยอดเงินตามสลิป (บาท)</label>
+                    <asp:TextBox ID="txtManualAmount" runat="server" TextMode="Number" step="0.01" min="0.01" inputmode="decimal"
+                        placeholder="กรอกยอดเงินตามที่โอนในสลิป" style="width:100%;max-width:260px;padding:10px;font-size:16px;" />
+                    <div class="note"><asp:Literal ID="litManualHint" runat="server" /></div>
+                </asp:Panel>
+
                 <asp:Button ID="btnManualConfirm" runat="server" CssClass="btn"
                     Text="✓ ยืนยันการชำระเงิน" OnClick="btnManualConfirm_Click" />
                 <asp:Button ID="btnManualBack" runat="server" CssClass="btn ghost"
