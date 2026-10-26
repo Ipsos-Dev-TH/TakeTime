@@ -256,6 +256,25 @@ namespace Take_Time_BangPhra.Integration
         /// HTML: PdfGenerationService.cs:2263-2264). ใช้ใส่ "ผู้รับเงิน (ตัวจริง)" ของใบรับรองแทนใบเสร็จ เพราะ NextAcc
         /// ไม่มีฟิลด์ผู้รับเงินแยกบนเอกสาร type 15 (มีแค่ CertificateReason/Certifier*/Witness*/PaymentDate — DocumentDtos.cs:50-56)</summary>
         public string CustomAppendix { get; set; }
+
+        // ===== ใบลด/เพิ่มหนี้ + ใบกำกับฝั่งซื้อ (หน้าตรวจทาน OCR) — NextAcc CreateDocumentRequest (DocumentDtos.cs:10-184) =====
+        // ทุกช่อง nullable + NullValueHandling.Ignore ⇒ ผู้เรียกเดิมส่ง payload เท่าเดิมทุกตัวอักษร
+        /// <summary>เอกสารต้นทาง (DocumentDtos.cs:23) — ใบลด/เพิ่มหนี้ต้องตั้งตอน create (UpdateDocumentRequest ไม่มีช่องนี้ :248-368)</summary>
+        public Guid? RelatedDocumentId { get; set; }
+        /// <summary>ฝั่งภาษีของใบลด/เพิ่มหนี้ — true = ฝั่งซื้อ (ลดภาษีซื้อ 116x) (DocumentDtos.cs:24-26; Document.cs:456-465)</summary>
+        public bool? CnDnPurchaseSideOverride { get; set; }
+        /// <summary>เหตุผลใบลดหนี้ Return=1 Discount=2 Adjustment=3 Writeoff=4 (AllEnums.cs:1636-1646; DocumentDtos.cs:77)</summary>
+        public int? CreditNoteReason { get; set; }
+        /// <summary>เหตุผลใบเพิ่มหนี้ PriceIncrease=1 ExtraGoods=2 AdditionalCharge=3 Adjustment=4 (AllEnums.cs:1652-1662; DocumentDtos.cs:79)</summary>
+        public int? DebitNoteReason { get; set; }
+        /// <summary>วันที่บนใบกำกับของผู้ขาย — คุมงวดเคลม §82/4 (DocumentDtos.cs:88)</summary>
+        public DateTime? SupplierTaxInvoiceDate { get; set; }
+        /// <summary>อ้างใบกำกับภาษีซื้อ (DocumentDtos.cs:97)</summary>
+        public bool? HasTaxInvoiceReference { get; set; }
+        /// <summary>สาขาผู้ขายบนใบ (5 หลัก, 00000 = สนญ.) (DocumentDtos.cs:98)</summary>
+        public string SupplierBranchCode { get; set; }
+        /// <summary>Cash=1 / Credit=2 (AllEnums.cs:573-577; DocumentDtos.cs:107)</summary>
+        public int? PaymentType { get; set; }
     }
 
     public class DocumentLineRequest
@@ -274,6 +293,12 @@ namespace Take_Time_BangPhra.Integration
         /// NextAcc รวม VAT เข้าบัญชีค่าใช้จ่าย (Dr ค่าใช้จ่าย = net+VAT) ไม่แยกภาษีซื้อ</summary>
         public bool IsVatClaimable { get; set; } = true;
         public string VatNonClaimableReason { get; set; }
+        /// <summary>ส่วนลดบรรทัดเป็นบาท (DocumentDtos.cs:234) — null = ไม่ส่ง (พฤติกรรมเดิม)</summary>
+        public decimal? DiscountAmount { get; set; }
+        /// <summary>ยอด VAT ของบรรทัดที่ระบุตรง ๆ — NextAcc honor แทน net×rate (DocumentDtos.cs:235-240) · null = คำนวณเอง</summary>
+        public decimal? VatAmountOverride { get; set; }
+        /// <summary>ประเภทเงินได้ ม.40 ของบรรทัด (DocumentDtos.cs:241-243) · null = ไม่ส่ง</summary>
+        public string IncomeTypeCode { get; set; }
     }
 
     /// <summary>แก้ไขเอกสาร Draft (PUT /api/companies/{id}/document/{docId}). ฟิลด์ null = คงค่าเดิม;
@@ -299,6 +324,20 @@ namespace Take_Time_BangPhra.Integration
         public string PreparerName { get; set; }
         /// <summary>ลายเซ็นผู้ทำเอกสาร (data-URI/base64) — NextAcc field "preparerSignatureBase64". null = คงเดิม.</summary>
         public string PreparerSignatureBase64 { get; set; }
+
+        // ── หน้าตรวจทาน OCR — NextAcc UpdateDocumentRequest (DocumentDtos.cs:248-368); null = คงค่าเดิม ──
+        /// <summary>DocumentDtos.cs:281</summary>
+        public string SupplierBranchCode { get; set; }
+        /// <summary>DocumentDtos.cs:280</summary>
+        public bool? HasTaxInvoiceReference { get; set; }
+        /// <summary>Cash=1 / Credit=2 (DocumentDtos.cs:288)</summary>
+        public int? PaymentType { get; set; }
+        /// <summary>DocumentDtos.cs:310</summary>
+        public int? CreditNoteReason { get; set; }
+        /// <summary>DocumentDtos.cs:311</summary>
+        public int? DebitNoteReason { get; set; }
+        /// <summary>true = ใบลด/เพิ่มหนี้ฝั่งซื้อ (DocumentDtos.cs:312-314)</summary>
+        public bool? CnDnPurchaseSideOverride { get; set; }
     }
 
     public class DocumentResponse
@@ -348,6 +387,19 @@ namespace Take_Time_BangPhra.Integration
         /// Rejected/Error/Voided — AllEnums.cs:1305-1314; DocumentDtos.cs:650). Submitted/Accepted = ถึงกรมสรรพากรแล้ว
         /// → NextAcc ปฏิเสธการยกเลิก (DocumentService.cs:9564-9570 RD-ETAX-REACHED-VOID) ต้องออกใบลดหนี้</summary>
         public string EtaxStatus { get; set; }
+
+        // ── หน้าตรวจทาน OCR (กันซ้ำ / ใบต้นทางของใบลดหนี้) — DocumentResponse DocumentDtos.cs:625-818 ──
+        /// <summary>DocumentDtos.cs:666 (RelatedDocumentId)</summary>
+        public Guid? RelatedDocumentId { get; set; }
+        /// <summary>เลขที่ใบของคู่ค้า (DocumentDtos.cs:701)</summary>
+        public string SupplierInvoiceNumber { get; set; }
+        public DateTime? SupplierTaxInvoiceDate { get; set; }
+        public string SupplierBranchCode { get; set; }
+        public bool HasTaxInvoiceReference { get; set; }
+        /// <summary>ภาษีซื้อพัก 11640 เพราะ §86/4 ไม่ครบ (DocumentDtos.cs:781)</summary>
+        public bool InputVatPostedAsUndue { get; set; }
+        /// <summary>enum เป็นสตริง (JsonStringEnumConverter — NextAcc Program.cs:771)</summary>
+        public string CreditNoteReason { get; set; }
     }
 
     /// <summary>NextAcc ContactBrief(Id, Name, TaxId, BranchCode) — DocumentDtos.cs:1268</summary>
@@ -507,6 +559,73 @@ namespace Take_Time_BangPhra.Integration
         public OcrQualityGradeDto Quality { get; set; }
         public string SuggestedEntryMode { get; set; }
         public bool GlAccountUsedAi { get; set; }         // true = AI จริงช่วยจัดผังบัญชี
+
+        // ── หน้าตรวจทาน OCR — NextAcc OcrDtos.cs:5-165 ──
+        /// <summary>ความมั่นใจรายช่อง 0-1 (OcrDtos.cs:19) — คีย์ตาม Helpers/OcrFieldKeys.cs:34-66 (SellerName/SellerTaxId/…/TotalAmount)</summary>
+        public Dictionary<string, double> FieldConfidence { get; set; }
+        /// <summary>§86/4 สาขา + ที่อยู่ผู้ขายที่อ่านจากใบ ("00000" = สนญ.) (OcrDtos.cs:81-87)</summary>
+        public string VendorBranchCode { get; set; }
+        public string VendorAddress { get; set; }
+        public string BuyerBranchCode { get; set; }
+        public string BuyerAddress { get; set; }
+        /// <summary>คำเตือนข้อมูลตามสรรพากรที่เซิร์ฟเวอร์คำนวณ (OcrDtos.cs:88-93)</summary>
+        public List<OcrScanIssueDto> ComplianceIssues { get; set; }
+        /// <summary>ใบต้นทางที่ผูกไว้ (OcrDtos.cs:148-155)</summary>
+        public Guid? LinkedPredecessorDocumentId { get; set; }
+        public string LinkedPredecessorNumber { get; set; }
+        public string LinkedPredecessorType { get; set; }
+        public Guid? DuplicateOfScanId { get; set; }
+        public decimal? SuggestedWhtRate { get; set; }
+        public string WhtIncomeTypeCode { get; set; }
+        public string Currency { get; set; }
+        public string UserNotes { get; set; }
+    }
+
+    /// <summary>คำเตือน 1 ข้อบนผลสแกน — Severity "error" | "warn" (OcrDtos.cs:168)</summary>
+    public class OcrScanIssueDto
+    {
+        public string Severity { get; set; }
+        public string Message { get; set; }
+    }
+
+    /// <summary>
+    /// Body ของ POST /api/companies/{cid}/ocr/{scanId}/correct (OcrController.cs:790-800; OcrCorrectionRequest OcrDtos.cs:301-366)
+    /// — บันทึกค่าที่ผู้ใช้ยืนยันลงแถวสแกน (ใช้ตอนสร้าง contact จากสแกน) + สอนตัวเรียนของ NextAcc. ส่งเฉพาะที่มีค่า (null = ไม่แตะ)
+    /// ไม่ส่ง Debit/CreditAccountCode (กันด่าน OCR-ACCT-PLACEMENT 409 — บัญชีรายบรรทัดส่งตอน PUT เอกสารแทน)
+    /// </summary>
+    public class OcrCorrectionRequest
+    {
+        public string VendorName { get; set; }
+        public string VendorTaxId { get; set; }
+        public string DocumentNumber { get; set; }
+        public DateTime? DocumentDate { get; set; }
+        public decimal? SubTotal { get; set; }
+        public decimal? VatAmount { get; set; }
+        public decimal? TotalAmount { get; set; }
+        public bool? HasWht { get; set; }
+        public decimal? WhtRate { get; set; }
+        public string TargetDocumentType { get; set; }
+        /// <summary>"Buyer" | "Seller" (OcrDtos.cs:334)</summary>
+        public string OurRole { get; set; }
+        public string VendorBranchCode { get; set; }
+        public string VendorAddress { get; set; }
+        public string Notes { get; set; }
+        /// <summary>ผู้ใช้ยืนยันสาขาผู้ขายเอง (OcrDtos.cs:358-362)</summary>
+        public bool? VendorBranchConfirmed { get; set; }
+    }
+
+    /// <summary>ใบต้นทางที่อาจตรงกับสแกน (OcrDtos.cs:235-237) — GET ocr/{scanId}/predecessor-candidates</summary>
+    public class OcrPredecessorCandidateDto
+    {
+        public Guid DocumentId { get; set; }
+        public string DocumentType { get; set; }
+        public string DocumentNumber { get; set; }
+        public DateTime DocumentDate { get; set; }
+        public decimal TotalAmount { get; set; }
+        public decimal BalanceDue { get; set; }
+        public string Strength { get; set; }
+        public int Score { get; set; }
+        public string Reason { get; set; }
     }
 
     public class OcrSuggestedAccountsDto
@@ -527,6 +646,13 @@ namespace Take_Time_BangPhra.Integration
         public decimal? Amount { get; set; }
         public string SuggestedAccountCode { get; set; }
         public string Unit { get; set; }
+        /// <summary>7 / 0 / -1 ยกเว้น §81 (OcrDtos.cs:279-285)</summary>
+        public decimal? VatRate { get; set; }
+        public decimal? VatAmount { get; set; }
+        /// <summary>ส่วนลดบรรทัดก่อน VAT: round(Qty×UnitPrice) − LineDiscountAmount = Amount (OcrDtos.cs:288-290)</summary>
+        public decimal? LineDiscountAmount { get; set; }
+        /// <summary>ราคา/ยอดของบรรทัดรวม VAT ตามกระดาษ (OcrDtos.cs:291-292)</summary>
+        public bool PriceIncludesVat { get; set; }
     }
 
     public class OcrDbdInfo
