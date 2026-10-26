@@ -1,0 +1,6 @@
+__pycache__/
+fonts/
+*.png
+*.jpg
+*.jpeg
+*.csv

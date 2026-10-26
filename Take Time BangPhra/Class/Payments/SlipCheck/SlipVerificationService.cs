@@ -205,7 +205,7 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
             {
                 insp.OcrAttempted = true;
                 var ocr = LocalSlipAmountReader.ReadText(bytes);
-                if (ocr.Ok) insp.OcrText = ocr.Text;
+                if (ocr.Ok) { insp.OcrText = ocr.Text; insp.OcrResult = ocr.Result; }
                 else insp.OcrError = ocr.Error;
             }
 
@@ -256,7 +256,7 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
             else if (!string.IsNullOrEmpty(insp.OcrText))
             {
                 int conf; string why;
-                decimal? amt = LocalSlipAmountReader.ExtractAmount(insp.OcrText, expected, out conf, out why);
+                decimal? amt = LocalSlipAmountReader.ExtractAmount(insp.OcrText, expected, out conf, out why, insp.OcrResult);
                 r.OcrRaw = insp.OcrText.Length > 1500 ? insp.OcrText.Substring(0, 1500) : insp.OcrText;
                 r.OcrConfidence = conf;
                 if (amt.HasValue)

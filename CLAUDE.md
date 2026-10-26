@@ -437,8 +437,14 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    ไม่ส่ง `amount`; รหัส 1003/1004/1015 โควต้า/แพ็กเกจ → ธง `Slip_Verify_Usage.Exhausted`, 1012/1013/1014 แนบ data, 1010 = รอ `data.delay` นาที, 1007+"หมดอายุ/ไม่มีรายการ" = NotFound;
    นับโควต้าเองรายเดือน; ปุ่มเช็คโควต้า `GET …/quota` → `ParseQuota` (quota+specialQuota = 0 → ธงหมด; overQuota>0 เตือน) — ยืนยันกับ **SlipOK API Guide v1.13 (28 ก.พ. 2026)**),
    `SlipQrDecoder` (ZXing.Net 0.16.11 `lib\net47\zxing.dll` + TLV mini-QR ธปท.: ธนาคาร+transRef+CRC16 — ไม่มี DLL = คืน null),
-   `LocalSlipAmountReader` (**tesseract.exe ผ่าน Process** ไม่ใช่ P/Invoke — native crash ไม่ล้ม w3wp, timeout kill ได้; heuristic คะแนนบรรทัด
-   "จำนวนเงิน/Amount" ทดสอบกับสลิปจริง SCB + KBank/KTB/BBL/PromptPay จำลอง; ซ่อม ฿→8 เฉพาะเทียบยอดที่ลง). ผลอ่านจาก OCR ไม่ใช่ข้อมูลธนาคาร.
+   `LocalSlipAmountReader` (**tesseract.exe ผ่าน Process** ไม่ใช่ P/Invoke — native crash ไม่ล้ม w3wp, timeout kill ได้). ผลอ่านจาก OCR ไม่ใช่ข้อมูลธนาคาร.
+   **OCR 2 รอบ + โหวต** (พอร์ต 1:1 จาก `tools/slip-ocr-bench/reader.py` — แก้คู่กัน): EXIF → ตัดการ์ดสลิป (รูปถ่ายจอ: ก้อน min(R,G,B) สว่าง) → เทา/กลับสีโหมดมืด/กว้าง 1500/ยืด
+   → รอบ 1 `tha+eng --psm 6` TSV หาป้าย จำนวนเงิน/จำนวน/ยอดชำระ/Amount + ตำแหน่ง (ขวา/ใต้ป้าย; ไม่เจอป้าย = รอบ 1b psm 11) → รอบ 2 ROI ตัวเลข (ลบคำตัวอักษร,
+   ลบ ฿ ด้วยรูปทรง) ต่อภาพเดียว เทา+Otsu `eng` whitelist ตัวเลข → โหวต. ความมั่นใจ **92** = รอบ 1 + รอบ 2 ≥ 2 แบบตรงกันในบริบทป้าย ไม่มีคู่แข่ง (เกณฑ์ล็อก 85) ·
+   80/72/62 · ขัดกัน/฿ กำกวม (8xxx vs ฿xxx) = ไม่คืนค่า (`SlipVerify_Ocr_Min_Confidence` 60). ผลเก็บใน `SlipInspection.OcrResult` → `ExtractAmount(…, result)`;
+   ข้อความอย่างเดียว (cache เก่า) ≤ 70. ค่าตั้ง `SlipVerify_Ocr_Timeout_Ms` (15000/รอบ), `SlipVerify_Ocr_Budget_Ms` (20000 รวม). หน้า SlipCheckSettings "ทดสอบด้วยสลิป"
+   แสดงข้อความแต่ละรอบ/ผู้สมัคร/ROI/โหวต + ภาพ ROI. **Benchmark** (สลิปจำลอง 9 ธนาคาร + สลิปจริง 6 ใบ × aug, 602 รูป): exact 89→97.5% · **ยอดผิด 4.8→0%**
+   (ตัวเก่าผิดที่ conf 90 ถึง 24 ใบ ส่วนใหญ่ ฿→8) · conf ≥85 ผิด 0 · ~2.6 วินาที/ใบ. วัดกับสลิปจริงของโรงแรม: `tools/slip-ocr-bench/README.md` (ยอด SlipOK เป็นเฉลย).
    **กฎ:** VERIFIED ต่าง ≤ `SlipVerify_Amount_Tolerance` (1.00) → ผ่าน + ใช้ยอดธนาคาร (เฉพาะ SlipOK) · MISMATCH → หยุด "สลิป X / ลง Y / ต่าง Z" (แก้ยอดตามสลิป /
    ติ๊กแบ่งสลิปหลายการจอง → `Payment_Slip_Allocation` / Owner-Admin override + เหตุผล) · DUPLICATE (unique `UX_Payment_Slips_TransRef` บน ธนาคาร+transRef ยกเว้น
    REJECTED/ALLOCATED; 1012 ของ SlipOK ไม่นับ — ฐานข้อมูลเราเป็นตัวตัดสิน) → หยุด ห้าม override (ยกเว้นใช้ยอดคงเหลือของสลิปที่แบ่งไว้ → แถวรอง ALLOCATED) ·
