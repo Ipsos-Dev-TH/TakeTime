@@ -724,7 +724,7 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
      เฉพาะใบลดหนี้ SYNCED ที่มีเอกสาร NextAcc (COMPANY_CN / ใบลดหนี้อัตโนมัติของ DEPOSIT_REFUND / INTEGRATION_CN; JOURNAL/LOCAL ไม่มีใบ). `CreditNote_Etax_Auto` (seed 0):
      1 = หลังคิว CREATE_CREDIT_NOTE สำเร็จ ถ้าใบต้นทาง e-Tax ถึงกรมสรรพากร ออกให้เอง (ไม่โยน). สถานะเก็บ `Credit_Note.Etax_*`. **ส่งอีเมลเอกสาร** (ใบลดหนี้/ใบเสร็จ/ใบแทน):
      `POST document/{id}/send-email` {To,…,AttachPdf} (DocumentController.cs:104-121, สิทธิ์ Document.Create; ล้ม = 200 success:false). (หมายเหตุ: `SendEtaxByEmailRequest` เดิม
-     ส่ง `recipientEmail` แต่ NextAcc รับ `To` — EmailDtos.cs:16 — ยังไม่แก้ในงานนี้)
+     ส่ง `recipientEmail` แต่ NextAcc รับ `To` — EmailDtos.cs:16 — **แก้แล้ว**: `SendEtaxByEmailRequest` ส่ง To/IncludePdf/IncludeXml/IncludeRdTimestamp (ชื่อเดิมเป็น alias ไม่ serialize).
    - ไม่ทำ: `reissue-settlement-paid` (เฉพาะใบที่รอบโอน settlement ลงบัญชีแล้ว), webhooks, รายงาน NextAcc, AI แนะนำบัญชี (ดู audit §5). ไม่มี JS ใหม่. ต้อง build+test บน Windows.
 26. **หน้าตั้งค่า NextAcc แบ่งแท็บ + วิซาร์ดตั้งค่า 6 ขั้น (ต.ค. 2026, ไม่มี migration):** `Admin/Settings/AccountingIntegration.aspx` = 7 แท็บฝั่งเบราว์เซอร์
    (การเชื่อมต่อ · ผังบัญชี & แหล่งเงิน · โหมดการส่ง & นโยบาย · คิว & ตรวจสุขภาพ · เครื่องมือ (+ **โซนอันตราย** พับไว้: ลบใบที่หาย/เก็บกวาด/กลับมัดจำค้าง/รีเซ็ตการจอง/

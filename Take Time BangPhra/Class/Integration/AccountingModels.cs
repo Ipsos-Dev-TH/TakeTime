@@ -1732,13 +1732,25 @@ namespace Take_Time_BangPhra.Integration
         public string SellerEmail { get; set; }
     }
 
+    /// <summary>
+    /// POST etax/{id}/send-email — ชื่อฟิลด์ต้องตรง NextAcc `SendEtaxByEmailRequest(To, Cc, Bcc, Subject, Body, IncludePdf, IncludeXml,
+    /// IncludeRdTimestamp)` (Models/DTOs/Email/EmailDtos.cs:16-24) — เดิมส่ง recipientEmail/attachPdf ซึ่ง NextAcc ไม่รู้จัก (To ว่าง ⇒ ส่งไม่ได้)
+    /// RecipientEmail/AttachPdf/AttachXml คงไว้เป็นชื่อเรียกเดิมฝั่งเรา (ไม่ serialize)
+    /// </summary>
     public class SendEtaxByEmailRequest
     {
-        public string RecipientEmail { get; set; }
+        public string To { get; set; }
+        public string Cc { get; set; }
+        public string Bcc { get; set; }
         public string Subject { get; set; }
         public string Body { get; set; }
-        public bool AttachPdf { get; set; } = true;
-        public bool AttachXml { get; set; }
+        public bool IncludePdf { get; set; } = true;
+        public bool IncludeXml { get; set; } = true;
+        public bool IncludeRdTimestamp { get; set; } = true;
+
+        [JsonIgnore] public string RecipientEmail { get { return To; } set { To = value; } }
+        [JsonIgnore] public bool AttachPdf { get { return IncludePdf; } set { IncludePdf = value; } }
+        [JsonIgnore] public bool AttachXml { get { return IncludeXml; } set { IncludeXml = value; } }
     }
 
     public class DocumentEmailLogResponse
