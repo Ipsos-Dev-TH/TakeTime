@@ -268,6 +268,19 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    `DocumentLineRequest`). ทั้งหมด fallback ไป mapping เดิมถ้าไม่เลือก/ยังไม่ Sync ผังบัญชี. โหลด dropdown
    จาก `Accounting_Nexaacc_Accounts` ใน Page_Load !IsPostBack (ViewState คงค่า). Save สำเร็จ → server-side
    `Response.Redirect(?saved=1)` + alert ใน Page_Load (แทน ClientScript alert+window.location ที่เงียบถ้า JS error).
+   - **ออกแบบใหม่ (ต.ค. 2026, PHASE19_40):** 6 การ์ด ผู้รับเงิน→รายการ→การชำระ→ภาษี→เอกสารแนบ→สรุป (mobile-first, `Content/pv-voucher.css`
+     + `Scripts/pv-voucher.js`, แถบบันทึกติดล่าง, ข้อความในหน้าแทน alert ทั้งหมด). ตัวเลือกเหลือ 2: **"จ่ายจาก"** `ddlPayFrom`
+     (`PH:{Paid_How.ID}` แสดงบัญชี NextAcc ที่ผูก / `NA:{guid}` บัญชี 11x/21x ที่ไม่มีแหล่งเงินผูก → ถาม "บันทึกในระบบเป็น" DropDownList2) และ
+     **"หมวดค่าใช้จ่าย"** `ddlLineAccount` (`PT:{Paid_Type.ID}` / `NA:{code}` ที่ไม่มีหมวดผูก) — `ApplyPayFromToLegacy`/`ApplyLineAccountToLegacy`
+     ตั้งค่า control เดิม (ซ่อน) ก่อนโค้ดเดิมทำงาน; หมวดหลักของใบ (DropDownList3) เลือกให้จากรายการแรก (`DeriveHeaderPaidTypeId`).
+     payload คิวย้ายไป `Class/Integration/PaymentVoucherForm.BuildVoucherPayload` (+`BuildLineRow`) — mono test เทียบโค้ดเดิม verbatim 10 เคส×2 culture
+     ผลเหมือนกันทุกตัว. ตรวจช่องบังคับ/ยอดทั้งหมด **ก่อน** void+ลบใบเดิมในโหมดแก้ไข (เดิมตรวจหลังลบ = ใบหาย). **ใบซ้ำ:** ช่อง "เลขที่ใบกำกับ/ใบเสร็จ
+     ของผู้ขาย" (`Account_Payment.Supplier_Invoice_No[_Norm]`, ไม่ส่งเข้าคิว) เทียบ Account_Payment + `Ocr_Document_Log` + NextAcc
+     `document/duplicate-check` (DocumentController.cs:907, เฉพาะ strong) → เตือนพร้อมลิงก์ กดบันทึกซ้ำ = ยืนยัน (จ่ายงวด). **AI** (`API/PvAssist.ashx`
+     → `PaymentVoucherAssist`, timeout 4–7 วิ, nonce ใน session, ไม่มี company endpoint/`Nexaacc_Pv_Ai_Assist=0`/NextAcc ล่ม = ไม่แสดง): ชิป
+     `ai/payment-voucher/suggest-account` (AiSuggestionController.cs:204), `vat/infer-type` (:501), `wht/infer-category` (:447 → อัตราตาม
+     ThaiWhtRateTable), `payment-voucher/suggest-type` (:123, ต้องมี contact ใน Accounting_Contact_Map), `contact/fuzzy-match` (:938) พร้อม %
+     + เหตุผล กด "ใช้" เอง → `ai-feedback/record` (AiFeedbackController.cs:46, Source=Explicit; ✕/เปลี่ยนเอง = rejected + ค่าที่เลือก).
 4. CheckPayment_New: now sorts by DisplayDoc (done). Homepage Google reviews: validates status (done).
 5. **รับ-side AR closure (DOCUMENT mode):** ✅ DONE. NextAcc `/integration/invoices` posts
    Dr ลูกหนี้การค้า / Cr รายได้ / Cr ภาษีขาย and does **NOT** auto-record a payment (PaymentMethod
