@@ -80,7 +80,7 @@ namespace Take_Time_BangPhra.Integration
         /// เหล่านี้อาจบังสถานะจริงได้ 24 ชม.) และ upsert ตาม ExternalId (customers/products/contacts)</summary>
         private static readonly System.Text.RegularExpressions.Regex CreateRouteRegex = new System.Text.RegularExpressions.Regex(
             @"^/api/(integration/(invoices|invoices/multipart|expenses|expenses/multipart|payment-vouchers|payments|journals|journals/reverse|credit-notes|debit-notes|batch|daily-summary|certificates-in-lieu)"
-            + @"|companies/[^/]+/(document|document/payments|document/[^/]+/(refund-deposit|realize-deposit|apply-deposit|convert)"
+            + @"|companies/[^/]+/(document|document/payments|document/[^/]+/(refund-deposit|realize-deposit|apply-deposit|convert|issue-full-tax-invoice|reclassify-payment-source)"
             + @"|ocr/[^/]+/create-document|payroll/runs|payroll/runs/import|withholding-tax-certs/auto-generate|product/stock/adjust|accounting/journals))/?$",
             System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
@@ -1621,6 +1621,60 @@ namespace Take_Time_BangPhra.Integration
         public async Task<ApiResponse<EtaxInvoiceResponse>> GetEtaxAsync(Guid etaxId)
         {
             return await GetAsync<ApiResponse<EtaxInvoiceResponse>>($"{CompanyPath}/etax/{etaxId}");
+        }
+
+        // ── CLAUDE.md ข้อ 25 — ความสามารถ NextAcc ที่เพิ่งเริ่มใช้ (company endpoint → X-Api-Key) ─────────────────
+
+        /// <summary>ออกใบกำกับภาษีเต็มรูป "แทน" ใบเสร็จ/ใบกำกับอย่างย่อ — POST document/{id}/issue-full-tax-invoice
+        /// (DocumentController.cs:1138-1157 → DocumentService.IssueFullTaxInvoiceForReceiptAsync :13109-13176) · สร้างเอกสารใหม่ ⇒ มี Idempotency-Key</summary>
+        public async Task<ApiResponse<DocumentResponse>> IssueFullTaxInvoiceAsync(Guid documentId, NxIssueFullTaxInvoiceRequest request)
+        {
+            return await PostAsync<NxIssueFullTaxInvoiceRequest, ApiResponse<DocumentResponse>>(
+                $"{CompanyPath}/document/{documentId}/issue-full-tax-invoice", request ?? new NxIssueFullTaxInvoiceRequest());
+        }
+
+        /// <summary>เปลี่ยนแหล่งเงินหลังอนุมัติ — POST document/{id}/reclassify-payment-source (DocumentController.cs:739-757 →
+        /// DocumentService.ReclassifyPaymentSourceAsync :9067-9240) · โพสต์ JE แก้ ⇒ มี Idempotency-Key</summary>
+        public async Task<ApiResponse<DocumentResponse>> ReclassifyPaymentSourceAsync(Guid documentId, NxReclassifyPaymentSourceRequest request)
+        {
+            return await PostAsync<NxReclassifyPaymentSourceRequest, ApiResponse<DocumentResponse>>(
+                $"{CompanyPath}/document/{documentId}/reclassify-payment-source", request);
+        }
+
+        /// <summary>ภาษีซื้อยังไม่ถึงกำหนด (11640) รอใบกำกับครบ §86/4 — GET document/undue-input-vat
+        /// (DocumentController.cs:450-455 → DocumentService.GetUndueInputVatAsync :6343-6390; ไม่มีพารามิเตอร์ กรองเดือนฝั่งเรา)</summary>
+        public async Task<ApiResponse<List<NxUndueInputVatSummary>>> GetUndueInputVatAsync()
+        {
+            return await GetAsync<ApiResponse<List<NxUndueInputVatSummary>>>($"{CompanyPath}/document/undue-input-vat");
+        }
+
+        /// <summary>เติมใบกำกับภาษีซื้อหลังอนุมัติ — POST document/{id}/complete-tax-invoice (DocumentController.cs:398-412, สิทธิ์ Document.Purchase.Create
+        /// → DocumentService.CompleteSupplierTaxInvoiceAsync :3492-3583: ครบ §86/4 ⇒ JE 11640→11610 ReclassifyUndueInputVatAsync :15943) · idempotent ฝั่ง NextAcc</summary>
+        public async Task<ApiResponse<DocumentResponse>> CompleteSupplierTaxInvoiceAsync(Guid documentId, NxCompleteSupplierTaxInvoiceRequest request)
+        {
+            return await PostAsync<NxCompleteSupplierTaxInvoiceRequest, ApiResponse<DocumentResponse>>(
+                $"{CompanyPath}/document/{documentId}/complete-tax-invoice", request);
+        }
+
+        /// <summary>ส่ง PDF เอกสารทางอีเมลจาก NextAcc — POST document/{id}/send-email (DocumentController.cs:104-121, สิทธิ์ Document.Create ของชนิดนั้น;
+        /// ส่งไม่สำเร็จ = 200 success:false + log)</summary>
+        public async Task<ApiResponse<NxDocumentEmailLog>> SendDocumentEmailAsync(Guid documentId, NxSendDocumentEmailRequest request)
+        {
+            return await PostAsync<NxSendDocumentEmailRequest, ApiResponse<NxDocumentEmailLog>>(
+                $"{CompanyPath}/document/{documentId}/send-email", request);
+        }
+
+        /// <summary>e-Tax ล่าสุดของเอกสาร — GET etax/document/{documentId} (EtaxController.cs:77-82)</summary>
+        public async Task<ApiResponse<EtaxInvoiceResponse>> GetEtaxByDocumentAsync(Guid documentId)
+        {
+            return await GetAsync<ApiResponse<EtaxInvoiceResponse>>($"{CompanyPath}/etax/document/{documentId}");
+        }
+
+        /// <summary>ส่ง e-Tax ที่ลงนามแล้วถึงกรมสรรพากร — POST etax/{id}/submit (EtaxController.cs:100-106, สิทธิ์ EtaxSubmit; ต้อง Status=Signed
+        /// EtaxInvoiceService.cs:585-586)</summary>
+        public async Task<ApiResponse<EtaxInvoiceResponse>> SubmitEtaxAsync(Guid etaxId)
+        {
+            return await PostAsync<object, ApiResponse<EtaxInvoiceResponse>>($"{CompanyPath}/etax/{etaxId}/submit", null);
         }
 
         /// <summary>

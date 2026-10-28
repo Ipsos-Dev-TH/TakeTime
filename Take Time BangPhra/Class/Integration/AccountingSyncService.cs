@@ -5712,11 +5712,21 @@ namespace Take_Time_BangPhra.Integration
 
                 // ── ใบลดหนี้ / คืนเงินลูกค้า (PHASE19_33 — AccountingSyncService.CreditNote.cs) ──
                 case "CREATE_CREDIT_NOTE":
-                    return await ProcessCreditNote(payload);
+                {
+                    string cnResult = await ProcessCreditNote(payload);
+                    await TryAutoCreditNoteEtaxAsync(payload);   // ข้อ 25: CreditNote_Etax_Auto=1 + ใบต้นทาง e-Tax ถึงกรมสรรพากร (ไม่โยน)
+                    return cnResult;
+                }
                 case "RECORD_CN_REFUND":
                     return await ProcessCreditNoteRefund(payload);
                 case "VOID_CREDIT_NOTE":
                     return await ProcessVoidCreditNote(payload);
+
+                // ── งาน NextAcc ที่สั่งจากหน้าจอ (ข้อ 25 — AccountingSyncService.NextAccActions.cs) ──
+                case ActIssueFullTaxInvoice:
+                    return await ProcessIssueFullTaxInvoice(payload);
+                case ActReclassifyPaymentSource:
+                    return await ProcessReclassifyPaymentSource(payload);
 
                 // ── Deprecated: ไม่ผูกกับเอกสาร — skip ไม่ยิง API ──
                 case "CREATE_DEPOSIT_JOURNAL":

@@ -631,6 +631,8 @@
     <Content Include="Resource\sRGB Color Space Profile.icm" />
     <Content Include="Checkout.aspx" />
     <Content Include="Account\OverpayRefund.aspx" />
+    <Content Include="Account\ReceiptNextAcc.aspx" />
+    <Content Include="Account\UndueInputVat.aspx" />
     <Content Include="Payment\MakePayment.aspx" />
     <Content Include="Payment\Pay.aspx" />
     <Content Include="Payment\Card.aspx" />
@@ -979,6 +981,8 @@
     <Compile Include="Class\Integration\NextAccDocRefresh.cs" />
     <Compile Include="Class\Integration\NextAccUi.cs" />
     <Compile Include="Class\Integration\AccountingSyncService.BuyerSync.cs" />
+    <Compile Include="Class\Integration\NextAccActions.cs" />
+    <Compile Include="Class\Integration\AccountingSyncService.NextAccActions.cs" />
     <Compile Include="Class\Integration\ReceiptPreflight.cs" />
     <Compile Include="Class\Integration\ReceiptPreflight.Data.cs" />
     <Compile Include="Class\Integration\CreditNoteModels.cs" />
@@ -1875,6 +1879,24 @@
     </Compile>
     <Compile Include="Account\OverpayRefund.aspx.designer.cs">
       <DependentUpon>OverpayRefund.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Account\ReceiptNextAcc.aspx.cs">
+      <DependentUpon>ReceiptNextAcc.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Account\ReceiptNextAcc.aspx.designer.cs">
+      <DependentUpon>ReceiptNextAcc.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Account\UndueInputVat.aspx.cs">
+      <DependentUpon>UndueInputVat.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Account\UndueInputVat.aspx.designer.cs">
+      <DependentUpon>UndueInputVat.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Account\CreditNotes.Etax.cs">
+      <DependentUpon>CreditNotes.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
     </Compile>
     <Compile Include="Payment\MakePayment.aspx.cs">
       <DependentUpon>MakePayment.aspx</DependentUpon>

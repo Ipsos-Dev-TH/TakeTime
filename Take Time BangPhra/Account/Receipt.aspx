@@ -184,6 +184,15 @@
     <div class="form-title">
         <i class="fas fa-file-invoice"></i> สร้าง/แก้ไข ใบกำกับภาษี
     </div>
+    <%-- CLAUDE.md ข้อ 25: งาน NextAcc ของใบนี้ (ใบกำกับเต็มรูปทีหลัง / แก้แหล่งเงิน / ส่งอีเมล) — เฉพาะโหมดแก้ไขใบที่มีอยู่ --%>
+    <% if (string.Equals(Request.QueryString["command"], "edit", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(Request.QueryString["uid"])) { %>
+    <div style="margin:-8px 0 14px; text-align:right">
+        <a href="<%= ResolveUrl("~/Account/ReceiptNextAcc?uid=" + HttpUtility.UrlEncode(Request.QueryString["uid"])) %>"
+           style="display:inline-block; background:#e0f2f1; color:#00695c; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:13px">
+            💼 ลูกค้าขอใบกำกับเต็มรูป / แก้แหล่งเงิน (NextAcc)
+        </a>
+    </div>
+    <% } %>
         <table style="width:100%;">
             <tr>
                  <td class="modal-sm" style="width: 20%; text-align: right">เลขที่:</td>

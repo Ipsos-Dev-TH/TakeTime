@@ -40,6 +40,8 @@ namespace Take_Time_BangPhra.Integration
         public string EtaxStatus { get; set; }
         public string Reference { get; set; }
         public string Notes { get; set; }
+        /// <summary>ใบกำกับเต็มรูปที่ออก "แทน" ใบนี้ออกแทนเอกสารใด (DocumentDtos.cs:961 — ข้อ 25) · null = ไม่ใช่ใบแทน</summary>
+        public Guid? ReplacesId { get; set; }
         /// <summary>BOOKING (by-booking) / RANGE (รายการช่วงวันที่) / POINTER (GET ตัวชี้ของใบเสร็จ)</summary>
         public string Source { get; set; }
         // ── ผล ──
@@ -322,6 +324,7 @@ namespace Take_Time_BangPhra.Integration
                 EtaxStatus = d.EtaxStatus,
                 Reference = d.Reference,
                 Notes = d.Notes,
+                ReplacesId = d.ReplacesDocumentId,
                 Source = source
             };
         }
@@ -490,7 +493,16 @@ namespace Take_Time_BangPhra.Integration
                 ReconReceipt prc;
                 string crn;
                 KeyValuePair<string, int> claim;
-                if (pointerOwner.TryGetValue(d.Id, out prc))
+                // ข้อ 25: ใบกำกับเต็มรูปที่ออก "แทน" ใบเสร็จ (issue-full-tax-invoice — ไม่มี JE ใหม่, ใบเดิมไม่นับซ้ำในรายงานภาษีขาย)
+                // = เอกสารที่ถูกต้องของใบนั้น ไม่ใช่เอกสารซ้ำ/กำพร้า (Reference ของใบแทน = เลขเอกสารเดิม DocumentService.cs:12881)
+                ReconReceipt replacedOwner;
+                if (d.ReplacesId.HasValue && pointerOwner.TryGetValue(d.ReplacesId.Value, out replacedOwner))
+                {
+                    d.ReceiptNumber = replacedOwner.ReceiptNumber;
+                    d.Class = RecMatched;
+                    d.Detail = $"ใบกำกับภาษีเต็มรูปที่ออกแทนเอกสารของใบ {replacedOwner.ReceiptNumber} (ไม่มีรายการบัญชีซ้ำ)";
+                }
+                else if (pointerOwner.TryGetValue(d.Id, out prc))
                 {
                     d.ReceiptNumber = prc.ReceiptNumber;
                     if (IsCancelledLocalStatus(prc.LocalStatus))
@@ -543,7 +555,8 @@ namespace Take_Time_BangPhra.Integration
             foreach (var rc in r.Receipts)
             {
                 var mine = r.Docs.Where(d => string.Equals(d.ReceiptNumber, rc.ReceiptNumber, StringComparison.OrdinalIgnoreCase)
-                    && (d.Class == RecMatched || d.Class == RecOrphanSuperseded)).ToList();
+                    && (d.Class == RecMatched || d.Class == RecOrphanSuperseded)
+                    && !d.ReplacesId.HasValue).ToList();   // ใบกำกับเต็มรูปที่ออกแทน (ข้อ 25) ไม่ใช่เอกสารซ้ำ
                 rc.ActiveDocs = mine.Count;
                 var notes = new List<string>();
                 if (mine.Count >= 2)
@@ -814,6 +827,12 @@ namespace Take_Time_BangPhra.Integration
             { message = "ไม่พบเอกสารนี้บน NextAcc แล้ว (ถูกลบไปแล้ว)"; return -1; }
             if (doc == null) { message = "อ่านเอกสารจาก NextAcc ไม่ได้ — ลองใหม่"; return -1; }
             if (doc.Status == NexaaccDocumentStatus.Voided) { message = $"เอกสาร {doc.DocumentNumber} ถูกยกเลิกไปแล้ว"; return -1; }
+            if (doc.ReplacesDocumentId.HasValue && doc.ReplacesDocumentId.Value != Guid.Empty)
+            {
+                // ข้อ 25: ใบกำกับเต็มรูปที่ออกแทนใบเสร็จ — ไม่ใช่เอกสารกำพร้า (ยกเลิก = ลูกค้าเสียใบกำกับ และรายงานภาษีกลับไปนับใบเดิม)
+                message = $"เอกสาร {doc.DocumentNumber} เป็นใบกำกับภาษีเต็มรูปที่ออกแทนใบเสร็จเดิม — ไม่ยกเลิกจากหน้านี้ (ถ้าต้องยกเลิกจริงให้ทำบน NextAcc โดยผู้ทำบัญชี)";
+                return -1;
+            }
             string resRef = $"RES-{reservationId}";
             bool belongs = string.Equals((doc.BookingNumber ?? "").Trim(), resRef, StringComparison.OrdinalIgnoreCase)
                 || string.Equals((doc.Reference ?? "").Trim(), resRef, StringComparison.OrdinalIgnoreCase)

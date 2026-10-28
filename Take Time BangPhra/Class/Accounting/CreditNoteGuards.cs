@@ -85,6 +85,26 @@ namespace Take_Time_BangPhra.Integration
         /// สถานะ e-Tax ล่าสุดของใบเสร็จ ถ้า "ถึงกรมสรรพากรแล้ว" (Submitted/Accepted — NextAcc EtaxStatus 2/3,
         /// Models/Enums/AllEnums.cs:1305-1314) — ไม่ถึง/ไม่มี/ยกเลิกแล้ว = null
         /// </summary>
+        /// <summary>เลขใบกำกับเต็มรูปที่ออกแทนใบเสร็จนี้ (Nexaacc_Doc_Action PHASE19_41 — ข้อ 25) · null = ไม่มี/ไม่มีตาราง</summary>
+        public static string FullTaxInvoiceReplacementOf(string conn, string receiptId)
+        {
+            if (string.IsNullOrWhiteSpace(receiptId)) return null;
+            try
+            {
+                var dt = new code().DatabaseQuerySafe(conn,
+                    @"IF OBJECT_ID('dbo.Nexaacc_Doc_Action','U') IS NOT NULL
+                        SELECT TOP 1 ISNULL(Result_Doc_No, CAST(Result_Doc_Id AS NVARCHAR(40))) AS DocNo
+                          FROM dbo.Nexaacc_Doc_Action
+                         WHERE Receipt_ID = @r AND Action = 'FULL_TAX_INVOICE' AND Status = 'DONE'
+                           AND Path IN ('REPLACEMENT', 'APPROVE_DRAFT', 'ALREADY') AND Result_Doc_Id IS NOT NULL
+                         ORDER BY ID DESC",
+                    new Dictionary<string, object> { { "@r", receiptId.Trim() } });
+                if (dt != null && dt.Rows.Count > 0 && dt.Rows[0][0] != DBNull.Value) return Convert.ToString(dt.Rows[0][0]);
+            }
+            catch { }
+            return null;
+        }
+
         public static string EtaxReachedRd(string conn, string receiptId)
         {
             if (string.IsNullOrWhiteSpace(receiptId)) return null;
@@ -138,6 +158,12 @@ namespace Take_Time_BangPhra.Integration
                          + "(NextAcc ปฏิเสธการยกเลิกเอกสารที่มีใบลดหนี้อ้าง ม.86/10 และยอดที่ลดหนี้ไปแล้วจะถูกกลับซ้ำ) · "
                          + "ต้องการยกเลิกทั้งใบ ให้ออกใบลดหนี้ส่วนที่เหลือที่หน้า ใบลดหนี้ / คืนเงินลูกค้า ("
                          + CreditNoteUrlForReceipt(id) + ")";
+                // ข้อ 25: ออกใบกำกับเต็มรูป "แทน" ใบนี้แล้ว (issue-full-tax-invoice) — ใบแทนอ้างเอกสารเดิม (RelatedDocumentId) และรายงานภาษีขายนับใบแทน ⇒
+                // ยกเลิก/แก้ใบเดิมจากระบบนี้ = ลูกค้าถือใบกำกับของเอกสารที่ถูกยกเลิก · ต้องให้ผู้ทำบัญชีจัดการบน NextAcc ก่อน
+                string rep = FullTaxInvoiceReplacementOf(conn, id);
+                if (rep != null)
+                    return "ใบ " + id + " ออกใบกำกับภาษีเต็มรูป " + rep + " แทนไปแล้ว — ยกเลิก/ลบ/แก้ไข/ส่งซ้ำใบนี้ไม่ได้ · "
+                         + "ถ้าต้องแก้ ให้ผู้ทำบัญชียกเลิกใบแทนบน NextAcc ก่อน หรือออกใบลดหนี้อ้างใบแทน (" + CreditNoteUrlForReceipt(id) + ")";
                 if (checkEtax && Enabled(conn))
                 {
                     string et = EtaxReachedRd(conn, id);

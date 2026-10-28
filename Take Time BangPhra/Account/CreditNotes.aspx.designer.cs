@@ -496,5 +496,11 @@ namespace Take_Time_BangPhra.Account
         /// To modify move field declaration from designer file to code-behind file.
         /// </remarks>
         protected global::System.Web.UI.WebControls.Button btnLaterSave;
+
+        // ── CLAUDE.md ข้อ 25: บล็อก e-Tax ใบลดหนี้ (CreditNotes.Etax.cs) ──
+        protected global::System.Web.UI.WebControls.Panel pnlCnEtax;
+        protected global::System.Web.UI.WebControls.Literal litCnEtaxNote;
+        protected global::System.Web.UI.WebControls.HiddenField hfCnEtaxEmail;
+        protected global::System.Web.UI.WebControls.Repeater rptCnEtax;
     }
 }

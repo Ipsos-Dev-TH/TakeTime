@@ -139,6 +139,41 @@
                             <asp:Literal ID="litListFoot" runat="server" />
                         </div>
                     </div>
+
+                    <%-- ═══ CLAUDE.md ข้อ 25: e-Tax ใบลดหนี้ + ส่งอีเมล (บล็อกแยก — โค้ดอยู่ที่ CreditNotes.Etax.cs) ═══ --%>
+                    <asp:Panel ID="pnlCnEtax" runat="server" CssClass="cn-card cn-noprint" Visible="false">
+                        <h3>📨 e-Tax ใบลดหนี้ / ส่งอีเมลเอกสาร</h3>
+                        <asp:Literal ID="litCnEtaxNote" runat="server" />
+                        <asp:HiddenField ID="hfCnEtaxEmail" runat="server" ClientIDMode="Static" />
+                        <div class="cn-scroll">
+                            <asp:Repeater ID="rptCnEtax" runat="server" OnItemCommand="rptCnEtax_ItemCommand">
+                                <HeaderTemplate>
+                                    <table class="cn-t" style="min-width:720px"><tr><th>ใบลดหนี้</th><th>เอกสาร NextAcc</th><th>ใบต้นทาง</th><th>e-Tax ใบลดหนี้</th><th>จัดการ</th></tr>
+                                </HeaderTemplate>
+                                <ItemTemplate>
+                                    <tr>
+                                        <td><b><%# H(Eval("CN_No")) %></b><br /><span class="cn-note"><%# D(Eval("CN_Date")) %></span></td>
+                                        <td><%# H(Eval("Nexaacc_Doc_No")) %></td>
+                                        <td><%# H(Eval("Source_Receipt_ID")) %><br /><span class="cn-note"><%# H(Eval("SrcEtax")) %></span></td>
+                                        <td><%# CnEtaxStatusHtml(Eval("Etax_Status"), Eval("Etax_Ref"), Eval("Etax_Error")) %></td>
+                                        <td class="cn-act">
+                                            <asp:LinkButton ID="lbEtaxGen" runat="server" CommandName="EtaxGen" CommandArgument='<%# Eval("ID") %>' Text="📨 ส่ง e-Tax"
+                                                Visible='<%# CanApprove && CnEtaxCanGenerate(Container.DataItem) %>'
+                                                OnClientClick="return confirm('ออก e-Tax ใบลดหนี้ (ลงนามตามค่าตั้ง e-Tax ของ NextAcc)?');" />
+                                            <asp:LinkButton ID="lbEtaxSubmit" runat="server" CommandName="EtaxSubmit" CommandArgument='<%# Eval("ID") %>' Text="🏛 ส่งกรมสรรพากร"
+                                                Visible='<%# CanApprove && Take_Time_BangPhra.Integration.CreditNoteEtaxPolicy.CanSubmit(Convert.ToString(Eval("Etax_Status"))) %>'
+                                                OnClientClick="return confirm('ส่ง e-Tax ใบลดหนี้ถึงกรมสรรพากร? (ส่งแล้วยกเลิกไม่ได้)');" />
+                                            <asp:LinkButton ID="lbEtaxRefresh" runat="server" CommandName="EtaxRefresh" CommandArgument='<%# Eval("ID") %>' Text="↻ สถานะ" />
+                                            <asp:LinkButton ID="lbDocEmail" runat="server" CommandName="DocEmail" CommandArgument='<%# Eval("ID") %>' Text="✉️ อีเมล"
+                                                Visible='<%# CanApprove %>'
+                                                OnClientClick="var m=prompt('อีเมลผู้รับ PDF ใบลดหนี้ (จาก NextAcc):');if(!m)return false;document.getElementById('hfCnEtaxEmail').value=m;return true;" />
+                                        </td>
+                                    </tr>
+                                </ItemTemplate>
+                                <FooterTemplate></table></FooterTemplate>
+                            </asp:Repeater>
+                        </div>
+                    </asp:Panel>
                 </asp:Panel>
 
                 <!-- ═══ ออกใบลดหนี้ manual ═══ -->

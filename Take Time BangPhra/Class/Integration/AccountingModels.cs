@@ -409,6 +409,19 @@ namespace Take_Time_BangPhra.Integration
         public string PaymentAccountName { get; set; }
         /// <summary>ราคาในบรรทัดรวม VAT (DocumentDtos.cs:711)</summary>
         public bool PricesIncludeVat { get; set; }
+
+        // ── CLAUDE.md ข้อ 25 (ใบกำกับเต็มรูปทีหลัง / เปลี่ยนแหล่งเงิน) — DocumentResponse DocumentDtos.cs:646-973 ──
+        /// <summary>บัญชีธนาคารบนหัวเอกสาร (DocumentDtos.cs:676) — คู่กับ PaymentAccountId = "แหล่งเงิน" ที่ reclassify-payment-source แก้ได้</summary>
+        public Guid? BankAccountId { get; set; }
+        /// <summary>ออกใบกำกับเต็มรูป "แทน" ได้ไหม — เซิร์ฟเวอร์ตัดสิน (DocumentDtos.cs:971, DocumentService.cs:2075-2083) · null = ไม่ได้คำนวณ</summary>
+        public bool? CanIssueFullTaxInvoice { get; set; }
+        /// <summary>เหตุผลที่ออกใบแทนไม่ได้ (DocumentDtos.cs:973)</summary>
+        public string FullTaxInvoiceBlockedReason { get; set; }
+        /// <summary>ใบนี้ถูกแทนด้วยใบกำกับเต็มรูปใบไหน (DocumentDtos.cs:958-959)</summary>
+        public Guid? ReplacedByDocumentId { get; set; }
+        public string ReplacedByDocumentNumber { get; set; }
+        /// <summary>ใบนี้ออกแทนใบไหน (DocumentDtos.cs:961)</summary>
+        public Guid? ReplacesDocumentId { get; set; }
     }
 
     /// <summary>NextAcc DocumentLineResponse (DocumentDtos.cs:1169-1210) — เฉพาะช่องที่ TakeTime ใช้</summary>
