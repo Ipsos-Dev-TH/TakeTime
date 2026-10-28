@@ -400,6 +400,34 @@ namespace Take_Time_BangPhra.Integration
         public bool InputVatPostedAsUndue { get; set; }
         /// <summary>enum เป็นสตริง (JsonStringEnumConverter — NextAcc Program.cs:771)</summary>
         public string CreditNoteReason { get; set; }
+
+        // ── ใบต้นทางของใบลด/เพิ่มหนี้ผู้ขาย (หน้าตรวจทาน OCR) — DocumentResponse DocumentDtos.cs:625-660 ──
+        /// <summary>บรรทัดของเอกสาร (JSON <c>lines</c> = DocumentLineResponse DocumentDtos.cs:1169-1210) — มีเฉพาะ GET รายใบ</summary>
+        public List<NexaaccDocLine> Lines { get; set; }
+        /// <summary>บัญชีเงินที่ใบนี้จ่าย/รับ (PV/ใบเสร็จ — Document.PaymentAccountId, DocumentDtos.cs:657-658)</summary>
+        public Guid? PaymentAccountId { get; set; }
+        public string PaymentAccountName { get; set; }
+        /// <summary>ราคาในบรรทัดรวม VAT (DocumentDtos.cs:711)</summary>
+        public bool PricesIncludeVat { get; set; }
+    }
+
+    /// <summary>NextAcc DocumentLineResponse (DocumentDtos.cs:1169-1210) — เฉพาะช่องที่ TakeTime ใช้</summary>
+    public class NexaaccDocLine
+    {
+        public string Description { get; set; }
+        public decimal Quantity { get; set; }
+        public string Unit { get; set; }
+        public decimal UnitPrice { get; set; }
+        public decimal DiscountAmount { get; set; }
+        /// <summary>ยอดก่อน VAT</summary>
+        public decimal Amount { get; set; }
+        public decimal VatRate { get; set; }
+        public decimal VatAmount { get; set; }
+        public Guid? AccountId { get; set; }
+        public string AccountCode { get; set; }
+        public string AccountName { get; set; }
+        public string ProductCode { get; set; }
+        public bool IsVatClaimable { get; set; } = true;
     }
 
     /// <summary>NextAcc ContactBrief(Id, Name, TaxId, BranchCode) — DocumentDtos.cs:1268</summary>
@@ -579,6 +607,9 @@ namespace Take_Time_BangPhra.Integration
         public string WhtIncomeTypeCode { get; set; }
         public string Currency { get; set; }
         public string UserNotes { get; set; }
+        /// <summary>ข้อความดิบที่ OCR อ่านได้ (NextAcc OcrResultResponse.RawTextContent — OcrDtos.cs:18, OcrService.cs MapToResponse) —
+        /// หน้าตรวจทานใช้อ่าน §86/10 ของใบลดหนี้ (อ้างใบเดิม/มูลค่าเดิม/เหตุผล) ด้วย OcrCnPaperReader</summary>
+        public string RawTextContent { get; set; }
     }
 
     /// <summary>คำเตือน 1 ข้อบนผลสแกน — Severity "error" | "warn" (OcrDtos.cs:168)</summary>

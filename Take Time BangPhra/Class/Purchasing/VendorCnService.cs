@@ -328,8 +328,12 @@ namespace Take_Time_BangPhra.Purchasing
         {
             if (s?.Lines == null || string.IsNullOrWhiteSpace(inventoryCode)) return 0m;
             string inv = inventoryCode.Trim();
-            return VendorCnPolicy.R2(s.Lines.Where(l => string.Equals((l.AccountCode ?? "").Trim(), inv, StringComparison.OrdinalIgnoreCase))
-                .Sum(l => Integration.OcrReview.OcrReviewMath.CalcLine(l).Net));
+            // ฐานก่อน VAT หลังกระทบเศษทั้งใบ (ราคารวม VAT ⇒ ถอดตามใบ — OcrReviewMath.CalcLines)
+            var calcs = Integration.OcrReview.OcrReviewMath.CalcLines(s);
+            decimal sum = 0m;
+            for (int i = 0; i < s.Lines.Count; i++)
+                if (s.Lines[i] != null && string.Equals((s.Lines[i].AccountCode ?? "").Trim(), inv, StringComparison.OrdinalIgnoreCase)) sum += calcs[i].Net;
+            return VendorCnPolicy.R2(sum);
         }
 
         /// <summary>รหัสบัญชีของ mapping key ("" = ไม่ผูก)</summary>

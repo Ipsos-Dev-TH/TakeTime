@@ -27,6 +27,7 @@ namespace Take_Time_BangPhra.Voucher
         protected global::System.Web.UI.WebControls.Button btnSubmitAck;
         protected global::System.Web.UI.WebControls.Button btnSubmit;
         protected global::System.Web.UI.WebControls.Button btnCnSearch;
+        protected global::System.Web.UI.WebControls.Button btnCnPick;
         protected global::System.Web.UI.WebControls.HiddenField hfReviewJson;
         protected global::System.Web.UI.WebControls.HiddenField hfMetaJson;
         protected global::System.Web.UI.WebControls.HiddenField hfScanId;

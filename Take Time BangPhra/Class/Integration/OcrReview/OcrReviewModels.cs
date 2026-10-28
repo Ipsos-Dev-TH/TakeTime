@@ -78,13 +78,89 @@ namespace Take_Time_BangPhra.Integration.OcrReview
         public const string VendorAccount = "VENDOR";
     }
 
-    /// <summary>บรรทัดที่ผู้ใช้ยืนยัน (ราคาไม่รวม VAT — ส่ง NextAcc ด้วย PricesIncludeVat=false)</summary>
+    /// <summary>
+    /// เหตุผลใบลด/เพิ่มหนี้ผู้ขาย (รหัสของเรา) → NextAcc enum (CreditNoteReason 1-4 / DebitNoteReason 1-4 — AllEnums.cs:1636-1662).
+    /// NextAcc พิมพ์ได้แค่ข้อความมาตรฐานของ enum (PdfGenerationService.cs:3198-3205 + DocumentLabels.cs:244-247) และไม่มีช่องข้อความเหตุผลอิสระ
+    /// ⇒ ข้อความของเรา (+ รายละเอียด) ไปอยู่ใน Notes ของเอกสาร. Return (1) กระทบสต๊อกฝั่ง NextAcc เฉพาะบรรทัดที่มี ProductCode
+    /// (DocumentService.cs:17828-17860) — หน้านี้ไม่ส่ง ProductCode ⇒ สต๊อกเดินตาม TakeTime (การคืนสินค้า PRT-) เท่านั้น
+    /// </summary>
+    public static class OcrNoteReasons
+    {
+        public sealed class Reason
+        {
+            public string Code;
+            public string Label;
+            public int NextAcc;
+            /// <summary>มีของส่งกลับจริง (ผูกการคืนสินค้า PRT- ได้)</summary>
+            public bool PhysicalReturn;
+            public bool NeedsText;
+            public string Hint;
+        }
+
+        public static readonly Reason[] Credit =
+        {
+            new Reason { Code = "RETURN", Label = "คืนสินค้า", NextAcc = 1, PhysicalReturn = true,
+                Hint = "ส่งของกลับผู้ขาย — ผูกการคืนสินค้า (PRT-) ถ้าบันทึกที่หน้า \"คืนสินค้าให้ผู้ขาย\" ไว้แล้ว" },
+            new Reason { Code = "DEFECT", Label = "สินค้าชำรุด/เสียหาย/ผิดสเปก (ส่งคืน)", NextAcc = 1, PhysicalReturn = true,
+                Hint = "ส่งของที่ชำรุด/ผิดสเปกกลับ — เหมือนคืนสินค้า" },
+            new Reason { Code = "SHORT", Label = "ผู้ขายไม่มีสินค้า/ส่งของไม่ครบ", NextAcc = 3,
+                Hint = "ไม่มีของส่งกลับ ⇒ ไม่ต้องผูกการคืนสินค้า · ถ้ารับเข้าสต๊อก (Product/In) เต็มจำนวนไปแล้ว ให้แก้จำนวนรับเข้าให้ตรงของที่ได้จริง และให้บรรทัดลงบัญชีเดียวกับใบเดิม (สินค้าคงเหลือ/GRNI) เพื่อลดต้นทุนของที่ไม่ได้รับ" },
+            new Reason { Code = "DISCOUNT", Label = "ส่วนลด/ลดราคาหลังขาย", NextAcc = 2,
+                Hint = "ไม่แตะสต๊อก — แนะนำบัญชีส่วนลดรับ/ส่งคืน หรือบัญชีเดียวกับใบเดิม" },
+            new Reason { Code = "PRICE_ERR", Label = "คิดราคาผิด/คำนวณผิด (สูงกว่าจริง)", NextAcc = 3,
+                Hint = "ไม่แตะสต๊อก — ใช้บัญชีเดียวกับใบเดิม" },
+            new Reason { Code = "OTHER", Label = "อื่น ๆ (ระบุ)", NextAcc = 3, NeedsText = true,
+                Hint = "พิมพ์รายละเอียดเหตุผล (§86/10 บังคับระบุเหตุผลบนใบ)" },
+        };
+
+        public static readonly Reason[] Debit =
+        {
+            new Reason { Code = "PRICE_UP", Label = "ราคาเพิ่มจากที่ตกลง/คิดราคาต่ำไป", NextAcc = 1 },
+            new Reason { Code = "EXTRA", Label = "ส่งสินค้าเกิน/บริการเพิ่ม", NextAcc = 2 },
+            new Reason { Code = "CHARGE", Label = "ค่าใช้จ่ายเพิ่มเติมภายหลัง (ขนส่ง/ติดตั้ง)", NextAcc = 3 },
+            new Reason { Code = "CALC_ERR", Label = "คำนวณยอด/ภาษีต่ำไป", NextAcc = 4 },
+            new Reason { Code = "OTHER", Label = "อื่น ๆ (ระบุ)", NextAcc = 4, NeedsText = true },
+        };
+
+        public static Reason Find(string docKind, string code)
+        {
+            if (string.IsNullOrWhiteSpace(code)) return null;
+            var list = docKind == OcrDocKind.VendorDebitNote ? Debit : Credit;
+            foreach (var r in list) if (string.Equals(r.Code, code.Trim(), StringComparison.OrdinalIgnoreCase)) return r;
+            return null;
+        }
+
+        /// <summary>ร่างเก่า (มีแค่ NoteReason 1-4) → รหัสของเรา</summary>
+        public static string FromLegacy(string docKind, int nextAcc)
+        {
+            if (docKind == OcrDocKind.VendorDebitNote)
+                return nextAcc == 1 ? "PRICE_UP" : nextAcc == 2 ? "EXTRA" : nextAcc == 3 ? "CHARGE" : nextAcc == 4 ? "CALC_ERR" : null;
+            return nextAcc == 1 ? "RETURN" : nextAcc == 2 ? "DISCOUNT" : nextAcc == 3 ? "PRICE_ERR" : nextAcc == 4 ? "OTHER" : null;
+        }
+    }
+
+    /// <summary>บรรทัดของใบต้นทางใน NextAcc (อ่านอย่างเดียว — ใช้แสดงข้างฟอร์มและจับคู่บัญชีของบรรทัดใบลด/เพิ่มหนี้)</summary>
+    public sealed class OcrSourceLine
+    {
+        public string Description { get; set; }
+        public string ProductCode { get; set; }
+        public decimal Qty { get; set; }
+        public decimal UnitPrice { get; set; }
+        /// <summary>ยอดบรรทัดก่อน VAT (NextAcc DocumentLineResponse.Amount)</summary>
+        public decimal Amount { get; set; }
+        public decimal VatRate { get; set; }
+        public string AccountCode { get; set; }
+        public string AccountName { get; set; }
+    }
+
+    /// <summary>บรรทัดที่ผู้ใช้ยืนยัน — ราคา/ส่วนลดอยู่ในฐานเดียวกับ <see cref="OcrReviewState.PricesIncludeVat"/>
+    /// (false = ก่อน VAT · true = รวม VAT ตามกระดาษ) ส่ง NextAcc ด้วย PricesIncludeVat ค่าเดียวกัน + VatAmountOverride ทุกบรรทัดที่มีภาษี</summary>
     public sealed class OcrReviewLine
     {
         public string Description { get; set; }
         public decimal Qty { get; set; } = 1m;
         public decimal UnitPrice { get; set; }
-        /// <summary>ส่วนลดเป็นบาทของบรรทัด (ก่อน VAT) — NextAcc DocumentLineRequest.DiscountAmount (DocumentDtos.cs:234)</summary>
+        /// <summary>ส่วนลดเป็นบาทของบรรทัด (ฐานเดียวกับราคา) — NextAcc DocumentLineRequest.DiscountAmount (DocumentDtos.cs:234)</summary>
         public decimal Discount { get; set; }
         /// <summary>รหัสบัญชี NextAcc (ค่าใช้จ่าย/สินค้า/GRNI) — DocumentLineRequest.AccountCode (DocumentDtos.cs:207)</summary>
         public string AccountCode { get; set; }
@@ -100,6 +176,12 @@ namespace Take_Time_BangPhra.Integration.OcrReview
         public string IncomeType { get; set; }
         /// <summary>บัญชีที่ OCR แนะนำ (เก็บไว้ทำ audit การแก้)</summary>
         public string OcrAccountCode { get; set; }
+        /// <summary>รหัสสินค้าบนกระดาษ (เช่น Makro article no.) — ใช้จับคู่บรรทัดใบต้นทาง ไม่ส่ง NextAcc (กันสต๊อกฝั่ง NextAcc ขยับ)</summary>
+        public string ProductCode { get; set; }
+        /// <summary>บัญชีของบรรทัดที่จับคู่ได้ในใบต้นทาง (<see cref="OcrReviewMath.AssignAccountsFromSource"/>)</summary>
+        public string SourceAccountCode { get; set; }
+        /// <summary>เหตุผลการจับคู่ (รหัสสินค้า / รายละเอียด / ราคา / บัญชีหลักของใบเดิม)</summary>
+        public string SourceMatch { get; set; }
     }
 
     /// <summary>สถานะหน้าตรวจทานทั้งใบ — เก็บเป็น JSON ใน Ocr_Document_Log.Review_Json (draft) และส่งไปมาระหว่างหน้าเว็บ</summary>
@@ -129,6 +211,11 @@ namespace Take_Time_BangPhra.Integration.OcrReview
         public string Notes { get; set; }
 
         public List<OcrReviewLine> Lines { get; set; } = new List<OcrReviewLine>();
+        /// <summary>ราคาในรายการ "รวม VAT แล้ว" (ตามกระดาษ เช่น Makro) — VAT ทั้งใบ = ยอดรวม − round(ยอดรวม × 100/107) ต่ออัตรา ·
+        /// ส่ง NextAcc PricesIncludeVat=true (DocumentDtos.cs:109, :290; สูตร DocumentService.cs:642-684)</summary>
+        public bool PricesIncludeVat { get; set; }
+        /// <summary>ที่มาของ <see cref="PricesIncludeVat"/>: "AUTO" = ระบบตัดสินจากยอดบนกระดาษ · "OCR" = OCR อ่านว่าราคารวม VAT · "USER" = ผู้ใช้สลับเอง</summary>
+        public string PriceBasisSource { get; set; }
 
         // ── ยอดตามกระดาษ (ผู้ใช้แก้ได้เมื่อ OCR อ่านผิด) ──
         public decimal? PrintedSubTotal { get; set; }
@@ -149,10 +236,32 @@ namespace Take_Time_BangPhra.Integration.OcrReview
         /// <summary>ผลรวมใบลดหนี้ที่อนุมัติแล้วซึ่งอ้างใบต้นทางนี้ (ไม่นับร่าง/ยกเลิก — DocumentService.cs:11922-11927)</summary>
         public decimal SourceCredited { get; set; }
         public decimal SourceBalanceDue { get; set; }
-        /// <summary>CN: CreditNoteReason 1-4 (AllEnums.cs:1636-1646) · DN: DebitNoteReason 1-4 (AllEnums.cs:1652-1662)</summary>
+        public decimal SourceSubTotal { get; set; }
+        public string SourceDocDate { get; set; }
+        /// <summary>เลขใบกำกับของผู้ขายที่ใบต้นทางบันทึกไว้ (SupplierInvoiceNumber)</summary>
+        public string SourceSupplierDocNo { get; set; }
+        /// <summary>บรรทัดของใบต้นทาง (GET document) — แสดงข้างฟอร์ม + จับคู่บัญชี</summary>
+        public List<OcrSourceLine> SourceLines { get; set; } = new List<OcrSourceLine>();
+        /// <summary>บัญชีเงินที่ใบต้นทางจ่ายออก (PV.PaymentAccountId หรือขาเครดิตเงินของ JE การจ่าย) — ค่าเริ่มต้นของบัญชีรับเงินคืน</summary>
+        public string SourcePaidAccountId { get; set; }
+        public string SourcePaidAccountLabel { get; set; }
+        /// <summary>CN: CreditNoteReason 1-4 (AllEnums.cs:1636-1646) · DN: DebitNoteReason 1-4 (AllEnums.cs:1652-1662) — ตั้งจาก <see cref="NoteReasonCode"/></summary>
         public int NoteReason { get; set; }
+        /// <summary>เหตุผลของเรา (<see cref="OcrNoteReasons"/>) เช่น SHORT = ผู้ขายไม่มีสินค้า/ส่งไม่ครบ</summary>
+        public string NoteReasonCode { get; set; }
         public string NoteReasonText { get; set; }
+        // ── §86/10 บนกระดาษใบลด/เพิ่มหนี้: อ้างใบกำกับเดิม + มูลค่าเดิม/ที่ถูกต้อง/ผลต่าง ──
+        public string OrigTaxInvoiceNo { get; set; }
+        /// <summary>yyyy-MM-dd</summary>
+        public string OrigTaxInvoiceDate { get; set; }
+        public decimal? OrigAmount { get; set; }
+        public decimal? CorrectAmount { get; set; }
+        public decimal? DiffAmount { get; set; }
+        /// <summary>วิธีชำระที่พิมพ์บนใบลดหนี้ (เช่น "Credit Card/Debit Card") — คำใบ้เลือกบัญชีรับเงินคืน</summary>
+        public string PaperPaymentType { get; set; }
         public string Settlement { get; set; } = OcrNoteSettlement.Auto;
+        /// <summary>ผู้ใช้เลือกขาเงินเอง — ระบบไม่ตั้งค่าเริ่มต้นทับ</summary>
+        public bool SettlementUserSet { get; set; }
         /// <summary>บัญชีรับคืน/จ่าย (ChartOfAccount id) เมื่อ Settlement = BANK</summary>
         public string RefundAccountId { get; set; }
         /// <summary>เลขอ้างอิงการคืนสินค้า PRT- — SourceMode = PRT (หลักฐาน, นโยบายเดิม) หรือใบลดหนี้ NEXTACC/OUTSIDE ที่ผูกการคืน
@@ -174,8 +283,9 @@ namespace Take_Time_BangPhra.Integration.OcrReview
     /// <summary>ผลคำนวณบรรทัด</summary>
     public sealed class OcrLineCalc
     {
-        public decimal Gross;           // round(จำนวน × ราคา)
-        public decimal Net;             // Gross − ส่วนลด (ฐานก่อน VAT)
+        public decimal Gross;           // round(จำนวน × ราคา) — ฐานเดียวกับราคา (รวม/ไม่รวม VAT)
+        public decimal Amount;          // Gross − ส่วนลด (ยอดตามกระดาษของบรรทัด)
+        public decimal Net;             // ฐานก่อน VAT
         public decimal Vat;             // VAT ของบรรทัด (รวมส่วนที่เคลมไม่ได้)
         public decimal Wht;             // ภาษีหัก ณ ที่จ่ายของบรรทัด
         public decimal NextAccVatRate;  // 7 / 0 / -1
@@ -205,10 +315,20 @@ namespace Take_Time_BangPhra.Integration.OcrReview
     }
 
     /// <summary>ผลตรวจทั้งใบ — Errors ต้องว่างจึงส่งได้</summary>
+    /// <summary>ปุ่มแก้ด่วน 1 แตะ (ตัวเดียวกับหน้าเว็บ — OcrReviewMath.SuggestFixes / OcrMath.suggestFixes)</summary>
+    public sealed class OcrFix
+    {
+        /// <summary>SWITCH_BASIS · FIT_VAT · FILL_MISSING · ADD_GAP</summary>
+        public string Code;
+        public string Label;
+        public string Hint;
+    }
+
     public sealed class OcrValidation
     {
         public List<string> Errors = new List<string>();
         public List<string> Warnings = new List<string>();
+        public List<OcrFix> Fixes = new List<OcrFix>();
         public List<OcrReconItem> Recon = new List<OcrReconItem>();
         public OcrTotals Totals;
         /// <summary>§86/4 ที่ยังขาด (ว่าง = ครบ) — ขาด + เคลม VAT ⇒ NextAcc ลง 11640 (TaxInvoiceCompletenessChecker.cs:5-10)</summary>

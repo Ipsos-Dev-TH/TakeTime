@@ -300,6 +300,8 @@ namespace Take_Time_BangPhra.Voucher
                 string raw = OcrReviewService.ToJson(state);
                 Session[RawKey(scanId)] = raw;
                 Session[DraftKey(scanId)] = raw;
+                // ใบลด/เพิ่มหนี้: ค้นใบต้นทางจาก "อ้างอิงใบกำกับภาษีเลขที่" ให้เลย — ตรงใบเดียว = เลือก + ตั้งบัญชี/ขาเงินตามใบเดิม
+                if (OcrDocKind.IsNote(state.DocKind)) { AutoFindSource(state); Session[DraftKey(scanId)] = OcrReviewService.ToJson(state); }
                 Svc.SaveDraft(state, raw, ocr.OriginalFileName ?? Session[NameKey(scanId)] as string, UserName);
                 if (ocr.CreatedDocumentId.HasValue)
                     _serverNotes.Add("สแกนนี้มีเอกสารบน NextAcc แล้ว — กดส่งจะใช้เอกสารเดิม (แก้ร่าง/อนุมัติต่อ) ไม่สร้างใหม่");
@@ -348,6 +350,12 @@ namespace Take_Time_BangPhra.Voucher
             m["accounts"] = LoadAccountOptions(out synced);
             m["chartSynced"] = synced;
             m["money"] = LoadMoneyOptions();
+            m["paidHow"] = LoadPaidHowAccounts().Select(x => (object)new Dictionary<string, object> { { "id", x.Item1.ToString() }, { "n", x.Item2 } }).ToList();
+            m["reasons"] = new Dictionary<string, object>
+            {
+                { "VCN", OcrNoteReasons.Credit.Select(ReasonMeta).ToList() },
+                { "VDN", OcrNoteReasons.Debit.Select(ReasonMeta).ToList() }
+            };
             m["vendors"] = LoadVendorOptions();
             var ocrJson = ViewState["ocrMeta"] as string;
             m["ocr"] = string.IsNullOrEmpty(ocrJson) ? new Dictionary<string, object>() : OcrReviewService.Json().DeserializeObject(ocrJson);
@@ -437,6 +445,15 @@ namespace Take_Time_BangPhra.Voucher
             if (OcrReviewMath.IsValidThaiTaxId(s.SupplierTaxId)) s.SupplierTaxId = OcrReviewMath.Digits(s.SupplierTaxId);
             string br = OcrReviewMath.NormalizeBranch(s.SupplierBranch);
             if (OcrReviewMath.IsValidBranch(br)) s.SupplierBranch = br;
+            s.Lines.RemoveAll(l => l == null);
+            if (s.SourceLines == null) s.SourceLines = new List<OcrSourceLine>();
+            s.NoteReasonCode = string.IsNullOrWhiteSpace(s.NoteReasonCode) ? null : s.NoteReasonCode.Trim().ToUpperInvariant();
+            if (OcrDocKind.IsNote(s.DocKind))
+            {
+                if (s.NoteReasonCode == null && s.NoteReason >= 1 && s.NoteReason <= 4) s.NoteReasonCode = OcrNoteReasons.FromLegacy(s.DocKind, s.NoteReason);   // ร่างเก่า
+                var rs = OcrNoteReasons.Find(s.DocKind, s.NoteReasonCode);
+                s.NoteReason = rs != null ? rs.NextAcc : 0;
+            }
             foreach (var l in s.Lines)
             {
                 l.Description = (l.Description ?? "").Trim();
@@ -477,6 +494,14 @@ namespace Take_Time_BangPhra.Voucher
             {
                 var results = RunSync(() => OcrReviewService.SearchSourceDocsAsync(NewClient(), s, notes));
                 ViewState["cnResults"] = OcrReviewService.ToJson(results);
+                // ตรงเลขใบกำกับเดิมใบเดียว และยังไม่ได้เลือก ⇒ เลือกให้เลย
+                var exact = results.Where(x => x.Exact).ToList();
+                if (string.IsNullOrWhiteSpace(s.SourceDocId) && exact.Count == 1)
+                {
+                    s.SourceDocId = exact[0].Id;
+                    LoadSource(s, notes);
+                    notes.Insert(0, "เลือกใบต้นทาง " + exact[0].No + " ให้แล้ว (ตรงเลขใบกำกับเดิม " + s.OrigTaxInvoiceNo + ") — เปลี่ยนได้");
+                }
             }
             catch (Exception ex)
             {
@@ -486,6 +511,55 @@ namespace Take_Time_BangPhra.Voucher
             ViewState["cnNotes"] = OcrReviewService.ToJson(notes);
             Svc.SaveDraft(s, null, null, UserName);
             RenderReview(s);
+        }
+
+        /// <summary>เลือกใบต้นทางจากผลค้น (JS ใส่ SourceDocId แล้วกดปุ่มซ่อน) → โหลดบรรทัด/บัญชี/การจ่ายของใบเดิม</summary>
+        protected void btnCnPick_Click(object sender, EventArgs e)
+        {
+            Server.ScriptTimeout = 300;
+            var s = ReadPostedState();
+            if (s == null) { ReviewLost(); return; }
+            var notes = new List<string>();
+            LoadSource(s, notes);
+            ViewState["cnNotes"] = OcrReviewService.ToJson(notes);
+            Svc.SaveDraft(s, null, null, UserName);
+            RenderReview(s);
+        }
+
+        private void LoadSource(OcrReviewState s, List<string> notes)
+        {
+            try
+            {
+                bool cnPrimary = false;
+                try { cnPrimary = new Take_Time_BangPhra.Purchasing.VendorCnService(Conn).CnPrimary(); } catch { }
+                var money = LoadPaidHowAccounts();
+                Guid cg = new AccountingConfig(Conn).CompanyId;
+                string cid = cg == Guid.Empty ? null : cg.ToString();
+                RunSync(() => OcrReviewService.LoadSourceDetailAsync(NewClient(), s, money.ToDictionary(x => x.Item1, x => x.Item2), cnPrimary, cid, notes));
+            }
+            catch (Exception ex) { notes.Add("โหลดใบต้นทางไม่สำเร็จ: " + OcrReviewService.ApiMessage(ex)); }
+        }
+
+        /// <summary>ครั้งแรกที่เปิดใบลด/เพิ่มหนี้: ค้นด้วยเลขใบกำกับเดิม (best-effort ไม่บล็อกหน้า)</summary>
+        private void AutoFindSource(OcrReviewState s)
+        {
+            if (string.IsNullOrWhiteSpace(s.OrigTaxInvoiceNo) || !string.IsNullOrWhiteSpace(s.SourceDocId)) return;
+            var notes = new List<string>();
+            try
+            {
+                var results = RunSync(() => OcrReviewService.SearchSourceDocsAsync(NewClient(), s, notes));
+                ViewState["cnResults"] = OcrReviewService.ToJson(results);
+                var exact = results.Where(x => x.Exact).ToList();
+                if (exact.Count == 1)
+                {
+                    s.SourceDocId = exact[0].Id;
+                    LoadSource(s, notes);
+                    notes.Insert(0, "พบใบต้นทาง " + exact[0].No + " จากเลขใบกำกับเดิม " + s.OrigTaxInvoiceNo + " — เลือกให้แล้ว (เปลี่ยนได้)");
+                }
+                else if (exact.Count > 1) notes.Insert(0, "พบใบต้นทางที่อ้างเลข " + s.OrigTaxInvoiceNo + " หลายใบ — เลือกใบที่ถูกจากตาราง");
+            }
+            catch (Exception ex) { notes.Add("ค้นใบต้นทางอัตโนมัติไม่สำเร็จ: " + OcrReviewService.ShortError(ex)); }
+            ViewState["cnNotes"] = OcrReviewService.ToJson(notes);
         }
 
         protected void btnSubmit_Click(object sender, EventArgs e) => DoSubmit(false);
@@ -815,6 +889,39 @@ namespace Take_Time_BangPhra.Voucher
                 if (dt != null)
                     foreach (DataRow row in dt.Rows)
                         list.Add(new Dictionary<string, object> { { "id", row["Nexaacc_AccountId"]?.ToString() ?? "" }, { "c", "" }, { "n", row["Paid_How"]?.ToString() ?? "" } });
+            }
+            catch { }
+            return list;
+        }
+
+        private static object ReasonMeta(OcrNoteReasons.Reason r) => new Dictionary<string, object>
+        {
+            { "c", r.Code }, { "t", r.Label }, { "n", r.NextAcc }, { "phys", r.PhysicalReturn }, { "txt", r.NeedsText }, { "h", r.Hint ?? "" }
+        };
+
+        /// <summary>แหล่งเงิน (Account_Paid_How ที่ผูกบัญชี NextAcc) — (บัญชี NextAcc, "ชื่อแหล่งเงิน · รหัส ชื่อบัญชี") ใช้เป็นตัวเลือก
+        /// "รับเงินคืนเข้า" ของใบลดหนี้ และใช้จับบัญชีที่ใบต้นทางจ่ายออก</summary>
+        private List<Tuple<Guid, string>> LoadPaidHowAccounts()
+        {
+            var list = new List<Tuple<Guid, string>>();
+            try
+            {
+                var dt = new Take_Time_BangPhra.code().DatabaseQuerySafe(Conn,
+                    @"SELECT ph.Paid_How, ph.Nexaacc_AccountId, a.Account_Code, a.Account_Name
+                        FROM Account_Paid_How ph
+                        LEFT JOIN Accounting_Nexaacc_Accounts a ON CONVERT(NVARCHAR(64), a.Nexaacc_AccountId) = LTRIM(RTRIM(ph.Nexaacc_AccountId))
+                       WHERE ph.Status = 'True' AND ph.Nexaacc_AccountId IS NOT NULL AND LTRIM(RTRIM(ph.Nexaacc_AccountId)) <> ''
+                       ORDER BY ph.Paid_How", null);
+                var seen = new HashSet<Guid>();
+                if (dt != null)
+                    foreach (DataRow row in dt.Rows)
+                    {
+                        Guid g;
+                        if (!Guid.TryParse(row["Nexaacc_AccountId"]?.ToString() ?? "", out g) || g == Guid.Empty || !seen.Add(g)) continue;
+                        string code = row["Account_Code"] == DBNull.Value ? "" : row["Account_Code"].ToString();
+                        string an = row["Account_Name"] == DBNull.Value ? "" : row["Account_Name"].ToString();
+                        list.Add(Tuple.Create(g, (row["Paid_How"]?.ToString() ?? "") + (code.Length > 0 ? " · " + code + " " + an : "")));
+                    }
             }
             catch { }
             return list;

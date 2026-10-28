@@ -45,6 +45,9 @@ namespace Take_Time_BangPhra.Integration.OcrReview
         public string ContactName { get; set; }
         public string SupplierDocNo { get; set; }
         public string Reason { get; set; }
+        public decimal SubTotal { get; set; }
+        /// <summary>เลขใบผู้ขาย/อ้างอิงของเอกสารนี้ตรงกับ "อ้างอิงใบกำกับภาษีเลขที่" บนใบลดหนี้</summary>
+        public bool Exact { get; set; }
     }
 
     /// <summary>ข้อมูลประกอบการส่งที่มาจากหน้าเว็บ (ผู้ใช้/ไฟล์/ลายเซ็น)</summary>
@@ -187,7 +190,7 @@ namespace Take_Time_BangPhra.Integration.OcrReview
             if (s == null || !HasLogTable()) return false;
             Guid scanId;
             if (!Guid.TryParse(s.ScanId ?? "", out scanId)) return false;
-            var t = OcrReviewMath.CalcTotals(s.Lines);
+            var t = OcrReviewMath.CalcTotals(s);
             try
             {
                 _code.DatabaseInsertSafe(_conn,
@@ -357,8 +360,13 @@ namespace Take_Time_BangPhra.Integration.OcrReview
 
             if (r.ExtractedItems != null && r.ExtractedItems.Count > 0)
             {
+                // ราคารวม VAT บนกระดาษ (เช่น Makro): เก็บราคาตามกระดาษ + PricesIncludeVat=true (ไม่ถอด 7% รายบรรทัด — เดิมถอดรายบรรทัด/ใส่ยอดรวม VAT
+                // เป็นราคาก่อน VAT ⇒ ยอดก่อน VAT 3,447 / VAT 241.29 ผิดกระดาษ). ถอดรายบรรทัดเฉพาะเมื่อ OCR ติดธงแค่บางบรรทัด
+                bool allIncl = r.ExtractedItems.All(it => it != null && it.PriceIncludesVat);
+                bool anyFlag = r.ExtractedItems.Any(it => it != null && it.PriceIncludesVat);
                 foreach (var it in r.ExtractedItems)
                 {
+                    if (it == null) continue;
                     var l = new OcrReviewLine
                     {
                         Description = (it.Description ?? "").Trim(),
@@ -367,13 +375,13 @@ namespace Take_Time_BangPhra.Integration.OcrReview
                         WhtRate = whtRate,
                         VatClaimable = claim
                     };
+                    l.ProductCode = OcrReviewMath.ExtractItemCode(l.Description);
                     decimal qty = it.Quantity.HasValue && it.Quantity.Value > 0 ? it.Quantity.Value : 1m;
                     decimal disc = it.LineDiscountAmount ?? 0m;
                     decimal amount = it.Amount ?? OcrReviewMath.R2(qty * (it.UnitPrice ?? 0m) - disc);
                     decimal unit = it.UnitPrice ?? (qty != 0 ? amount / qty : amount);
-                    if (it.PriceIncludesVat)
+                    if (it.PriceIncludesVat && !allIncl)
                     {
-                        // ราคารวม VAT บนกระดาษ → ถอด 7% (UnitPrice 4 ตำแหน่ง; ยอดบรรทัดคิด round(qty×unit) ตรงกับ NextAcc)
                         unit = Math.Round(unit / 1.07m, 4, MidpointRounding.AwayFromZero);
                         disc = OcrReviewMath.R2(disc / 1.07m);
                     }
@@ -386,11 +394,19 @@ namespace Take_Time_BangPhra.Integration.OcrReview
                     if (string.IsNullOrEmpty(l.Description)) l.Description = "รายการตามเอกสาร";
                     s.Lines.Add(l);
                 }
-                // ส่วนลดท้ายบิลที่บรรทัดยังไม่รวม → ใส่ที่บรรทัดยอดสูงสุด (ผู้ใช้ปรับได้)
-                decimal hdrDisc = r.ExtractedDiscountAmount ?? 0m;
-                if (hdrDisc > 0m && s.PrintedSubTotal.HasValue)
+                if (allIncl && hasVat) { s.PricesIncludeVat = true; s.PriceBasisSource = "OCR"; }
+                // ตัดสินรวม/ไม่รวม VAT จากยอดบนกระดาษ (Σยอดบรรทัด = ยอดรวม ⇒ รวม VAT · = ยอดก่อน VAT ⇒ ไม่รวม) — ข้ามเมื่อ OCR ติดธงบางบรรทัด (ถอดไปแล้ว)
+                if (!anyFlag || allIncl)
                 {
-                    var t0 = OcrReviewMath.CalcTotals(s.Lines);
+                    var det = OcrReviewMath.DetectPricesIncludeVat(s.Lines, s.PrintedSubTotal, s.PrintedVat, s.PrintedTotal);
+                    if (det.HasValue && det.Value != s.PricesIncludeVat) { s.PricesIncludeVat = det.Value; s.PriceBasisSource = "AUTO"; }
+                    else if (det.HasValue) s.PriceBasisSource = s.PriceBasisSource ?? "AUTO";
+                }
+                // ส่วนลดท้ายบิลที่บรรทัดยังไม่รวม → ใส่ที่บรรทัดยอดสูงสุด (ผู้ใช้ปรับได้) — เฉพาะราคาไม่รวม VAT
+                decimal hdrDisc = r.ExtractedDiscountAmount ?? 0m;
+                if (hdrDisc > 0m && s.PrintedSubTotal.HasValue && !s.PricesIncludeVat)
+                {
+                    var t0 = OcrReviewMath.CalcTotals(s);
                     if (Math.Abs(t0.SubTotal - hdrDisc - s.PrintedSubTotal.Value) <= OcrReviewMath.Tolerance)
                     {
                         var big = s.Lines.OrderByDescending(x => OcrReviewMath.CalcLine(x).Net).First();
@@ -414,16 +430,25 @@ namespace Take_Time_BangPhra.Integration.OcrReview
             }
 
             // VAT รายบรรทัดให้ตรงยอด VAT บนกระดาษ (เศษสตางค์) — ถ้าต่างไม่เกิน 1 บาท ตั้ง override ที่บรรทัดภาษีที่ใหญ่สุด
-            if (hasVat)
+            if (hasVat && OcrReviewMath.SuggestFixes(s).Any(f => f.Code == "FIT_VAT"))
+                OcrReviewMath.ApplyFix(s, "FIT_VAT");
+
+            // §86/9-10 บนใบลด/เพิ่มหนี้ (อ้างใบเดิม/มูลค่า/เหตุผล/วิธีชำระ) — อ่านจากข้อความดิบ; ใช้แสดงเมื่อชนิดเป็นใบลด/เพิ่มหนี้
+            string raw = r.RawTextContent;
+            string origNo, origDate;
+            if (OcrCnPaperReader.ReadOriginalInvoice(raw, out origNo, out origDate)
+                && !string.Equals(OcrReviewMath.NormalizeDocNo(origNo), OcrReviewMath.NormalizeDocNo(s.SupplierDocNo), StringComparison.Ordinal))
             {
-                var t1 = OcrReviewMath.CalcTotals(s.Lines);
-                decimal diff = OcrReviewMath.R2(vat.Value - t1.Vat);
-                if (diff != 0m && Math.Abs(diff) <= 1.00m)
-                {
-                    var taxed = s.Lines.Where(x => x.VatType == "7").OrderByDescending(x => OcrReviewMath.CalcLine(x).Net).FirstOrDefault();
-                    if (taxed != null) taxed.VatOverride = OcrReviewMath.R2(OcrReviewMath.CalcLine(taxed).Vat + diff);
-                }
+                s.OrigTaxInvoiceNo = origNo;
+                s.OrigTaxInvoiceDate = origDate;
             }
+            s.OrigAmount = OcrCnPaperReader.ReadOriginalAmount(raw);
+            s.CorrectAmount = OcrCnPaperReader.ReadCorrectAmount(raw);
+            s.DiffAmount = OcrCnPaperReader.ReadDiffAmount(raw);
+            s.PaperPaymentType = OcrCnPaperReader.ReadPaymentType(raw);
+            s.NoteReasonCode = OcrCnPaperReader.ReadReasonCode(raw, s.DocKind == OcrDocKind.VendorDebitNote);
+            var rs = OcrNoteReasons.Find(s.DocKind, s.NoteReasonCode);
+            if (rs != null) s.NoteReason = rs.NextAcc;
 
             // ช่องที่ OCR ไม่มั่นใจ (< 0.70) — หน้าเว็บไฮไลต์ให้ตรวจ
             if (r.FieldConfidence != null)
@@ -440,7 +465,7 @@ namespace Take_Time_BangPhra.Integration.OcrReview
                     s.SourceDocNo = r.LinkedPredecessorNumber;
                     s.SourceDocType = r.LinkedPredecessorType;
                 }
-                s.SearchText = s.SupplierName;
+                s.SearchText = FirstNonEmpty(s.OrigTaxInvoiceNo, s.SupplierName);
             }
             return s;
         }
@@ -506,10 +531,15 @@ namespace Take_Time_BangPhra.Integration.OcrReview
             string text = (s.SearchText ?? "").Trim();
 
             var batches = new List<List<DocumentResponse>>();
+            string orig = (s.OrigTaxInvoiceNo ?? "").Trim();
+            string origNorm = OcrReviewMath.NormalizeDocNo(orig);
             try
             {
                 if (text.Length > 0)
                     batches.Add((await client.ListDocumentsAsync(PurchaseSourceTypes, null, text, null, 30))?.data?.Items);
+                // เลขใบกำกับเดิมบนใบลดหนี้ (search ของ NextAcc ครอบ Reference — DocumentService.cs:2427-2430; ใบจากหน้านี้ตั้ง Reference = เลขผู้ขาย)
+                if (orig.Length > 0 && !string.Equals(orig, text, StringComparison.OrdinalIgnoreCase))
+                    batches.Add((await client.ListDocumentsAsync(PurchaseSourceTypes, null, orig, null, 30))?.data?.Items);
                 if (hasContact)
                     batches.Add((await client.ListDocumentsAsync(PurchaseSourceTypes, contactId, null, null, 30))?.data?.Items);
                 if (text.Length == 0 && !hasContact && !string.IsNullOrWhiteSpace(s.SupplierName))
@@ -524,13 +554,19 @@ namespace Take_Time_BangPhra.Integration.OcrReview
                 {
                     if (d == null || map.ContainsKey(d.Id) || !IsLiveStatus(d.Status)) continue;
                     if (!PurchaseSourceTypes.Contains(d.DocumentType)) continue;
-                    map[d.Id] = new OcrSourceCandidate
+                    var cand = new OcrSourceCandidate
                     {
                         Id = d.Id.ToString(), No = d.DocumentNumber, Type = d.DocumentType.ToString(CultureInfo.InvariantCulture),
                         TypeLabel = TypeLabel(d.DocumentType), Date = d.DocumentDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                        Total = d.TotalAmount, BalanceDue = d.BalanceDue,
+                        Total = d.TotalAmount, BalanceDue = d.BalanceDue, SubTotal = d.SubTotal,
                         ContactId = d.Contact?.Id.ToString(), ContactName = d.Contact?.Name, SupplierDocNo = d.SupplierInvoiceNumber
                     };
+                    if (origNorm.Length > 0 && (OcrReviewMath.NormalizeDocNo(d.SupplierInvoiceNumber) == origNorm || OcrReviewMath.NormalizeDocNo(d.Reference) == origNorm))
+                    {
+                        cand.Exact = true;
+                        cand.Reason = "ตรงเลขใบกำกับเดิม " + orig;
+                    }
+                    map[d.Id] = cand;
                 }
             }
 
@@ -544,7 +580,7 @@ namespace Take_Time_BangPhra.Integration.OcrReview
                     foreach (var c in pc?.data ?? new List<OcrPredecessorCandidateDto>())
                     {
                         OcrSourceCandidate ex;
-                        if (map.TryGetValue(c.DocumentId, out ex)) { ex.Reason = c.Reason; continue; }
+                        if (map.TryGetValue(c.DocumentId, out ex)) { if (!ex.Exact) ex.Reason = c.Reason; continue; }
                         int type = TypeFromName(c.DocumentType);
                         if (!PurchaseSourceTypes.Contains(type)) continue;
                         map[c.DocumentId] = new OcrSourceCandidate
@@ -558,7 +594,7 @@ namespace Take_Time_BangPhra.Integration.OcrReview
                 catch { /* ไม่มีผู้สมัคร/สแกนยังไม่ใช่ใบลดหนี้ — ข้าม */ }
             }
 
-            var list = map.Values.OrderByDescending(x => x.Reason != null).ThenByDescending(x => x.Date).Take(12).ToList();
+            var list = map.Values.OrderByDescending(x => x.Exact).ThenByDescending(x => x.Reason != null).ThenByDescending(x => x.Date).Take(12).ToList();
             foreach (var c in list)
             {
                 try
@@ -570,6 +606,78 @@ namespace Take_Time_BangPhra.Integration.OcrReview
             }
             if (list.Count == 0) notes.Add("ไม่พบเอกสารต้นทางที่ตรงคำค้น — ลองค้นด้วยเลขที่เอกสาร NextAcc หรือชื่อผู้ขาย หรือเลือก \"ใบเดิมอยู่นอกระบบ\"");
             return list;
+        }
+
+        /// <summary>
+        /// โหลดรายละเอียดใบต้นทางที่เลือก (GET document — DocumentController GET /document/{id}; บรรทัด DocumentLineResponse DocumentDtos.cs:1169-1210)
+        /// → ยอด/ค้างจ่าย/ลดหนี้แล้ว + บรรทัดพร้อมบัญชี + บัญชีเงินที่ใบเดิมจ่าย แล้วตั้งบัญชีของบรรทัดใบลดหนี้ตามใบเดิม และขาเงินเริ่มต้น.
+        /// บัญชีที่จ่าย: PV = PaymentAccountId ของใบ · อื่น ๆ = ขาเครดิตเงินของ JE ที่ SourceDocumentId = ใบนี้ (JE การชำระผูกใบ — DocumentService.cs:20046)
+        /// เลือกเฉพาะบัญชีที่เป็นแหล่งเงินใน Account_Paid_How (<paramref name="moneyAccounts"/>) หรือ 111x/112x
+        /// </summary>
+        public static async Task<bool> LoadSourceDetailAsync(AccountingApiClient client, OcrReviewState s, IDictionary<Guid, string> moneyAccounts,
+            bool cnPrimary, string companyId, List<string> notes)
+        {
+            Guid sid;
+            if (s == null || !Guid.TryParse(s.SourceDocId ?? "", out sid) || sid == Guid.Empty) return false;
+            DocumentResponse d;
+            try { d = (await client.GetDocumentAsync(sid))?.data; }
+            catch (Exception ex) { notes.Add("อ่านเอกสารต้นทางจาก NextAcc ไม่สำเร็จ: " + ApiMessage(ex)); return false; }
+            if (d == null) { notes.Add("ไม่พบเอกสารต้นทางใน NextAcc"); return false; }
+            s.SourceDocNo = d.DocumentNumber;
+            s.SourceDocType = d.DocumentType.ToString(CultureInfo.InvariantCulture);
+            s.SourceDocDate = d.DocumentDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            s.SourceTotal = d.TotalAmount;
+            s.SourceSubTotal = d.SubTotal;
+            s.SourceBalanceDue = d.BalanceDue;
+            s.SourceSupplierDocNo = d.SupplierInvoiceNumber;
+            s.SourceContactId = d.Contact?.Id.ToString();
+            s.SourceContactName = d.Contact?.Name;
+            if (string.IsNullOrWhiteSpace(s.SupplierName) && !string.IsNullOrWhiteSpace(d.Contact?.Name)) s.SupplierName = d.Contact.Name;
+            try { s.SourceCredited = await SumCreditedAsync(client, sid); } catch { }
+            s.SourceLines = (d.Lines ?? new List<NexaaccDocLine>()).Where(x => x != null).Select(x => new OcrSourceLine
+            {
+                Description = x.Description, ProductCode = x.ProductCode, Qty = x.Quantity, UnitPrice = x.UnitPrice, Amount = x.Amount,
+                VatRate = x.VatRate, AccountCode = x.AccountCode, AccountName = x.AccountName
+            }).ToList();
+            if (s.SourceLines.Count == 0) notes.Add("ใบต้นทาง " + d.DocumentNumber + " ไม่มีรายการให้เทียบ — เลือกบัญชีของบรรทัดเอง");
+
+            // บัญชีเงินที่ใบเดิมจ่ายออก
+            s.SourcePaidAccountId = null; s.SourcePaidAccountLabel = null;
+            if (d.PaymentAccountId.HasValue && d.PaymentAccountId.Value != Guid.Empty && (d.PaidAmount > 0m || d.BalanceDue <= 0.01m))
+            {
+                s.SourcePaidAccountId = d.PaymentAccountId.Value.ToString();
+                string lb; moneyAccounts.TryGetValue(d.PaymentAccountId.Value, out lb);
+                s.SourcePaidAccountLabel = lb ?? d.PaymentAccountName;
+            }
+            else if (d.PaidAmount > 0m && !string.IsNullOrEmpty(companyId))
+            {
+                try
+                {
+                    var r = await client.GetAsync<ApiResponse<PagedResponse<JournalEntryResponse>>>(
+                        "/api/companies/" + companyId + "/accounting/journals?page=1&pageSize=20&sourceDocumentId=" + sid);
+                    var leg = (r?.data?.Items ?? new List<JournalEntryResponse>())
+                        .Where(j => j.Status != 2 && j.Status != 6 && (j.ReversedByEntryId == null || j.ReversedByEntryId == Guid.Empty) && j.Lines != null)
+                        .SelectMany(j => j.Lines.Select(l => new { j.CreatedAt, l }))
+                        .Where(x => x.l.CreditAmount > 0m
+                                 && (moneyAccounts.ContainsKey(x.l.AccountId)
+                                     || (x.l.AccountCode ?? "").StartsWith("111", StringComparison.Ordinal)
+                                     || (x.l.AccountCode ?? "").StartsWith("112", StringComparison.Ordinal)))
+                        .OrderByDescending(x => moneyAccounts.ContainsKey(x.l.AccountId)).ThenByDescending(x => x.l.CreditAmount).ThenByDescending(x => x.CreatedAt)
+                        .Select(x => x.l).FirstOrDefault();
+                    if (leg != null)
+                    {
+                        s.SourcePaidAccountId = leg.AccountId.ToString();
+                        string lb; moneyAccounts.TryGetValue(leg.AccountId, out lb);
+                        s.SourcePaidAccountLabel = lb ?? ((leg.AccountCode ?? "") + " " + (leg.AccountName ?? "")).Trim();
+                    }
+                }
+                catch (Exception ex) { notes.Add("อ่านการจ่ายของใบต้นทางไม่สำเร็จ (" + ShortError(ex) + ") — เลือกบัญชีรับเงินคืนเอง"); }
+            }
+
+            int n = OcrReviewMath.AssignAccountsFromSource(s, false);
+            if (n > 0) notes.Add("ตั้งบัญชี " + n + " รายการตามใบต้นทาง " + d.DocumentNumber + " (เปลี่ยนได้ที่ช่องบัญชี)");
+            OcrReviewMath.DefaultSettlement(s, cnPrimary);
+            return true;
         }
 
         private static int TypeFromName(string name)
@@ -607,13 +715,21 @@ namespace Take_Time_BangPhra.Integration.OcrReview
         // ส่ง NextAcc
         // ──────────────────────────────────────────────────────────────
 
-        /// <summary>บรรทัดที่ยืนยัน → DocumentLineRequest (ราคาไม่รวม VAT; VAT ทุกบรรทัดที่มีภาษีส่งเป็น VatAmountOverride ⇒ ยอดใน NextAcc = ยอดที่ผู้ใช้เห็น)</summary>
+        /// <summary>
+        /// บรรทัดที่ยืนยัน → DocumentLineRequest — ราคา/ส่วนลดในฐานเดียวกับ <see cref="OcrReviewState.PricesIncludeVat"/> (ส่ง PricesIncludeVat ค่าเดียวกัน)
+        /// และ VAT ทุกบรรทัดที่มีภาษีส่งเป็น VatAmountOverride (หลังกระทบเศษทั้งใบ) ⇒ NextAcc: ฐาน = หลังส่วนลด − VAT เมื่อรวม VAT,
+        /// ไม่กระทบเศษซ้ำ (DocumentService.cs:653-659, :812-814) ⇒ ยอดใน NextAcc = ยอดบนกระดาษ (Makro 3,221.50 / 225.50 / 3,447.00)
+        /// </summary>
         public static List<DocumentLineRequest> ToLines(OcrReviewState s)
         {
             var list = new List<DocumentLineRequest>();
-            foreach (var l in s.Lines ?? new List<OcrReviewLine>())
+            var lines = s.Lines ?? new List<OcrReviewLine>();
+            var calcs = OcrReviewMath.CalcLines(lines, s.PricesIncludeVat);
+            for (int i = 0; i < lines.Count; i++)
             {
-                var c = OcrReviewMath.CalcLine(l);
+                var l = lines[i];
+                if (l == null) continue;
+                var c = calcs[i];
                 bool taxed = c.NextAccVatRate > 0;
                 bool claim = !taxed || l.VatClaimable;
                 list.Add(new DocumentLineRequest
@@ -635,26 +751,65 @@ namespace Take_Time_BangPhra.Integration.OcrReview
             return list;
         }
 
-        private static string Notes(OcrReviewState s)
+        /// <summary>
+        /// หมายเหตุของเอกสาร — ใบลด/เพิ่มหนี้: เหตุผลของเรา (NextAcc พิมพ์เฉพาะข้อความมาตรฐานของ enum และไม่มีช่องเหตุผลอิสระ —
+        /// PdfGenerationService.cs:2226-2231) + อ้างใบกำกับเดิม/มูลค่าตามกระดาษ (กรณีใบเดิมนอกระบบ NextAcc พิมพ์ได้แค่เลขอ้างอิง :1907-1916)
+        /// </summary>
+        public static string Notes(OcrReviewState s)
         {
             var parts = new List<string>();
             if (!string.IsNullOrWhiteSpace(s.Notes)) parts.Add(s.Notes.Trim());
-            if (OcrDocKind.IsNote(s.DocKind) && !string.IsNullOrWhiteSpace(s.NoteReasonText)) parts.Add("เหตุผล: " + s.NoteReasonText.Trim());
+            if (OcrDocKind.IsNote(s.DocKind))
+            {
+                var rs = OcrNoteReasons.Find(s.DocKind, s.NoteReasonCode);
+                string txt = (s.NoteReasonText ?? "").Trim();
+                if (rs != null) parts.Add("เหตุผล: " + rs.Label + (txt.Length > 0 && !string.Equals(txt, rs.Label, StringComparison.Ordinal) ? " — " + txt : ""));
+                else if (txt.Length > 0) parts.Add("เหตุผล: " + txt);
+                if (!string.IsNullOrWhiteSpace(s.OrigTaxInvoiceNo))
+                {
+                    var od = OcrReviewMath.ParseDate(s.OrigTaxInvoiceDate);
+                    parts.Add("อ้างอิงใบกำกับภาษีเดิมเลขที่ " + s.OrigTaxInvoiceNo.Trim()
+                        + (od.HasValue ? " ลงวันที่ " + od.Value.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture) : ""));
+                }
+                if (s.OrigAmount.HasValue || s.CorrectAmount.HasValue || s.DiffAmount.HasValue)
+                    parts.Add("มูลค่าตามใบกำกับเดิม " + (s.OrigAmount.HasValue ? OcrReviewMath.Money(s.OrigAmount.Value) : "-")
+                        + " · มูลค่าที่ถูกต้อง " + (s.CorrectAmount.HasValue ? OcrReviewMath.Money(s.CorrectAmount.Value) : "-")
+                        + " · ผลต่าง " + (s.DiffAmount.HasValue ? OcrReviewMath.Money(s.DiffAmount.Value) : "-") + " (ตามเอกสารผู้ขาย)");
+            }
             parts.Add("สร้างจากหน้าตรวจทาน OCR (TakeTime)");
-            return string.Join(" · ", parts);
+            return Cut(string.Join(" · ", parts), 2000);
+        }
+
+        /// <summary>
+        /// อ้างอิงของเอกสาร: ใบลด/เพิ่มหนี้ = เลขที่ใบกำกับเดิม (NextAcc ใช้ Reference พิมพ์กล่อง §86/9-10 เมื่อไม่ได้ผูกใบต้นทาง —
+        /// PdfGenerationService.cs:1907-1916; ผูกแล้วพิมพ์จากใบต้นทางเอง :1864-1901) · อื่น ๆ = เลขที่เอกสารผู้ขาย
+        /// </summary>
+        public static string ReferenceFor(OcrReviewState s)
+        {
+            if (OcrDocKind.IsNote(s.DocKind) && !string.IsNullOrWhiteSpace(s.OrigTaxInvoiceNo)) return s.OrigTaxInvoiceNo.Trim();
+            return string.IsNullOrWhiteSpace(s.SupplierDocNo) ? null : s.SupplierDocNo.Trim();
+        }
+
+        /// <summary>NextAcc CreditNoteReason/DebitNoteReason จากรหัสเหตุผลของเรา (ร่างเก่าใช้ NoteReason เดิม)</summary>
+        public static int ResolveNoteReason(OcrReviewState s)
+        {
+            var rs = OcrNoteReasons.Find(s.DocKind, s.NoteReasonCode);
+            return rs != null ? rs.NextAcc : s.NoteReason;
         }
 
         private static UpdateDocumentRequest BuildUpdate(OcrReviewState s, OcrSubmitContext ctx)
         {
             bool note = OcrDocKind.IsNote(s.DocKind);
-            var claimsVat = (s.Lines ?? new List<OcrReviewLine>()).Any(l => l.VatClaimable && OcrReviewMath.CalcLine(l).Vat > 0);
+            var calcs = OcrReviewMath.CalcLines(s);
+            var lines = s.Lines ?? new List<OcrReviewLine>();
+            var claimsVat = Enumerable.Range(0, lines.Count).Any(i => lines[i] != null && lines[i].VatClaimable && calcs[i].Vat > 0);
             var upd = new UpdateDocumentRequest
             {
                 DocumentDate = OcrReviewMath.ParseDate(s.DocDate),
                 Lines = ToLines(s),
-                PricesIncludeVat = false,
+                PricesIncludeVat = s.PricesIncludeVat,
                 SupplierInvoiceNumber = string.IsNullOrWhiteSpace(s.SupplierDocNo) ? null : s.SupplierDocNo.Trim(),
-                Reference = string.IsNullOrWhiteSpace(s.SupplierDocNo) ? null : s.SupplierDocNo.Trim(),
+                Reference = ReferenceFor(s),
                 SupplierTaxInvoiceDate = OcrReviewMath.ParseDate(s.TaxInvoiceDate) ?? (s.FullTaxInvoice ? OcrReviewMath.ParseDate(s.SupplierDocDate) : null),
                 SupplierBranchCode = OcrReviewMath.IsValidBranch(OcrReviewMath.NormalizeBranch(s.SupplierBranch)) ? OcrReviewMath.NormalizeBranch(s.SupplierBranch) : null,
                 HasTaxInvoiceReference = s.FullTaxInvoice && (claimsVat || note),
@@ -672,8 +827,9 @@ namespace Take_Time_BangPhra.Integration.OcrReview
             else
             {
                 upd.CnDnPurchaseSideOverride = true;
-                if (s.DocKind == OcrDocKind.VendorCreditNote) upd.CreditNoteReason = s.NoteReason;
-                else upd.DebitNoteReason = s.NoteReason;
+                int reason = ResolveNoteReason(s);
+                if (s.DocKind == OcrDocKind.VendorCreditNote) upd.CreditNoteReason = reason;
+                else upd.DebitNoteReason = reason;
             }
             return upd;
         }
@@ -696,6 +852,7 @@ namespace Take_Time_BangPhra.Integration.OcrReview
             bool cnPrimary = note && vcs.CnPrimary();
             if (cnPrimary && s.SourceMode == OcrNoteSource.PurchaseReturn) s.SourceMode = OcrNoteSource.NextAcc;
             if (cnPrimary && s.DocKind != OcrDocKind.VendorCreditNote) s.ReturnRef = null;
+            if (note) s.NoteReason = ResolveNoteReason(s);   // รหัสเหตุผลของเรา → enum NextAcc (AllEnums.cs:1636-1662)
 
             // ── ใบต้นทาง (ดึงสดจาก NextAcc — ค่าในหน้าเว็บใช้แสดงผลเท่านั้น) ──
             DocumentResponse source = null;
@@ -711,6 +868,8 @@ namespace Take_Time_BangPhra.Integration.OcrReview
                         {
                             s.SourceDocNo = source.DocumentNumber;
                             s.SourceTotal = source.TotalAmount;
+                            s.SourceSubTotal = source.SubTotal;
+                            s.SourceSupplierDocNo = source.SupplierInvoiceNumber;
                             s.SourceBalanceDue = source.BalanceDue;
                             s.SourceContactId = source.Contact?.Id.ToString();
                             s.SourceContactName = source.Contact?.Name;
@@ -848,7 +1007,7 @@ namespace Take_Time_BangPhra.Integration.OcrReview
                             Reference = upd.Reference,
                             Notes = upd.Notes,
                             Lines = upd.Lines,
-                            PricesIncludeVat = false,
+                            PricesIncludeVat = s.PricesIncludeVat,
                             SupplierInvoiceNumber = upd.SupplierInvoiceNumber,
                             SupplierTaxInvoiceDate = upd.SupplierTaxInvoiceDate,
                             SupplierBranchCode = upd.SupplierBranchCode,
@@ -985,7 +1144,7 @@ namespace Take_Time_BangPhra.Integration.OcrReview
         {
             try
             {
-                var t = OcrReviewMath.CalcTotals(s.Lines);
+                var t = OcrReviewMath.CalcTotals(s);
                 decimal whtRate = (s.Lines ?? new List<OcrReviewLine>()).Select(l => l.WhtRate).DefaultIfEmpty(0m).Max();
                 string br = OcrReviewMath.NormalizeBranch(s.SupplierBranch);
                 await client.SubmitOcrCorrectionAsync(scanId, new OcrCorrectionRequest
@@ -1106,7 +1265,7 @@ namespace Take_Time_BangPhra.Integration.OcrReview
                 string inv = vcs.MappedCode("INVENTORY");
                 decimal invNet = VendorCnService.InventoryNet(s, inv);
                 decimal dif = VendorCnPolicy.CostDifference(invNet, link.CarryingCost);
-                var t = OcrReviewMath.CalcTotals(s.Lines);
+                var t = OcrReviewMath.CalcTotals(s);
                 string revRef = link.PrtJournal == ReturnPrtJournal.None ? null : VendorCnPolicy.ReverseRef(link.ReturnRef);
                 string difRef = Math.Abs(dif) >= 0.005m ? VendorCnPolicy.CostDiffRef(link.ReturnRef) : null;
                 if (!vcs.MarkLinked(link.ReturnRef, scanId, docId, res.DocNo, s.SupplierDocNo, invNet, t.Total, revRef, difRef, dif, null, user))

@@ -93,6 +93,19 @@
         .src-pick:hover td { background:#f7fafc; }
         .src-sel td { background:#ebf8ff !important; }
         .pill { display:inline-block; padding:1px 8px; border-radius:10px; font-size:11px; background:#edf2f7; color:#2d3748; }
+        /* ข้อที่ต้องแก้ + ปุ่มแก้ด่วน (ขั้น 5) — อยู่เหนือตารางยอด, เลื่อนมาได้จากแถบล่าง */
+        #rvStep5 { scroll-margin-top: 70px; }
+        .ocr-fix { background:#ebf8ff; border:1px solid #90cdf4; border-radius:8px; padding:10px 12px; margin:6px 0 10px; }
+        .ocr-fix .ocr-btn { width:100%; text-align:left; white-space:normal; margin-top:6px; }
+        .ocr-fix .ocr-btn:first-child { margin-top:0; }
+        .fixhint { font-size:12px; color:#744210; background:#fffaf0; border-left:3px solid #ed8936; padding:3px 8px; margin:3px 0 6px; font-weight:400; }
+        .src-lines summary { cursor:pointer; font-size:13px; font-weight:600; color:#2c5282; margin:6px 0; }
+        @media (max-width: 600px) {
+            .rv-bar { padding:8px 12px; gap:6px; }
+            .rv-bar .sum { flex:1 1 100%; margin-right:0; }
+            /* เว้นมุมขวาล่างให้ปุ่มแชทของเว็บไม่ทับปุ่มส่ง */
+            .rv-bar #rvSubmitBtn { flex:1 1 auto; margin-right:72px; }
+        }
         @keyframes ocrspin { to { transform: rotate(360deg); } }
     </style>
 
@@ -199,6 +212,8 @@
 
             <%-- ปุ่มซ่อน: ค้นใบต้นทาง (JS เรียกหลังเขียน state ลง hfReviewJson) --%>
             <asp:Button ID="btnCnSearch" runat="server" Text="ค้น" OnClick="btnCnSearch_Click" style="display:none;" />
+            <%-- ปุ่มซ่อน: เลือกใบต้นทาง → เซิร์ฟเวอร์ดึงรายการ/ผังบัญชี/บัญชีที่จ่ายของใบเดิม (OcrReviewService.LoadSourceDetailAsync) --%>
+            <asp:Button ID="btnCnPick" runat="server" Text="เลือก" OnClick="btnCnPick_Click" style="display:none;" />
             <asp:HiddenField ID="hfReviewJson" runat="server" />
             <asp:HiddenField ID="hfMetaJson" runat="server" />
         </asp:Panel>
@@ -248,19 +263,123 @@
         }
         function isValidBranch(n) { return !!n && n.length === 5 && digits(n) === n; }
         function vatRate(t) { return t === 'EX' ? -1 : (t === '0' ? 0 : 7); }
-        function calcLine(l) {
-            var gross = r2((+l.Qty || 0) * (+l.UnitPrice || 0)), net = r2(gross - (+l.Discount || 0)), rate = vatRate(l.VatType), vat = 0;
-            if (rate > 0) vat = (l.VatOverride !== null && l.VatOverride !== undefined && l.VatOverride !== '') ? r2(+l.VatOverride) : r2(net * rate / 100);
+        function hasOv(l) { return l.VatOverride !== null && l.VatOverride !== undefined && l.VatOverride !== ''; }
+        /* บรรทัดเดียว — OcrReviewMath.CalcLine(l, incl) (NextAcc ComputeLineAmounts) */
+        function calcLine(l, incl) {
+            var gross = r2((+l.Qty || 0) * (+l.UnitPrice || 0)), amount = r2(gross - (+l.Discount || 0)), rate = vatRate(l.VatType), vat = 0, net = amount;
+            if (rate > 0) {
+                if (hasOv(l)) { vat = r2(+l.VatOverride); net = incl ? r2(amount - vat) : amount; }
+                else if (incl) { net = r2(amount * 100 / (100 + rate)); vat = r2(amount - net); }
+                else vat = r2(net * rate / 100);
+            }
             var wht = (+l.WhtRate || 0) > 0 ? r2(net * (+l.WhtRate) / 100) : 0;
-            return { gross: gross, net: net, vat: vat, wht: wht, rate: rate };
+            return { gross: gross, amount: amount, net: net, vat: vat, wht: wht, rate: rate };
         }
-        function calcTotals(lines) {
-            var t = { sub: 0, vat: 0, vatClaim: 0, vatNoClaim: 0, wht: 0 };
-            (lines || []).forEach(function (l) { var c = calcLine(l); t.sub += c.net; t.vat += c.vat; if (l.VatClaimable) t.vatClaim += c.vat; else t.vatNoClaim += c.vat; t.wht += c.wht; });
+        function largest(g, cs) { var b = -1; g.forEach(function (i) { if (b < 0 || Math.abs(cs[i].net) > Math.abs(cs[b].net)) b = i; }); return b; }
+        /* ทั้งใบ — OcrReviewMath.CalcLines (กระทบเศษ VAT/WHT ต่ออัตรา; รวม VAT: VAT = Σยอด − round(Σยอด×100/107)) */
+        function calcLines(lines, incl) {
+            lines = lines || [];
+            var cs = lines.map(function (l) { return calcLine(l, incl); }), groups = {}, order = [];
+            lines.forEach(function (l, i) { if (!hasOv(l) && cs[i].rate > 0 && cs[i].net !== 0) { var k = String(cs[i].rate); if (!groups[k]) { groups[k] = []; order.push(k); } groups[k].push(i); } });
+            order.forEach(function (k) {
+                var g = groups[k], rate = +k, target, sv = 0;
+                if (incl) { var amt = 0; g.forEach(function (i) { amt += cs[i].amount; }); amt = r2(amt); target = r2(amt - r2(amt * 100 / (100 + rate))); }
+                else { var sn = 0; g.forEach(function (i) { sn += cs[i].net; }); target = r2(r2(sn) * rate / 100); }
+                g.forEach(function (i) { sv += cs[i].vat; });
+                var diff = r2(target - sv);
+                if (diff === 0 || Math.abs(diff) > 1) return;
+                var j = largest(g, cs); cs[j].vat = r2(cs[j].vat + diff); if (incl) cs[j].net = r2(cs[j].net - diff);
+            });
+            var wg = {}, wo = [];
+            lines.forEach(function (l, i) { if ((+l.WhtRate || 0) > 0 && cs[i].net !== 0) { var k = String(+l.WhtRate); if (!wg[k]) { wg[k] = []; wo.push(k); } wg[k].push(i); } });
+            wo.forEach(function (k) {
+                var g = wg[k], sn = 0, sw = 0; g.forEach(function (i) { sn += cs[i].net; sw += cs[i].wht; });
+                var diff = r2(r2(r2(sn) * (+k) / 100) - sw);
+                if (diff === 0 || Math.abs(diff) > 1) return;
+                var j = largest(g, cs); cs[j].wht = r2(cs[j].wht + diff);
+            });
+            return cs;
+        }
+        function calcTotals(lines, incl) {
+            var t = { sub: 0, vat: 0, vatClaim: 0, vatNoClaim: 0, wht: 0 }, cs = calcLines(lines, !!incl);
+            (lines || []).forEach(function (l, i) { var c = cs[i]; t.sub += c.net; t.vat += c.vat; if (l.VatClaimable) t.vatClaim += c.vat; else t.vatNoClaim += c.vat; t.wht += c.wht; });
             t.sub = r2(t.sub); t.vat = r2(t.vat); t.vatClaim = r2(t.vatClaim); t.vatNoClaim = r2(t.vatNoClaim); t.wht = r2(t.wht);
             t.total = r2(t.sub + t.vat); t.net = r2(t.total - t.wht);
             return t;
         }
+        function noOv(lines) { return (lines || []).map(function (l) { var c = {}; for (var k in l) c[k] = l[k]; c.VatOverride = null; return c; }); }
+        function has(v) { return v !== null && v !== undefined && v !== ''; }
+        function score(t, s) { var n = 0; if (has(s.PrintedSubTotal) && Math.abs(t.sub - (+s.PrintedSubTotal)) <= TOL) n++; if (has(s.PrintedVat) && Math.abs(t.vat - (+s.PrintedVat)) <= TOL) n++; if (has(s.PrintedTotal) && Math.abs(t.total - (+s.PrintedTotal)) <= TOL) n++; return n; }
+        /* OcrReviewMath.DetectPricesIncludeVat — true/false/null */
+        function detectIncl(s) {
+            var raw = noOv(s.Lines);
+            if (!raw.length || !raw.some(function (l) { return vatRate(l.VatType) > 0; })) return null;
+            if (!has(s.PrintedSubTotal) && !has(s.PrintedTotal)) return null;
+            if (has(s.PrintedVat) && +s.PrintedVat === 0) return null;
+            var se = score(calcTotals(raw, false), s), si = score(calcTotals(raw, true), s);
+            if (si > se) return true; if (se > si) return false;
+            var sum = 0; raw.forEach(function (l) { sum += calcLine(l, false).amount; }); sum = r2(sum);
+            var nt = has(s.PrintedTotal) && Math.abs(sum - (+s.PrintedTotal)) <= 1, ns = has(s.PrintedSubTotal) && Math.abs(sum - (+s.PrintedSubTotal)) <= 1;
+            if (nt && !ns) return true; if (ns && !nt) return false;
+            return null;
+        }
+        function fitLine(cs) { var b = -1; cs.forEach(function (c, i) { if (c.rate > 0 && (b < 0 || Math.abs(c.net) > Math.abs(cs[b].net))) b = i; }); return b; }
+        /* OcrReviewMath.SuggestFixes — ปุ่มแก้ด่วน */
+        function suggestFixes(s) {
+            var f = [], lines = s.Lines || [];
+            if (!lines.length) return f;
+            var incl = !!s.PricesIncludeVat, t = calcTotals(lines, incl);
+            if (reconcile(t, s).slice(0, 3).every(function (r) { return r.ok; })) return f;
+            var missing = (has(s.PrintedSubTotal) ? 0 : 1) + (has(s.PrintedVat) ? 0 : 1) + (has(s.PrintedTotal) ? 0 : 1);
+            if (missing === 1) { f.push({ code: 'FILL_MISSING', label: 'เติมช่องที่ว่างจากอีกสองช่องตามเอกสาร', hint: 'ยอดรวม = ก่อน VAT + VAT' }); return f; }
+            if (missing > 0) return f;
+            if (reconcile(calcTotals(noOv(lines), !incl), s).slice(0, 3).every(function (r) { return r.ok; })) {
+                f.push({ code: 'SWITCH_BASIS', label: incl ? 'สลับเป็น "ราคายังไม่รวม VAT"' : 'สลับเป็น "ราคาในรายการรวม VAT แล้ว"',
+                         hint: incl ? 'ผลรวมรายการเท่ากับยอดก่อน VAT บนเอกสาร' : 'ผลรวมรายการเท่ากับยอดรวม (รวม VAT) บนเอกสาร — เช่นใบของ Makro' });
+                return f;
+            }
+            var cs = calcLines(lines, incl), amt = 0; cs.forEach(function (c) { amt += c.amount; }); amt = r2(amt);
+            var baseOk = incl ? Math.abs(amt - (+s.PrintedTotal)) <= TOL : Math.abs(t.sub - (+s.PrintedSubTotal)) <= TOL;
+            var vd = r2((+s.PrintedVat) - t.vat), j = fitLine(cs);
+            if (baseOk && vd !== 0 && Math.abs(vd) <= 1 && j >= 0) {
+                f.push({ code: 'FIT_VAT', label: 'ใช้ยอดตามเอกสาร (ปรับ VAT ' + money(vd) + ' ที่รายการที่ ' + (j + 1) + ')', hint: 'ต่างแค่เศษสตางค์จากการปัด — ตั้ง VAT ของรายการใหญ่สุดให้ตรงกระดาษ' });
+                return f;
+            }
+            var gap = incl ? r2((+s.PrintedTotal) - amt) : r2((+s.PrintedSubTotal) - t.sub);
+            if (gap > TOL) f.push({ code: 'ADD_GAP', label: 'เพิ่มรายการส่วนต่าง ' + money(gap), hint: 'OCR อ่านรายการไม่ครบ — ตรวจกับภาพแล้วแก้รายละเอียด/บัญชีของบรรทัดที่เพิ่ม' });
+            return f;
+        }
+        /* OcrReviewMath.ApplyFix */
+        function applyFix(s, code) {
+            var lines = s.Lines || [], incl = !!s.PricesIncludeVat;
+            if (code === 'FILL_MISSING') {
+                if (!has(s.PrintedSubTotal) && has(s.PrintedVat) && has(s.PrintedTotal)) s.PrintedSubTotal = r2(+s.PrintedTotal - (+s.PrintedVat));
+                else if (!has(s.PrintedVat) && has(s.PrintedSubTotal) && has(s.PrintedTotal)) s.PrintedVat = r2(+s.PrintedTotal - (+s.PrintedSubTotal));
+                else if (!has(s.PrintedTotal) && has(s.PrintedSubTotal) && has(s.PrintedVat)) s.PrintedTotal = r2(+s.PrintedSubTotal + (+s.PrintedVat));
+                else return false;
+                return true;
+            }
+            if (code === 'SWITCH_BASIS') { s.PricesIncludeVat = !incl; s.PriceBasisSource = 'USER'; lines.forEach(function (l) { l.VatOverride = null; }); return true; }
+            if (code === 'FIT_VAT') {
+                if (!has(s.PrintedVat)) return false;
+                var cs = calcLines(lines, incl), j = fitLine(cs); if (j < 0) return false;
+                lines[j].VatOverride = r2(cs[j].vat + r2((+s.PrintedVat) - calcTotals(lines, incl).vat));
+                return true;
+            }
+            if (code === 'ADD_GAP') {
+                var cs2 = calcLines(lines, incl), a = 0; cs2.forEach(function (c) { a += c.amount; });
+                var gap = incl ? (has(s.PrintedTotal) ? r2((+s.PrintedTotal) - r2(a)) : 0) : (has(s.PrintedSubTotal) ? r2((+s.PrintedSubTotal) - calcTotals(lines, false).sub) : 0);
+                if (gap <= TOL) return false;
+                var b = lines[0] || {};
+                lines.push({ Description: 'รายการเพิ่มเติมตามเอกสาร', Qty: 1, UnitPrice: gap, Discount: 0, AccountCode: b.AccountCode || '', VatType: b.VatType || '7', VatClaimable: b.VatClaimable !== false, VatOverride: null, WhtRate: b.WhtRate || 0, IncomeType: '', OcrAccountCode: '' });
+                return true;
+            }
+            return false;
+        }
+        var REASONS = { VCN: [], VDN: [] };
+        function setReasons(r) { if (r) REASONS = r; }
+        function findReason(kind, code) { return (REASONS[kind === 'VDN' ? 'VDN' : 'VCN'] || []).filter(function (x) { return x.c === code; })[0] || null; }
+        function normDocNo(v) { return String(v || '').toUpperCase().replace(/[^0-9A-Z฀-๿]/g, ''); }
         function item(key, label, computed, printed, required) {
             var has = printed !== null && printed !== undefined && printed !== '';
             var diff = has ? r2(computed - (+printed)) : 0;
@@ -276,7 +395,7 @@
         function capCheck(net, srcTotal, credited, balance) {
             if (net <= 0) return 'ยอดใบลดหนี้ต้องมากกว่า 0';
             var rem = r2(srcTotal - credited);
-            if (net > rem + TOL) return 'ยอดใบลดหนี้ ' + money(net) + ' เกินยอดที่ลดหนี้ได้ของใบต้นทาง ' + money(rem) + ' (§86/10)';
+            if (net > rem + TOL) return 'ยอดใบลดหนี้ ' + money(net) + ' เกินยอดที่ลดหนี้ได้ของใบต้นทาง ' + money(rem) + ' (ยอดใบ ' + money(srcTotal) + ' − ลดหนี้แล้ว ' + money(credited) + ') — §86/10';
             if (balance > TOL && net > balance + TOL) return 'ยอดใบลดหนี้ ' + money(net) + ' มากกว่ายอดค้างจ่ายของใบต้นทาง ' + money(balance) + ' — ต้องแยกใบ';
             return null;
         }
@@ -294,8 +413,8 @@
         function money(v) { return (+v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
         function validate(s) {
             var v = { errors: [], warnings: [], missing: [] }, isNote = s.DocKind === 'VCN' || s.DocKind === 'VDN';
-            var lines = s.Lines || [];
-            v.totals = calcTotals(lines); v.recon = reconcile(v.totals, s);
+            var lines = s.Lines || [], incl = !!s.PricesIncludeVat, cs = calcLines(lines, incl);
+            v.totals = calcTotals(lines, incl); v.recon = reconcile(v.totals, s); v.calcs = cs;
             if (!String(s.SupplierName || '').trim() && !(+s.VendorId > 0) && !(isNote && s.SourceMode === 'NEXTACC')) v.errors.push('ระบุชื่อผู้ขาย');
             if (String(s.SupplierTaxId || '').trim() && !isValidTaxId(s.SupplierTaxId)) v.errors.push('เลขผู้เสียภาษีผู้ขายไม่ถูกต้อง (13 หลัก + mod-11)');
             var br = normBranch(s.SupplierBranch); if (br !== null && !isValidBranch(br)) v.errors.push('รหัสสาขาต้องเป็นตัวเลข 5 หลัก (00000 = สำนักงานใหญ่)');
@@ -305,22 +424,24 @@
             if (!String(s.SupplierDocNo || '').trim()) v.warnings.push('ไม่มีเลขที่เอกสารผู้ขาย — กันซ้ำไม่ได้และเคลมภาษีซื้อไม่ได้');
             if (!lines.length) v.errors.push('ต้องมีอย่างน้อย 1 รายการ');
             lines.forEach(function (l, i) {
-                var c = calcLine(l), n = 'รายการที่ ' + (i + 1);
+                var c = cs[i], n = 'รายการที่ ' + (i + 1);
                 if (!String(l.Description || '').trim()) v.errors.push(n + ': ระบุรายละเอียด');
                 if (!(+l.Qty > 0)) v.errors.push(n + ': จำนวนต้องมากกว่า 0');
                 if (+l.UnitPrice < 0 || +l.Discount < 0) v.errors.push(n + ': ราคา/ส่วนลดติดลบไม่ได้');
                 if (!(c.net > 0)) v.errors.push(n + ': ยอดหลังส่วนลดต้องมากกว่า 0');
                 if (!String(l.AccountCode || '').trim()) v.errors.push(n + ': เลือกบัญชี');
                 if (+l.WhtRate < 0 || +l.WhtRate > 15) v.errors.push(n + ': อัตราหัก ณ ที่จ่าย 0-15%');
-                if (c.rate > 0 && l.VatOverride !== null && l.VatOverride !== undefined && l.VatOverride !== '') {
-                    var std = r2(c.net * 0.07); if (Math.abs(+l.VatOverride - std) > 1) v.errors.push(n + ': VAT ที่แก้ต่างจาก 7% เกิน 1 บาท — แยกบรรทัด VAT 0%/ยกเว้น');
+                if (c.rate > 0 && hasOv(l)) {
+                    var std = incl ? r2(c.amount - r2(c.amount * 100 / 107)) : r2(c.net * 0.07);
+                    if (Math.abs(+l.VatOverride - std) > 1) v.errors.push(n + ': VAT ที่แก้ต่างจาก 7% เกิน 1 บาท — แยกบรรทัด VAT 0%/ยกเว้น' + (incl ? '' : ' · ถ้าราคาบนกระดาษรวม VAT ให้สลับ "ราคาในรายการรวม VAT แล้ว"'));
                 }
             });
             v.recon.forEach(function (r) {
                 if (r.ok) return;
                 v.errors.push(r.printed === null ? ('กรอก' + r.label + 'ตามเอกสาร') : (r.label + ': คำนวณ ' + money(r.computed) + ' ≠ เอกสาร ' + money(r.printed) + ' (ต่าง ' + money(r.diff) + ')'));
             });
-            var claims = lines.some(function (l) { return l.VatClaimable && calcLine(l).vat > 0; });
+            v.fixes = suggestFixes(s);
+            var claims = lines.some(function (l, i) { return l.VatClaimable && cs[i].vat > 0; });
             if (claims) {
                 v.missing = missing8604(s);
                 if (!s.FullTaxInvoice) v.errors.push('มีบรรทัดที่เคลมภาษีซื้อ แต่ไม่ได้ติ๊ก "เป็นใบกำกับภาษีเต็มรูป" — ใบเสร็จ/อย่างย่อเคลมไม่ได้ ให้เลือก "ไม่เคลม"');
@@ -328,11 +449,29 @@
             }
             if (s.DocKind === 'PV' && !s.PaidHowAccountId) v.warnings.push('ยังไม่เลือกแหล่งจ่ายเงิน — NextAcc จะเลือกบัญชีเงินสด/ธนาคารเอง');
             if (isNote) {
-                if (!(+s.NoteReason >= 1 && +s.NoteReason <= 4)) v.errors.push('เลือกเหตุผล (§86/9-10)');
+                var rs = findReason(s.DocKind, s.NoteReasonCode);
+                if (!rs && !(+s.NoteReason >= 1 && +s.NoteReason <= 4)) v.errors.push('เลือกเหตุผล (§86/9-10)');
+                if (rs && rs.txt && !String(s.NoteReasonText || '').trim()) v.errors.push('เหตุผล "อื่น ๆ" — พิมพ์รายละเอียดเหตุผล (§86/9-10)');
+                var phys = rs ? !!rs.phys : +s.NoteReason === 1;
+                if (s.DocKind === 'VCN' && String(s.ReturnRef || '').trim() && !phys)
+                    v.errors.push('ผูกการคืนสินค้าได้เฉพาะเหตุผล "คืนสินค้า" / "ชำรุด-ผิดสเปก (ส่งคืน)"' + (rs && rs.c === 'SHORT' ? ' — ส่งไม่ครบไม่มีของส่งกลับ เลือก "ไม่ใช่การคืนสินค้า"' : ''));
+                if (has(s.OrigAmount) && has(s.CorrectAmount) && has(s.DiffAmount) && Math.abs(r2(+s.OrigAmount - (+s.CorrectAmount)) - (+s.DiffAmount)) > TOL)
+                    v.warnings.push('บนกระดาษ: มูลค่าเดิม − มูลค่าที่ถูกต้อง ≠ ผลต่าง — ตรวจตัวเลขที่ OCR อ่านกับภาพ');
+                if (has(s.DiffAmount) && Math.abs(+s.DiffAmount - v.totals.total) > TOL && Math.abs(+s.DiffAmount - v.totals.sub) > TOL)
+                    v.warnings.push('ผลต่างบนกระดาษ ' + money(+s.DiffAmount) + ' ≠ ยอดของใบนี้ (รวม ' + money(v.totals.total) + ' / ก่อน VAT ' + money(v.totals.sub) + ')');
                 if (s.SourceMode === 'NEXTACC') {
                     if (!s.SourceDocId) v.errors.push('เลือกเอกสารต้นทางใน NextAcc');
-                    else if (s.DocKind === 'VCN') { var cap = capCheck(v.totals.net, +s.SourceTotal || 0, +s.SourceCredited || 0, +s.SourceBalanceDue || 0); if (cap) v.errors.push(cap); }
-                } else if (s.SourceMode === 'OUTSIDE') { if (!s.OutsideCapConfirmed) v.errors.push('ติ๊กยืนยันว่ายอดไม่เกินยอดใบเดิม (ใบเดิมอยู่นอกระบบ)'); }
+                    else {
+                        if (s.DocKind === 'VCN') { var cap = capCheck(v.totals.net, +s.SourceTotal || 0, +s.SourceCredited || 0, +s.SourceBalanceDue || 0); if (cap) v.errors.push(cap); }
+                        var a = normDocNo(s.OrigTaxInvoiceNo), b = normDocNo(s.SourceSupplierDocNo);
+                        if (a && b && a !== b) v.warnings.push('ใบลด/เพิ่มหนี้อ้างใบกำกับเดิมเลข ' + s.OrigTaxInvoiceNo + ' แต่ใบต้นทางที่เลือกบันทึกเลขใบผู้ขาย ' + s.SourceSupplierDocNo + ' — ตรวจว่าเลือกใบถูก');
+                        if (has(s.OrigAmount) && (+s.SourceTotal || 0) > 0 && Math.abs(+s.OrigAmount - (+s.SourceTotal)) > 1 && Math.abs(+s.OrigAmount - (+s.SourceSubTotal || 0)) > 1)
+                            v.warnings.push('มูลค่าตามใบกำกับเดิมบนกระดาษ ' + money(+s.OrigAmount) + ' ≠ ยอดใบต้นทางใน NextAcc ' + money(+s.SourceTotal) + ' — ตรวจว่าเลือกใบถูก');
+                    }
+                } else if (s.SourceMode === 'OUTSIDE') {
+                    if (!s.OutsideCapConfirmed) v.errors.push('ติ๊กยืนยันว่ายอดไม่เกินยอดใบเดิม (ใบเดิมอยู่นอกระบบ)');
+                    if (!String(s.OrigTaxInvoiceNo || '').trim()) v.errors.push('ใบเดิมอยู่นอกระบบ — กรอก "เลขที่ใบกำกับภาษีเดิม" (§86/9-10)');
+                }
                 else if (s.SourceMode === 'PRT') {
                     if (s.DocKind !== 'VCN') v.errors.push('อ้างการคืนสินค้า (PRT-) ได้เฉพาะใบลดหนี้');
                     if (!/^PRT-/i.test(String(s.ReturnRef || '').trim())) v.errors.push('ระบุเลขอ้างอิงการคืนสินค้า (PRT-)');
@@ -343,14 +482,15 @@
             return v;
         }
         return { r2: r2, digits: digits, isValidTaxId: isValidTaxId, isJuristic: isJuristic, normBranch: normBranch, isValidBranch: isValidBranch,
-                 vatRate: vatRate, calcLine: calcLine, calcTotals: calcTotals, reconcile: reconcile, capCheck: capCheck, missing8604: missing8604,
+                 vatRate: vatRate, calcLine: calcLine, calcLines: calcLines, calcTotals: calcTotals, reconcile: reconcile, capCheck: capCheck, missing8604: missing8604,
+                 detectIncl: detectIncl, suggestFixes: suggestFixes, applyFix: applyFix, setReasons: setReasons, findReason: findReason,
                  validate: validate, money: money };
     })();
 
     var OCR = (function () {
         var S = null, M = null, scale = 1, rot = 0;
         var hfState = '<%= hfReviewJson.ClientID %>', hfMeta = '<%= hfMetaJson.ClientID %>';
-        var btnSearchId = '<%= btnCnSearch.ClientID %>';
+        var btnSearchId = '<%= btnCnSearch.ClientID %>', btnPickId = '<%= btnCnPick.ClientID %>';
         function $(id) { return document.getElementById(id); }
         function esc(s) { return String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
         function money(v) { return OcrMath.money(v); }
@@ -363,8 +503,8 @@
             { v: 'EXP', t: 'ค่าใช้จ่ายตั้งหนี้', d: 'ยังไม่จ่าย — Cr เจ้าหนี้' },
             { v: 'VCN', t: 'ใบลดหนี้จากผู้ขาย', d: 'ลดเจ้าหนี้/รับเงินคืน · ลดภาษีซื้อ' },
             { v: 'VDN', t: 'ใบเพิ่มหนี้จากผู้ขาย', d: 'เพิ่มเจ้าหนี้ · เพิ่มภาษีซื้อ' }];
-        var CN_REASONS = [[1, 'คืนสินค้า'], [2, 'ส่วนลด / ลดราคา'], [3, 'ปรับยอด (ค่าสินค้าน้อยกว่าที่ตกลง)'], [4, 'ตัดยอด']];
-        var DN_REASONS = [[1, 'ราคาเพิ่มจากที่ตกลง'], [2, 'ส่งสินค้าเกิน / บริการเพิ่ม'], [3, 'ค่าใช้จ่ายเพิ่มเติมภายหลัง'], [4, 'ปรับยอด (คำนวณต่ำไป)']];
+        /* เหตุผลใบลด/เพิ่มหนี้มาจากเซิร์ฟเวอร์ (OcrNoteReasons — M.reasons) ไม่มีสำเนาในหน้า */
+        function reasonList() { return ((M.reasons || {})[S.DocKind === 'VDN' ? 'VDN' : 'VCN']) || []; }
         function isNote() { return S.DocKind === 'VCN' || S.DocKind === 'VDN'; }
 
         function field(f, label, type, opts) {
@@ -381,17 +521,29 @@
             (M.money || []).forEach(function (a) { h += '<option value="' + esc(a.id) + '"' + (S[f] === a.id ? ' selected' : '') + '>' + esc((a.c ? a.c + ' ' : '') + a.n) + '</option>'; });
             return h + '</select></div>';
         }
-        function accountOptions(sel, ocrCode) {
+        function accountOptions(sel, ocrCode, srcCode) {
             var h = '<option value="">— เลือกบัญชี —</option>', groups = {}, order = [];
             (M.accounts || []).forEach(function (a) { if (!groups[a.g]) { groups[a.g] = []; order.push(a.g); } groups[a.g].push(a); });
-            var found = false;
+            var found = false, srcFound = false;
             order.forEach(function (g) {
                 h += '<optgroup label="' + esc(g) + '">';
-                groups[g].forEach(function (a) { var s = a.c === sel; if (s) found = true; h += '<option value="' + esc(a.c) + '"' + (s ? ' selected' : '') + '>' + esc(a.c + ' ' + a.n + (a.c === ocrCode ? ' ★OCR' : '')) + '</option>'; });
+                groups[g].forEach(function (a) {
+                    var s = a.c === sel; if (s) found = true; if (a.c === srcCode) srcFound = true;
+                    h += '<option value="' + esc(a.c) + '"' + (s ? ' selected' : '') + '>' + esc(a.c + ' ' + a.n + (a.c === srcCode ? ' ★ใบเดิม' : '') + (a.c === ocrCode ? ' ★OCR' : '')) + '</option>';
+                });
                 h += '</optgroup>';
             });
-            if (sel && !found) h += '<option value="' + esc(sel) + '" selected>' + esc(sel) + ' (ไม่พบในผังที่ Sync — ตรวจ)</option>';
+            // บัญชีของใบต้นทางที่ไม่อยู่ในกลุ่มบัญชีฝั่งเดบิต (เช่น GRNI/บัญชีอื่น) — ยังเลือกได้
+            if (srcCode && !srcFound && srcCode !== sel) h += '<option value="' + esc(srcCode) + '">' + esc(srcCode + ' ★ใบเดิม') + '</option>';
+            if (sel && !found) h += '<option value="' + esc(sel) + '" selected>' + esc(sel) + (sel === srcCode ? ' ★ใบเดิม' : ' (ไม่พบในผังที่ Sync — ตรวจ)') + '</option>';
             return h;
+        }
+        function lineAmt(c, incl) {
+            return money(c.amount) + (incl && c.rate > 0 ? '<div class="ocr-hint" style="font-weight:400;">ก่อน VAT ' + money(c.net) + ' · VAT ' + money(c.vat) + '</div>' : '');
+        }
+        function srcBadge(l) {
+            var same = String(l.AccountCode || '') === String(l.SourceAccountCode || '');
+            return (same ? '<span class="okmark">✓ ' : '<span class="badmark">≠ ') + 'ใบเดิม: ' + esc(l.SourceAccountCode) + '</span>' + (l.SourceMatch ? ' <small>(' + esc(l.SourceMatch) + ')</small>' : '');
         }
 
         function render() {
@@ -446,32 +598,43 @@
             if (isNote()) h += renderNote();
 
             // ── 4) รายการ ──
-            h += '<div class="rv-sec"><h4>4. รายการ (ราคาไม่รวม VAT)</h4><div class="lines-wrap"><table class="lines"><thead><tr>' +
-                 '<th>#</th><th class="c-desc">รายละเอียด</th><th class="c-n">จำนวน</th><th class="c-n">ราคา/หน่วย</th><th class="c-n">ส่วนลด ฿</th>' +
-                 '<th class="c-amt">ยอด</th><th class="c-acc">บัญชี</th><th class="c-vt">VAT</th><th>เคลม</th><th class="c-n">VAT ฿</th><th class="c-n">WHT %</th><th class="c-x"></th></tr></thead><tbody>';
+            var incl = !!S.PricesIncludeVat, cs = OcrMath.calcLines(S.Lines, incl), hasSrcAcc = (S.Lines || []).some(function (l) { return !!l.SourceAccountCode; });
+            h += '<div class="rv-sec"><h4>4. รายการ</h4>';
+            // ราคาในรายการรวม VAT หรือยัง — ระบบตรวจจากยอดบนกระดาษ (OcrReviewMath.DetectPricesIncludeVat) ผู้ใช้สลับได้
+            var det = OcrMath.detectIncl(S);
+            h += '<div class="rv-f" style="margin-bottom:8px;"><label>ราคาในรายการ (ตามกระดาษ)</label><div class="seg">' +
+                 '<label class="' + (!incl ? 'sel' : '') + '"><input type="radio" name="rvBasis" value="0" data-act="basis"' + (!incl ? ' checked' : '') + ' />ยังไม่รวม VAT</label>' +
+                 '<label class="' + (incl ? 'sel' : '') + '"><input type="radio" name="rvBasis" value="1" data-act="basis"' + (incl ? ' checked' : '') + ' />รวม VAT แล้ว</label></div>' +
+                 '<div class="hint">' + (S.PriceBasisSource === 'USER' ? 'ผู้ใช้เลือกเอง' : (S.PriceBasisSource === 'OCR' ? 'OCR อ่านว่าราคารวม VAT' : (S.PriceBasisSource === 'AUTO' ? 'ระบบตรวจจากยอดบนกระดาษ' : ''))) +
+                 (det !== null && det !== incl ? ' <span class="badmark">· ยอดบนกระดาษบอกว่าควรเป็น "' + (det ? 'รวม VAT แล้ว' : 'ยังไม่รวม VAT') + '"</span>' : (det === incl ? ' <span class="okmark">✓ ตรงกับยอดบนกระดาษ</span>' : '')) +
+                 (incl ? ' · VAT ทั้งใบ = ยอดรวม − ยอดรวม×100/107 (ปัดทั้งใบ ไม่ปัดรายบรรทัด)' : '') + '</div></div>';
+            h += '<div class="lines-wrap"><table class="lines"><thead><tr>' +
+                 '<th>#</th><th class="c-desc">รายละเอียด</th><th class="c-n">จำนวน</th><th class="c-n">ราคา/หน่วย' + (incl ? ' (รวม VAT)' : '') + '</th><th class="c-n">ส่วนลด ฿</th>' +
+                 '<th class="c-amt">ยอด' + (incl ? ' (รวม VAT)' : '') + '</th><th class="c-acc">บัญชี</th><th class="c-vt">VAT</th><th>เคลม</th><th class="c-n">VAT ฿</th><th class="c-n">WHT %</th><th class="c-x"></th></tr></thead><tbody>';
             (S.Lines || []).forEach(function (l, i) {
-                var c = OcrMath.calcLine(l);
+                var c = cs[i];
                 h += '<tr class="ln" data-i="' + i + '">' +
                     '<td class="c-x" style="padding-top:10px;">' + (i + 1) + '</td>' +
                     '<td class="c-desc"><span class="mlabel">รายละเอียด</span><input type="text" data-l="' + i + '" data-k="Description" value="' + esc(l.Description) + '" /></td>' +
                     '<td class="c-n"><span class="mlabel">จำนวน</span><input type="text" inputmode="decimal" data-l="' + i + '" data-k="Qty" value="' + esc(l.Qty) + '" /></td>' +
-                    '<td class="c-n"><span class="mlabel">ราคา/หน่วย</span><input type="text" inputmode="decimal" data-l="' + i + '" data-k="UnitPrice" value="' + esc(l.UnitPrice) + '" /></td>' +
+                    '<td class="c-n"><span class="mlabel">ราคา/หน่วย' + (incl ? ' (รวม VAT)' : '') + '</span><input type="text" inputmode="decimal" data-l="' + i + '" data-k="UnitPrice" value="' + esc(l.UnitPrice) + '" /></td>' +
                     '<td class="c-n"><span class="mlabel">ส่วนลด ฿</span><input type="text" inputmode="decimal" data-l="' + i + '" data-k="Discount" value="' + esc(l.Discount || '') + '" placeholder="0" /></td>' +
-                    '<td class="c-amt" id="la_' + i + '">' + money(c.net) + '</td>' +
-                    '<td class="c-acc"><span class="mlabel">บัญชี</span><select data-l="' + i + '" data-k="AccountCode">' + accountOptions(l.AccountCode, l.OcrAccountCode) + '</select></td>' +
+                    '<td class="c-amt" id="la_' + i + '">' + lineAmt(c, incl) + '</td>' +
+                    '<td class="c-acc"><span class="mlabel">บัญชี</span><select data-l="' + i + '" data-k="AccountCode">' + accountOptions(l.AccountCode, l.OcrAccountCode, l.SourceAccountCode) + '</select>' +
+                    (l.SourceAccountCode ? '<div class="hint" id="ls_' + i + '">' + srcBadge(l) + '</div>' : '') + '</td>' +
                     '<td class="c-vt"><span class="mlabel">VAT</span><select data-l="' + i + '" data-k="VatType"><option value="7"' + (l.VatType === '7' ? ' selected' : '') + '>7%</option><option value="0"' + (l.VatType === '0' ? ' selected' : '') + '>0%</option><option value="EX"' + (l.VatType === 'EX' ? ' selected' : '') + '>ยกเว้น</option></select></td>' +
                     '<td style="padding-top:10px;"><span class="mlabel">เคลมภาษีซื้อ</span><input type="checkbox" data-l="' + i + '" data-k="VatClaimable"' + (l.VatClaimable ? ' checked' : '') + (c.rate > 0 ? '' : ' disabled') + ' /></td>' +
-                    '<td class="c-n"><span class="mlabel">VAT ฿</span><input type="text" inputmode="decimal" data-l="' + i + '" data-k="VatOverride" value="' + esc(l.VatOverride === null || l.VatOverride === undefined ? '' : l.VatOverride) + '" placeholder="' + (c.rate > 0 ? money(OcrMath.r2(c.net * 0.07)) : '-') + '"' + (c.rate > 0 ? '' : ' disabled') + ' /></td>' +
+                    '<td class="c-n"><span class="mlabel">VAT ฿</span><input type="text" inputmode="decimal" data-l="' + i + '" data-k="VatOverride" value="' + esc(l.VatOverride === null || l.VatOverride === undefined ? '' : l.VatOverride) + '" placeholder="' + (c.rate > 0 ? money(c.vat) : '-') + '"' + (c.rate > 0 ? '' : ' disabled') + ' /></td>' +
                     '<td class="c-n"><span class="mlabel">WHT %</span><input type="text" inputmode="decimal" data-l="' + i + '" data-k="WhtRate" value="' + esc(l.WhtRate || '') + '" placeholder="0" /></td>' +
                     '<td class="c-x"><button type="button" class="ln-del" data-act="del" data-i="' + i + '" title="ลบรายการ">✕</button></td></tr>';
             });
             h += '</tbody></table></div><div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;"><button type="button" class="ocr-btn ghost" data-act="add">＋ เพิ่มรายการ</button>' +
-                 '<button type="button" class="ocr-btn ghost" data-act="fit">ใส่ส่วนต่างเป็นรายการใหม่</button></div>' +
-                 '<div class="hint" style="margin-top:6px;">VAT ฿ = แก้เศษสตางค์ให้ตรงกระดาษ (ว่าง = 7% อัตโนมัติ) · ใบกำกับของสินค้าที่ <b>รับเข้าสต๊อกแล้ว</b> เลือกบัญชี "ล้างรับของ" ไม่ใช่ค่าใช้จ่าย (กันต้นทุนซ้ำ) · WHT คิดจากยอดก่อน VAT</div></div>';
+                 '<button type="button" class="ocr-btn ghost" data-act="fit">ใส่ส่วนต่างเป็นรายการใหม่</button>' +
+                 (hasSrcAcc ? '<button type="button" class="ocr-btn ghost" data-act="srcacc">ใช้บัญชีตามใบเดิมทุกบรรทัด</button>' : '') + '</div>' +
+                 '<div class="hint" style="margin-top:6px;">VAT ฿ = แก้เศษสตางค์ให้ตรงกระดาษ (ว่าง = คำนวณอัตโนมัติ) · ใบกำกับของสินค้าที่ <b>รับเข้าสต๊อกแล้ว</b> เลือกบัญชี "ล้างรับของ" ไม่ใช่ค่าใช้จ่าย (กันต้นทุนซ้ำ) · WHT คิดจากยอดก่อน VAT</div></div>';
 
-            // ── 5) ตรวจยอด ──
-            h += '<div class="rv-sec"><h4>5. ตรวจยอดกับเอกสาร</h4><div id="rvRecon"></div></div>';
-            h += '<div class="rv-sec" id="rvChecks"></div>';
+            // ── 5) ตรวจยอด ── (ข้อที่ต้องแก้ + ปุ่มแก้ด่วนอยู่บนตาราง — มือถือไม่ถูกแถบล่างบัง)
+            h += '<div class="rv-sec" id="rvStep5"><h4>5. ตรวจยอดกับเอกสาร</h4><div id="rvChecks"></div><div id="rvRecon"></div></div>';
             $('rvForm').innerHTML = h;
             updateDynamic();
         }
@@ -489,21 +652,31 @@
         function renderNote() {
             if (M.cnPrimary && S.SourceMode !== 'PRT') S.Settlement = effSettlement();   // ค่าที่จะทำจริง (ฝั่งเซิร์ฟเวอร์ใช้กติกาเดียวกัน — VendorCnPolicy.EffectiveSettlement)
             var cn = S.DocKind === 'VCN', h = '<div class="rv-sec"><h4>ใบต้นทาง &amp; ' + (cn ? 'ใบลดหนี้' : 'ใบเพิ่มหนี้') + '</h4>';
+            // ── §86/9-10 บนกระดาษ: อ้างใบกำกับเดิม + มูลค่าเดิม/ที่ถูกต้อง/ผลต่าง (อ่านจาก OCR แก้ได้) ──
+            var od = has(S.OrigAmount) && has(S.CorrectAmount) && has(S.DiffAmount) ? OcrMath.r2(+S.OrigAmount - (+S.CorrectAmount)) : null;
+            h += '<div class="rv-grid" style="margin-bottom:10px;">' +
+                 field('OrigTaxInvoiceNo', 'อ้างอิงใบกำกับภาษีเดิม เลขที่', 'text', { hint: 'เลขที่ใบกำกับของผู้ขายที่ใบนี้' + (cn ? 'ลด' : 'เพิ่ม') + 'หนี้ — ใช้ค้นใบต้นทาง' }) +
+                 field('OrigTaxInvoiceDate', 'ลงวันที่', 'date') +
+                 field('OrigAmount', 'มูลค่าตามใบกำกับเดิม', 'text', { num: true }) +
+                 field('CorrectAmount', 'มูลค่าที่ถูกต้อง', 'text', { num: true }) +
+                 field('DiffAmount', 'ผลต่าง (' + (cn ? 'ลดหนี้' : 'เพิ่มหนี้') + ')', 'text', { num: true, hint: '<span id="paperChk">' + (od === null ? '' : (Math.abs(od - (+S.DiffAmount)) <= 0.01 ? '<span class="okmark">✓ เดิม − ที่ถูกต้อง = ผลต่าง</span>' : '<span class="badmark">✗ เดิม − ที่ถูกต้อง = ' + money(od) + '</span>')) + '</span>' }) +
+                 '</div>';
+            if (S.PaperPaymentType) h += '<div class="hint" style="margin:-4px 0 8px;">วิธีชำระบนใบ: <b>' + esc(S.PaperPaymentType) + '</b> — ใช้เลือก "รับเงินคืนเข้า" ด้านล่าง</div>';
             h += '<div class="seg" style="margin-bottom:10px;">';
             [['NEXTACC', 'เลือกเอกสารใน NextAcc'], ['OUTSIDE', 'ใบเดิมอยู่นอกระบบ']].concat(cn && !M.cnPrimary ? [['PRT', 'เป็นการคืนสินค้าที่บันทึกแล้ว (PRT-)']] : []).forEach(function (m) {
                 h += '<label class="' + (S.SourceMode === m[0] ? 'sel' : '') + '"><input type="radio" name="rvSrc" value="' + m[0] + '" data-act="src"' + (S.SourceMode === m[0] ? ' checked' : '') + ' />' + m[1] + '</label>';
             });
             h += '</div>';
             if (S.SourceMode === 'NEXTACC') {
-                h += '<div class="rv-grid"><div class="rv-f wide"><label>ค้นเอกสารต้นทาง (เลขที่เอกสาร NextAcc หรือชื่อผู้ขาย)</label><div style="display:flex; gap:6px;">' +
+                h += '<div class="rv-grid"><div class="rv-f wide"><label>ค้นเอกสารต้นทาง (เลขใบกำกับเดิม / เลขที่เอกสาร NextAcc / ชื่อผู้ขาย)</label><div style="display:flex; gap:6px;">' +
                      '<input type="text" data-f="SearchText" id="f_SearchText" value="' + esc(S.SearchText || '') + '" /><button type="button" class="ocr-btn" data-act="search">ค้นหา</button></div>' +
-                     '<div class="hint">ใบลด/เพิ่มหนี้ฝั่งซื้ออ้างได้: ใบแจ้งหนี้ซื้อ · ค่าใช้จ่าย · ใบสำคัญจ่าย (NextAcc ValidConversions)</div></div></div>';
-                (M.cnNotes || []).forEach(function (n) { h += '<div class="ocr-msg warn">' + esc(n) + '</div>'; });
+                     '<div class="hint">ใบลด/เพิ่มหนี้ฝั่งซื้ออ้างได้: ใบแจ้งหนี้ซื้อ · ค่าใช้จ่าย · ใบสำคัญจ่าย (NextAcc ValidConversions) · เลือกแล้วระบบดึงรายการ/บัญชี/การจ่ายของใบเดิมมาให้</div></div></div>';
+                (M.cnNotes || []).forEach(function (n) { h += '<div class="ocr-msg info">' + esc(n) + '</div>'; });
                 var rs = M.cnResults || [];
                 if (rs.length) {
                     h += '<div style="overflow-x:auto;"><table class="tbl"><thead><tr><th>เลขที่</th><th>ชนิด</th><th>วันที่</th><th>ผู้ขาย</th><th class="num">ยอด</th><th class="num">ค้างจ่าย</th><th class="num">ลดหนี้แล้ว</th><th class="num">ลดได้อีก</th><th></th></tr></thead><tbody>';
                     rs.forEach(function (r, i) {
-                        h += '<tr class="src-pick' + (S.SourceDocId === r.Id ? ' src-sel' : '') + '"><td>' + esc(r.No) + (r.SupplierDocNo ? '<br/><small>ใบผู้ขาย ' + esc(r.SupplierDocNo) + '</small>' : '') + (r.Reason ? '<br/><small style="color:#2b6cb0;">' + esc(r.Reason) + '</small>' : '') + '</td><td>' + esc(r.TypeLabel) + '</td><td>' + esc(r.Date) + '</td><td>' + esc(r.ContactName || '') + '</td>' +
+                        h += '<tr class="src-pick' + (S.SourceDocId === r.Id ? ' src-sel' : '') + '"><td>' + esc(r.No) + (r.SupplierDocNo ? '<br/><small>ใบผู้ขาย ' + esc(r.SupplierDocNo) + '</small>' : '') + (r.Reason ? '<br/><small style="color:' + (r.Exact ? '#2f855a;font-weight:700' : '#2b6cb0') + ';">' + (r.Exact ? '✓ ' : '') + esc(r.Reason) + '</small>' : '') + '</td><td>' + esc(r.TypeLabel) + '</td><td>' + esc(r.Date) + '</td><td>' + esc(r.ContactName || '') + '</td>' +
                              '<td class="num">' + money(r.Total) + '</td><td class="num">' + money(r.BalanceDue) + '</td><td class="num">' + money(r.Credited) + '</td><td class="num"><b>' + money(r.Remaining) + '</b></td>' +
                              '<td><button type="button" class="ocr-btn" style="padding:4px 10px;" data-act="pick" data-i="' + i + '">' + (S.SourceDocId === r.Id ? '✓ เลือกแล้ว' : 'เลือก') + '</button></td></tr>';
                     });
@@ -511,13 +684,19 @@
                 }
                 if (S.SourceDocId) {
                     var rem = OcrMath.r2((+S.SourceTotal || 0) - (+S.SourceCredited || 0));
-                    h += '<div class="ocr-msg info"><b>ใบต้นทาง: ' + esc(S.SourceDocNo || S.SourceDocId) + '</b>' + (S.SourceContactName ? ' · ' + esc(S.SourceContactName) : '') +
-                         '<br/>ยอดใบ ' + money(S.SourceTotal) + ' · ลดหนี้แล้ว ' + money(S.SourceCredited) + ' · <b>ลดได้อีก ' + money(rem) + '</b> · ค้างจ่าย ' + money(S.SourceBalanceDue) +
+                    h += '<div class="ocr-msg info"><b>ใบต้นทาง: ' + esc(S.SourceDocNo || S.SourceDocId) + '</b>' + (S.SourceContactName ? ' · ' + esc(S.SourceContactName) : '') + (S.SourceSupplierDocNo ? ' · ใบผู้ขาย ' + esc(S.SourceSupplierDocNo) : '') +
+                         '<br/>ยอดใบ ' + money(S.SourceTotal) + ' − ลดหนี้แล้ว ' + money(S.SourceCredited) + ' = <b>ลดได้อีก ' + money(rem) + '</b> · ค้างจ่าย ' + money(S.SourceBalanceDue) +
                          '<br/><span id="capChk"></span>' +
                          '<br/><small>' + ((+S.SourceBalanceDue || 0) > 0.01 ? (cn ? 'ใบต้นทางยังค้างจ่าย ⇒ NextAcc ลง <b>Dr เจ้าหนี้</b> (ลดหนี้ที่ค้าง)' : 'NextAcc ลง Cr เจ้าหนี้') : (cn ? 'ใบต้นทางจ่ายครบแล้ว ⇒ NextAcc ลง <b>Dr เงินสด 111</b> — เลือกด้านล่างว่าเงินคืนเข้าบัญชีไหน หรือเก็บเป็นเครดิตกับผู้ขาย' : 'ใบต้นทางจ่ายครบ ⇒ NextAcc ลง Cr เงินสด 111 — เลือกด้านล่างว่าตั้งเจ้าหนี้รอจ่าย หรือจ่ายทันที')) + '</small></div>';
+                    var sl = S.SourceLines || [];
+                    if (sl.length) {
+                        h += '<details class="src-lines" open><summary>รายการ + ผังบัญชีของใบเดิม (' + sl.length + ')</summary><div style="overflow-x:auto;"><table class="tbl"><thead><tr><th>รายการ</th><th class="num">จำนวน</th><th class="num">ราคา/หน่วย</th><th class="num">ยอดก่อน VAT</th><th>บัญชี</th></tr></thead><tbody>';
+                        sl.forEach(function (x) { h += '<tr><td>' + esc((x.ProductCode ? x.ProductCode + ' · ' : '') + (x.Description || '')) + '</td><td class="num">' + esc(x.Qty) + '</td><td class="num">' + money(x.UnitPrice) + '</td><td class="num">' + money(x.Amount) + '</td><td><b>' + esc(x.AccountCode || '-') + '</b> ' + esc(x.AccountName || '') + '</td></tr>'; });
+                        h += '</tbody></table></div><div class="hint">บัญชีของแต่ละรายการใบลดหนี้ตั้งตามรายการที่ตรงกันในใบเดิม (รหัสสินค้า → รายละเอียด → ราคา → บัญชีหลักของใบเดิม) — เปลี่ยนได้ที่ช่องบัญชี (★ใบเดิม)</div></details>';
+                    } else if (S.SourceDocNo) h += '<button type="button" class="ocr-btn ghost" style="padding:4px 10px;" data-act="reload">ดึงรายการ/บัญชี/การจ่ายของใบเดิม</button>';
                 }
             } else if (S.SourceMode === 'OUTSIDE') {
-                h += '<div class="ocr-msg warn">ไม่ได้อ้างเอกสารใน NextAcc ⇒ ตรวจเพดานยอด §86/10 อัตโนมัติไม่ได้ และ NextAcc จะลง <b>เจ้าหนี้</b> เป็นคู่บัญชี (ไม่มีใบต้นทางให้ดูสถานะการจ่าย)</div>' +
+                h += '<div class="ocr-msg warn">ไม่ได้อ้างเอกสารใน NextAcc ⇒ ตรวจเพดานยอด §86/10 อัตโนมัติไม่ได้ และ NextAcc จะลง <b>เจ้าหนี้</b> เป็นคู่บัญชี (ไม่มีใบต้นทางให้ดูสถานะการจ่าย) · NextAcc พิมพ์ "อ้างอิงใบกำกับเดิม" จากเลขที่ด้านบน</div>' +
                      '<label style="font-size:13px;"><input type="checkbox" data-f="OutsideCapConfirmed"' + (S.OutsideCapConfirmed ? ' checked' : '') + ' /> ตรวจแล้ว ยอดลด/เพิ่มหนี้รวมไม่เกินยอดใบเดิม และผู้ขายรายเดียวกับใบเดิม</label>';
             } else {
                 h += '<div class="ocr-msg warn">การคืนสินค้าที่บันทึกในหน้า "คืนสินค้าให้ผู้ขาย" โพสต์บัญชีไว้ครบแล้ว (เจ้าหนี้/เงินคืน · สินค้าคงเหลือ · ภาษีซื้อ) ⇒ ระบบจะ <b>เก็บใบลดหนี้นี้เป็นหลักฐาน</b> ไม่สร้างใบลดหนี้ใน NextAcc ซ้ำ (Vendor_Cn_Primary=0)</div>' +
@@ -525,66 +704,106 @@
             }
             if (S.SourceMode === 'PRT') return h + '</div>';
 
-            var rs2 = cn ? CN_REASONS : DN_REASONS;
-            h += '<div class="rv-grid" style="margin-top:10px;"><div class="rv-f"><label>เหตุผล (§86/' + (cn ? '10' : '9') + ')</label><select data-f="NoteReason" data-int="1"><option value="0">— เลือก —</option>';
-            rs2.forEach(function (r) { h += '<option value="' + r[0] + '"' + (+S.NoteReason === r[0] ? ' selected' : '') + '>' + r[1] + '</option>'; });
-            h += '</select></div>' + field('NoteReasonText', 'รายละเอียดเหตุผล (พิมพ์บนเอกสาร/หมายเหตุ)', 'text') + '</div>';
+            // ── เหตุผล (OcrNoteReasons — map เป็น CreditNoteReason/DebitNoteReason ของ NextAcc; ข้อความเต็มไปที่หมายเหตุเอกสาร) ──
+            var rl = reasonList(), cur = OcrMath.findReason(S.DocKind, S.NoteReasonCode);
+            h += '<div class="rv-grid" style="margin-top:10px;"><div class="rv-f"><label>เหตุผล (§86/' + (cn ? '10' : '9') + ')</label><select data-f="NoteReasonCode"><option value="">— เลือก —</option>';
+            rl.forEach(function (r) { h += '<option value="' + esc(r.c) + '"' + (S.NoteReasonCode === r.c ? ' selected' : '') + '>' + esc(r.t) + '</option>'; });
+            h += '</select>' + (cur && cur.h ? '<div class="hint">' + esc(cur.h) + '</div>' : '') + '</div>' +
+                 field('NoteReasonText', cur && cur.txt ? 'รายละเอียดเหตุผล (ต้องกรอก)' : 'รายละเอียดเพิ่มเติม (พิมพ์ในหมายเหตุเอกสาร)', 'text') + '</div>';
 
-            // ── การคืนสินค้าที่เกี่ยวข้อง (PHASE19_39: ใบลดหนี้ = ตัวจริง) ──
-            if (cn && M.cnPrimary) {
+            // ── การคืนสินค้าที่เกี่ยวข้อง (PHASE19_39: ใบลดหนี้ = ตัวจริง) — เฉพาะเหตุผลที่มีของส่งกลับ ──
+            if (cn && M.cnPrimary && (!cur || cur.phys || S.ReturnRef)) {
                 var prs = M.pendingReturns || [], pr = pickedReturn();
                 h += '<div class="rv-f wide" style="margin-top:10px;"><label>ใบลดหนี้นี้เป็นของการคืนสินค้า (หน้า "คืนสินค้าให้ผู้ขาย") หรือไม่</label><select data-f="ReturnRef">' +
-                     '<option value="">ไม่ใช่การคืนสินค้า — ส่วนลด/ปรับราคา (ไม่แตะสต๊อก)</option>';
+                     '<option value="">ไม่ใช่การคืนสินค้า — ส่วนลด/ปรับราคา/ส่งไม่ครบ (ไม่แตะสต๊อก)</option>';
                 prs.forEach(function (r) { h += '<option value="' + esc(r.ref) + '"' + (pr && pr.ref === r.ref ? ' selected' : '') + '>' + esc(r.ref + ' · ' + (r.supplier || '') + ' · ' + money(r.net) + ' + VAT ' + money(r.vat) + ' · ' + r.date + (r.refund ? ' · ผู้ขายคืนเงินแล้ว' : '')) + '</option>'; });
                 if (S.ReturnRef && !pr) h += '<option value="' + esc(S.ReturnRef) + '" selected>' + esc(S.ReturnRef) + ' (ไม่อยู่ในรายการรอใบลดหนี้)</option>';
                 h += '</select><div class="hint">' + (prs.length ? 'แสดงเฉพาะการคืนที่วางบิลแล้วและยังรอใบลดหนี้' : 'ไม่มีการคืนสินค้าที่รอใบลดหนี้') + '</div></div>';
                 if (pr) {
-                    var invNet = 0; (S.Lines || []).forEach(function (l) { if (M.inventoryCode && String(l.AccountCode || '') === M.inventoryCode) invNet += OcrMath.calcLine(l).net; });
+                    var invNet = 0, pcs = OcrMath.calcLines(S.Lines, !!S.PricesIncludeVat);
+                    (S.Lines || []).forEach(function (l, i) { if (M.inventoryCode && String(l.AccountCode || '') === M.inventoryCode) invNet += pcs[i].net; });
                     var dif = OcrMath.r2(OcrMath.r2(invNet) - (+pr.carry || 0));
                     h += '<div class="ocr-msg info"><b>ใบลดหนี้นี้เป็นรายการบัญชี/ภาษีตัวจริงของการคืน ' + esc(pr.ref) + '</b>' +
                          '<br/>ราคาซื้อที่คืน ' + money(pr.net) + ' · VAT ' + money(pr.vat) + ' · ต้นทุนเฉลี่ยที่ตัดสต๊อก ' + money(pr.carry) +
                          '<br/>หลังอนุมัติ: กลับ JE ที่ลงระหว่างรอ (<b>' + esc(pr.ref) + '-REV</b>) + ปรับสินค้าคงเหลือ ' + money(dif) + ' (<b>' + esc(pr.ref) + '-DIF</b> ราคาซื้อ ↔ ต้นทุนเฉลี่ย) — ยอดไม่ซ้อน' +
                          (M.inventoryCode ? '<br/><button type="button" class="ocr-btn ghost" style="padding:4px 10px;margin-top:6px;" data-act="invlines">ตั้งบัญชีทุกบรรทัด = สินค้าคงเหลือ ' + esc(M.inventoryCode) + '</button>' : '<br/><span class="badmark">ยังไม่ผูก mapping INVENTORY</span>') + '</div>';
                     if (M.inventoryCode && invNet <= 0) h += '<div class="ocr-msg warn">ยังไม่มีบรรทัดที่ลงบัญชีสินค้าคงเหลือ (' + esc(M.inventoryCode) + ') — สต๊อกใน GL จะถูกตัดที่ต้นทุนเฉลี่ยผ่าน ' + esc(pr.ref) + '-DIF ส่วนบรรทัดใบลดหนี้ลงบัญชีที่เลือก</div>';
-                    if (Math.abs(OcrMath.calcTotals(S.Lines).sub - (+pr.net || 0)) > 1) h += '<div class="ocr-msg warn">ยอดก่อน VAT ของใบลดหนี้ ≠ ราคาซื้อที่คืน ' + money(pr.net) + ' — ตรวจว่าผู้ขายลดหนี้เต็มจำนวนหรือไม่ (เจ้าหนี้จะลดตามใบลดหนี้)</div>';
-                } else if (M.inventoryCode && (S.Lines || []).some(function (l) { return String(l.AccountCode || '') === M.inventoryCode; })) {
+                    if (Math.abs(OcrMath.calcTotals(S.Lines, !!S.PricesIncludeVat).sub - (+pr.net || 0)) > 1) h += '<div class="ocr-msg warn">ยอดก่อน VAT ของใบลดหนี้ ≠ ราคาซื้อที่คืน ' + money(pr.net) + ' — ตรวจว่าผู้ขายลดหนี้เต็มจำนวนหรือไม่ (เจ้าหนี้จะลดตามใบลดหนี้)</div>';
+                } else if (M.inventoryCode && (S.Lines || []).some(function (l) { return String(l.AccountCode || '') === M.inventoryCode; }) && (!cur || cur.phys)) {
                     h += '<div class="ocr-msg warn">ใบลดหนี้ไม่ผูกการคืนสินค้า แต่มีบรรทัดลงบัญชีสินค้าคงเหลือ — ถ้าจะส่งของคืนตามมา: บันทึกในหน้า "คืนสินค้าให้ผู้ขาย" เลือก "มีใบลดหนี้ที่บันทึกแล้ว" (ตัดจำนวน + ปรับต้นทุน) · ถ้าเป็นส่วนลด/ปรับราคา แนะนำบัญชีส่งคืน/ส่วนลดรับ (ต้นทุนเฉลี่ยใน TakeTime ไม่ลดตาม)</div>';
                 }
             }
+            if (cn && cur && cur.c === 'SHORT') h += '<div class="ocr-msg info" style="margin-top:8px;"><b>ผู้ขายส่งไม่ครบ / ไม่มีสินค้า:</b> ไม่มีของส่งกลับ ⇒ ไม่ผูกการคืนสินค้า · ถ้าบันทึกรับเข้าสต๊อก (Product/In) เต็มจำนวนไปแล้ว ให้แก้จำนวนรับเข้าให้ตรงของที่ได้จริง · บรรทัดใบลดหนี้ใช้บัญชีเดียวกับใบเดิม (สินค้าคงเหลือ/GRNI/ค่าใช้จ่าย) เพื่อลดต้นทุนของที่ไม่ได้รับ — ผู้ทำบัญชีเปลี่ยนได้</div>';
 
-            // ── ขาเงิน ──
-            if (!M.cnPrimary) {
-                h += '<div class="rv-f" style="margin-top:10px;"><label>ขาเงิน</label><div class="seg">';
-                [['AUTO', cn ? 'ตาม NextAcc (ค้าง = ลดเจ้าหนี้ · จ่ายแล้ว = เงินสด)' : 'ตาม NextAcc'], ['BANK', cn ? 'ผู้ขายคืนเงินเข้าบัญชี…' : 'จ่ายเพิ่มจากบัญชี…'], ['VENDOR', cn ? 'เก็บเป็นยอดกับผู้ขาย (หักครั้งหน้า)' : 'ตั้งเจ้าหนี้รอจ่าย']].forEach(function (m) {
-                    h += '<label class="' + (S.Settlement === m[0] ? 'sel' : '') + '"><input type="radio" name="rvSet" value="' + m[0] + '" data-act="set"' + (S.Settlement === m[0] ? ' checked' : '') + ' />' + m[1] + '</label>';
-                });
-                h += '</div><div class="hint">ใช้เมื่อใบต้นทางจ่ายครบแล้ว: NextAcc ลงขาเงินที่เงินสด 111 เสมอ ⇒ TakeTime โพสต์ JE ย้ายขาไปบัญชีที่เลือก</div></div>';
-                if (S.Settlement === 'BANK') h += '<div class="rv-grid">' + moneySelect('RefundAccountId', 'บัญชีที่รับเงินคืน / จ่ายเงิน', '— เลือกบัญชี —') + '</div>';
-                return h + '</div>';
-            }
-            var eff = effSettlement();
-            h += '<div class="rv-f" style="margin-top:10px;"><label>ขาเงิน</label>';
-            if (!sourcePaid()) {
-                h += '<div class="hint">' + (S.SourceMode === 'NEXTACC' && S.SourceDocId ? 'ใบต้นทางยังค้างจ่าย' : (S.SourceMode === 'NEXTACC' ? 'ยังไม่เลือกใบต้นทาง' : 'ใบเดิมอยู่นอกระบบ')) + ' ⇒ NextAcc ลง <b>เจ้าหนี้</b> (' + (cn ? 'ลด' : 'เพิ่ม') + 'ยอดค้างจ่าย) — ไม่มีขาเงินให้เลือก</div></div>';
-            } else {
-                h += '<div class="seg">';
-                var opts = cn ? [['VENDOR', 'เก็บเป็นเครดิตกับผู้ขาย (หักตอนจ่ายครั้งหน้า) — ' + (M.vendorCreditLabel || 'เจ้าหนี้การค้า')], ['BANK', 'ผู้ขายคืนเงินเข้าบัญชี…']]
-                              : [['VENDOR', 'ตั้งเจ้าหนี้รอจ่าย (ค่าเริ่มต้น)'], ['BANK', 'จ่ายทันทีจากบัญชี…']];
-                opts.forEach(function (m) { h += '<label class="' + (eff === m[0] ? 'sel' : '') + '"><input type="radio" name="rvSet" value="' + m[0] + '" data-act="set"' + (eff === m[0] ? ' checked' : '') + ' />' + esc(m[1]) + '</label>'; });
-                h += '</div><div class="hint">ใบต้นทางจ่ายครบแล้ว: NextAcc ลงขาเงินที่เงินสด 111 เสมอ ⇒ TakeTime โพสต์ JE ย้ายขาไป' + (cn ? 'บัญชีเครดิตผู้ขาย/บัญชีที่รับเงินคืน' : 'เจ้าหนี้การค้า/บัญชีที่จ่ายจริง') + ' (ไม่มีเงินสดเข้า-ออกจริงในวันนั้น)</div></div>';
-                if (eff === 'BANK') h += '<div class="rv-grid">' + moneySelect('RefundAccountId', cn ? 'บัญชีที่รับเงินคืน' : 'จ่ายจากบัญชี', '— เลือกบัญชี —') + '</div>';
-            }
+            // ── ขาเงิน: เลือกจากแหล่งเงิน (Account_Paid_How) — ค่าเริ่มต้น = บัญชีที่ใบเดิมจ่ายออก (หักเงินกลับ) ──
+            h += renderSettlement(cn);
             return h + '</div>';
         }
 
+        function settleValue() {
+            var e = M.cnPrimary ? effSettlement() : (S.Settlement || 'AUTO');
+            return e === 'BANK' ? 'BANK|' + (S.RefundAccountId || '') : e;
+        }
+        function renderSettlement(cn) {
+            var h = '<div class="rv-f wide" style="margin-top:12px;"><label>' + (cn ? 'รับเงินคืน / หักกลับเข้า' : 'จ่ายเพิ่มจาก / ตั้งหนี้') + '</label>';
+            var srcSel = S.SourceMode === 'NEXTACC' && !!S.SourceDocId;
+            if (srcSel && !sourcePaid()) {
+                return h + '<select disabled><option>' + (cn ? 'ลดเจ้าหนี้ (ใบเดิมยังไม่จ่าย)' : 'ตั้งเจ้าหนี้เพิ่ม (ใบเดิมยังไม่จ่าย)') + '</option></select>' +
+                       '<div class="hint">ใบต้นทางยังค้างจ่าย ' + money(S.SourceBalanceDue) + ' ⇒ NextAcc ' + (cn ? 'ลด' : 'เพิ่ม') + 'ยอดเจ้าหนี้ของใบเดิม (DocumentService.cs:17933-17936) — ไม่มีเงินเข้า/ออก</div></div>';
+            }
+            if (!srcSel) {
+                return h + '<select disabled><option>' + (cn ? 'ลดเจ้าหนี้' : 'ตั้งเจ้าหนี้') + '</option></select><div class="hint">' +
+                       (S.SourceMode === 'NEXTACC' ? 'เลือกใบต้นทางก่อน — ระบบจะเลือกบัญชีที่ใบเดิมจ่ายให้อัตโนมัติ' : 'ใบเดิมอยู่นอกระบบ ⇒ NextAcc ลงเจ้าหนี้') + '</div></div>';
+            }
+            var val = settleValue(), list = (M.paidHow && M.paidHow.length) ? M.paidHow : (M.money || []).map(function (a) { return { id: a.id, n: (a.c ? a.c + ' ' : '') + a.n }; });
+            var found = false;
+            h += '<select data-act="settle" id="f_Settle">';
+            h += '<optgroup label="' + (cn ? 'รับเงินคืนเข้าแหล่งเงิน' : 'จ่ายจากแหล่งเงิน') + '">';
+            list.forEach(function (a) {
+                var v = 'BANK|' + a.id, s = v === val; if (s) found = true;
+                h += '<option value="' + esc(v) + '"' + (s ? ' selected' : '') + '>' + esc(a.n + (a.id === S.SourcePaidAccountId ? ' ★ใบเดิมจ่ายจากบัญชีนี้' : '')) + '</option>';
+            });
+            if (S.SourcePaidAccountId && !list.some(function (a) { return a.id === S.SourcePaidAccountId; })) {
+                var v2 = 'BANK|' + S.SourcePaidAccountId; if (v2 === val) found = true;
+                h += '<option value="' + esc(v2) + '"' + (v2 === val ? ' selected' : '') + '>' + esc((S.SourcePaidAccountLabel || 'บัญชีที่ใบเดิมจ่าย') + ' ★ใบเดิม') + '</option>';
+            }
+            if (/^BANK\|/.test(val) && !found) h += '<option value="' + esc(val) + '" selected>' + esc(S.RefundAccountId ? 'บัญชีที่เลือกไว้' : '— เลือกบัญชี —') + '</option>';
+            h += '</optgroup><optgroup label="ไม่มีเงินเข้า-ออก">';
+            h += '<option value="VENDOR"' + (val === 'VENDOR' ? ' selected' : '') + '>' + esc(cn ? 'เก็บเป็นเครดิตกับผู้ขาย (หักตอนจ่ายครั้งหน้า) — ' + (M.vendorCreditLabel || 'เจ้าหนี้การค้า') : 'ตั้งเจ้าหนี้รอจ่าย') + '</option>';
+            if (!M.cnPrimary) h += '<option value="AUTO"' + (val === 'AUTO' ? ' selected' : '') + '>ตาม NextAcc (เงินสด 111)</option>';
+            h += '</optgroup></select>';
+            h += '<div class="hint">' + (S.SourcePaidAccountId ? 'ใบเดิมจ่ายจาก <b>' + esc(S.SourcePaidAccountLabel || '') + '</b> ⇒ ค่าเริ่มต้นหักเงินกลับเข้าบัญชีเดียวกัน · ' : 'ไม่พบบัญชีที่ใบเดิมจ่าย — เลือกเอง · ') +
+                 'NextAcc ลงขาเงินที่เงินสด 111 เสมอ (DocumentService.cs:17899, :17920-17924) ⇒ TakeTime โพสต์ JE ย้ายขาไปบัญชีที่เลือก' + (S.SettlementUserSet ? ' · <i>ผู้ใช้เลือกเอง</i>' : '') + '</div></div>';
+            return h;
+        }
+
+        /* แก้อย่างไร — คำแนะนำต่อข้อผิดพลาด (ข้อความจาก OcrMath.validate) */
+        var HINTS = [
+            [/^(ยอดก่อน VAT|ภาษีมูลค่าเพิ่ม|ยอดรวมตามเอกสาร):/, 'ดูว่าราคาบนกระดาษ "รวม VAT แล้ว" หรือยัง (สลับที่ขั้น 4) · เทียบจำนวน/ราคาแต่ละรายการกับภาพ · ต่างแค่เศษ VAT ใช้ปุ่ม "ใช้ยอดตามเอกสาร"'],
+            [/^กรอก/, 'พิมพ์ตัวเลขตามที่พิมพ์บนเอกสาร (ตาราง "ตามเอกสาร" ด้านล่าง)'],
+            [/เลือกบัญชี$/, 'เลือกบัญชีที่ช่อง "บัญชี" ของรายการ' ],
+            [/เพดาน|ลดได้อีก|ลดหนี้ได้ของใบต้นทาง|ยอดค้างจ่ายของใบต้นทาง/, 'ตรวจว่าเลือกใบต้นทางถูก (เทียบ "มูลค่าตามใบกำกับเดิม") · ถ้าราคาในรายการรวม VAT ให้สลับที่ขั้น 4 · ส่วนที่จ่ายแล้วต้องแยกใบ'],
+            [/เหตุผล/, 'เลือก/กรอกเหตุผลในส่วน "ใบต้นทาง & ใบลดหนี้"'],
+            [/เอกสารต้นทาง/, 'พิมพ์เลขใบกำกับเดิมแล้วกด "ค้นหา" แล้วกด "เลือก"'],
+            [/ใบกำกับภาษีเต็มรูป/, 'ติ๊ก "เป็นใบกำกับภาษีเต็มรูป" ที่ขั้น 3 หรือเปลี่ยนบรรทัดเป็น "ไม่เคลม"'],
+            [/mod-11|13 หลัก/, 'พิมพ์เลขผู้เสียภาษีให้ตรงเอกสาร (13 หลัก)'],
+            [/ผูกการคืนสินค้า/, 'เลือก "ไม่ใช่การคืนสินค้า" หรือเปลี่ยนเหตุผลเป็น "คืนสินค้า"'],
+            [/บัญชีที่รับเงินคืน/, 'เลือกบัญชีที่ช่อง "รับเงินคืน / หักกลับเข้า"']
+        ];
+        function hintFor(m) { for (var i = 0; i < HINTS.length; i++) if (HINTS[i][0].test(m)) return HINTS[i][1]; return ''; }
+
         function updateDynamic() {
             if (!S) return;
-            var v = OcrMath.validate(S), t = v.totals;
-            (S.Lines || []).forEach(function (l, i) { var e = $('la_' + i); if (e) e.textContent = money(OcrMath.calcLine(l).net); });
+            var v = OcrMath.validate(S), t = v.totals, incl = !!S.PricesIncludeVat;
+            (S.Lines || []).forEach(function (l, i) {
+                var e = $('la_' + i); if (e) e.innerHTML = lineAmt(v.calcs[i], incl);
+                var b = $('ls_' + i); if (b && l.SourceAccountCode) b.innerHTML = srcBadge(l);
+            });
             // tax id / branch marks
             var tc = $('taxChk'); if (tc) { var tx = S.SupplierTaxId; tc.innerHTML = !tx ? '<span class="ocr-hint">ว่าง = เอกสารไม่มีเลข (เคลม VAT ไม่ได้)</span>' : (OcrMath.isValidTaxId(tx) ? '<span class="okmark">✓ ถูกต้อง · ' + (OcrMath.isJuristic(tx) ? 'นิติบุคคล (หัก ณ ที่จ่าย ภ.ง.ด.53)' : 'บุคคลธรรมดา (ภ.ง.ด.3)') + '</span>' : '<span class="badmark">✗ ไม่ผ่าน mod-11 / ไม่ครบ 13 หลัก</span>'); var ti = $('f_SupplierTaxId'); if (ti) ti.classList.toggle('bad', !!tx && !OcrMath.isValidTaxId(tx)); }
             var bc = $('brChk'); if (bc) { var nb = OcrMath.normBranch(S.SupplierBranch); bc.innerHTML = nb === null ? '<span class="ocr-hint">ว่าง</span>' : (OcrMath.isValidBranch(nb) ? '<span class="okmark">✓ ' + nb + (nb === '00000' ? ' สำนักงานใหญ่' : '') + '</span>' : '<span class="badmark">✗ ต้องเป็นตัวเลข 5 หลัก</span>'); }
-            var cc = $('capChk'); if (cc && S.DocKind === 'VCN') { var cap = OcrMath.capCheck(t.net, +S.SourceTotal || 0, +S.SourceCredited || 0, +S.SourceBalanceDue || 0); cc.innerHTML = cap ? '<span class="badmark">✗ ' + esc(cap) + '</span>' : '<span class="okmark">✓ ยอดใบนี้ ' + money(t.net) + ' อยู่ในเพดาน</span>'; }
+            var cc = $('capChk'); if (cc && S.DocKind === 'VCN') { var cap = OcrMath.capCheck(t.net, +S.SourceTotal || 0, +S.SourceCredited || 0, +S.SourceBalanceDue || 0); cc.innerHTML = cap ? '<span class="badmark">✗ ' + esc(cap) + '</span>' : '<span class="okmark">✓ ใบนี้ ' + money(t.net) + ' ≤ ลดได้อีก — อยู่ในเพดาน §86/10</span>'; }
+            var pc = $('paperChk'); if (pc) { pc.innerHTML = has(S.OrigAmount) && has(S.CorrectAmount) && has(S.DiffAmount) ? (Math.abs(OcrMath.r2(+S.OrigAmount - (+S.CorrectAmount)) - (+S.DiffAmount)) <= 0.01 ? '<span class="okmark">✓ เดิม − ที่ถูกต้อง = ผลต่าง</span>' : '<span class="badmark">✗ เดิม − ที่ถูกต้อง = ' + money(OcrMath.r2(+S.OrigAmount - (+S.CorrectAmount))) + '</span>') : ''; }
             // recon
             var r = '<div style="overflow-x:auto;"><table class="tbl recon"><thead><tr><th>ช่อง</th><th class="num">ตามเอกสาร (แก้ได้)</th><th class="num">คำนวณจากรายการ</th><th class="num">ต่าง</th><th></th></tr></thead><tbody>';
             var rows = [['PrintedSubTotal', 'ยอดก่อน VAT', t.sub], ['PrintedVat', 'ภาษีมูลค่าเพิ่ม', t.vat], ['PrintedTotal', 'ยอดรวมตามเอกสาร', t.total], ['PrintedWht', 'หัก ณ ที่จ่าย (ถ้าเอกสารระบุ)', t.wht]];
@@ -595,32 +814,45 @@
                 r += '<tr class="' + cls + '"><td>' + row[1] + '</td><td class="num"><input type="text" inputmode="decimal" class="' + lc + '" data-f="' + row[0] + '" data-num="1" value="' + esc(pv === null || pv === undefined ? '' : pv) + '" /></td>' +
                      '<td class="num">' + money(row[2]) + '</td><td class="num">' + (it && it.printed !== null ? money(it.diff) : '-') + '</td><td class="st">' + (it ? (it.ok ? '✓' : (it.printed === null ? 'กรอก' : '✗')) : '') + '</td></tr>';
             });
-            r += '</tbody></table></div><div class="ocr-hint" style="margin-top:6px;">ภาษีซื้อเคลมได้ ' + money(t.vatClaim) + ' · ไม่เคลม (รวมเข้าค่าใช้จ่าย) ' + money(t.vatNoClaim) +
-                 ' · หัก ณ ที่จ่าย ' + money(t.wht) + (t.wht > 0 ? ' (' + (OcrMath.isJuristic(S.SupplierTaxId) ? 'ภ.ง.ด.53' : 'ภ.ง.ด.3') + ')' : '') + ' · <b>ยอดจ่ายสุทธิ ' + money(t.net) + '</b></div>';
+            r += '</tbody></table></div><div class="ocr-hint" style="margin-top:6px;">' + (incl ? 'ราคาในรายการรวม VAT แล้ว · ' : '') + 'ภาษีซื้อเคลมได้ ' + money(t.vatClaim) + ' · ไม่เคลม (รวมเข้าค่าใช้จ่าย) ' + money(t.vatNoClaim) +
+                 ' · หัก ณ ที่จ่าย ' + money(t.wht) + (t.wht > 0 ? ' (' + (OcrMath.isJuristic(S.SupplierTaxId) ? 'ภ.ง.ด.53' : 'ภ.ง.ด.3') + ')' : '') + ' · <b>ยอด' + (OcrDocIsNote() ? 'ใบนี้' : 'จ่าย') + 'สุทธิ ' + money(t.net) + '</b></div>';
             var rc = $('rvRecon');
             if (rc) {
                 var act = document.activeElement, actF = act && act.getAttribute ? act.getAttribute('data-f') : null, selS = act && act.selectionStart, selE = act && act.selectionEnd;
                 rc.innerHTML = r;
                 if (actF && /^Printed/.test(actF)) { var ne = rc.querySelector('[data-f="' + actF + '"]'); if (ne) { ne.focus(); try { ne.setSelectionRange(selS, selE); } catch (e) { } } }
             }
-            // checks
-            var c = '';
+            // checks — ข้อที่ต้องแก้ + "แก้อย่างไร" + ปุ่มแก้ด่วน 1 แตะ (OcrMath.suggestFixes ≡ OcrReviewMath.SuggestFixes)
+            var c = '', seenHint = {};
+            if ((v.fixes || []).length) c += '<div class="ocr-fix">' + v.fixes.map(function (f) { return '<button type="button" class="ocr-btn" data-act="fix" data-code="' + esc(f.code) + '">⚡ ' + esc(f.label) + '</button><div class="hint">' + esc(f.hint || '') + '</div>'; }).join('') + '</div>';
+            if (v.errors.length) c += '<div class="ocr-msg err" id="rvErrList"><b>ต้องแก้ก่อนส่ง (' + v.errors.length + ')</b><ul class="chk">' + v.errors.map(function (m) { var hn = hintFor(m); if (hn && seenHint[hn]) hn = ''; else if (hn) seenHint[hn] = 1; return '<li>' + esc(m) + (hn ? '<div class="fixhint">แก้อย่างไร: ' + esc(hn) + '</div>' : '') + '</li>'; }).join('') + '</ul></div>';
             if (v.missing.length) c += '<div class="ocr-msg warn"><b>ใบกำกับ §86/4 ยังขาด:</b><ul class="chk">' + v.missing.map(function (m) { return '<li>✗ ' + esc(m) + '</li>'; }).join('') + '</ul>ขาด = NextAcc ลงภาษีซื้อพักไว้ที่ 11640 จนกว่าจะเติมครบ</div>';
-            if (v.errors.length) c += '<div class="ocr-msg err"><b>ต้องแก้ก่อนส่ง (' + v.errors.length + ')</b><ul class="chk">' + v.errors.map(function (m) { return '<li>' + esc(m) + '</li>'; }).join('') + '</ul></div>';
             if (v.warnings.length) c += '<div class="ocr-msg warn"><ul class="chk">' + v.warnings.map(function (m) { return '<li>' + esc(m) + '</li>'; }).join('') + '</ul></div>';
             if (M.nextaccDupWarn) c += '<label class="ocr-msg warn" style="display:block;"><input type="checkbox" data-f="AllowDuplicate"' + (S.AllowDuplicate ? ' checked' : '') + ' /> NextAcc เตือนว่าอาจเป็นใบซ้ำ — ตรวจแล้ว <b>ไม่ใช่ใบซ้ำ</b> ให้สร้างได้</label>';
             if (!v.errors.length) c += '<div class="ocr-msg ok">✓ ยอดตรงเอกสารและข้อมูลครบ — กด "ส่งไปสร้างเอกสารบน NextAcc" ด้านล่าง</div>';
             var ce = $('rvChecks'); if (ce) ce.innerHTML = c;
-            // bar
+            // bar — แตะ "ต้องแก้ n ข้อ" เลื่อนไปที่รายการ; เผื่อที่ให้แถบล่างไม่บังเนื้อหา
             $('rvBarSum').innerHTML = esc(kindLabel(S.DocKind)) + ' · รวม <b>' + money(t.total) + '</b>' + (t.wht > 0 ? ' · สุทธิ ' + money(t.net) : '') +
-                (v.errors.length ? ' · <span class="badmark">ต้องแก้ ' + v.errors.length + ' ข้อ</span>' : ' · <span class="okmark">พร้อมส่ง</span>');
+                (v.errors.length ? ' · <a href="#rvStep5" class="badmark" data-act="goerr">ต้องแก้ ' + v.errors.length + ' ข้อ ↑</a>' : ' · <span class="okmark">พร้อมส่ง</span>');
             $('rvSubmitBtn').disabled = v.errors.length > 0 || !!M.locked;
+            padForBar();
             return v;
         }
+        function OcrDocIsNote() { return S.DocKind === 'VCN' || S.DocKind === 'VDN'; }
+        function has(v) { return v !== null && v !== undefined && v !== ''; }
+        function padForBar() { var b = $('rvBar'); if (b && b.offsetHeight && document.body && document.body.style) document.body.style.paddingBottom = (b.offsetHeight + 24) + 'px'; }
         function kindLabel(k) { var x = KINDS.filter(function (z) { return z.v === k; })[0]; return x ? x.t : k; }
 
         function onInput(e) {
             var el = e.target, f = el.getAttribute('data-f'), li = el.getAttribute('data-l');
+            if (el.getAttribute('data-act') === 'settle') {
+                if (e.type !== 'change') return;
+                var sv = el.value || '';
+                if (sv.indexOf('BANK|') === 0) { S.Settlement = 'BANK'; S.RefundAccountId = sv.substring(5); }
+                else { S.Settlement = sv; }
+                S.SettlementUserSet = true;
+                render(); return;
+            }
             if (f) {
                 if (el.type === 'checkbox') S[f] = el.checked;
                 else if (el.getAttribute('data-num')) S[f] = numOrNull(el.value);
@@ -629,6 +861,12 @@
                 if (f === 'FullTaxInvoice' && el.checked && !S.TaxInvoiceDate) { S.TaxInvoiceDate = S.SupplierDocDate || ''; var td = $('f_TaxInvoiceDate'); if (td) td.value = S.TaxInvoiceDate; }
                 if (f === 'FullTaxInvoice' && !el.checked) { (S.Lines || []).forEach(function (l) { if (OcrMath.vatRate(l.VatType) > 0) l.VatClaimable = false; }); if (e.type === 'change') { render(); return; } }
                 if (f === 'VendorId' || f === 'NoteReason' || f === 'RefundAccountId' || f === 'PaidHowAccountId') { updateDynamic(); return; }
+                if (f === 'NoteReasonCode') {
+                    var rr = OcrMath.findReason(S.DocKind, S.NoteReasonCode); S.NoteReason = rr ? rr.n : 0;
+                    if (rr && !rr.phys && S.ReturnRef && S.SourceMode !== 'PRT') S.ReturnRef = '';   // ส่งไม่ครบ/ส่วนลด ไม่มีของคืน
+                    if (e.type === 'change') { render(); return; }
+                }
+                if (f === 'OrigTaxInvoiceNo' && e.type === 'change' && !String(S.SearchText || '').trim()) { S.SearchText = S.OrigTaxInvoiceNo; var st = $('f_SearchText'); if (st) st.value = S.SearchText; }
                 if (f === 'ReturnRef' && el.tagName === 'SELECT') {
                     // การคืนที่ผู้ขายคืนเงินแล้ว ⇒ ขาเงินเริ่มต้น = บัญชีที่ PRT รับเงินคืน
                     var pr = pickedReturn();
@@ -651,7 +889,8 @@
             var el = e.target.closest ? e.target.closest('[data-act]') : null;
             if (!el) return;
             var act = el.getAttribute('data-act');
-            if (act === 'kind') { S.DocKind = el.value; if (isNote() && !S.SourceMode) S.SourceMode = 'NEXTACC'; if (S.DocKind !== 'VCN' && S.SourceMode === 'PRT') S.SourceMode = 'NEXTACC'; if (S.DocKind !== 'VCN' && S.SourceMode !== 'PRT') S.ReturnRef = ''; render(); }
+            if (act === 'kind') { S.DocKind = el.value; if (isNote() && !S.SourceMode) S.SourceMode = 'NEXTACC';
+                if (isNote() && S.NoteReasonCode && !OcrMath.findReason(S.DocKind, S.NoteReasonCode)) { S.NoteReasonCode = null; S.NoteReason = 0; } if (S.DocKind !== 'VCN' && S.SourceMode === 'PRT') S.SourceMode = 'NEXTACC'; if (S.DocKind !== 'VCN' && S.SourceMode !== 'PRT') S.ReturnRef = ''; render(); }
             else if (act === 'invlines') { if (M.inventoryCode) (S.Lines || []).forEach(function (l) { l.AccountCode = M.inventoryCode; }); render(); }
             else if (act === 'src') { S.SourceMode = el.value; render(); }
             else if (act === 'set') { S.Settlement = el.value; render(); }
@@ -661,21 +900,24 @@
                 render();
             }
             else if (act === 'fit') {
-                var t = OcrMath.calcTotals(S.Lines), want = numOrNull(S.PrintedSubTotal);
-                if (want === null) { alert('กรอก "ยอดก่อน VAT ตามเอกสาร" ก่อน'); return; }
-                var gap = OcrMath.r2(want - t.sub);
-                if (gap <= 0) { alert(gap === 0 ? 'ยอดก่อน VAT ตรงแล้ว' : 'ยอดรายการเกินเอกสาร ' + money(-gap) + ' — แก้/ลดรายการแทน (NextAcc ไม่รับบรรทัดติดลบ)'); return; }
-                var base = S.Lines[0] || {};
-                S.Lines.push({ Description: 'รายการเพิ่มเติมตามเอกสาร', Qty: 1, UnitPrice: gap, Discount: 0, AccountCode: base.AccountCode || '', VatType: base.VatType || '7', VatClaimable: base.VatClaimable !== false, VatOverride: null, WhtRate: base.WhtRate || 0, IncomeType: '', OcrAccountCode: '' });
+                var incl = !!S.PricesIncludeVat, want = numOrNull(incl ? S.PrintedTotal : S.PrintedSubTotal);
+                if (want === null) { alert('กรอก "' + (incl ? 'ยอดรวมตามเอกสาร' : 'ยอดก่อน VAT ตามเอกสาร') + '" ก่อน'); return; }
+                if (!OcrMath.applyFix(S, 'ADD_GAP')) { alert('ยอดรายการไม่น้อยกว่าเอกสาร — แก้/ลดรายการแทน (NextAcc ไม่รับบรรทัดติดลบ)'); return; }
                 render();
             }
+            else if (act === 'basis') { var nv = el.value === '1'; if (nv !== !!S.PricesIncludeVat) { S.PricesIncludeVat = nv; S.PriceBasisSource = 'USER'; (S.Lines || []).forEach(function (l) { l.VatOverride = null; }); } render(); }
+            else if (act === 'fix') { if (OcrMath.applyFix(S, el.getAttribute('data-code'))) render(); }
+            else if (act === 'srcacc') { (S.Lines || []).forEach(function (l) { if (l.SourceAccountCode) l.AccountCode = l.SourceAccountCode; }); render(); }
+            else if (act === 'reload') { pickPost(); }
             else if (act === 'del') { if (S.Lines.length <= 1) { alert('ต้องมีอย่างน้อย 1 รายการ'); return; } S.Lines.splice(+el.getAttribute('data-i'), 1); render(); }
             else if (act === 'pick') {
                 var r = (M.cnResults || [])[+el.getAttribute('data-i')]; if (!r) return;
                 S.SourceDocId = r.Id; S.SourceDocNo = r.No; S.SourceDocType = r.Type; S.SourceTotal = r.Total; S.SourceBalanceDue = r.BalanceDue;
                 S.SourceCredited = r.Credited; S.SourceContactId = r.ContactId; S.SourceContactName = r.ContactName;
+                S.SourceSubTotal = r.SubTotal || 0; S.SourceSupplierDocNo = r.SupplierDocNo || null; S.SourceLines = [];
+                S.SourcePaidAccountId = null; S.SourcePaidAccountLabel = null; S.SettlementUserSet = false;
                 if (!S.SupplierName && r.ContactName) S.SupplierName = r.ContactName;
-                render();
+                pickPost();   // เซิร์ฟเวอร์ดึงรายการ/บัญชี/การจ่ายของใบเดิม → ตั้งบัญชีบรรทัด + ขาเงินเริ่มต้น
             }
             else if (act === 'search') { search(); }
         }
@@ -683,6 +925,11 @@
             writeState();
             OCR_overlay('กำลังค้นเอกสารต้นทางใน NextAcc…');
             $(btnSearchId).click();
+        }
+        function pickPost() {
+            writeState();
+            OCR_overlay('กำลังดึงรายการและผังบัญชีของใบต้นทาง…');
+            $(btnPickId).click();
         }
         /* \u003c / \u0026 — กัน ASP.NET request validation ("<x" / "&#") เมื่อผู้ใช้พิมพ์อักขระพิเศษ (JSON ถอดกลับเองฝั่งเซิร์ฟเวอร์) */
         function writeState() { $(hfState).value = JSON.stringify(S).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026'); }
@@ -697,14 +944,16 @@
             row('เลขที่ / วันที่เอกสาร', esc(S.SupplierDocNo || '-') + ' · ' + esc(S.SupplierDocDate || '-'));
             row('วันที่ลงบัญชี', esc(S.DocDate));
             row('จำนวนรายการ', (S.Lines || []).length + ' รายการ · บัญชี ' + esc(Array.from(new Set((S.Lines || []).map(function (l) { return l.AccountCode; }))).join(', ')));
-            row('ยอดก่อน VAT / VAT / รวม', money(t.sub) + ' / ' + money(t.vat) + ' / <b>' + money(t.total) + '</b>');
+            row('ยอดก่อน VAT / VAT / รวม', money(t.sub) + ' / ' + money(t.vat) + ' / <b>' + money(t.total) + '</b>' + (S.PricesIncludeVat ? '<br/><small>ราคาในรายการรวม VAT แล้ว (ส่ง NextAcc แบบราคารวม VAT)</small>' : ''));
             row('ภาษีซื้อ', 'เคลม ' + money(t.vatClaim) + (t.vatNoClaim ? ' · ไม่เคลม ' + money(t.vatNoClaim) : '') + (S.FullTaxInvoice ? '' : ' · <i>ไม่ใช่ใบกำกับเต็มรูป</i>'));
             if (t.wht > 0) row('หัก ณ ที่จ่าย / จ่ายสุทธิ', money(t.wht) + ' / <b>' + money(t.net) + '</b>');
             if (S.DocKind === 'PV') row('แหล่งจ่ายเงิน', esc(optText('PaidHowAccountId') || 'ให้ NextAcc เลือกเอง'));
             if (isNote()) {
-                row('ใบต้นทาง', S.SourceMode === 'NEXTACC' ? esc(S.SourceDocNo || '-') : (S.SourceMode === 'OUTSIDE' ? 'อยู่นอกระบบ' : 'คืนสินค้า ' + esc(S.ReturnRef || '')));
-                var es = effSettlement();
-                if (S.SourceMode !== 'PRT') row('ขาเงิน', es === 'BANK' ? 'บัญชี ' + esc(optText('RefundAccountId')) : (es === 'VENDOR' ? (S.DocKind === 'VCN' ? 'เก็บเป็นเครดิตกับผู้ขาย — ' + esc(M.vendorCreditLabel || 'เจ้าหนี้การค้า') : 'ตั้งเจ้าหนี้รอจ่าย') : 'ตาม NextAcc (เจ้าหนี้)'));
+                row('ใบต้นทาง', (S.SourceMode === 'NEXTACC' ? esc(S.SourceDocNo || '-') : (S.SourceMode === 'OUTSIDE' ? 'อยู่นอกระบบ' : 'คืนสินค้า ' + esc(S.ReturnRef || ''))) + (S.OrigTaxInvoiceNo ? '<br/><small>อ้างใบกำกับเดิม ' + esc(S.OrigTaxInvoiceNo) + '</small>' : ''));
+                var rsn = OcrMath.findReason(S.DocKind, S.NoteReasonCode);
+                row('เหตุผล', esc(rsn ? rsn.t : '-') + (S.NoteReasonText ? ' — ' + esc(S.NoteReasonText) : ''));
+                var es = M.cnPrimary ? effSettlement() : (S.Settlement || 'AUTO'), srcUnpaid = S.SourceMode !== 'NEXTACC' || !sourcePaid();
+                if (S.SourceMode !== 'PRT') row('ขาเงิน', srcUnpaid ? (S.DocKind === 'VCN' ? 'ลดเจ้าหนี้' : 'ตั้งเจ้าหนี้') : (es === 'BANK' ? (S.DocKind === 'VCN' ? 'รับเงินคืนเข้า ' : 'จ่ายจาก ') + esc(optText('RefundAccountId') || '-') : (es === 'VENDOR' ? (S.DocKind === 'VCN' ? 'เก็บเป็นเครดิตกับผู้ขาย — ' + esc(M.vendorCreditLabel || 'เจ้าหนี้การค้า') : 'ตั้งเจ้าหนี้รอจ่าย') : 'ตาม NextAcc (เงินสด 111)')));
                 if (pickedReturn()) row('การคืนสินค้า', '<b>' + esc(S.ReturnRef) + '</b> — ใบลดหนี้นี้เป็นรายการจริง: กลับ ' + esc(S.ReturnRef) + '-REV + ปรับต้นทุน ' + esc(S.ReturnRef) + '-DIF');
             }
             h += '</table>';
@@ -714,7 +963,11 @@
             $('rvModalBody').innerHTML = h;
             $('rvModal').style.display = 'flex';
         }
-        function optText(f) { var s = (M.money || []).filter(function (a) { return a.id === S[f]; })[0]; return s ? (s.c ? s.c + ' ' : '') + s.n : ''; }
+        function optText(f) {
+            var p = (M.paidHow || []).filter(function (a) { return a.id === S[f]; })[0]; if (p) return p.n;
+            var s = (M.money || []).filter(function (a) { return a.id === S[f]; })[0]; if (s) return (s.c ? s.c + ' ' : '') + s.n;
+            return S[f] && S[f] === S.SourcePaidAccountId ? (S.SourcePaidAccountLabel || '') : '';
+        }
         function closeConfirm() { $('rvModal').style.display = 'none'; }
         function beforePost(action) {
             if (!S) return true;
@@ -756,7 +1009,9 @@
             var hs = $(hfState), hm = $(hfMeta);
             if (!hs || !hm || !hs.value) return;
             try { S = JSON.parse(hs.value); M = JSON.parse(hm.value || '{}'); } catch (e) { $('rvForm').innerHTML = '<div class="ocr-msg err">อ่านข้อมูลตรวจทานไม่ได้: ' + esc(e.message) + '</div>'; return; }
-            S.Lines = S.Lines || []; S.LowConfidence = S.LowConfidence || [];
+            S.Lines = S.Lines || []; S.LowConfidence = S.LowConfidence || []; S.SourceLines = S.SourceLines || [];
+            OcrMath.setReasons(M.reasons);
+            window.addEventListener('resize', padForBar);
             if (M.cnPrimary && S.SourceMode === 'PRT') S.SourceMode = 'NEXTACC';   // ร่างเก่า (หลักฐาน PRT) → ใบลดหนี้จริงที่ผูกการคืน
             var form = $('rvForm');
             form.addEventListener('input', onInput);

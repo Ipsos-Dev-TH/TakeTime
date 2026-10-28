@@ -134,7 +134,7 @@ namespace Take_Time_BangPhra.Product
             if (st == null || !docId.HasValue) return false;
             supplierDocNo = st.SupplierDocNo;
             invNet = VendorCnService.InventoryNet(st, Vcs.MappedCode("INVENTORY"));
-            total = Take_Time_BangPhra.Integration.OcrReview.OcrReviewMath.CalcTotals(st.Lines).Total;
+            total = Take_Time_BangPhra.Integration.OcrReview.OcrReviewMath.CalcTotals(st).Total;
             return true;
         }
 

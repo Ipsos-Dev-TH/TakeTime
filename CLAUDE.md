@@ -244,6 +244,19 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
      ผู้ขายคืนเงิน = BANK (การคืนแบบคืนเงินตั้ง default บัญชีเดียวกับ PRT). (4) **เติมที่อยู่/สาขา/เลขผู้เสียภาษีของผู้ติดต่อเฉพาะช่องว่าง** (ไม่ทับ) — สวิตช์
      `Ocr_Fill_Missing_Contact` (1), log audit ค่าเดิม→ใหม่, กล่องสำเร็จแสดง "เติมข้อมูลผู้ขายใน NextAcc: …". โค้ด `Class/Purchasing/VendorCnPolicy.cs` (pure, mono test),
      `VendorCnService.cs`, `Class/Integration/AccountingSyncService.VendorCn.cs`. ข้อจำกัด: CN-first ช่วงก่อนบันทึกคืน GL สต๊อกลดก่อนจำนวน; ledger จับคู่ผู้ขายด้วยเลขภาษี/Vendor.ID/ชื่อ.
+   - **ราคารวม VAT / เหตุผล / ใบเดิม / ขาเงิน (ต.ค. 2026 — เคส Makro CN 005911030177; ไม่มี migration):** (1) `OcrReviewState.PricesIncludeVat` + ตรวจอัตโนมัติ
+     `OcrReviewMath.DetectPricesIncludeVat` (คิดสองแบบเทียบยอดกระดาษ; VAT 0/ยกเว้นรายบรรทัดได้) — รวม VAT ⇒ VAT ต่ออัตรา = Σยอด − round(Σยอด×100/107)
+     (ปัดทั้งใบ: 3,447 → 3,221.50/225.50) ส่ง `PricesIncludeVat=true` + `VatAmountOverride` ทุกบรรทัด (NextAcc ฐาน = ยอด − VAT, ไม่กระทบเศษซ้ำ
+     DocumentService.cs:653-659, :812-814; ไม่ส่ง override NextAcc ได้ 225.51). `CalcLines` กระทบเศษต่ออัตราแบบ NextAcc (:802-901); JS `OcrMath` = สำเนา (parity test).
+     ปุ่มแก้ด่วน `SuggestFixes/ApplyFix` (SWITCH_BASIS/FIT_VAT/FILL_MISSING/ADD_GAP) + "แก้อย่างไร" ใต้แต่ละข้อ; ข้อผิดพลาดอยู่บนตารางยอด, แถบล่างลิงก์ไปข้อที่ต้องแก้ + เว้นที่ (มือถือ).
+     (2) เหตุผล `OcrNoteReasons` (RETURN/DEFECT→Return1, SHORT ส่งไม่ครบ/PRICE_ERR/OTHER→Adjustment3, DISCOUNT→2; DN 4 แบบ) — NextAcc พิมพ์ได้แค่ข้อความ enum
+     (PdfGenerationService.cs:3198-3205) ⇒ ข้อความเต็ม + อ้างใบเดิม + มูลค่าเดิม/ถูกต้อง/ผลต่าง ไปที่ Notes; ผูก PRT- ได้เฉพาะเหตุผลที่มีของส่งคืน; SHORT = ไม่แตะสต๊อก
+     (ถ้ารับเข้า Product/In เต็มจำนวนแล้ว แก้จำนวนรับเข้า; บรรทัดใช้บัญชีใบเดิม). (3) §86/10 จาก `RawTextContent` (`OcrCnPaperReader`): เลข/วันที่ใบกำกับเดิม, มูลค่า 3 ช่อง,
+     เหตุผล, วิธีชำระ; ใบเดิมนอกระบบต้องมีเลขใบเดิม (= `Reference` ที่ NextAcc พิมพ์ :1907-1916; ผูกใบต้นทางแล้ว NextAcc พิมพ์เอง :1864-1901). (4) ใบต้นทาง:
+     ค้นด้วยเลขใบกำกับเดิม (search ครอบ Reference :2427-2430 + SupplierInvoiceNumber ของผู้ติดต่อ) ตรงใบเดียว = เลือกให้ตอนเปิดหน้า; เลือกแล้ว `LoadSourceDetailAsync`
+     ดึงบรรทัด+บัญชี (`AssignAccountsFromSource`: รหัสสินค้า → รายละเอียด → ราคา → บัญชีหลัก; ไม่ทับบรรทัดที่ผู้ใช้แก้) + บัญชีที่ใบเดิมจ่าย (PV `PaymentAccountId` /
+     ขาเครดิตเงินของ JE `sourceDocumentId` :20046 ที่อยู่ใน Account_Paid_How) ⇒ `DefaultSettlement`: ค้างจ่าย = ลดเจ้าหนี้ · จ่ายแล้ว = รับคืนเข้าบัญชีเดิม (BANK →
+     JE `OCRCN-…-MNY`) · ไม่รู้บัญชี = เครดิตผู้ขาย; dropdown เดียว (แหล่งเงิน / เครดิตผู้ขาย) ผู้ใช้เปลี่ยนได้ (`SettlementUserSet`).
 3b. **หน้า PaymentVoucher (manual) parity กับ OCR:** ✅ DONE (page-side only, ไม่แตะ mapper/sync).
    เพิ่ม 3 dropdown: (a) `ddlPaidHowNexaacc` แหล่งจ่ายเงินดึงจากผังบัญชีจริง NextAcc (11x/21x, value=
    `Nexaacc_AccountId`) → save บังคับ `paymentAccountId` ตัวนี้ก่อน mapping (`LookupPaidHowAccountId`)
