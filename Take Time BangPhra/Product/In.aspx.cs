@@ -319,11 +319,87 @@ namespace Take_Time_BangPhra.Product
                 var dtB = Take_Time_BangPhra.Purchasing.PurchaseService.ListBatches(conn, false, 30);
                 if (dtB != null && dtB.Rows.Count > 0)
                 {
+                    LoadNaBatchBadges(dtB);
                     gvRecentBatches.DataSource = dtB;
                     gvRecentBatches.DataBind();
                     pnlRecentBatches.Visible = true;
                 }
             }
+        }
+
+        // ── ป้ายสถานะ NextAcc แบบเดียวทุกหน้า (CLAUDE.md ข้อ 24): JE รับของ (STOCK_IN, stockRef PIN-{สินค้า}-{เวลารับ}) รวมต่อการรับของ ──
+        private readonly Dictionary<string, string> _naBatch = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        protected string NaBatchBadge(object batch)
+        {
+            string h;
+            return _naBatch.TryGetValue(Convert.ToString(batch) ?? "", out h) ? h : "";
+        }
+
+        /// <summary>2 query: แถว Product_In ของการรับของที่แสดง + คิว STOCK_IN ของทุกแถว → ป้ายรวมต่อการรับของ</summary>
+        private void LoadNaBatchBadges(DataTable batches)
+        {
+            try
+            {
+                var names = new List<string>();
+                var ps = new Dictionary<string, object>();
+                int k = 0;
+                foreach (DataRow r in batches.Rows)
+                {
+                    string b = Convert.ToString(r["Batch"]);
+                    if (string.IsNullOrEmpty(b) || k >= 200) continue;
+                    names.Add("@b" + k); ps["@b" + k] = b; k++;
+                }
+                if (names.Count == 0) return;
+                var lines = code.DatabaseQuerySafe(conn,
+                    "SELECT Receipt_Batch, Product_ID, DateTime_In FROM Product_In WHERE Receipt_Batch IN (" + string.Join(",", names) + ")", ps);
+                if (lines == null) return;
+                // เวลารับของ = DateTime.Now ตอนบันทึก (ทศนิยมวินาทีอาจปัดใน SQL) → ลองวินาทีก่อนหน้าด้วย
+                Func<object, DateTime, string> refOf = (pid, t) => "PIN-" + Convert.ToString(pid) + "-" + t.ToString("yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture);
+                var perBatch = new Dictionary<string, List<string[]>>(StringComparer.OrdinalIgnoreCase);
+                var refs = new List<string>();
+                foreach (DataRow r in lines.Rows)
+                {
+                    if (r["DateTime_In"] == DBNull.Value) continue;
+                    DateTime t = Convert.ToDateTime(r["DateTime_In"]);
+                    string a = refOf(r["Product_ID"], t), b2 = refOf(r["Product_ID"], t.AddSeconds(-1));
+                    string batch = Convert.ToString(r["Receipt_Batch"]);
+                    List<string[]> l;
+                    if (!perBatch.TryGetValue(batch, out l)) perBatch[batch] = l = new List<string[]>();
+                    l.Add(new[] { a, b2 });
+                    refs.Add(a); refs.Add(b2);
+                }
+                var q = Take_Time_BangPhra.Integration.NextAccStatusData.LatestByPayloadKey(conn, "STOCK", new[] { "STOCK_IN" }, "stockRef", refs);
+                foreach (var kv in perBatch)
+                {
+                    var badges = new List<Take_Time_BangPhra.Integration.NextAccUi.NaBadge>();
+                    string firstRef = null;
+                    foreach (var pair in kv.Value)
+                    {
+                        Take_Time_BangPhra.Integration.NextAccUi.NaQueueRow row;
+                        if (!q.TryGetValue(pair[0], out row)) q.TryGetValue(pair[1], out row);
+                        if (row == null) continue;
+                        if (firstRef == null) firstRef = q.ContainsKey(pair[0]) ? pair[0] : pair[1];
+                        badges.Add(Take_Time_BangPhra.Integration.NextAccUi.ResolveBadge(new Take_Time_BangPhra.Integration.NextAccUi.NaBadgeInput { Queue = row }));
+                    }
+                    if (badges.Count == 0)
+                    {
+                        _naBatch[kv.Key] = Take_Time_BangPhra.Integration.NextAccStatusData.Render(this, conn, new Take_Time_BangPhra.Integration.NextAccUi.NaBadgeInput
+                        {
+                            NoQueueMeansNotApplicable = true, NotApplicableLabel = "ไม่มีรายการบัญชี",
+                            NotApplicableReason = "ไม่พบรายการส่ง JE รับของ — ตั้งค่าไม่ลง JE ตอนรับของ (ใบสำคัญจ่าย/ใบกำกับลงสินค้าแทน) หรือไม่มีต้นทุน"
+                        }, kv.Key, null);
+                        continue;
+                    }
+                    var agg = Take_Time_BangPhra.Integration.NextAccUi.AggregateBadges(badges);
+                    // ป้ายรวม: ลิงก์ไปคิวด้วยเลขอ้างอิงแรก (เลขรับของไม่อยู่ใน payload)
+                    string queueUrl = agg.State == Take_Time_BangPhra.Integration.NextAccUi.NaState.Sent ? null
+                        : ResolveUrl("~" + Take_Time_BangPhra.Integration.NextAccUi.QueueUrl("", q: firstRef));
+                    _naBatch[kv.Key] = Take_Time_BangPhra.Integration.NextAccUi.RenderBadge(agg,
+                        new Take_Time_BangPhra.Integration.NextAccUi.NaBadgeLinks { QueueUrl = queueUrl });
+                }
+            }
+            catch { }
         }
 
         protected void ddlSupplierVendor_SelectedIndexChanged(object sender, EventArgs e)

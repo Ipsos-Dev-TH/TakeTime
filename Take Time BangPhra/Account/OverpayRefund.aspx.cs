@@ -65,6 +65,50 @@ namespace Take_Time_BangPhra.Account
             litMsg.Text += "<div class='op-alert " + H(kind) + "'>" + html + "</div>";
         }
 
+        /// <summary>การ์ด "สถานะบน NextAcc": ใบเสร็จของการจอง (ใบมัดจำที่จะคืน) + ใบลดหนี้ที่มีอยู่ — ป้ายแบบเดียวทุกหน้า (ข้อ 24).
+        /// อ่านอย่างเดียว 3 query; พังต้องไม่ทำให้ฟอร์มคืนเงินพัง</summary>
+        private void RenderNaStatus(int res, CreditNoteService.ReservationMoney money)
+        {
+            try
+            {
+                var sb = new StringBuilder();
+                var ids = money.Receipts.Select(r => r.Id).Where(x => !string.IsNullOrEmpty(x)).ToList();
+                var rb = NextAccStatusData.ReceiptBadges(this, conn, ids);
+                foreach (var r in money.Receipts)
+                {
+                    string h;
+                    if (!rb.TryGetValue(r.Id ?? "", out h)) continue;
+                    sb.Append("<div class='na-stack' style='margin:4px 0;'><b>").Append(H(r.Id)).Append("</b> ")
+                      .Append(r.IsDeposit ? "(มัดจำ)" : "(ใบเสร็จ/ใบกำกับ)").Append(" ยอด ").Append(M(r.Total)).Append(" · ").Append(h).Append("</div>");
+                }
+                if (CreditNoteGuards.SchemaReady(conn))
+                {
+                    var dt = new code().DatabaseQuerySafe(conn,
+                        "SELECT ID, CN_No, Status, CAST(Nexaacc_Doc_Id AS NVARCHAR(50)) AS DocId, Nexaacc_Doc_No, Nexaacc_Path, Sync_Error FROM Credit_Note WHERE Reservation_ID = @r ORDER BY ID",
+                        new Dictionary<string, object> { { "@r", res } });
+                    var rows = new List<NextAccStatusData.CnRow>();
+                    if (dt != null)
+                        foreach (DataRow row in dt.Rows)
+                            rows.Add(new NextAccStatusData.CnRow
+                            {
+                                Id = Convert.ToInt64(row["ID"]), CnNo = Convert.ToString(row["CN_No"]), Status = Convert.ToString(row["Status"]),
+                                DocId = row["DocId"] == DBNull.Value ? null : Convert.ToString(row["DocId"]), DocNo = Convert.ToString(row["Nexaacc_Doc_No"]),
+                                Path = Convert.ToString(row["Nexaacc_Path"]), SyncError = Convert.ToString(row["Sync_Error"])
+                            });
+                    var cb = NextAccStatusData.CreditNoteBadges(this, conn, rows);
+                    foreach (var r in rows)
+                    {
+                        string h;
+                        if (cb.TryGetValue(r.Id, out h))
+                            sb.Append("<div class='na-stack' style='margin:4px 0;'>ใบลดหนี้ <b>").Append(H(r.CnNo)).Append("</b> · ").Append(h).Append("</div>");
+                    }
+                }
+                if (sb.Length > 0)
+                    litNaStatus.Text = "<div class='op-card'><div style='font-weight:600;margin-bottom:6px;'>สถานะบน NextAcc</div>" + sb + "</div>";
+            }
+            catch { litNaStatus.Text = ""; }
+        }
+
         private void InitForm()
         {
             int res = ResId;
@@ -73,6 +117,8 @@ namespace Take_Time_BangPhra.Account
             try { money = svc.LoadReservationMoney(res); }
             catch (Exception ex) { Msg("err", "อ่านข้อมูลการจองไม่ได้: " + ex.Message); pnlForm.Visible = false; return; }
             if (money == null) { Msg("err", "ไม่พบการจอง #" + res); pnlForm.Visible = false; return; }
+
+            RenderNaStatus(res, money);
 
             decimal credit = 0m;
             try { var bal = ReservationBalance.Load(conn, res); if (bal != null) credit = bal.Credit; } catch { }

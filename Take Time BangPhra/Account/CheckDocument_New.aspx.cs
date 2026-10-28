@@ -2250,16 +2250,6 @@ namespace Take_Time_BangPhra.Account
                 : ", CAST(NULL AS NVARCHAR(20)) AS Error_Class, CAST(NULL AS NVARCHAR(400)) AS Fix_Url";
         }
 
-        /// <summary>ป้ายแถวคิวที่ยังไม่สำเร็จ (ตัวเดียวกับ CheckPayment_New — NextAccUi.DocQueueBadge)</summary>
-        private NextAccUi.SyncBadge BuildQueueBadge(DataRow queueRow, string docId)
-        {
-            string cls = queueRow.Table.Columns.Contains("Error_Class") && queueRow["Error_Class"] != DBNull.Value ? queueRow["Error_Class"].ToString() : "";
-            string fix = queueRow.Table.Columns.Contains("Fix_Url") && queueRow["Fix_Url"] != DBNull.Value ? queueRow["Fix_Url"].ToString() : "";
-            string fixResolved = NextAccUi.IsSafeAppPath(fix) ? ResolveUrl("~" + fix) : "";
-            string queueLink = ResolveUrl("~" + NextAccUi.QueueUrl("", q: docId));
-            return NextAccUi.DocQueueBadge(queueRow["Status"]?.ToString(), cls, queueRow["ID"]?.ToString(),
-                queueRow["Error_Message"]?.ToString(), fixResolved, queueLink);
-        }
 
         protected void gvDetails_RowDataBound(object sender, GridViewRowEventArgs e)
         {
@@ -2279,11 +2269,16 @@ namespace Take_Time_BangPhra.Account
             {
                 bool voided = docStatus == "Cancel";
                 bool isNaPayment = (DataBinder.Eval(e.Row.DataItem, "IsNaPaymentDoc")?.ToString() ?? "0") == "1";
-                lblSync.Text = voided
-                    ? "<span class='sync-badge failed' title='เอกสารถูกยกเลิกบน NextAcc'>❌ ยกเลิก (NextAcc)</span>"
-                    : isNaPayment
-                        ? "<span class='sync-badge completed' title='ใบรับชำระที่ NextAcc ออกคู่กับใบกำกับ — ไม่ใช่ใบขายของระบบเรา'>💵 ใบรับชำระ (NextAcc)</span>"
-                        : "<span class='sync-badge completed' title='เอกสารสร้างบน NextAcc'>NextAcc</span>";
+                // ป้ายสถานะ NextAcc แบบเดียวทุกหน้า (CLAUDE.md ข้อ 24) — เอกสารที่มีบน NextAcc อย่างเดียว
+                lblSync.Text = NextAccStatusData.Render(this, conn, new NextAccUi.NaBadgeInput
+                {
+                    DocId = DataBinder.Eval(e.Row.DataItem, "NextAccId")?.ToString(),
+                    DocNumber = docId,
+                    Voided = voided,
+                    VoidedLabel = "ยกเลิกแล้ว (บน NextAcc)",
+                    SentLabel = isNaPayment ? "ใบรับชำระ (NextAcc)" : "อยู่บน NextAcc",
+                    Note = isNaPayment ? "ใบรับชำระที่ NextAcc ออกคู่กับใบกำกับ — ไม่ใช่ใบขายของระบบเรา" : "เอกสารสร้างบน NextAcc"
+                }, docId, null);
 
                 // ทำไมแถวนี้ไม่มีปุ่ม "แก้ไข": เอกสารนี้อยู่บน NextAcc แต่ไม่มีใบคู่ในระบบเรา
                 // ถ้าการจองเดียวกันมีใบ local อยู่ → ชี้ไปที่แถวนั้น (ผู้ใช้มักหาไม่เจอแล้วคิดว่าแก้ไม่ได้แล้ว)
@@ -2354,52 +2349,29 @@ namespace Take_Time_BangPhra.Account
 
             if (docStatus == "Cancel")
             {
-                lblSync.Text = "<span class='sync-badge none'>-</span>";
+                lblSync.Text = NextAccStatusData.Render(this, conn, new NextAccUi.NaBadgeInput
+                {
+                    NotApplicable = true, NotApplicableLabel = "ใบยกเลิก — ไม่ส่ง", NotApplicableReason = "ใบนี้ถูกยกเลิกในระบบแล้ว"
+                }, docId, null);
                 btnSync.Visible = false;
                 return;
             }
 
             if (_syncStatusCache == null) LoadSyncStatusCache();
 
-            if (_syncStatusCache.ContainsKey(docId))
+            // ป้ายสถานะ NextAcc แบบเดียวทุกหน้า (CLAUDE.md ข้อ 24): แถวคิวล่าสุด (Status + Error_Class + Fix_Url) + เอกสารที่จับคู่ได้
+            // ซ่อน "ส่งใหม่" เมื่อไม่ช่วย/เสี่ยงซ้ำ (ตั้งค่า / ต้องใบลดหนี้ / อาจซ้ำ) — กติกาเดียวกับป้ายเดิม (NextAccUi.DocQueueBadge)
+            DataRow queueRow;
+            _syncStatusCache.TryGetValue(docId, out queueRow);
+            NextAccUi.NaBadge naBadge;
+            lblSync.Text = NextAccStatusData.Render(this, conn, new NextAccUi.NaBadgeInput
             {
-                var queueRow = _syncStatusCache[docId];
-                string syncStatus = queueRow["Status"]?.ToString() ?? "";
-                string queueId = queueRow["ID"]?.ToString() ?? "";
-
-                switch (syncStatus)
-                {
-                    case "COMPLETED":
-                        string nexaaccDocNum = queueRow.Table.Columns.Contains("Nexaacc_Document_Number")
-                            ? queueRow["Nexaacc_Document_Number"]?.ToString() : "";
-                        string nexaaccId = queueRow.Table.Columns.Contains("Nexaacc_Response_Id")
-                            ? queueRow["Nexaacc_Response_Id"]?.ToString() : "";
-                        string nexaaccDocType = queueRow.Table.Columns.Contains("Nexaacc_Document_Type")
-                            ? queueRow["Nexaacc_Document_Type"]?.ToString() : "";
-                        string displayLabel = !string.IsNullOrEmpty(nexaaccDocNum) ? nexaaccDocNum : $"#{queueId}";
-                        string deepLink = BuildNexaaccLink(nexaaccId, nexaaccDocType);
-                        if (!string.IsNullOrEmpty(deepLink))
-                            lblSync.Text = $"<a href='{deepLink}' target='_blank' class='sync-badge completed' title='เปิดใน NextAcc'>✓ {Server.HtmlEncode(displayLabel)}</a>";
-                        else
-                            lblSync.Text = $"<span class='sync-badge completed' title='NextAcc ID: {Server.HtmlEncode(nexaaccId)}'>✓ {Server.HtmlEncode(displayLabel)}</span>";
-                        btnSync.Visible = false;
-                        break;
-                    default:
-                    {
-                        // ป้ายตามชนิดปัญหา (Error_Class) + คำไทยของ AWAITING_SLIP/SUPERSEDED — ซ่อน "ส่งใหม่" เมื่อไม่ช่วย/เสี่ยงซ้ำ
-                        var badge = BuildQueueBadge(queueRow, docId);
-                        lblSync.Text = badge.Html;
-                        btnSync.Visible = badge.ShowRetry;
-                        if (badge.ShowRetry) btnSync.Text = badge.RetryText;
-                        break;
-                    }
-                }
-            }
-            else
-            {
-                lblSync.Text = "<span class='sync-badge none'>ยังไม่ส่งเข้าบัญชี</span>";
-                btnSync.Visible = true;
-            }
+                Queue = NextAccStatusData.FromDataRow(queueRow),
+                DocId = DataBinder.Eval(e.Row.DataItem, "NextAccId")?.ToString(),
+                NotSentLabel = "ยังไม่ส่งเข้าบัญชี"
+            }, docId, "/API/ViewReceiptDoc.ashx?doc=" + Uri.EscapeDataString(docId), out naBadge);
+            btnSync.Visible = naBadge.ShowRetry;
+            if (naBadge.ShowRetry && naBadge.State != NextAccUi.NaState.NotSent) btnSync.Text = naBadge.RetryText;
 
             // ปุ่ม "📧 ส่ง e-Tax" — โชว์เฉพาะใบที่มี e-Tax แล้ว (local rows; NextAcc-only ไม่มีใบในระบบ return ไปก่อนแล้ว)
             var btnEtax = e.Row.FindControl("btnSendEtax") as Button;
@@ -2606,27 +2578,5 @@ namespace Take_Time_BangPhra.Account
             }
         }
 
-        private string BuildNexaaccLink(string nexaaccId, string docType)
-        {
-            if (string.IsNullOrEmpty(nexaaccId)) return null;
-            try
-            {
-                var config = new Integration.AccountingConfig(conn);
-                if (!config.IsConfigured) return null;
-                string baseUrl = config.RawBaseUrl.TrimEnd('/');
-                string companyId = config.CompanyId.ToString();
-                string path = "documents";
-                switch ((docType ?? "").ToUpper())
-                {
-                    case "INVOICE": path = "invoices"; break;
-                    case "EXPENSE": path = "expenses"; break;
-                    case "JOURNAL": path = "journals"; break;
-                    case "CREDIT_NOTE": path = "credit-notes"; break;
-                    case "DEBIT_NOTE": path = "debit-notes"; break;
-                }
-                return $"{baseUrl}/{companyId}/{path}/{nexaaccId}";
-            }
-            catch { return null; }
-        }
     }
 }

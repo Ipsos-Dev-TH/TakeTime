@@ -377,6 +377,52 @@ namespace Take_Time_BangPhra
                 : "btn btn-success btn-sm mb-1";
         }
 
+        /// <summary>ภาพรวมของการจอง + ป้าย "สถานะ NextAcc" แบบเดียวทุกหน้า ต่อใบเสร็จ (CLAUDE.md ข้อ 24) — ส่งแบบโครงสร้าง
+        /// (Badges[เลขใบ] = {code,label,title,icon,links}) ให้ Scripts/nextacc-ui.js เป็นคน render (ไม่ส่ง HTML).
+        /// สถานะจริงบน NextAcc (State จากการ GET เอกสาร) เป็นตัวตัดสินเอกสาร ส่วนคิวล่าสุดบอกงานที่ค้าง (query เดียว)</summary>
+        private object WithNaBadges(Integration.AccountingSyncService.ReservationSyncOverview ov, int resId,
+                                    System.Web.Script.Serialization.JavaScriptSerializer ser)
+        {
+            if (ov == null || !ov.Success || ov.Receipts == null) return ov;
+            try
+            {
+                var inputs = Integration.NextAccStatusData.ReceiptBadgeInputs(conn, ov.Receipts.Select(r => r.ReceiptNumber));
+                var badges = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+                foreach (var rc in ov.Receipts)
+                {
+                    if (string.IsNullOrEmpty(rc.ReceiptNumber)) continue;
+                    Integration.NextAccUi.NaBadgeInput inp;
+                    if (!inputs.TryGetValue(rc.ReceiptNumber, out inp)) inp = new Integration.NextAccUi.NaBadgeInput();
+                    inp.Voided = rc.State == "DOC_VOIDED";
+                    inp.Note = rc.StateLabel;
+                    switch (rc.State)
+                    {
+                        case "DOCUMENT":
+                            inp.DocNumber = string.IsNullOrEmpty(rc.DocNumber) ? inp.DocNumber : rc.DocNumber;
+                            break;
+                        case "JE_ONLY":
+                            inp.KnownPosted = true;
+                            inp.SentLabel = "ลงบัญชีแล้ว (JE " + rc.JeCount + ")";
+                            break;
+                        case "DELETED":
+                        case "NONE":
+                            // GET ยืนยันแล้วว่าไม่มีเอกสาร — ไม่เชื่อ marker/คิวที่บอกว่าส่งแล้ว
+                            inp.DocId = null; inp.DocNumber = null; inp.KnownPosted = false;
+                            if (inp.Queue != null && string.Equals(inp.Queue.Status, "COMPLETED", StringComparison.OrdinalIgnoreCase)) inp.Queue = null;
+                            inp.NotSentLabel = rc.State == "DELETED" ? "ถูกลบจาก NextAcc" : "ไม่มีบน NextAcc";
+                            break;
+                    }
+                    badges[rc.ReceiptNumber] = Integration.NextAccStatusData.Describe(this, conn, inp, rc.ReceiptNumber,
+                        Integration.NextAccStatusData.ReceiptPdfPath(rc.ReceiptNumber));
+                }
+                var dict = ser.Deserialize<Dictionary<string, object>>(ser.Serialize(ov));
+                dict["Badges"] = badges;
+                dict["QueueLink"] = ResolveUrl("~" + Integration.NextAccUi.QueueUrl("", q: resId.ToString()));
+                return dict;
+            }
+            catch { return ov; }
+        }
+
         /// <summary>AJAX จัดการ sync NextAcc ของ "การจองเดียว": overview (จำแนก ไม่มี/JE/เอกสาร ต่อใบ) /
         /// resyncAll (รีเซ็ต + สร้างใหม่ทั้งชุด) / reset (ลบเอกสาร+กลับ JE อย่างเดียว) /
         /// resyncReceipt, voidReceipt (รายใบ). Owner/Admin เท่านั้น.</summary>
@@ -406,7 +452,7 @@ namespace Take_Time_BangPhra
                                 Server.ScriptTimeout = 300;
                                 var t = Task.Run(() => sync.GetReservationSyncOverviewAsync(resId));
                                 result = t.Wait(90000)
-                                    ? (object)t.Result
+                                    ? (object)WithNaBadges(t.Result, resId, ser)
                                     : new { Success = false, Message = "NextAcc ตอบช้าเกิน 90 วินาที — ลองใหม่อีกครั้ง" };
                                 break;
                             }

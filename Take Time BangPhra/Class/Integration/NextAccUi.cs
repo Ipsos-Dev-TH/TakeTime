@@ -14,10 +14,13 @@ namespace Take_Time_BangPhra.Integration
     //  + กติกา "ลองใหม่ทั้งหมด" ที่ปลอดภัย + ลิงก์แก้ของตรวจสุขภาพ + ข้อความเงินเดือน/Telegram.
     //  โค้ดบริสุทธิ์ (ไม่แตะ DB/HttpContext) — เทสต์ด้วย mono ได้. ข้อความที่มาจาก NextAcc/คิว ผ่าน H() ทุกครั้ง.
     // ══════════════════════════════════════════════════════════════════════════════════════════
-    public static class NextAccUi
+    public static partial class NextAccUi
     {
         /// <summary>หน้าคิว (root-relative) — ลิงก์ทุกที่ชี้ที่นี่</summary>
         public const string QueuePagePath = "/Admin/Settings/AccountingIntegration";
+
+        /// <summary>ศูนย์บัญชี NextAcc (ข้อ 24)</summary>
+        public const string HubPagePath = "/Account/NextAccHub";
 
         /// <summary>HTML-encode (null = "")</summary>
         public static string H(string s) { return WebUtility.HtmlEncode(s ?? ""); }
@@ -504,7 +507,8 @@ namespace Take_Time_BangPhra.Integration
             if (waitOpen > 0) sb.AppendLine("🟦 รอรายการอื่น: " + waitOpen + " รายการ");
             if (pendingStale > 0) sb.AppendLine("🕐 ค้างเกิน 6 ชม.: " + pendingStale + " รายการ");
             if (ok) sb.AppendLine("ไม่มีรายการค้าง — ข้อความนี้ส่งวันละครั้งเพื่อยืนยันว่าระบบแจ้งเตือนยังทำงาน");
-            sb.Append("🔗 <a href=\"" + H(QueueUrl(siteBase, status: ok ? null : "FAILED")) + "\">เปิดคิว</a>");
+            sb.Append("🔗 <a href=\"" + H(QueueUrl(siteBase, status: ok ? null : "FAILED")) + "\">เปิดคิว</a>"
+                      + " · <a href=\"" + H((siteBase ?? "").TrimEnd('/') + HubPagePath) + "\">ศูนย์บัญชี NextAcc</a>");
             return sb.ToString();
         }
     }

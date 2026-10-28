@@ -134,6 +134,8 @@
 
     <!-- Font Awesome for icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+    <%-- ป้าย "สถานะ NextAcc" แบบเดียวทุกหน้า (CLAUDE.md ข้อ 24) --%>
+    <link rel="stylesheet" href="/Content/nextacc-ui.css?v=1" />
         
     <style type="text/css">
         /* ============================================
@@ -901,6 +903,12 @@
                                             <div class="mega-menu-column">
                                                 <h4><i class="fas fa-file-invoice-dollar"></i> การเงิน & บัญชี</h4>
                                                 <ul>
+                                                    <%-- ศูนย์บัญชี NextAcc (CLAUDE.md ข้อ 24) — Owner / Admin ที่มีสิทธิ์บัญชี --%>
+                                                    <asp:PlaceHolder ID="phNavNextAccHub" runat="server" Visible="false">
+                                                    <li><a runat="server" href="~/Account/NextAccHub">
+                                                        <i class="fas fa-gauge-high"></i> ศูนย์บัญชี NextAcc<asp:Literal ID="litNavHubBadge" runat="server" />
+                                                    </a></li>
+                                                    </asp:PlaceHolder>
                                                     <li><a runat="server" href="~/Account/Receipt">
                                                         <i class="fas fa-receipt"></i> ออกใบเสร็จ / ใบกำกับ
                                                     </a></li>
@@ -2264,5 +2272,6 @@
     </form>
     <%-- PWA: ลงทะเบียน service worker (ทุกหน้า, เฉพาะ https/localhost) + ตรรกะแผ่นชวนติดตั้งแอพ (ทำงานเมื่อมี #ttPwaSheet) --%>
     <script src="/Scripts/pwa.js?v=1"></script>
+    <script src="/Scripts/nextacc-ui.js?v=1"></script>
 </body>
 </html>

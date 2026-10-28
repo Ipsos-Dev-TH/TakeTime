@@ -47,6 +47,9 @@ namespace Take_Time_BangPhra
         /// <summary>ตัวเลขงานค้างในเมนูการเงิน: ใบซื้อเชื่อค้างจ่าย / คืนสินค้ารอใบลดหนี้</summary>
         protected global::System.Web.UI.WebControls.Literal litNavCppBadge;
         protected global::System.Web.UI.WebControls.Literal litNavPrtBadge;
+        /// <summary>เมนูศูนย์บัญชี NextAcc (ข้อ 24) + ตัวเลขงานที่ต้องมีคนทำ</summary>
+        protected global::System.Web.UI.WebControls.PlaceHolder phNavNextAccHub;
+        protected global::System.Web.UI.WebControls.Literal litNavHubBadge;
         protected global::System.Web.UI.WebControls.Panel pnlCrmNav;
 
         /// <summary>Public floating customer chat widget</summary>

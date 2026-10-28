@@ -631,6 +631,9 @@
     <Content Include="Resource\sRGB Color Space Profile.icm" />
     <Content Include="Checkout.aspx" />
     <Content Include="Account\OverpayRefund.aspx" />
+    <Content Include="Account\NextAccHub.aspx" />
+    <Content Include="Content\nextacc-ui.css" />
+    <Content Include="Scripts\nextacc-ui.js" />
     <Content Include="Payment\MakePayment.aspx" />
     <Content Include="Payment\Pay.aspx" />
     <Content Include="Payment\Card.aspx" />
@@ -978,6 +981,9 @@
     <Compile Include="Class\Integration\QueueErrors.cs" />
     <Compile Include="Class\Integration\NextAccDocRefresh.cs" />
     <Compile Include="Class\Integration\NextAccUi.cs" />
+    <Compile Include="Class\Integration\NextAccUi.Badge.cs" />
+    <Compile Include="Class\Integration\NextAccStatusData.cs" />
+    <Compile Include="Class\Integration\NextAccHubData.cs" />
     <Compile Include="Class\Integration\AccountingSyncService.BuyerSync.cs" />
     <Compile Include="Class\Integration\ReceiptPreflight.cs" />
     <Compile Include="Class\Integration\ReceiptPreflight.Data.cs" />
@@ -1872,6 +1878,13 @@
     <Compile Include="Account\OverpayRefund.aspx.cs">
       <DependentUpon>OverpayRefund.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Account\NextAccHub.aspx.cs">
+      <DependentUpon>NextAccHub.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Account\NextAccHub.aspx.designer.cs">
+      <DependentUpon>NextAccHub.aspx</DependentUpon>
     </Compile>
     <Compile Include="Account\OverpayRefund.aspx.designer.cs">
       <DependentUpon>OverpayRefund.aspx</DependentUpon>

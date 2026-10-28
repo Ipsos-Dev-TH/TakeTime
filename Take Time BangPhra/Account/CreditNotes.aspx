@@ -119,8 +119,8 @@
                                         <td class="num"><%# M(Eval("Retained_Amount")) %></td>
                                         <td><%# H(Take_Time_BangPhra.Integration.CreditNoteService.MethodLabel(Convert.ToString(Eval("Refund_Method")))) %><br /><span class="cn-note"><%# H(Eval("PaidHowName")) %> <%# H(Take_Time_BangPhra.Integration.CreditNoteService.DisplayRefundRef(Convert.ToString(Eval("Refund_Ref")))) %></span></td>
                                         <td><span class="cn-chip <%# Eval("Status") %>"><%# H(Take_Time_BangPhra.Integration.CreditNoteService.StatusLabel(Convert.ToString(Eval("Status")))) %></span>
-                                            <%# string.IsNullOrEmpty(Convert.ToString(Eval("Sync_Error"))) || Convert.ToString(Eval("Status")) == "SYNCED" || Convert.ToString(Eval("Status")) == "VOIDED" ? "" : "<br/><span class='cn-chip ERR' title='" + H(Eval("Sync_Error")) + "'>⚠ ส่งไม่สำเร็จ</span>" %></td>
-                                        <td><%# H(Eval("Nexaacc_Doc_No")) %></td>
+                                            </td>
+                                        <td class="na-stack"><%# NaBadge(Eval("ID")) %></td>
                                         <td class="cn-act cn-noprint">
                                             <a href="<%# ResolveUrl("~/Account/CreditNotes?print=" + Eval("ID")) %>" target="_blank">🖨 พิมพ์</a>
                                             <%# Eval("Nexaacc_Doc_Id") != DBNull.Value && Convert.ToString(Eval("Nexaacc_Path")) != "JOURNAL" ? "<a href='" + ResolveUrl("~/Account/CreditNotes?pdf=" + Eval("ID")) + "' target='_blank'>📄 PDF NextAcc</a>" : "" %>

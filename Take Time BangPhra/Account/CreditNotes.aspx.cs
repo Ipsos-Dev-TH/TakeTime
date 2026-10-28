@@ -29,6 +29,15 @@ namespace Take_Time_BangPhra.Account
         protected bool CanApprove;
 
         protected string TabCss(string m) => Mode == m ? "on" : "";
+
+        // ป้ายสถานะ NextAcc แบบเดียวทุกหน้า (CLAUDE.md ข้อ 24) — คำนวณทีเดียวตอน BindList (query คิวเดียว)
+        private Dictionary<long, string> _naBadges = new Dictionary<long, string>();
+        protected string NaBadge(object id)
+        {
+            long v;
+            string h;
+            return long.TryParse(Convert.ToString(id, Inv), out v) && _naBadges.TryGetValue(v, out h) ? h : "";
+        }
         protected static string H(object o) => HttpUtility.HtmlEncode(o == null || o == DBNull.Value ? "" : o.ToString());
         protected static string M(object o) => Dec(o).ToString("#,##0.00", Inv);
         protected static string Q(object o) => Dec(o).ToString("0.##", Inv);
@@ -191,6 +200,24 @@ namespace Take_Time_BangPhra.Account
             DataTable dt = null;
             try { dt = Svc.List(from, to, ddlStatus.SelectedValue, txtSearch.Text); }
             catch (Exception ex) { Msg("err", "อ่านรายการไม่ได้: " + ex.Message); }
+            _naBadges = new Dictionary<long, string>();
+            if (dt != null && dt.Rows.Count > 0)
+            {
+                try
+                {
+                    var rows = new List<NextAccStatusData.CnRow>();
+                    foreach (DataRow row in dt.Rows)
+                        rows.Add(new NextAccStatusData.CnRow
+                        {
+                            Id = Convert.ToInt64(row["ID"]), CnNo = Convert.ToString(row["CN_No"]), Status = Convert.ToString(row["Status"]),
+                            DocId = row["Nexaacc_Doc_Id"] == DBNull.Value ? null : Convert.ToString(row["Nexaacc_Doc_Id"]),
+                            DocNo = Convert.ToString(row["Nexaacc_Doc_No"]), Path = Convert.ToString(row["Nexaacc_Path"]),
+                            SyncError = Convert.ToString(row["Sync_Error"])
+                        });
+                    _naBadges = NextAccStatusData.CreditNoteBadges(this, conn, rows);
+                }
+                catch { _naBadges = new Dictionary<long, string>(); }
+            }
             rptList.DataSource = dt;
             rptList.DataBind();
             if (dt == null || dt.Rows.Count == 0) { litListFoot.Text = "<div class='cn-note' style='padding:10px'>ไม่มีใบลดหนี้ในช่วง/เงื่อนไขนี้</div>"; return; }

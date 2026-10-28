@@ -184,6 +184,81 @@ namespace Take_Time_BangPhra.Product
             gvLines.DataBind();
         }
 
+        // ── ป้ายสถานะ NextAcc แบบเดียวทุกหน้า (CLAUDE.md ข้อ 24): JE คืนสินค้า (PRT-) + กลับรายการ (-REV) + ปรับต้นทุน (-DIF) ──
+        private readonly Dictionary<string, string> _naReturn = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        protected string NaReturnBadge(object returnRef)
+        {
+            string h;
+            return _naReturn.TryGetValue(Convert.ToString(returnRef) ?? "", out h) ? h : "";
+        }
+
+        /// <summary>query คิวเดียวสำหรับทุกการคืนในตาราง → ป้ายรวมต่อการคืน (ปัญหาที่ต้องมีคนทำชนะ)</summary>
+        private void LoadNaReturnBadges(List<string> refs, Dictionary<string, ReturnCnLink> links)
+        {
+            try
+            {
+                var keys = new List<string>();
+                foreach (var r in refs)
+                {
+                    if (string.IsNullOrEmpty(r)) continue;
+                    keys.Add(r);
+                    ReturnCnLink l;
+                    if (links != null && links.TryGetValue(r, out l))
+                    {
+                        if (!string.IsNullOrEmpty(l.RevRef)) keys.Add(l.RevRef);
+                        if (!string.IsNullOrEmpty(l.DifRef)) keys.Add(l.DifRef);
+                    }
+                }
+                var q = Take_Time_BangPhra.Integration.NextAccStatusData.LatestByPayloadKey(conn, "STOCK",
+                    new[] { "PURCHASE_RETURN", "PURCHASE_RETURN_REVERSE", "PURCHASE_RETURN_COSTDIFF" }, "stockRef", keys);
+                var lc = Take_Time_BangPhra.Integration.NextAccStatusData.GetLinkContext(conn);
+                foreach (var r in refs)
+                {
+                    if (string.IsNullOrEmpty(r)) continue;
+                    ReturnCnLink l = null;
+                    if (links != null) links.TryGetValue(r, out l);
+                    var badges = new List<Take_Time_BangPhra.Integration.NextAccUi.NaBadge>();
+                    string problemRef = null;
+                    foreach (var k in new[] { r, l != null ? l.RevRef : null, l != null ? l.DifRef : null })
+                    {
+                        Take_Time_BangPhra.Integration.NextAccUi.NaQueueRow row;
+                        if (string.IsNullOrEmpty(k) || !q.TryGetValue(k, out row)) continue;
+                        var b = Take_Time_BangPhra.Integration.NextAccUi.ResolveBadge(new Take_Time_BangPhra.Integration.NextAccUi.NaBadgeInput
+                        { Queue = row, ServerDown = lc.ServerDown, ServerDownUntil = lc.ServerDownUntil });
+                        if (b.State != Take_Time_BangPhra.Integration.NextAccUi.NaState.Sent && problemRef == null) problemRef = k;
+                        badges.Add(b);
+                    }
+                    bool linked = l != null && l.CnStatus == ReturnCnStatus.Linked;
+                    if (linked)
+                        badges.Add(Take_Time_BangPhra.Integration.NextAccUi.ResolveBadge(new Take_Time_BangPhra.Integration.NextAccUi.NaBadgeInput
+                        {
+                            DocId = l.CnDocId.HasValue ? l.CnDocId.Value.ToString() : null, DocNumber = l.CnDocNo,
+                            KnownPosted = true, SentLabel = "ส่งแล้ว · ใบลดหนี้ " + (l.CnDocNo ?? "")
+                        }));
+                    if (badges.Count == 0)
+                    {
+                        _naReturn[r] = Take_Time_BangPhra.Integration.NextAccStatusData.Render(this, conn, new Take_Time_BangPhra.Integration.NextAccUi.NaBadgeInput
+                        {
+                            NoQueueMeansNotApplicable = true, NotApplicableLabel = "ไม่มีรายการบัญชี",
+                            NotApplicableReason = "การคืนนี้ไม่ต้องลง JE คืนสินค้า (ไม่มีคู่บัญชี/ตัดผ่านใบลดหนี้ที่บันทึกแล้ว)"
+                        }, r, null);
+                        continue;
+                    }
+                    var agg = Take_Time_BangPhra.Integration.NextAccUi.AggregateBadges(badges);
+                    if (linked && agg.State == Take_Time_BangPhra.Integration.NextAccUi.NaState.Sent)
+                        agg = badges[badges.Count - 1];   // ครบแล้ว → แสดงเลขใบลดหนี้ผู้ขาย
+                    var lk = new Take_Time_BangPhra.Integration.NextAccUi.NaBadgeLinks();
+                    if (agg.State == Take_Time_BangPhra.Integration.NextAccUi.NaState.Sent && linked && l.CnDocId.HasValue)
+                        lk.OpenUrl = Take_Time_BangPhra.Integration.NextAccUi.DocWebUrl(lc.WebBase, lc.CompanyId, l.CnDocId.Value.ToString(), null);
+                    if (agg.State != Take_Time_BangPhra.Integration.NextAccUi.NaState.Sent)
+                        lk.QueueUrl = ResolveUrl("~" + Take_Time_BangPhra.Integration.NextAccUi.QueueUrl("", q: problemRef ?? r));
+                    _naReturn[r] = Take_Time_BangPhra.Integration.NextAccUi.RenderBadge(agg, lk);
+                }
+            }
+            catch { }
+        }
+
         private void BindRecent()
         {
             try
@@ -213,6 +288,7 @@ namespace Take_Time_BangPhra.Product
                                 ? "⏳ รอใบลดหนี้ (" + Math.Max(0, (int)(DateTime.Now - l.CreatedAt).TotalDays) + " วัน) · VAT " + l.VatAmount.ToString("N2")
                                 : (VendorCnPolicy.IsBilledCounter(l.CounterKey) ? "ไม่มีใบลดหนี้ (ลงครบที่หน้านี้)" : "ไม่ต้องมี (ยังไม่วางบิล)");
                     }
+                    LoadNaReturnBadges(refs, links);
                     gvRecent.DataSource = dt;
                     gvRecent.DataBind();
                     pnlRecent.Visible = true;

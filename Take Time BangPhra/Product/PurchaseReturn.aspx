@@ -127,6 +127,9 @@
                             <asp:BoundField DataField="Net_Total" HeaderText="มูลค่าคืน (สุทธิ)" DataFormatString="{0:N2}" ItemStyle-HorizontalAlign="Right" />
                             <asp:BoundField DataField="Reason" HeaderText="เหตุผล" />
                             <asp:BoundField DataField="Cn_Info" HeaderText="ใบลดหนี้ผู้ขาย" />
+                            <asp:TemplateField HeaderText="NextAcc">
+                                <ItemTemplate><div class="na-stack"><%# NaReturnBadge(Eval("Purchase_Return_Ref")) %></div></ItemTemplate>
+                            </asp:TemplateField>
                         </Columns>
                     </asp:GridView>
                 </div>

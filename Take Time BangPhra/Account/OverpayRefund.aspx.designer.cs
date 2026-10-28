@@ -12,6 +12,8 @@ namespace Take_Time_BangPhra.Account
     public partial class OverpayRefund
     {
         protected global::System.Web.UI.WebControls.Literal litMsg;
+        /// <summary>ป้ายสถานะ NextAcc ของใบเสร็จ/ใบลดหนี้ของการจอง (ข้อ 24)</summary>
+        protected global::System.Web.UI.WebControls.Literal litNaStatus;
         protected global::System.Web.UI.WebControls.Panel pnlForm;
         protected global::System.Web.UI.WebControls.Literal litInfo;
         protected global::System.Web.UI.WebControls.DropDownList ddlSource;

@@ -266,6 +266,8 @@
             </div>
             <%-- โหมดลงบัญชีอย่างเดียว: เตือนว่าแบบภาษี/ประกันสังคมต้องยื่นจากข้อมูลระบบนี้ (CLAUDE.md ข้อ 23) --%>
             <asp:Literal ID="litPayrollModeNote" runat="server" Mode="PassThrough"></asp:Literal>
+            <%-- สถานะ NextAcc ของงวดนี้ — ป้ายแบบเดียวทุกหน้า (CLAUDE.md ข้อ 24) --%>
+            <asp:Literal ID="litPayrollNaStatus" runat="server" Mode="PassThrough"></asp:Literal>
 
         </asp:Panel>
 

@@ -161,6 +161,7 @@ namespace Take_Time_BangPhra.Admin.Payroll
                     LoadStatistics(currentPayrollPeriodId);
 
                     string status = periodRow["Status"].ToString();
+                    ShowPayrollNaStatus(currentPayrollPeriodId, status);
                     btnGeneratePayroll.Visible = false;
                     btnApprovePayroll.Visible = (status == "DRAFT");
                     btnProcessAll.Visible = (status == "COMPLETED" || status == "APPROVED");
@@ -998,6 +999,39 @@ namespace Take_Time_BangPhra.Admin.Payroll
             string q = queueId > 0 ? queueId.ToString() : (mode == "JOURNAL_ONLY" ? "" : currentPayrollPeriodId.ToString());
             string url = ResolveUrl("~" + Take_Time_BangPhra.Integration.NextAccUi.QueueUrl("", q: q));
             return Take_Time_BangPhra.Integration.NextAccUi.PayrollSyncNoteHtml(mode, queueId, url);
+        }
+
+        /// <summary>ป้ายสถานะ NextAcc ของงวด (ข้อ 24): โหมดส่งทั้งงวด = คิว IMPORT/SYNC_PAYROLL_RUN ล่าสุด (Entity_ID = งวด, query เดียว);
+        /// ลงบัญชีรายคน = ดูรายคนที่หน้าตรวจสอบใบสำคัญจ่าย; LOCAL/ไม่เชื่อม = ไม่แสดง</summary>
+        private void ShowPayrollNaStatus(int periodId, string periodStatus)
+        {
+            try
+            {
+                string cs = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                var cfg = new Take_Time_BangPhra.Integration.AccountingConfig(cs);
+                if (!cfg.IsConfigured || !cfg.Enabled || cfg.IsPayrollLocal || periodId <= 0) { litPayrollNaStatus.Text = ""; return; }
+                var inp = new Take_Time_BangPhra.Integration.NextAccUi.NaBadgeInput();
+                if (cfg.IsPayrollImportMode || cfg.IsPayrollDocumentMode)
+                {
+                    Take_Time_BangPhra.Integration.NextAccUi.NaQueueRow row;
+                    Take_Time_BangPhra.Integration.NextAccStatusData.LatestByEntityId(cs, "PAYROLL",
+                        new[] { "IMPORT_PAYROLL_RUN", "SYNC_PAYROLL_RUN" }, new long[] { periodId }).TryGetValue(periodId, out row);
+                    inp.Queue = row;
+                    inp.SentLabel = "ส่งงวดแล้ว";
+                    if (row == null && string.Equals(periodStatus, "DRAFT", StringComparison.OrdinalIgnoreCase))
+                    { inp.NotApplicable = true; inp.NotApplicableLabel = "ยังไม่อนุมัติ — ยังไม่ส่ง"; inp.NotApplicableReason = "ส่งงวดเงินเดือนเข้า NextAcc เมื่อกดอนุมัติ/ทำจ่าย"; }
+                    else inp.NotSentLabel = "งวดนี้ยังไม่ส่ง";
+                }
+                else
+                {
+                    inp.NotApplicable = true;
+                    inp.NotApplicableLabel = "ลงบัญชีรายคนตอนทำจ่าย";
+                    inp.NotApplicableReason = "ดูสถานะรายคนที่หน้า ตรวจสอบใบสำคัญจ่าย";
+                }
+                string badge = Take_Time_BangPhra.Integration.NextAccStatusData.Render(this, cs, inp, inp.Queue != null ? inp.Queue.Id.ToString() : null, null);
+                litPayrollNaStatus.Text = "<div class='na-stack' style='margin:8px 0;font-size:13px;'>สถานะบน NextAcc ของงวดนี้: " + badge + "</div>";
+            }
+            catch { litPayrollNaStatus.Text = ""; }
         }
 
         /// <summary>โหมดลงบัญชีอย่างเดียว (ค่าเริ่มต้น): เตือนบนหน้าตลอดว่า ภ.ง.ด.1/สปส.1-10/50 ทวิ ต้องยื่นจากข้อมูลระบบนี้</summary>

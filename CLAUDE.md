@@ -655,6 +655,25 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
      redirect → `CheckDocument_New` (คงพารามิเตอร์, endResponse). เมนูการเงินเพิ่ม CreditPurchasePayment + PurchaseReturn พร้อมตัวเลขงานค้าง (แคช 5 นาที).
      เงินเดือน: ข้อความไทยไม่มีรหัสโหมด + ลิงก์คิว; JOURNAL_ONLY เตือนตลอดว่า ภ.ง.ด.1/สปส.1-10/50 ทวิ ต้องยื่นจากระบบนี้. คำ: "ยกเลิก (void)" = เอกสาร NextAcc,
      "ลบ" = ใบในระบบ. ไม่ทำ: P0-11 (OCR — ทีมอื่น). ต้อง build+test บน Windows.
+24. **ป้าย "สถานะ NextAcc" แบบเดียวทุกหน้า + ศูนย์บัญชี NextAcc (ต.ค. 2026 — roadmap P1-1/P1-2, ไม่มี migration):**
+   - **ป้าย:** `Class/Integration/NextAccUi.Badge.cs` (pure, mono test) `ResolveBadge` → สถานะ ส่งแล้ว (เลขเอกสาร) / รอส่ง / กำลังส่ง /
+     รอเอกสารอื่น (WAIT, AWAITING_SLIP) / ต้องแก้ข้อมูล (DATA) / ต้องตั้งค่า (CONFIG) / ต้องใบลดหนี้ (POLICY) / อาจซ้ำ (DUPLICATE) /
+     ส่งไม่สำเร็จ / ยกเลิกแล้ว / ยังไม่ส่ง / ไม่ส่งบัญชี — ลำดับ: ยกเลิก → ไม่ส่งบัญชี → แถวคิวล่าสุด → เอกสารที่รู้ (marker) → ยังไม่ส่ง;
+     `ShowRetry` กติกาเดิม (ซ่อน CONFIG/POLICY/DUPLICATE). `BuildBadgeLinks` = เปิดใน NextAcc (`AccountingConfig.WebBaseUrl` =
+     `Nexaacc_Web_BaseUrl` ถ้าตั้ง ไม่งั้น `Nexaacc_BaseUrl` เดิม; ไม่มีบริษัท/GUID/http(s) = ไม่แสดง) · PDF (ตัวดูเดิม) · แก้ที่นี่ (`Fix_Url`,
+     `?focus=` → หน้าตั้งค่า; CONFIG/POLICY มีค่าเริ่มต้น) · ดูในคิว (`?q=`). `RenderBadge` encode ทุกอย่าง + ตรวจ URL; `BadgeToDict` → JSON ให้
+     `Scripts/nextacc-ui.js` (`NaBadge.render`, ตรวจซ้ำ) · CSS `Content/nextacc-ui.css` (`.na-st--{code}`) โหลดใน Site.Master.
+     ข้อมูล: `NextAccStatusData` — `LatestByPayloadKey`/`LatestByEntityId` (1 query ต่อชุด ≤80 คีย์, คอลัมน์ guarded), `ReceiptBadges`/`CreditNoteBadges`.
+   - **ใช้ที่:** CheckDocument_New / CheckPayment_New (แทนป้ายข้อ 23 — `BuildQueueBadge`/`BuildNexaaccLink` ของ CheckDocument ลบแล้ว),
+     ReserveTable หน้าต่าง NextAcc (`WithNaBadges` — สถานะ GET จริงเป็นตัวตัดสินเอกสาร + ลิงก์คิวของการจอง), CreditNotes (คอลัมน์ NextAcc),
+     OverpayRefund (การ์ดสถานะใบเสร็จ/ใบลดหนี้ของการจอง), Product/In (รวมต่อการรับของ — STOCK_IN `PIN-{สินค้า}-{เวลา}` ±1 วิ), Product/PurchaseReturn
+     (PRT/-REV/-DIF + ใบลดหนี้ผู้ขายที่ผูก), Product/Stock (STKOUT/STOCKOUT + `Nexaacc_Journal_Ref`), PayrollManagement (IMPORT/SYNC_PAYROLL_RUN ของงวด).
+   - **ศูนย์บัญชี** `Account/NextAccHub.aspx` (`NextAccHubData` อ่าน DB อย่างเดียว; สิทธิ์ = `ReceiptPreflight.CanOverrideCurrentUser`): การเชื่อมต่อ
+     (ส่งสำเร็จล่าสุด, พักเพราะล่ม, ชนิดคีย์ภาษาไทย, ผังบัญชี, โหมดตัวตรวจ) · คิวตามชนิด → ลิงก์คิวกรอง · งานที่ต้องมีคนทำ (FAILED DATA/CONFIG/POLICY/DUPLICATE
+     top 15) · ก่อนยื่น ภ.พ.30 (`VatFilingCountdown` + `Nexaacc_Vat_Filing_Day`, PRE_FILING_GAP, คิวเดือนภาษีค้าง) · ตรวจเทียบ (ข้อ 19 + LOC:, `FindingTypeTh`) ·
+     งานข้ามโมดูล (สลิปรอตรวจ/ธง, ใบลดหนี้รออนุมัติ/ส่งไม่สำเร็จ/รอคืน, รอใบลดหนี้ผู้ขาย, OCR ค้าง) · ปุ่มลัดเรียก `AccountingIntegration?action=processQueue|
+     healthCheck|preflightScan|integrityScan` เดิม (ต้อง SYS_ACCOUNTING; ไม่มีตรรกะซ้ำ) · รีเฟรชเอง 60 วิ (localStorage). เมนูการเงินบนสุด + ตัวเลขงานค้าง
+     (แคช 5 นาที), การ์ดหน้า Settings, ลิงก์ในสรุป Telegram รายวัน. ต้อง build+test บน Windows.
 
 ## Queue resilience (ส.ค. 2026 — หลังเคส NextAcc ล่มทั้งแอป)
 

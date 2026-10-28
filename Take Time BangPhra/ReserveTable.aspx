@@ -1010,9 +1010,11 @@
         function naRenderOverview(d) {
             if (!d || !d.Success) return '<div class="alert alert-danger">⚠ ' + naEsc(d ? d.Message : 'ไม่มีข้อมูล') + '</div>';
             var html = '';
+            var naQ = window.NaBadge ? NaBadge.safeUrl(d.QueueLink, false) : '';
             html += '<div style="margin-bottom:10px; font-size:14px;"><b>' + naEsc(d.GuestName || '-') + '</b>'
                  + ' · มัดจำจ่าย <b>' + naNum(d.DepositPaid) + '</b>'
-                 + ' · ถูกหักในใบเช็คเอาท์ <b>' + naNum(d.DepositAppliedTotal) + '</b></div>';
+                 + ' · ถูกหักในใบเช็คเอาท์ <b>' + naNum(d.DepositAppliedTotal) + '</b>'
+                 + (naQ ? ' · <a href="' + naEsc(naQ) + '" target="_blank" style="font-size:12px;">ดูคิวบัญชีของการจองนี้</a>' : '') + '</div>';
 
             if (!d.Receipts || d.Receipts.length === 0)
                 return html + '<div class="alert alert-info">' + naEsc(d.Message || 'การจองนี้ไม่มีใบเสร็จในระบบ')
@@ -1036,7 +1038,9 @@
                 html += '<td style="text-align:right;">' + naNum(rc.Amount) + '</td>';
                 html += '<td>' + (rc.IsDeposit ? '💰 มัดจำ' : (rc.DepositApplied > 0 ? 'เช็คเอาท์ (หักมัดจำ ' + naNum(rc.DepositApplied) + ')' : 'รับชำระ')) + '</td>';
                 html += '<td>' + (rc.SlipCount > 0 ? '📎 ' + rc.SlipCount + ' ไฟล์' : '-') + '</td>';
-                html += '<td>' + naStateBadge(rc)
+                // ป้ายสถานะ NextAcc แบบเดียวทุกหน้า (Scripts/nextacc-ui.js — CLAUDE.md ข้อ 24); ไม่มีข้อมูลป้าย = ป้ายเดิม
+                var naB = d.Badges && d.Badges[rc.ReceiptNumber];
+                html += '<td class="na-stack">' + (naB && window.NaBadge ? NaBadge.render(naB) : naStateBadge(rc))
                      + (rc.DocNumber && rc.State === 'DOCUMENT'
                         ? '<br/><small>' + naEsc(rc.DocStatus) + (rc.BalanceDue > 0.01 ? ' · <span style="color:#c0392b;">ค้าง ' + naNum(rc.BalanceDue) + '</span>' : '') + '</small>'
                         : '') + '</td>';

@@ -407,7 +407,9 @@ namespace Take_Time_BangPhra.Product
             catch (Exception ex) { pnlPending.Visible = false; System.Diagnostics.Trace.TraceWarning("Stock pending: " + ex.Message); }
             try
             {
-                gvHistory.DataSource = svc.LoadHistory(60);
+                var hist = svc.LoadHistory(60);
+                LoadNaQueue(hist);
+                gvHistory.DataSource = hist;
                 gvHistory.DataBind();
             }
             catch (Exception ex) { System.Diagnostics.Trace.TraceWarning("Stock history: " + ex.Message); }
@@ -482,6 +484,55 @@ namespace Take_Time_BangPhra.Product
             if (string.IsNullOrEmpty(Convert.ToString(reasonCode))) return "<span class='so-badge so-LEGACY'>รายการเดิม</span>";
             if (a == StockOutService.StatusPending) return "<span class='so-badge so-PENDING'>รออนุมัติ</span>";
             return "<span class='so-badge so-APPROVED'>อนุมัติ</span>";
+        }
+
+        // ── ป้ายสถานะ NextAcc แบบเดียวทุกหน้า (CLAUDE.md ข้อ 24) — คิว STOCK_OUT_REASON_JOURNAL ของทั้งตาราง query เดียว ──
+        private Dictionary<string, Take_Time_BangPhra.Integration.NextAccUi.NaQueueRow> _naQueue =
+            new Dictionary<string, Take_Time_BangPhra.Integration.NextAccUi.NaQueueRow>(StringComparer.OrdinalIgnoreCase);
+
+        private void LoadNaQueue(DataTable hist)
+        {
+            try
+            {
+                if (hist == null || hist.Rows.Count == 0) return;
+                var refs = new List<string>();
+                foreach (DataRow r in hist.Rows)
+                {
+                    long id;
+                    if (!long.TryParse(Convert.ToString(r["ID"]), out id)) continue;
+                    refs.Add(Take_Time_BangPhra.Integration.AccountingDataMapper.StockOutRef(id));
+                    refs.Add(Take_Time_BangPhra.Integration.AccountingDataMapper.LegacyStockOutRef(id));
+                }
+                _naQueue = Take_Time_BangPhra.Integration.NextAccStatusData.LatestByPayloadKey(conn, "STOCK",
+                    new[] { "STOCK_OUT_REASON_JOURNAL" }, "stockRef", refs);
+            }
+            catch { }
+        }
+
+        /// <summary>ป้ายสถานะ NextAcc ของรายการเบิก (คอลัมน์ "บัญชี")</summary>
+        protected string NaBadge(object id, object approval, object reversed, object reasonCode, object journalRef)
+        {
+            long rowId;
+            long.TryParse(Convert.ToString(id), out rowId);
+            string j = Convert.ToString(journalRef);
+            string code = Convert.ToString(reasonCode);
+            string a = Convert.ToString(approval).ToUpperInvariant();
+            var inp = new Take_Time_BangPhra.Integration.NextAccUi.NaBadgeInput { DocType = "JOURNAL", NotSentLabel = "ยังไม่ลงบัญชี" };
+            if (IsTrue(reversed) || j.Contains("|REV:")) { inp.Voided = true; inp.VoidedLabel = "กลับรายการแล้ว"; }
+            else if (string.IsNullOrEmpty(code)) { inp.NotApplicable = true; inp.NotApplicableLabel = "รายการเดิม"; inp.NotApplicableReason = "บันทึกก่อนมีเหตุผลการเบิก"; }
+            else if (a == StockOutService.StatusRejected) { inp.NotApplicable = true; inp.NotApplicableLabel = "ปฏิเสธ — ไม่ลงบัญชี"; }
+            else if (a == StockOutService.StatusPending) { inp.NotApplicable = true; inp.NotApplicableLabel = "รออนุมัติ — ยังไม่ส่ง"; inp.NotApplicableReason = "ลงบัญชี NextAcc เมื่ออนุมัติ"; }
+            else if (StockOutReasonCatalog.IsSystemReason(code) && string.IsNullOrWhiteSpace(j))
+            { inp.NotApplicable = true; inp.NotApplicableLabel = "ลงบัญชีที่หน้าคืนสินค้า"; }
+            Take_Time_BangPhra.Integration.NextAccUi.NaQueueRow q = null;
+            if (rowId > 0 && !_naQueue.TryGetValue(Take_Time_BangPhra.Integration.AccountingDataMapper.StockOutRef(rowId), out q))
+                _naQueue.TryGetValue(Take_Time_BangPhra.Integration.AccountingDataMapper.LegacyStockOutRef(rowId), out q);
+            inp.Queue = q;
+            string head = string.IsNullOrWhiteSpace(j) ? "" : j.Split('|')[0].Trim();
+            Guid g;
+            if (Guid.TryParse(head, out g) && g != Guid.Empty) inp.DocId = g.ToString();
+            return Take_Time_BangPhra.Integration.NextAccStatusData.Render(this, conn, inp,
+                rowId > 0 ? Take_Time_BangPhra.Integration.AccountingDataMapper.StockOutRef(rowId) : null, null);
         }
 
         protected string JournalBadge(object journalRef)

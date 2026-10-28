@@ -41,6 +41,7 @@ namespace Take_Time_BangPhra
                     pnlFinanceNav.Visible = Perm.CanView(Perm.FinReceipt) || Perm.CanView(Perm.FinVoucher)
                                             || Perm.CanView(Perm.FinReport);
                     if (pnlFinanceNav.Visible) ApplyFinanceMenuCounts();
+                    try { phNavNextAccHub.Visible = pnlFinanceNav.Visible && Integration.ReceiptPreflight.CanOverrideCurrentUser(); } catch { }
                     pnlCrmNav.Visible = Perm.CanView(Perm.CrmCustomer) || Perm.CanView(Perm.CrmLoyalty)
                                         || Perm.CanView(Perm.CrmReview) || Perm.CanView(Perm.CrmAffiliate);
                     pnlHotelMgmt.Visible = Perm.CanView(Perm.MgtDashboard) || Perm.CanView(Perm.MgtReport)
@@ -151,7 +152,7 @@ namespace Take_Time_BangPhra
         // ── ตัวเลขงานค้างในเมนูการเงิน (แคชทั้งแอป 5 นาที — เมนูอยู่ทุกหน้า ห้าม query ทุกคำขอ) ──
         private static readonly object _finCountLock = new object();
         private static DateTime _finCountAt = DateTime.MinValue;
-        private static int _finCppPending, _finPrtPending;
+        private static int _finCppPending, _finPrtPending, _finHubWork;
 
         /// <summary>ใบซื้อเชื่อค้างจ่าย (Account_Payment.IsCredit ยังไม่จ่าย) + การคืนสินค้ารอใบลดหนี้ผู้ขาย
         /// (Purchase_Return_Cn_Link.Cn_Status = PENDING) — ตาราง/คอลัมน์ไม่มี = 0 · พังต้องไม่ทำให้เมนูพัง</summary>
@@ -174,6 +175,11 @@ namespace Take_Time_BangPhra
                                       EXEC(N'SELECT COUNT(*) FROM dbo.Account_Payment WHERE IsCredit = 1 AND ISNULL(Status, N''Normal'') <> N''Cancel'' AND Credit_Paid_Date IS NULL')
                                   ELSE
                                       EXEC(N'SELECT COUNT(*) FROM dbo.Account_Payment WHERE IsCredit = 1 AND ISNULL(Status, N''Normal'') <> N''Cancel'' AND Nexaacc_Payment_Id IS NULL')");
+                            // ศูนย์บัญชี NextAcc: แถวคิวที่ต้องมีคนทำ (DATA/CONFIG/POLICY/DUPLICATE)
+                            _finHubWork = CountOrZero(db, conn,
+                                @"IF COL_LENGTH('dbo.Accounting_Sync_Queue', 'Error_Class') IS NOT NULL
+                                      EXEC(N'SELECT COUNT(*) FROM dbo.Accounting_Sync_Queue WHERE Status = N''FAILED'' AND Error_Class IN (N''DATA'', N''CONFIG'', N''POLICY'', N''DUPLICATE'')')
+                                  ELSE SELECT 0");
                             _finPrtPending = CountOrZero(db, conn,
                                 @"IF OBJECT_ID(N'dbo.Purchase_Return_Cn_Link', N'U') IS NOT NULL
                                       EXEC(N'SELECT COUNT(*) FROM dbo.Purchase_Return_Cn_Link WHERE Cn_Status = N''PENDING''')
@@ -183,6 +189,7 @@ namespace Take_Time_BangPhra
                 }
                 litNavCppBadge.Text = MenuCountBadge(_finCppPending, "ใบซื้อเชื่อค้างจ่าย");
                 litNavPrtBadge.Text = MenuCountBadge(_finPrtPending, "การคืนสินค้าที่รอใบลดหนี้จากผู้ขาย");
+                litNavHubBadge.Text = MenuCountBadge(_finHubWork, "งานบัญชีที่ต้องมีคนทำ (แก้ข้อมูล/ตั้งค่า/ใบลดหนี้/ตรวจซ้ำ)");
             }
             catch { }
         }

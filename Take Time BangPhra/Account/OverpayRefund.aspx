@@ -28,6 +28,8 @@
         </div>
 
         <asp:Literal ID="litMsg" runat="server" />
+        <%-- สถานะ NextAcc ของใบเสร็จ/ใบลดหนี้ของการจองนี้ — ป้ายแบบเดียวทุกหน้า (CLAUDE.md ข้อ 24) --%>
+        <asp:Literal ID="litNaStatus" runat="server" />
 
         <asp:Panel ID="pnlForm" runat="server" CssClass="op-card">
             <asp:Literal ID="litInfo" runat="server" />

@@ -1268,14 +1268,22 @@ namespace Take_Time_BangPhra.Account
             // เอกสารที่สร้างบน NextAcc โดยตรง — ไม่มีสถานะ sync ของ TakeTime
             if (isNextAccOnly == "1")
             {
-                lblSync.Text = "<span class='sync-badge completed'>บน NextAcc</span>";
+                // ป้ายสถานะ NextAcc แบบเดียวทุกหน้า (CLAUDE.md ข้อ 24)
+                lblSync.Text = NextAccStatusData.Render(this, conn, new NextAccUi.NaBadgeInput
+                {
+                    DocId = SafeEval(e.Row.DataItem, "NextAccId"), DocNumber = docId, SentLabel = "อยู่บน NextAcc",
+                    Voided = docStatus == "Cancel", VoidedLabel = "ยกเลิกแล้ว (บน NextAcc)", Note = "เอกสารสร้างบน NextAcc"
+                }, docId, null);
                 btnSync.Visible = false;
                 return;
             }
 
             if (docStatus == "Cancel")
             {
-                lblSync.Text = "<span class='sync-badge none'>-</span>";
+                lblSync.Text = NextAccStatusData.Render(this, conn, new NextAccUi.NaBadgeInput
+                {
+                    NotApplicable = true, NotApplicableLabel = "ใบยกเลิก — ไม่ส่ง", NotApplicableReason = "ใบนี้ถูกยกเลิกในระบบแล้ว"
+                }, docId, null);
                 btnSync.Visible = false;
                 return;
             }
@@ -1293,67 +1301,37 @@ namespace Take_Time_BangPhra.Account
                 if (!PayrollRunBasedMode && _syncStatusCache.ContainsKey(docId))
                 {
                     var prow = _syncStatusCache[docId];
-                    string pst = prow["Status"]?.ToString() ?? "";
-                    if (pst == "COMPLETED")
-                        lblSync.Text = "<span class='sync-badge completed'>✓ เงินเดือน (GL)</span>";
-                    else if (pst == "FAILED")
-                        lblSync.Text = $"<span class='sync-badge failed' title='{Server.HtmlEncode(prow["Error_Message"]?.ToString() ?? "")}'>เงินเดือน: ล้มเหลว</span>";
-                    else
-                        lblSync.Text = "<span class='sync-badge pending'>เงินเดือน: รอดำเนินการ</span>";
+                    lblSync.Text = NextAccStatusData.Render(this, conn, new NextAccUi.NaBadgeInput
+                    {
+                        Queue = NextAccStatusData.FromDataRow(prow), SentLabel = "ส่งแล้ว · เงินเดือน (บัญชี)"
+                    }, docId, null);
                 }
                 else
                 {
                     // run-based (DOCUMENT_IMPORT/DOCUMENT) — sync ทั้งงวดบนหน้าจัดการเงินเดือน
-                    lblSync.Text = "<span class='sync-badge completed' title='เงินเดือน sync ทั้งงวดผ่านหน้าจัดการเงินเดือน (NextAcc payroll run) — ไม่ sync เป็นใบสำคัญจ่ายเดี่ยว'>ผ่านงวดเงินเดือน</span>";
+                    lblSync.Text = NextAccStatusData.Render(this, conn, new NextAccUi.NaBadgeInput
+                    {
+                        NotApplicable = true, NotApplicableLabel = "ส่งทั้งงวดเงินเดือน",
+                        NotApplicableReason = "เงินเดือนส่งเข้า NextAcc ทั้งงวดจากหน้าจัดการเงินเดือน — ไม่ส่งเป็นใบสำคัญจ่ายเดี่ยว"
+                    }, docId, null);
                 }
                 return;
             }
 
             if (_syncStatusCache == null) LoadSyncStatusCache();
 
-            if (_syncStatusCache.ContainsKey(docId))
+            // ป้ายสถานะ NextAcc แบบเดียวทุกหน้า (CLAUDE.md ข้อ 24) — ซ่อน "ส่งใหม่" ของ ตั้งค่า / ต้องใบลดหนี้ / อาจซ้ำ (กติกาเดิม)
+            DataRow queueRow;
+            _syncStatusCache.TryGetValue(docId, out queueRow);
+            NextAccUi.NaBadge naBadge;
+            lblSync.Text = NextAccStatusData.Render(this, conn, new NextAccUi.NaBadgeInput
             {
-                var queueRow = _syncStatusCache[docId];
-                string syncStatus = queueRow["Status"]?.ToString() ?? "";
-                string queueId = queueRow["ID"]?.ToString() ?? "";
-
-                switch (syncStatus)
-                {
-                    case "COMPLETED":
-                        string nexaaccDocNum = queueRow.Table.Columns.Contains("Nexaacc_Document_Number")
-                            ? queueRow["Nexaacc_Document_Number"]?.ToString() : "";
-                        string nexaaccId = queueRow.Table.Columns.Contains("Nexaacc_Response_Id")
-                            ? queueRow["Nexaacc_Response_Id"]?.ToString() : "";
-                        string nexaaccDocType = queueRow.Table.Columns.Contains("Nexaacc_Document_Type")
-                            ? queueRow["Nexaacc_Document_Type"]?.ToString() : "";
-                        string displayLabel = !string.IsNullOrEmpty(nexaaccDocNum) ? nexaaccDocNum : $"#{queueId}";
-                        string deepLink = BuildNexaaccLink(nexaaccId, nexaaccDocType);
-                        if (!string.IsNullOrEmpty(deepLink))
-                            lblSync.Text = $"<a href='{deepLink}' target='_blank' class='sync-badge completed' title='เปิดใน NextAcc'>✓ {Server.HtmlEncode(displayLabel)}</a>";
-                        else
-                            lblSync.Text = $"<span class='sync-badge completed' title='NextAcc ID: {Server.HtmlEncode(nexaaccId)}'>✓ {Server.HtmlEncode(displayLabel)}</span>";
-                        btnSync.Visible = false;
-                        break;
-                    default:
-                    {
-                        // ป้ายตามชนิดปัญหา (Error_Class) — ตัวเดียวกับ CheckDocument_New; ซ่อน "ส่งใหม่" เมื่อไม่ช่วย/เสี่ยงซ้ำ
-                        string cls = queueRow.Table.Columns.Contains("Error_Class") && queueRow["Error_Class"] != DBNull.Value ? queueRow["Error_Class"].ToString() : "";
-                        string fix = queueRow.Table.Columns.Contains("Fix_Url") && queueRow["Fix_Url"] != DBNull.Value ? queueRow["Fix_Url"].ToString() : "";
-                        var badge = NextAccUi.DocQueueBadge(syncStatus, cls, queueId, queueRow["Error_Message"]?.ToString(),
-                            NextAccUi.IsSafeAppPath(fix) ? ResolveUrl("~" + fix) : "",
-                            ResolveUrl("~" + NextAccUi.QueueUrl("", q: docId)));
-                        lblSync.Text = badge.Html;
-                        btnSync.Visible = badge.ShowRetry;
-                        if (badge.ShowRetry) btnSync.Text = badge.RetryText;
-                        break;
-                    }
-                }
-            }
-            else
-            {
-                lblSync.Text = "<span class='sync-badge none'>ยังไม่ส่งเข้าบัญชี</span>";
-                btnSync.Visible = true;
-            }
+                Queue = NextAccStatusData.FromDataRow(queueRow),
+                DocId = SafeEval(e.Row.DataItem, "NextAccId"),
+                NotSentLabel = "ยังไม่ส่งเข้าบัญชี"
+            }, docId, null, out naBadge);
+            btnSync.Visible = naBadge.ShowRetry;
+            if (naBadge.ShowRetry && naBadge.State != NextAccUi.NaState.NotSent) btnSync.Text = naBadge.RetryText;
         }
 
         private Dictionary<string, string> _uidCache;

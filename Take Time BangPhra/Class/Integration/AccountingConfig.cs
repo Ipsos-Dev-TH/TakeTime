@@ -30,6 +30,16 @@ namespace Take_Time_BangPhra.Integration
         // Core settings
         public string BaseUrl => SanitizeBaseUrl(GetConfig("Nexaacc_BaseUrl", ""));
         public string RawBaseUrl => GetConfig("Nexaacc_BaseUrl", "");
+        /// <summary>ที่อยู่เว็บ NextAcc สำหรับลิงก์ "เปิดใน NextAcc" (ป้ายสถานะ ข้อ 24): Nexaacc_Web_BaseUrl ถ้าตั้งไว้
+        /// (กรณีเว็บกับ API คนละโดเมน) ไม่งั้นใช้ Nexaacc_BaseUrl เดิม (พฤติกรรมเดิมของลิงก์ในหน้าเอกสาร)</summary>
+        public string WebBaseUrl
+        {
+            get
+            {
+                string w = GetConfig("Nexaacc_Web_BaseUrl", "");
+                return string.IsNullOrWhiteSpace(w) ? RawBaseUrl : w.Trim();
+            }
+        }
         public string ApiKey => _code.Derypt(GetConfig("Nexaacc_ApiKey_Encrypted", ""));
 
         /// <summary>acc_ API Key สำหรับ company endpoints (/api/companies/* — document, OCR, override

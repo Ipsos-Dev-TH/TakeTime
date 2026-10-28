@@ -214,6 +214,9 @@
                             <asp:BoundField DataField="Vat_Amount" HeaderText="VAT" DataFormatString="{0:N2}" ItemStyle-HorizontalAlign="Right" />
                             <asp:BoundField DataField="Payment_Status" HeaderText="สถานะ" />
                             <asp:BoundField DataField="Linked_Voucher_Id" HeaderText="ใบสำคัญจ่าย" />
+                            <asp:TemplateField HeaderText="NextAcc">
+                                <ItemTemplate><div class="na-stack"><%# NaBatchBadge(Eval("Batch")) %></div></ItemTemplate>
+                            </asp:TemplateField>
                             <asp:HyperLinkField Text="💳 ใบสำคัญจ่าย" DataNavigateUrlFields="Batch" DataNavigateUrlFormatString="/Account/PaymentVoucher?grn={0}" />
                             <asp:HyperLinkField Text="↩️ คืนสินค้า" DataNavigateUrlFields="Batch" DataNavigateUrlFormatString="/Product/PurchaseReturn?batch={0}" />
                         </Columns>

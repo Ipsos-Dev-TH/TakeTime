@@ -330,7 +330,7 @@
                                 <ItemTemplate><%# StatusBadge(Eval("Approval_Status"), Eval("Is_Reversed"), Eval("Out_Reason_Code")) %></ItemTemplate>
                             </asp:TemplateField>
                             <asp:TemplateField HeaderText="บัญชี">
-                                <ItemTemplate><%# JournalBadge(Eval("Nexaacc_Journal_Ref")) %></ItemTemplate>
+                                <ItemTemplate><div class="na-stack"><%# NaBadge(Eval("ID"), Eval("Approval_Status"), Eval("Is_Reversed"), Eval("Out_Reason_Code"), Eval("Nexaacc_Journal_Ref")) %></div></ItemTemplate>
                             </asp:TemplateField>
                             <asp:TemplateField HeaderText="หลักฐาน">
                                 <ItemTemplate><%# EvidenceLink(Eval("ID"), Eval("Evidence_Path")) %> <%# PrintLink(Eval("ID"), Eval("Out_Reason_Code")) %></ItemTemplate>

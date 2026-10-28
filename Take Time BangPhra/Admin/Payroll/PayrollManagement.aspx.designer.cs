@@ -309,5 +309,10 @@ namespace Take_Time_BangPhra.Admin.Payroll
         /// To modify move field declaration from designer file to code-behind file.
         /// </remarks>
         protected global::System.Web.UI.WebControls.Literal litPayrollModeNote;
+
+        /// <summary>
+        /// litPayrollNaStatus control — ป้ายสถานะ NextAcc ของงวด (ข้อ 24).
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Literal litPayrollNaStatus;
     }
 }

@@ -168,6 +168,12 @@ namespace Take_Time_BangPhra.Admin.Settings
             var acc = new Group("บัญชี & ภาษี (NextAcc)",
                 "เชื่อมระบบบัญชี NextAcc, ผูกแหล่งเงินกับผังบัญชี, อ่านอีเมลจอง OTA และเลือกว่าจะลงบันทึกรายได้ทางไหนบ้าง",
                 "fa-calculator", "#00897b", Perm.SysAccounting);
+            // ศูนย์บัญชี NextAcc (CLAUDE.md ข้อ 24) — หน้าแรกของงานบัญชี (Owner / Admin ที่มีสิทธิ์บัญชี)
+            acc.Items.Add(new Item("ศูนย์บัญชี NextAcc (งานบัญชีวันนี้)",
+                "สถานะการเชื่อมต่อ, คิวตามชนิดปัญหา, **งานที่ต้องมีคนทำ**, ใบที่ต้องขึ้นก่อนยื่น ภ.พ.30, ผลตรวจเทียบ, สลิป/ใบลดหนี้รอดำเนินการ + ปุ่มประมวลผลคิว/ตรวจสุขภาพ",
+                "~/Account/NextAccHub",
+                "ศูนย์บัญชี hub nextacc คิว งานค้าง ภ.พ.30 ยื่นภาษี ตรวจเทียบ ตรวจสุขภาพ สลิป ใบลดหนี้ dashboard", false, null, Perm.SysAccounting + "|" + Perm.FinReport)
+            { AdminOnly = true });
             acc.Items.Add(new Item("Accounting Integration (NextAcc)",
                 "เชื่อมระบบบัญชี, ผังบัญชี, **ผูกแหล่งเงิน (กระเป๋าเงิน)**, โหมด sync, อ่านอีเมลจอง OTA, สวิตช์ลงบันทึกรายได้ (ขายหน้าร้าน / รูมเซอร์วิส / ค่าห้อง OTA)",
                 "~/Admin/Settings/AccountingIntegration",
