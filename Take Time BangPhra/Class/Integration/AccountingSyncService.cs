@@ -13671,7 +13671,9 @@ namespace Take_Time_BangPhra.Integration
         {
             if (invoice == null || info == null) return;
             invoice.CustomerExternalId = info.ExternalId;
-            if (string.IsNullOrEmpty(invoice.CustomerName)) invoice.CustomerName = info.Name;
+            // ชื่อจากผู้ติดต่อ (แถว Customer ล่าสุด) ชนะชื่อใน payload ตอน enqueue (ข้อ 22 — แก้ชื่อแล้วส่งใหม่ต้องได้ชื่อใหม่)
+            if (!string.IsNullOrWhiteSpace(info.Name)) invoice.CustomerName = info.Name.Trim();
+            else if (string.IsNullOrEmpty(invoice.CustomerName)) invoice.CustomerName = info.Name;
             if (!string.IsNullOrEmpty(info.TaxId)) invoice.CustomerTaxId = info.TaxId;
         }
 
@@ -16036,7 +16038,21 @@ namespace Take_Time_BangPhra.Integration
             catch (Exception ex) { return (false, "ตรวจข้อมูลผู้ซื้อไม่ได้: " + ex.Message); }
         }
 
+        /// <summary>ข้อความผลการตรวจผู้ซื้อของ repost รอบนี้ (CLAUDE.md ข้อ 22) — ต่อหน้า LastRepostMessage</summary>
+        private string _repostBuyerNote;
+
         public long RepostReceiptWithCurrentLogic(long queueId)
+        {
+            _repostBuyerNote = null;
+            long rc = RepostReceiptWithCurrentLogicCore(queueId);
+            string note = _repostBuyerNote;
+            _repostBuyerNote = null;
+            if (!string.IsNullOrEmpty(note) && (LastRepostMessage ?? "").IndexOf(note, StringComparison.Ordinal) < 0)
+                LastRepostMessage = note + (string.IsNullOrEmpty(LastRepostMessage) ? "" : " | " + LastRepostMessage);
+            return rc;
+        }
+
+        private long RepostReceiptWithCurrentLogicCore(long queueId)
         {
             LastRepostMessage = null;
             var dt = _code.DatabaseQuerySafe(_connectionString,
@@ -16167,11 +16183,41 @@ namespace Take_Time_BangPhra.Integration
                     $"RepostReceipt: ตรวจเอกสารถูกลบล้มเหลว (ดำเนินเส้น resync ปกติ): {delChkEx.Message}", "SYSTEM");
             }
 
+            // ── ผู้ซื้อเปลี่ยน (CLAUDE.md ข้อ 22): ส่งข้อมูลผู้ซื้อของใบขึ้นผู้ติดต่อของตัวเองก่อน แล้วเลือกทาง ──
+            // ชื่อบน PDF มาจากผู้ติดต่อของเอกสาร (ไม่มี snapshot) ⇒ ผู้ติดต่อเดิม = แก้ชื่อผู้ติดต่อพอ (เลขเดิม);
+            // ผู้ติดต่อคนละคน = resyncUpdate/แก้ JE ไม่เปลี่ยนผู้ซื้อ → ต้องยกเลิก→ออกใหม่ (ข้ามทางที่ 0/1)
+            bool buyerForceRecreate = false;
+            try
+            {
+                var bc = System.Threading.Tasks.Task.Run(() => PlanBuyerChangeForRepostAsync(receiptNumber, p, docType,
+                    row["Nexaacc_Response_Id"]?.ToString())).GetAwaiter().GetResult();
+                if (bc != null)
+                {
+                    _repostBuyerNote = bc.Message;
+                    if (!string.IsNullOrEmpty(bc.Blocked)) { LastRepostMessage = bc.Blocked; _repostBuyerNote = null; return -1; }
+                    if (bc.Done)
+                    {
+                        _code.DatabaseInsertSafe(_connectionString,
+                            "UPDATE Accounting_Sync_Queue SET Error_Message = N'Buyer name updated via contact (no void)' WHERE ID = @id",
+                            new Dictionary<string, object> { { "@id", queueId } });
+                        LastRepostMessage = bc.Message;
+                        _repostBuyerNote = null;
+                        return 0;
+                    }
+                    buyerForceRecreate = bc.ForceRecreate;
+                }
+            }
+            catch (Exception bcx)
+            {
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"RepostReceipt: ตรวจผู้ซื้อล้มเหลว (ดำเนินเส้นเดิม) receipt={receiptNumber}: {bcx.Message}", "SYSTEM");
+            }
+
             // ── ทางที่ 0: Official resync contract (INTEGRATION_RESYNC.md) — เอกสารเดิมเป็น
             // integration invoice → ส่ง /integration/invoices ซ้ำด้วย externalRef เดิม + resyncUpdate:true
             // NextAcc จัดการเอง: งวดเปิด+JE เดียว = in-place (เลข JE คงเดิม) / งวดปิด = reversal+post ใหม่
             // เลขเอกสารคงเดิมเสมอ ไม่มี void. guard (ชำระแล้ว/มี CN-DN/ภ.พ.30 ยื่นแล้ว) → success:false
-            if (docType == "INVOICE")
+            if (docType == "INVOICE" && !buyerForceRecreate)
             {
                 try
                 {
@@ -16310,7 +16356,7 @@ namespace Take_Time_BangPhra.Integration
             // journal-mode receipt = JE เดี่ยว self-contained → แทนที่ Lines ทั้งชุดได้ปลอดภัย.
             // RECEIPT/INVOICE มี JE คู่หู (adjustment หักมัดจำ / integration payment) ที่จะรอดจากการ
             // แทนที่ → ยอดเบิล — พวกนั้นใช้ resyncUpdate (INVOICE ด้านบน) หรือ fallback void→สร้างใหม่
-            if (docType == "JOURNAL")
+            if (docType == "JOURNAL" && !buyerForceRecreate)
             try
             {
                 decimal jeDeposit = -1m;   // ยอดหักมัดจำที่ใช้สร้าง JE ใหม่ (−1 = ไม่เปลี่ยน)
@@ -16422,18 +16468,29 @@ namespace Take_Time_BangPhra.Integration
         /// (ทั้งโฟลเดอร์ฝั่งจ่าย PaymentFolderPath และฝั่งรับ ReceiptFolderPath)</summary>
         private void ClearReceiptPdfCache(string receiptNumber)
         {
+            // โฟลเดอร์ที่ตัวดึง PDF ใช้จริง (AppCfg: ค่าใน DB ก่อน Web.config) — เดิมอ่าน Web.config อย่างเดียว
+            // ⇒ ตั้งโฟลเดอร์ในหน้าตั้งค่าระบบแล้วล้างผิดที่ ไฟล์รุ่นก่อนแก้ค้างถูกเสิร์ฟต่อ (CLAUDE.md ข้อ 22)
             foreach (string key in new[] { "PaymentFolderPath", "ReceiptFolderPath" })
             {
-                try
+                foreach (string basePath in DocumentFolderBases(key))
                 {
-                    string basePath = ConfigurationManager.AppSettings[key];
-                    if (!string.IsNullOrEmpty(basePath))
+                    try
                     {
                         string naFolder = Path.Combine(basePath, "NextAcc", MakeSafeFileName(receiptNumber));
                         if (Directory.Exists(naFolder)) Directory.Delete(naFolder, true);
                     }
+                    catch
+                    {
+                        // ไฟล์ถูกล็อก (กำลังเปิดดู) ลบทั้งโฟลเดอร์ไม่ได้ → ลบ .docstate ให้รอบหน้าดึงใหม่แน่นอน
+                        try
+                        {
+                            string naFolder = Path.Combine(basePath, "NextAcc", MakeSafeFileName(receiptNumber));
+                            if (Directory.Exists(naFolder))
+                                foreach (var st in Directory.GetFiles(naFolder, "*.docstate")) { try { File.Delete(st); } catch { } }
+                        }
+                        catch { }
+                    }
                 }
-                catch { }
             }
         }
 
@@ -16558,7 +16615,9 @@ namespace Take_Time_BangPhra.Integration
                 {
                     invoice.CustomerExternalId = repostContact.ExternalId;
                     invoice.CustomerTaxId = repostContact.TaxId;
-                    if (string.IsNullOrEmpty(invoice.CustomerName)) invoice.CustomerName = repostContact.Name;
+                    // ชื่อผู้ซื้อปัจจุบันของใบ (ข้อ 22) — เดิมคงชื่อใน payload ตอน enqueue ⇒ แก้ชื่อแล้ว resync ยังส่งชื่อเก่า
+                    if (!string.IsNullOrWhiteSpace(repostContact.Name)) invoice.CustomerName = repostContact.Name.Trim();
+                    else if (string.IsNullOrEmpty(invoice.CustomerName)) invoice.CustomerName = repostContact.Name;
 
                     // resync แบบขายสดใบเดียว: คงรูปแบบ isCashSale — field มัดจำต้องมากับ IsCashSale
                     // เท่านั้น (ห้ามหลุดไปใบ declined-buyer: contract ครึ่งเดียว NextAcc ตีความไม่ได้)
@@ -18104,12 +18163,15 @@ namespace Take_Time_BangPhra.Integration
             //   กดดู PDF กี่ครั้งก็ได้ตัวร่างตลอดไป (ต้องกดปุ่มดึงล่าสุดเท่านั้นถึงจะเปลี่ยน)
             //   ตอนนี้ใช้ได้ต่อเมื่อ marker ยืนยันว่าเอกสารพ้นสถานะร่างแล้ว
             string statePath = Path.Combine(folder, Path.GetFileNameWithoutExtension(pdfFileName) + ".docstate");
-            if (!forceRefresh && File.Exists(pdfPath) && new FileInfo(pdfPath).Length > 0
+            // ข้อ 22: ไฟล์ล่าสุดอาจเป็นรุ่น _v{ticks} (ไฟล์หลักถูกล็อกตอนดึงล่าสุด)
+            string byIdSuffix = isCancelled ? "_Cancel" : "";
+            string byIdCached = NextAccPdfCache.ResolveCachedPdf(folder, safeDoc, byIdSuffix);
+            if (!forceRefresh && byIdCached != null
                 && PdfCacheIsFinal(statePath))
             {
                 result.Found = true;
-                result.PdfLocalPath = pdfPath;
-                result.PdfRelativeUrl = relPrefix + "/" + pdfFileName;
+                result.PdfLocalPath = byIdCached;
+                result.PdfRelativeUrl = relPrefix + "/" + Path.GetFileName(byIdCached);
                 try
                 {
                     foreach (var f in Directory.GetFiles(folder, "att*"))
@@ -18129,14 +18191,28 @@ namespace Take_Time_BangPhra.Integration
                 if (!Directory.Exists(folder)) Directory.CreateDirectory(folder);
 
                 // 1) PDF อย่างเป็นทางการจาก NextAcc (ตาม document id) — ประทับ "ยกเลิก" ถ้าเอกสารถูก void
-                if (forceRefresh || !File.Exists(pdfPath) || new FileInfo(pdfPath).Length == 0
+                string byIdServed = byIdCached;
+                string byIdWriteErr = null;
+                bool byIdFresh = false;
+                if (forceRefresh || byIdCached == null
                     || !PdfCacheIsFinal(statePath))
                 {
                     byte[] pdf = await _apiClient.GenerateDocumentPdfAsync(nextAccId,
                         watermark: isCancelled ? "ยกเลิก" : null);
+                    string byIdWritten = null;
                     if (pdf != null && pdf.Length > 0)
                     {
-                        File.WriteAllBytes(pdfPath, pdf);
+                        // ข้อ 22: เขียนแบบ atomic (ตรวจหัว PDF, ไฟล์เดิมล็อก = ชื่อใหม่) — ล้มเหลว = คงไฟล์เดิม
+                        byIdWriteErr = NextAccPdfCache.WritePdfAtomically(pdfPath, pdf, safeDoc, byIdSuffix, out byIdWritten);
+                        if (byIdWriteErr != null)
+                            _code.Logs(_connectionString, "AccountingSync",
+                                $"DownloadNextAccDocumentById: GUID={nextAccId} {byIdWriteErr}", "SYSTEM");
+                    }
+                    if (byIdWritten != null)
+                    {
+                        byIdServed = byIdWritten;
+                        byIdFresh = true;
+                        NextAccPdfCache.CleanupOlderVersions(folder, safeDoc, byIdSuffix, byIdWritten);
 
                         // บันทึกว่า NextAcc "บอกว่า" เอกสาร GUID นี้เลขอะไร/สถานะอะไร ณ ตอนดึง
                         // ใช้ทั้งกัน cache ตัวร่าง และเป็นหลักฐานเทียบกับเลขที่ปรากฏใน PDF จริง
@@ -18157,15 +18233,20 @@ namespace Take_Time_BangPhra.Integration
                         catch { WritePdfStateMarker(statePath, "", ""); }
                     }
                 }
-                if (File.Exists(pdfPath) && new FileInfo(pdfPath).Length > 0)
+                if (forceRefresh && !byIdFresh)
+                {
+                    // "ดึงล่าสุด" แต่ได้ไฟล์ใหม่ไม่สำเร็จ → รายงานเหตุจริง ไม่เสิร์ฟไฟล์เก่าให้เข้าใจผิดว่าเป็นฉบับล่าสุด (ข้อ 22)
+                    result.Message = byIdWriteErr ?? "NextAcc ไม่คืน PDF ฉบับใหม่ (ไม่มี template/เอกสาร) — คงไฟล์เดิมไว้";
+                }
+                else if (byIdServed != null && File.Exists(byIdServed) && new FileInfo(byIdServed).Length > 0)
                 {
                     result.Found = true;
-                    result.PdfLocalPath = pdfPath;
-                    result.PdfRelativeUrl = relPrefix + "/" + pdfFileName;
+                    result.PdfLocalPath = byIdServed;
+                    result.PdfRelativeUrl = relPrefix + "/" + Path.GetFileName(byIdServed);
                 }
                 else
                 {
-                    result.Message = "NextAcc ไม่มี PDF/template สำหรับเอกสารนี้";
+                    result.Message = byIdWriteErr ?? "NextAcc ไม่มี PDF/template สำหรับเอกสารนี้";
                 }
 
                 // 2) ไฟล์แนบ
@@ -18245,12 +18326,16 @@ namespace Take_Time_BangPhra.Integration
             // เหตุ (บั๊กจริง): แก้ไข = void→สร้างใหม่ "เลขใบเดิม แต่ GUID ใหม่". cache เดิมผูกเลขใบอย่างเดียว
             // → กดดู PDF หลังแก้ยังเสิร์ฟไฟล์รุ่นก่อนแก้ (ชื่อ/รายการเดิม) ทั้งที่ NextAcc มีใบใหม่แล้ว.
             // ผูก GUID → เอกสารใหม่ = ไฟล์ใหม่ = ดึงสดเสมอ (ไฟล์เก่าไม่ถูกเสิร์ฟอีก)
-            Guid docId = LookupNexaaccDocIdByReceipt(receiptNumber);
+            // ตัวชี้บนใบ (Nexaacc_Doc_Id) ก่อน แล้วค่อยคิว — CLAUDE.md ข้อ 22
+            Guid docId = LookupReceiptDocIdForPdf(receiptNumber);
             if (docId == Guid.Empty)
             {
                 // lookup จากคิวไม่เจอ (payload คนละรูปแบบ/คิวถูกล้าง) — อย่าตอบ "ไม่พบ" ทันที:
                 // ถ้ามีไฟล์ cache ของใบนี้อยู่แล้ว (รุ่นก่อนที่เคยดึงได้) เสิร์ฟไฟล์ล่าสุดไปก่อน
                 // ดีกว่าเด้งผู้ใช้กลับโดยไม่มีอะไรให้ดู (caller มี fallback by-GUID + local ต่ออยู่แล้ว)
+                // ⚠ ยกเว้น forceRefresh ("ดึงล่าสุด"): เดิมเสิร์ฟไฟล์เก่าตรงนี้ด้วย ⇒ caller เห็น Found=true ไม่ลอง by-GUID
+                //   = ปุ่มดึงล่าสุดไม่เคยได้ไฟล์ใหม่จนกว่าจะลบไฟล์ทิ้งเอง (บั๊กที่เจ้าของแจ้ง ข้อ 22)
+                if (!forceRefresh)
                 try
                 {
                     string fbDoc = MakeSafeFileName(receiptNumber);
@@ -18285,9 +18370,11 @@ namespace Take_Time_BangPhra.Integration
             //   → ถ้ามีค่าและไม่ตรง receiptNumber = เอกสารของใบอื่น (ชน) → ไม่เสิร์ฟ.
             // ชั้น 2 (fallback ถ้าอ่านไม่ได้/reference ว่าง = เอกสารเก่า): เช็คจากคิวว่า GUID ถูกใบอื่นอ้างไหม.
             bool mismatch = false;
+            DocumentResponse liveDoc = null;   // ใช้ซ้ำเป็นลายนิ้วมือความสดของ cache (ข้อ 22) — ไม่ยิง API เพิ่ม
             try
             {
                 var idChk = await _apiClient.GetDocumentAsync(docId);
+                liveDoc = idChk?.data;
                 string docRef = idChk?.data?.Reference?.Trim();
                 if (string.IsNullOrWhiteSpace(docRef))
                     mismatch = IsDocGuidClaimedByOtherReceipt(docId, receiptNumber);   // เอกสารเก่าไม่มี reference → ดูคิว
@@ -18332,21 +18419,31 @@ namespace Take_Time_BangPhra.Integration
             //   ถ้าไปอนุมัติ/แก้เอกสารบน NextAcc เอง ฝั่งเราไม่มีอะไรเปลี่ยน → cache ไม่ถูกมองว่าเก่า
             //   → เสิร์ฟไฟล์ฉบับร่างค้างตลอดไป (เคสเดียวกับฝั่งใบสำคัญจ่าย)
             string statePath = Path.Combine(folder, safeDoc + "_" + guid8 + suffix + ".docstate");
-            if (!forceRefresh && File.Exists(pdfPath) && new FileInfo(pdfPath).Length > 0
-                && PdfCacheIsFinal(statePath)
-                && !IsReceiptPdfCacheStale(receiptNumber, pdfPath))
+            // ข้อ 22: ⚠ IsReceiptPdfCacheStale ดูแค่ "คิวฝั่งเรา" — resync in-place/แก้ชื่อผู้ติดต่อ/อนุมัติบน NextAcc ไม่สร้างคิวใหม่
+            //   ⇒ เทียบลายนิ้วมือเอกสาร NextAcc (เลข/สถานะ/ยอด/ผู้ซื้อ/e-Tax) ที่อ่านมาแล้วตอนตรวจตัวตน กับที่จดไว้ตอนดึงไฟล์
+            string pdfStem = safeDoc + "_" + guid8;
+            string cachedPdf = NextAccPdfCache.ResolveCachedPdf(folder, pdfStem, suffix);
+            string liveFp = LiveDocFingerprint(liveDoc);
+            if (!forceRefresh && cachedPdf != null
+                && NextAccPdfCache.CacheIsCurrent(true, false, PdfCacheIsFinal(statePath),
+                    IsReceiptPdfCacheStale(receiptNumber, cachedPdf),
+                    NextAccPdfCache.MarkerFingerprint(ReadPdfStateMarker(statePath)), liveFp))
             {
                 result.Found = true;
-                result.PdfLocalPath = pdfPath;
-                result.PdfRelativeUrl = relPrefix + "/" + fileName;
+                result.PdfLocalPath = cachedPdf;
+                result.PdfRelativeUrl = relPrefix + "/" + Path.GetFileName(cachedPdf);
                 return result;
             }
+            if (!forceRefresh && cachedPdf != null && liveFp != null)
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"DownloadReceiptPdf: receipt={receiptNumber} เอกสาร NextAcc เปลี่ยน/ไม่มีลายนิ้วมือ (เลข={liveDoc?.DocumentNumber ?? "-"}, ผู้ซื้อ={liveDoc?.Contact?.Name ?? "-"}) → ดึง PDF ใหม่ทับ cache", "SYSTEM");
 
             // ยกระดับ cache รุ่นเก่า (ชื่อไฟล์ก่อนผูก GUID: "{safeDoc}{suffix}.pdf"): ถ้ายังไม่ stale
             // (ใบไม่ถูกแก้/re-sync หลัง cache) = เนื้อหายังตรงกับเอกสารปัจจุบัน → copy เป็นชื่อ GUID
             // แล้วเสิร์ฟทันที ไม่ยิง NextAcc — กันเหตุ "เปลี่ยนรูปแบบชื่อ cache แล้วทั้งระบบต้องดึงใหม่หมด"
             // (คลิกแรกหลัง deploy จะช้า/ล้มถ้า NextAcc ช้า ทั้งที่ไฟล์เดิมยังถูกต้องอยู่บนดิสก์)
-            if (!forceRefresh)
+            // (ข้อ 22: เฉพาะเมื่ออ่านเอกสาร NextAcc ไม่ได้ — อ่านได้แล้วไฟล์รุ่นเก่าไม่มีลายนิ้วมือให้เทียบ = ดึงใหม่ 1 ครั้งดีกว่า)
+            if (!forceRefresh && liveFp == null)
             try
             {
                 string legacyPath = Path.Combine(folder, safeDoc + suffix + ".pdf");
@@ -18372,27 +18469,39 @@ namespace Take_Time_BangPhra.Integration
                     watermark: isCancelled ? "ยกเลิก" : null);
                 if (pdf != null && pdf.Length > 0)
                 {
-                    File.WriteAllBytes(pdfPath, pdf);
-
-                    // จดเลข/สถานะ ณ ตอนดึง — ยังเป็นร่างก็จะดึงใหม่เองจนกว่าจะอนุมัติ
-                    try
+                    // ข้อ 22: ไฟล์ชั่วคราว → ตรวจหัว %PDF → แทนที่ไฟล์เดิม (ล็อกอยู่ = ชื่อใหม่ _v{ticks}); ล้ม = คงไฟล์เดิม + แจ้งเหตุ
+                    string written;
+                    string writeErr = NextAccPdfCache.WritePdfAtomically(pdfPath, pdf, pdfStem, suffix, out written);
+                    if (writeErr == null)
                     {
-                        var info = await _apiClient.GetDocumentAsync(docId);
-                        string curNum = info?.data?.DocumentNumber ?? "";
-                        int curSt = info?.data?.Status ?? -1;
-                        WritePdfStateMarker(statePath, curNum, curSt.ToString());
-                        if (curNum.StartsWith("DRAFT", StringComparison.OrdinalIgnoreCase))
+                        // จดเลข/สถานะ/ลายนิ้วมือ ณ ตอนดึง — ยังเป็นร่างก็จะดึงใหม่เองจนกว่าจะอนุมัติ; เอกสารเปลี่ยนภายหลัง = ดึงใหม่เอง
+                        try
+                        {
+                            var info = await _apiClient.GetDocumentAsync(docId);
+                            string curNum = info?.data?.DocumentNumber ?? "";
+                            int curSt = info?.data?.Status ?? -1;
+                            WritePdfStateMarkerFp(statePath, curNum, curSt.ToString(), LiveDocFingerprint(info?.data));
+                            if (curNum.StartsWith("DRAFT", StringComparison.OrdinalIgnoreCase))
+                                _code.Logs(_connectionString, "AccountingSync",
+                                    $"DownloadReceiptPdf: receipt={receiptNumber} ยังเป็นร่างบน NextAcc ({curNum}) — "
+                                    + "PDF ที่ได้จะเป็นตัวร่าง จะดึงใหม่อัตโนมัติเมื่ออนุมัติแล้ว", "SYSTEM");
+                        }
+                        catch { WritePdfStateMarker(statePath, "", ""); }
+                        NextAccPdfCache.CleanupOlderVersions(folder, pdfStem, suffix, written);
+                        if (!string.Equals(written, pdfPath, StringComparison.OrdinalIgnoreCase))
                             _code.Logs(_connectionString, "AccountingSync",
-                                $"DownloadReceiptPdf: receipt={receiptNumber} ยังเป็นร่างบน NextAcc ({curNum}) — "
-                                + "PDF ที่ได้จะเป็นตัวร่าง จะดึงใหม่อัตโนมัติเมื่ออนุมัติแล้ว", "SYSTEM");
-                    }
-                    catch { WritePdfStateMarker(statePath, "", ""); }
+                                $"DownloadReceiptPdf: receipt={receiptNumber} ไฟล์เดิมถูกล็อก → บันทึกฉบับใหม่เป็น {Path.GetFileName(written)}", "SYSTEM");
 
-                    result.Found = true;
-                    result.PdfLocalPath = pdfPath;
-                    result.PdfRelativeUrl = relPrefix + "/" + fileName;
-                    return result;
+                        result.Found = true;
+                        result.PdfLocalPath = written;
+                        result.PdfRelativeUrl = relPrefix + "/" + Path.GetFileName(written);
+                        return result;
+                    }
+                    result.Message = writeErr;
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"DownloadReceiptPdf: receipt={receiptNumber} {writeErr}", "SYSTEM");
                 }
+                else
                 result.Message = "NextAcc ไม่มี PDF/template สำหรับเอกสารนี้";
             }
             catch (Exception ex)

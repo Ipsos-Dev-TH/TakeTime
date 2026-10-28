@@ -976,6 +976,8 @@
     <Compile Include="Class\Integration\AccountingSyncService.Prevention.cs" />
     <Compile Include="Class\Integration\AccountingSyncService.VendorCn.cs" />
     <Compile Include="Class\Integration\QueueErrors.cs" />
+    <Compile Include="Class\Integration\NextAccDocRefresh.cs" />
+    <Compile Include="Class\Integration\AccountingSyncService.BuyerSync.cs" />
     <Compile Include="Class\Integration\ReceiptPreflight.cs" />
     <Compile Include="Class\Integration\ReceiptPreflight.Data.cs" />
     <Compile Include="Class\Integration\CreditNoteModels.cs" />

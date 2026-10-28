@@ -600,6 +600,27 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
      DATA ของใบเสร็จ (กันซ้ำรายแถว ≤1 ข้อความ/10 นาที). ตรวจสุขภาพข้อ 11: โหมด, ค้างรายชนิด, ผ่านรอบแรก 14 วัน (เป้า ≥95%), หายเอง, ต้องมีคนแก้, บล็อก/ยืนยันข้าม.
    - ยังไม่ทำ (P2): ป้ายชนิดใน CheckDocument_New/ReserveTable, ตัวตรวจใบสำคัญจ่าย/ใบลดหนี้/เงินเดือน, ตารางตัวชี้วัดรายวัน, resync in-place ตอนแก้ใบที่มีเอกสาร,
      NextAcc `/document/validate`. ต้อง build+test บน Windows.
+22. **"ดึงล่าสุด" ไม่ทับไฟล์ + แก้ชื่อผู้ซื้อแล้วส่งใหม่ชื่อไม่เปลี่ยน (ต.ค. 2026):** `Class/Integration/NextAccDocRefresh.cs` (pure, mono test) +
+   `AccountingSyncService.BuyerSync.cs`.
+   - **PDF:** ต้นเหตุ — `DownloadReceiptPdfFromNextAccAsync` หา GUID จากคิว COMPLETED อย่างเดียว (หลัง void→สร้างใหม่/supersede หาไม่เจอ) แล้ว
+     **เสิร์ฟไฟล์ cache เก่าแม้ forceRefresh** ⇒ caller เห็น Found ไม่ลอง by-GUID (ลบไฟล์เองจึงหาย) · `ClearReceiptPdfCache` ล้างจาก Web.config แต่ตัวดึงใช้
+     `AppCfg` (DB ก่อน) · ความสดดูแค่คิวฝั่งเรา (resync in-place/แก้ผู้ติดต่อ ไม่มีคิวใหม่) · redirect URL เดิม (browser cache). แก้: GUID จาก
+     `Account_Receipt.Nexaacc_Doc_Id` ก่อน · forceRefresh ไม่เสิร์ฟ cache · `.docstate` = `เลข|สถานะ|fingerprint` (เลข/สถานะ/ยอด/VAT/วันที่/ผู้ติดต่อ/
+     e-Tax/หักมัดจำ จาก GET document ที่ตรวจตัวตนอยู่แล้ว — NextAcc ไม่มี UpdatedAt) ไม่ตรง = ดึงใหม่ · เขียน atomic (tmp → ตรวจ `%PDF-` → Replace; ไฟล์ล็อก =
+     `{stem}_v{ticks}{suffix}.pdf`; ล้ม = คงไฟล์เดิม + แจ้ง) ทั้งเส้นใบเสร็จและ by-GUID (by-GUID + force ล้ม = Found=false ไม่เสิร์ฟของเก่า) ·
+     redirect `?v={mtime}-{size}` (CheckDocument_New/CheckPayment_New) · Web.config `Documents/Receipt`, `Documents/Payment/NextAcc` = DisableCache ·
+     ViewReceiptDoc no-store.
+   - **ผู้ซื้อ:** PDF NextAcc พิมพ์ชื่อจาก**ผู้ติดต่อของเอกสาร** (PdfGenerationService.cs:2148, ไม่มี snapshot); resyncUpdate ไม่แตะ ContactId/ธง declined
+     (IntegrationService.cs:3311-3342); เอกสารลงบัญชีแล้วแก้ ContactId ไม่ได้ (DocumentService.cs:2611-2621); int_ invoice จับผู้ติดต่อด้วยเลขภาษี/ชื่อ ไม่ใช่
+     ExternalId (IntegrationService.cs:1801-1826). เดิม repost INVOICE refresh แค่ "ผู้จอง" (ไม่ใช่ `Account_Receipt.Customer_ID`) และข้ามใบมัดจำ, RECEIPT ไป
+     void→ใหม่ (เลขเปลี่ยน) ด้วยผู้ติดต่อ cache (มัดจำไม่ push ชื่อ). ตอนนี้ `RepostReceiptWithCurrentLogic` (ทุกปุ่มส่งใหม่/Resync/Retry) เรียก
+     `PlanBuyerChangeForRepostAsync` ก่อน: GET เอกสาร → push ผู้ซื้อของใบ (`ResolveReceiptBuyer`; ไม่มีเบอร์ = `RES-{id}`) ขึ้นผู้ติดต่อของตัวเอง →
+     `ReceiptBuyerChangePlanner.Decide`: ผู้ติดต่อเดิม = **แก้ชื่อผู้ติดต่อ** (PUT `document/contacts/{id}` DocumentController.cs:1486) ยืนยันด้วย GET
+     ("✅ อัปเดตชื่อผู้ซื้อใน NextAcc แล้ว") — ยอด/วันที่/วิธีรับเงินเท่าเดิม = คืน 0 เลขเดิม ไม่ resync/void (`Nexaacc_Repost_NameOnly_Shortcut`=0 ปิด) ·
+     คนละแถวเลขภาษีเดียวกัน = แก้ชื่อแถวที่เอกสารใช้ · คนละคน/ผู้ติดต่อกลางแต่ตอนนี้ §86/4 ครบ = **บังคับ void→สร้างใหม่** (ข้าม resyncUpdate/JE in-place) ·
+     e-Tax ถึง RD = หยุด แนะใบลดหนี้ · ผู้ติดต่อกลาง + ผู้ซื้อยังไม่ครบ = อธิบาย (ชื่อไม่ขึ้นถูกต้อง) **ไม่แก้ชื่อผู้ติดต่อกลางเด็ดขาด**. ข้อความต่อหน้า
+     `LastRepostMessage`. `ApplyContactToInvoice`/`BuildCorrectedReceiptInvoice` ใช้ชื่อผู้ติดต่อปัจจุบันแทนชื่อใน payload. ปิดทั้งหมด: `Nexaacc_Repost_Buyer_Sync=0`.
+     ข้อจำกัด: แก้ชื่อผู้ติดต่อ = ทุกใบของผู้ติดต่อนั้นพิมพ์ชื่อใหม่ (รวมใบที่ส่ง e-Tax แล้ว — XML เดิมไม่เปลี่ยน); ต้อง company endpoint; ต้อง build+test บน Windows.
 
 ## Queue resilience (ส.ค. 2026 — หลังเคส NextAcc ล่มทั้งแอป)
 

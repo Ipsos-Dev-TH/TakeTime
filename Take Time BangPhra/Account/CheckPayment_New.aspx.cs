@@ -615,7 +615,7 @@ namespace Take_Time_BangPhra.Account
                             ).GetAwaiter().GetResult();
                             if (dl != null && dl.Found && !string.IsNullOrEmpty(dl.PdfRelativeUrl))
                             {
-                                Response.Redirect(dl.PdfRelativeUrl);
+                                Response.Redirect(Take_Time_BangPhra.Integration.NextAccPdfCache.VersionedUrl(dl.PdfRelativeUrl, dl.PdfLocalPath));   // ?v= กัน browser cache ไฟล์รุ่นก่อน (ข้อ 22)
                                 return;
                             }
                         }
@@ -680,7 +680,7 @@ namespace Take_Time_BangPhra.Account
                             ).GetAwaiter().GetResult();
                             if (fresh != null && fresh.Found && !string.IsNullOrEmpty(fresh.PdfRelativeUrl))
                             {
-                                Response.Redirect(fresh.PdfRelativeUrl);
+                                Response.Redirect(Take_Time_BangPhra.Integration.NextAccPdfCache.VersionedUrl(fresh.PdfRelativeUrl, fresh.PdfLocalPath));   // ?v= กัน browser cache ไฟล์รุ่นก่อน (ข้อ 22)
                                 return;
                             }
                         }
@@ -736,7 +736,7 @@ namespace Take_Time_BangPhra.Account
                             ).GetAwaiter().GetResult();
                             if (cached != null && cached.Found && !string.IsNullOrEmpty(cached.PdfRelativeUrl))
                             {
-                                Response.Redirect(cached.PdfRelativeUrl);
+                                Response.Redirect(Take_Time_BangPhra.Integration.NextAccPdfCache.VersionedUrl(cached.PdfRelativeUrl, cached.PdfLocalPath));   // ?v= กัน browser cache ไฟล์รุ่นก่อน (ข้อ 22)
                                 return;
                             }
                         }

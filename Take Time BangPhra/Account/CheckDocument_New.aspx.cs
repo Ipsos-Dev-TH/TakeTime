@@ -1563,7 +1563,7 @@ namespace Take_Time_BangPhra.Account
                                 svc.DownloadNextAccDocumentByIdAsync(gid, naDocNum, false, naCancelled)).GetAwaiter().GetResult();
                             if (na != null && na.Found && !string.IsNullOrEmpty(na.PdfRelativeUrl))
                             {
-                                Response.Redirect(na.PdfRelativeUrl);
+                                Response.Redirect(Take_Time_BangPhra.Integration.NextAccPdfCache.VersionedUrl(na.PdfRelativeUrl, na.PdfLocalPath));   // ?v= กัน browser cache ไฟล์รุ่นก่อน (ข้อ 22)
                                 return;
                             }
                             ShowError("NextAcc ไม่มี PDF สำหรับเอกสารนี้: " + (na?.Message ?? "ไม่ทราบสาเหตุ"));
@@ -1619,7 +1619,7 @@ namespace Take_Time_BangPhra.Account
                             else naTimedOut = true;
                             if (naPdf != null && naPdf.Found && !string.IsNullOrEmpty(naPdf.PdfRelativeUrl))
                             {
-                                Response.Redirect(naPdf.PdfRelativeUrl);
+                                Response.Redirect(Take_Time_BangPhra.Integration.NextAccPdfCache.VersionedUrl(naPdf.PdfRelativeUrl, naPdf.PdfLocalPath));   // ?v= กัน browser cache ไฟล์รุ่นก่อน (ข้อ 22)
                                 return;
                             }
                             // เอกสารบน NextAcc ของเลขนี้ชนกับใบอื่น (ExternalRef ไม่ตรง) → หยุด ไม่ดึงต่อ
@@ -1644,7 +1644,7 @@ namespace Take_Time_BangPhra.Account
                                 else naTimedOut = true;
                                 if (byId != null && byId.Found && !string.IsNullOrEmpty(byId.PdfRelativeUrl))
                                 {
-                                    Response.Redirect(byId.PdfRelativeUrl);
+                                    Response.Redirect(Take_Time_BangPhra.Integration.NextAccPdfCache.VersionedUrl(byId.PdfRelativeUrl, byId.PdfLocalPath));   // ?v= กัน browser cache ไฟล์รุ่นก่อน (ข้อ 22)
                                     return;
                                 }
                             }
@@ -1943,7 +1943,7 @@ namespace Take_Time_BangPhra.Account
 
                     if (fresh != null && fresh.Found && !string.IsNullOrEmpty(fresh.PdfRelativeUrl))
                     {
-                        Response.Redirect(fresh.PdfRelativeUrl);
+                        Response.Redirect(Take_Time_BangPhra.Integration.NextAccPdfCache.VersionedUrl(fresh.PdfRelativeUrl, fresh.PdfLocalPath));   // ?v= กัน browser cache ไฟล์รุ่นก่อน (ข้อ 22)
                         return;
                     }
                     ShowError(timedOut

@@ -29,6 +29,10 @@ namespace Take_Time_BangPhra.API
                 return;
             }
 
+            // ผลลัพธ์ขึ้นกับสถานะเอกสารปัจจุบัน — ห้าม browser/proxy จำ redirect ไว้ (CLAUDE.md ข้อ 22)
+            context.Response.Cache.SetCacheability(HttpCacheability.NoCache);
+            context.Response.Cache.SetNoStore();
+
             string conn = DatabaseHelper.GetConnectionString();
             var code = new code();
 
