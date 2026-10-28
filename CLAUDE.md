@@ -687,6 +687,45 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
      งานข้ามโมดูล (สลิปรอตรวจ/ธง, ใบลดหนี้รออนุมัติ/ส่งไม่สำเร็จ/รอคืน, รอใบลดหนี้ผู้ขาย, OCR ค้าง) · ปุ่มลัดเรียก `AccountingIntegration?action=processQueue|
      healthCheck|preflightScan|integrityScan` เดิม (ต้อง SYS_ACCOUNTING; ไม่มีตรรกะซ้ำ) · รีเฟรชเอง 60 วิ (localStorage). เมนูการเงินบนสุด + ตัวเลขงานค้าง
      (แคช 5 นาที), การ์ดหน้า Settings, ลิงก์ในสรุป Telegram รายวัน. ต้อง build+test บน Windows.
+25. **ใช้ความสามารถ NextAcc ที่ยังไม่เคยเรียก (ต.ค. 2026, PHASE19_41 — เลข 40 ทีมอื่นจองแล้ว; ไม่มีตาราง = ทำงานได้แต่ไม่มีประวัติ):**
+   ตรรกะบริสุทธิ์ `Class/Integration/NextAccActions.cs` (mono test) + บริการ `AccountingSyncService.NextAccActions.cs` + หน้า `Account/ReceiptNextAcc.aspx`
+   (`?receipt=`/`?uid=` — ลิงก์จาก `Receipt.aspx` โหมดแก้ไข) · `Account/UndueInputVat.aspx` (เมนูการเงิน) · บล็อกแยกใน `Account/CreditNotes.aspx` (`CreditNotes.Etax.cs`).
+   ประวัติ `Nexaacc_Doc_Action` (ใคร/ขออะไร/ผล/เอกสารใหม่). สิทธิ์: Owner / Admin ที่มี SYS_ACCOUNTING|FIN_REPORT|FIN_RECEIPT (หน้า 11640: SYS_ACCOUNTING|FIN_REPORT).
+   - **① ใบกำกับเต็มรูปทีหลัง** — คิว `ISSUE_FULL_TAX_INVOICE` (Entity RECEIPT, ประมวลผลทันทีจากหน้า `ProcessNxActionNowAsync`; แถวที่ยังไม่ส่งของใบเดิม = ใช้แถวเดิม ⇒
+     Idempotency-Key เดิม; เส้นทางอยู่ใน `CreateRouteRegex`). NextAcc `POST document/{id}/issue-full-tax-invoice` {Reason} (DocumentController.cs:1138-1157, สิทธิ์ระดับ Approve)
+     → `IssueFullTaxInvoiceForReceiptAsync` (DocumentService.cs:13109-13176): ต้นทางต้องเป็น Receipt/ReceiptVoucher (:13116-13120) · `FullTaxInvoiceReplacement.Check`
+     (Helpers/FullTaxInvoiceReplacement.cs:56-90 — จด VAT/อนุมัติแล้ว/มี VAT/ยังไม่เคยออก/ผู้ซื้อของ "ผู้ติดต่อใบต้นทาง" ครบ §86/4) · ใบแทน TaxInvoice วันที่เดิม
+     ไม่มี JE (:7258-7273) RelatedDocumentId=ต้นทาง (:12921) Reference=เลขเอกสารเดิม (:12881) · อนุมัติไม่ผ่าน (งวดปิด) = ใบแทนค้างร่าง RD-86/4-REPLACE-APPROVE-FAILED
+     (:13156-13173). "เต็มรูปอยู่แล้ว" = TaxInvoice หรือผู้ติดต่อครบ+ไม่ declined+ไม่ walk-in (:13095-13097); ContactId ของใบลงบัญชีแก้ไม่ได้ (:2658-2662).
+     ลำดับ (`FullTaxInvoicePlanner`): ตรวจฟอร์ม (ชื่อ+ที่อยู่ §86/4(3), เลข 13 หลัก mod-11 ตาม TaxInvoiceCompletenessChecker.cs:157, สาขา 5 หลัก — นิติว่าง=00000 :97-120)
+     → บันทึกผู้ซื้อในระบบ (UPDATE Customer เฉพาะชื่อ/เลข/สาขา/ชนิด/ที่อยู่ — ไม่ใช้ UpsertCustomer กับแถวเดิมเพราะทับชื่อเล่น/อีเมล) → GET เอกสาร: ยกเลิก/ร่าง/มีใบลดหนี้/
+     e-Tax ถึง RD/ไม่มี VAT = หยุด · เคยออกแล้ว = ALREADY · ใบแทนค้างร่าง = อนุมัติใบนั้น (ไม่ออกซ้ำ) · ผู้ติดต่อกลาง/เลขภาษีคนละราย/TaxInvoice ที่ declined =
+     `NeedRecreate` (ทำเมื่อติ๊กยอมรับ → `RepostReceiptByNumber` ยกเลิก→ออกใหม่ เลขเปลี่ยน) · ไม่งั้น PUT ผู้ติดต่อ "ของเอกสาร" (DocumentController.cs:1486) ยืนยันด้วย GET →
+     อ่านค่าที่ NextAcc คำนวณ (`CanIssueFullTaxInvoice`/`FullTaxInvoiceBlockedReason` DocumentService.cs:2075-2083, `DocumentTitle`): ออกได้ → issue (ใบแทน + e-Tax อัตโนมัติถ้าเปิด) ·
+     หัวเป็นใบกำกับแล้ว = `ContactUpgrade` (เลขเดิม) · อื่น ๆ = หยุดพร้อมเหตุผลของ NextAcc. ทุกทางล้าง PDF cache (ข้อ 22). PDF ใบแทนเปิดจากหน้านี้ (`?pdf=` เฉพาะ GUID ของใบ/
+     ในประวัติ) เพราะตัวดึง PDF ใบเสร็จยืนยันตัวตนด้วย Reference = เลขใบเสร็จ. **ผลข้างเคียงที่กันไว้:** `CreditNoteGuards.VoidBlockReason` บล็อกยกเลิก/แก้/ส่งซ้ำใบที่ออกใบแทนแล้ว
+     · ตัวตรวจเทียบ (ข้อ 19) นับใบแทน (`ReplacesDocumentId`) = MATCHED ไม่ใช่ DUPLICATE/กำพร้า และ `voidNaDoc` ปฏิเสธใบแทน. ข้อจำกัด: แก้ผู้ติดต่อ = ทุกใบของผู้ติดต่อนั้น
+     พิมพ์ข้อมูลใหม่ (เหมือนข้อ 22); ใบลดหนี้ของใบที่ออกใบแทนแล้วยังอ้างใบเดิม (ทีมใบลดหนี้ควรเปลี่ยนเป็นอ้างใบแทน); int_ = ใช้ไม่ได้ (ไม่มี company endpoint).
+   - **② แก้แหล่งเงินที่เลือกผิด** — คิว `RECLASSIFY_PAYMENT_SOURCE` → `POST document/{id}/reclassify-payment-source` {NewPaymentAccountId=`Account_Paid_How.Nexaacc_AccountId`,
+     Reason} (DocumentController.cs:739-757, สิทธิ์ Approve) → `ReclassifyPaymentSourceAsync` (DocumentService.cs:9067-9240): ต้องมีแหล่งเงินบนหัวเอกสาร (:9082-9085) · อนุมัติแล้ว ·
+     งวด Open (:9095-9100) · ไม่มีเอกสารปลายทาง (:9102-9107) · **ไม่มีรายการชำระแยก (:9111-9116)** · ไม่อยู่ในรายงานภาษีที่ยื่น (:9118-9124) · ไม่ส่ง e-Tax (:9126-9129) ·
+     JE แก้ (เงินเข้า: Dr ใหม่/Cr เก่า) วันที่เอกสารเดิม (:9207-9226). ⇒ ใช้ได้กับใบรับมัดจำ/ใบเสร็จ (Receipt type 3 มี PaymentAccountId) — **ใบกำกับภาษี + รับชำระแยก (ข้อ 6b)
+     ใช้ไม่ได้** (NextAcc ไม่มี API เปลี่ยนแหล่งเงินของ payment) → ข้อความไทยให้ใช้การแก้ใบเสร็จตามปกติ. `PaymentSourceReclassPolicy` กันก่อนยิง: ใบหักมัดจำในใบ (JE ปรับปรุงของเรา
+     Cr บัญชีเดิม — ย้ายแค่ขาเอกสารทำบัญชีเดิมติดลบ) · งวดปิดจาก cache ข้อ 21 · e-Tax/ใบลดหนี้/ใบแทน · บัญชีเดียวกัน/ยังไม่ส่ง/ถูก void = แก้เฉพาะในระบบ. สำเร็จ → `Account_Receipt.Paid_Type`
+     + `Payment_History.PaymentMethod` (แถวรับเงินของใบที่ใช้ชื่อเดิม) + `Account_Receipt_Edit_Log` (ก่อน/หลัง). retry หลังสำเร็จ = เห็นบัญชีใหม่บนเอกสารแล้วไม่ยิงซ้ำ.
+     ใบสำคัญจ่าย: ไม่ทำ UI (หน้า PaymentVoucher ทีมอื่น) — API client พร้อม (`ReclassifyPaymentSourceAsync`) ใช้กับ PV company (type 13) ได้.
+   - **③ ภาษีซื้อยังไม่ถึงกำหนด 11640** — `GET document/undue-input-vat` (DocumentController.cs:450-455 → DocumentService.cs:6343-6390; ไม่มีพารามิเตอร์ กรองเดือน/เลยกำหนดฝั่งเรา) +
+     ฟอร์ม → PUT ผู้ติดต่อผู้ขาย (เฉพาะช่องที่เปลี่ยน; เลขขึ้นต้น 0 = นิติบุคคล) → `POST document/{id}/complete-tax-invoice` {SupplierInvoiceNumber, SupplierTaxInvoiceDate,
+     SupplierBranchCode} (:398-412, สิทธิ์ Document.Purchase.Create; DocumentDtos.cs:395-410) → NextAcc ย้าย 11640→11610 เมื่อครบ (`ReclassifyUndueInputVatAsync` :15943; ครบ =
+     ชื่อ/เลข mod-11/ที่อยู่/สาขา/เลขที่/วันที่ใบกำกับ TaxInvoiceCompletenessChecker.cs:34-62; พ้น §82/3 6 เดือนไม่ย้าย :15957-15963) → อ่านรายการใหม่: หาย = สำเร็จ, ยังอยู่ = แสดงช่องที่ขาด.
+     ใบ ภ.พ.36 (IsForeignService) แสดงอย่างเดียว (เคลมผ่านหน้านำส่งภาษี).
+   - **④ e-Tax ใบลดหนี้** — `POST etax/generate` {DocumentId} (EtaxController.cs:61-68, สิทธิ์ EtaxIssue; CN → TypeCode 81 Helpers/EtaxDocumentTypeMap.cs:25-35; CN ต้องมี
+     RelatedDocumentId และต้นทางฝั่งขาย, ไม่ซ้ำ — EtaxInvoiceService.GenerateAsync) → ส่ง: `etax/{id}/submit` (:100-106, ต้อง Signed) หรือ `sign-and-submit` (:210-220).
+     เฉพาะใบลดหนี้ SYNCED ที่มีเอกสาร NextAcc (COMPANY_CN / ใบลดหนี้อัตโนมัติของ DEPOSIT_REFUND / INTEGRATION_CN; JOURNAL/LOCAL ไม่มีใบ). `CreditNote_Etax_Auto` (seed 0):
+     1 = หลังคิว CREATE_CREDIT_NOTE สำเร็จ ถ้าใบต้นทาง e-Tax ถึงกรมสรรพากร ออกให้เอง (ไม่โยน). สถานะเก็บ `Credit_Note.Etax_*`. **ส่งอีเมลเอกสาร** (ใบลดหนี้/ใบเสร็จ/ใบแทน):
+     `POST document/{id}/send-email` {To,…,AttachPdf} (DocumentController.cs:104-121, สิทธิ์ Document.Create; ล้ม = 200 success:false). (หมายเหตุ: `SendEtaxByEmailRequest` เดิม
+     ส่ง `recipientEmail` แต่ NextAcc รับ `To` — EmailDtos.cs:16 — ยังไม่แก้ในงานนี้)
+   - ไม่ทำ: `reissue-settlement-paid` (เฉพาะใบที่รอบโอน settlement ลงบัญชีแล้ว), webhooks, รายงาน NextAcc, AI แนะนำบัญชี (ดู audit §5). ไม่มี JS ใหม่. ต้อง build+test บน Windows.
 26. **หน้าตั้งค่า NextAcc แบ่งแท็บ + วิซาร์ดตั้งค่า 6 ขั้น (ต.ค. 2026, ไม่มี migration):** `Admin/Settings/AccountingIntegration.aspx` = 7 แท็บฝั่งเบราว์เซอร์
    (การเชื่อมต่อ · ผังบัญชี & แหล่งเงิน · โหมดการส่ง & นโยบาย · คิว & ตรวจสุขภาพ · เครื่องมือ (+ **โซนอันตราย** พับไว้: ลบใบที่หาย/เก็บกวาด/กลับมัดจำค้าง/รีเซ็ตการจอง/
    มัดจำด้วยมือ/void OTADOC — ทุกปุ่ม confirm) · อีเมลจอง & LINE · บันทึก (`action=recentSyncLog` อ่าน Logs 1-168 ชม., ไม่ใช่ Owner ตัดบรรทัดเงินเดือน)).
