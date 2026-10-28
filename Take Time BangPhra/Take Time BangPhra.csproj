@@ -977,6 +977,7 @@
     <Compile Include="Class\Integration\AccountingSyncService.VendorCn.cs" />
     <Compile Include="Class\Integration\QueueErrors.cs" />
     <Compile Include="Class\Integration\NextAccDocRefresh.cs" />
+    <Compile Include="Class\Integration\NextAccUi.cs" />
     <Compile Include="Class\Integration\AccountingSyncService.BuyerSync.cs" />
     <Compile Include="Class\Integration\ReceiptPreflight.cs" />
     <Compile Include="Class\Integration\ReceiptPreflight.Data.cs" />
@@ -1661,6 +1662,7 @@
     <Compile Include="Class\Payments\SecurityHoldService.cs" />
     <Compile Include="Class\Payments\PaymentChannelCatalog.cs" />
     <Compile Include="Class\Reports\TaxReportKit.cs" />
+    <Compile Include="Class\Reports\RevenueBySource.cs" />
     <Compile Include="Guest\MyPoints.aspx.cs">
       <DependentUpon>MyPoints.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>

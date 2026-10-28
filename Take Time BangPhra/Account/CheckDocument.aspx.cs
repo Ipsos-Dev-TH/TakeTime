@@ -20,6 +20,10 @@ namespace Take_Time_BangPhra.Account
         protected void Page_Load(object sender, EventArgs e)
         {
             if (!Perm.Guard(this, Perm.FinReceipt)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
+            // หน้าเก่า (มีเส้น sync/resync ของตัวเองซ้ำกับหน้าใหม่) — ส่งต่อไปหน้าตรวจสอบเอกสารขายหน้าใหม่ คงพารามิเตอร์เดิม
+            // (CLAUDE.md ข้อ 23). endResponse:true = จบคำขอทันที — postback เดิม (ปุ่มลบ/Sync ของหน้าเก่า) ไม่ถูกประมวลผลอีก
+            // ตรรกะด้านล่างคงไว้ให้ย้อนดูเท่านั้น (ไม่ถูกเรียกแล้ว)
+            Response.Redirect("~/Account/CheckDocument_New" + Request.Url.Query, true);
             this.MaintainScrollPositionOnPostBack = true;
             try
             {

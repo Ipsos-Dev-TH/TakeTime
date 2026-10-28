@@ -503,12 +503,82 @@ namespace Take_Time_BangPhra.Integration
                 sb.AppendLine($"<b>{icon} คิวบัญชี: {QueueErrors.BadgeTh(cls)}</b>");
                 sb.AppendLine($"คิว #{queueId}{(string.IsNullOrEmpty(receiptNumber) ? "" : " · ใบ " + System.Net.WebUtility.HtmlEncode(receiptNumber))}{(string.IsNullOrEmpty(rule) ? "" : " · " + System.Net.WebUtility.HtmlEncode(rule))}");
                 sb.AppendLine(System.Net.WebUtility.HtmlEncode(m));
-                sb.Append("<i>แก้ที่: Admin → ตั้งค่า → NextAcc → คิว (ปุ่ม \"แก้ที่นี่\")</i>");
+                string site = QueueLinkSiteBase();
+                sb.Append("🔗 <a href=\"" + System.Net.WebUtility.HtmlEncode(NextAccUi.QueueUrl(site, cls: QueueErrors.Code(cls), q: string.IsNullOrEmpty(receiptNumber) ? queueId.ToString(InvP) : receiptNumber))
+                          + "\">เปิดรายการนี้ในคิว (ปุ่ม \"แก้ที่นี่\")</a>");
                 string text = sb.ToString();
                 // อาจถูกเรียกจากคำขอหน้าเว็บ (EnqueueReceipt) — อย่าให้การส่ง Telegram หน่วงการบันทึก
                 Task.Run(() => { try { Notify.Send(Notify.Ev.AccQueueAlert, text); } catch { } });
             }
             catch { }
+        }
+
+        /// <summary>โดเมนของเว็บสำหรับลิงก์ใน Telegram (Payment_Site_BaseUrl → SiteBaseUrl → คำขอปัจจุบัน → ค่าเริ่มต้น)</summary>
+        private static string QueueLinkSiteBase()
+        {
+            try { return Take_Time_BangPhra.Payments.PaymentUrls.SiteBase(); }
+            catch { return ""; }
+        }
+
+        /// <summary>จำนวนรายการค้างตามชนิดปัญหา (FAILED หมดรอบ + PENDING ที่รอ) — ว่าง = ยังไม่รัน migration/ไม่มี</summary>
+        private Dictionary<string, int> QueueClassCounts()
+        {
+            var d = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            if (!ReceiptPreflight.QueueSchemaReady(_connectionString)) return d;
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT Error_Class, COUNT(*) AS N FROM Accounting_Sync_Queue
+                      WHERE Error_Class IS NOT NULL
+                        AND ((Status = 'FAILED' AND Retry_Count >= Max_Retries) OR (Status = 'PENDING' AND Error_Class = 'WAIT'))
+                      GROUP BY Error_Class", null);
+                if (dt != null)
+                    foreach (DataRow r in dt.Rows)
+                        d[r["Error_Class"]?.ToString() ?? "UNKNOWN"] = Convert.ToInt32(r["N"]);
+            }
+            catch { }
+            return d;
+        }
+
+        private static DateTime _lastDailySummaryCheck = DateTime.MinValue;
+
+        /// <summary>
+        /// สรุปคิวประจำวันทาง Telegram (วันละครั้ง หลัง Nexaacc_Queue_Daily_Summary_Hour = 9 น.) — ไม่มีอะไรค้าง = "ปกติดี"
+        /// ⇒ เจ้าของรู้ว่าระบบเตือนยังทำงาน (เงียบ ≠ ปกติ). ปิดได้ด้วย Nexaacc_Queue_Daily_Summary = 0 (ค่าเริ่มต้น 1).
+        /// จำวันที่ส่งแล้วใน Nexaacc_Queue_Daily_Summary_Last (รีสตาร์ทแอปไม่ส่งซ้ำ)
+        /// </summary>
+        private void SendDailyQueueSummaryIfDue(bool serverDown)
+        {
+            try
+            {
+                if ((DateTime.Now - _lastDailySummaryCheck).TotalMinutes < 15) return;
+                _lastDailySummaryCheck = DateTime.Now;
+                if (_config.GetConfigValue("Nexaacc_Queue_Daily_Summary", "1") != "1") return;
+                int hour;
+                if (!int.TryParse(_config.GetConfigValue("Nexaacc_Queue_Daily_Summary_Hour", "9"), out hour) || hour < 0 || hour > 23) hour = 9;
+                if (DateTime.Now.Hour < hour) return;
+                string today = DateTime.Today.ToString("yyyy-MM-dd", InvP);
+                if (_config.GetConfigValue("Nexaacc_Queue_Daily_Summary_Last", "") == today) return;
+
+                bool cls = ReceiptPreflight.QueueSchemaReady(_connectionString);
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"SELECT
+                        SUM(CASE WHEN Status = 'COMPLETED' AND Processed_Date >= DATEADD(DAY, -1, CAST(GETDATE() AS DATE))
+                                  AND Processed_Date < CAST(GETDATE() AS DATE) THEN 1 ELSE 0 END) AS DoneY,
+                        SUM(CASE WHEN Status = 'FAILED' AND Retry_Count >= Max_Retries THEN 1 ELSE 0 END) AS Dead,
+                        SUM(CASE WHEN Status = 'PENDING' AND " + (cls ? "Error_Class = 'WAIT'" : "1 = 0") + @" THEN 1 ELSE 0 END) AS Waiting,
+                        SUM(CASE WHEN Status IN ('PENDING','FAILED') AND Created_Date < DATEADD(HOUR, -6, GETDATE()) THEN 1 ELSE 0 END) AS Stale
+                      FROM Accounting_Sync_Queue
+                      WHERE Status IN ('PENDING','FAILED') OR Processed_Date >= DATEADD(DAY, -1, CAST(GETDATE() AS DATE))", null);
+                if (dt == null || dt.Rows.Count == 0) return;
+                Func<string, int> n = c => dt.Rows[0][c] != DBNull.Value ? Convert.ToInt32(dt.Rows[0][c]) : 0;
+
+                _config.SetConfig("Nexaacc_Queue_Daily_Summary_Last", today);   // ตั้งก่อนส่ง — ส่งไม่ได้ก็ไม่วนส่งทั้งวัน
+                string text = NextAccUi.DailySummaryHtml(DateTime.Today, n("DoneY"), n("Dead"), n("Waiting"), n("Stale"),
+                                                         serverDown, QueueLinkSiteBase());
+                Notify.Send(Notify.Ev.AccQueueAlert, text);
+            }
+            catch { /* สรุปประจำวันพังต้องไม่ทำให้คิวพัง */ }
         }
 
         /// <summary>บรรทัดสรุปรายชนิดสำหรับข้อความเตือนรอบ 6 ชม. (null = ไม่มี/ยังไม่รัน migration)</summary>

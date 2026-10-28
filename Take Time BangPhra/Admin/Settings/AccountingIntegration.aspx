@@ -95,8 +95,8 @@
     <div class="acc-page">
         <div class="page-header">
             <div>
-                <h1><i class="fas fa-calculator"></i> Accounting Integration Settings</h1>
-                <p>ตั้งค่าการเชื่อมต่อระบบบัญชี Nexaacc และจัดการ Sync Queue</p>
+                <h1><i class="fas fa-calculator"></i> ตั้งค่าเชื่อมระบบบัญชี NextAcc</h1>
+                <p>ตั้งค่าการเชื่อมต่อระบบบัญชี NextAcc ผูกบัญชี/แหล่งเงิน และดูคิวส่งข้อมูล</p>
             </div>
             <div class="header-actions">
                 <a href="<%= ResolveUrl("~/Admin/Settings/ConnectionSettings") %>" class="btn-primary" style="text-decoration:none; display:flex; align-items:center; gap:6px;">
@@ -107,22 +107,22 @@
 
         <div class="acc-grid">
             <!-- API Configuration -->
-            <div class="acc-card">
-                <h3><i class="fas fa-key"></i> API Configuration</h3>
+            <div class="acc-card" id="cardApi">
+                <h3><i class="fas fa-key"></i> การเชื่อมต่อ NextAcc</h3>
                 <div class="config-item">
-                    <label>Base URL</label>
+                    <label>ที่อยู่เซิร์ฟเวอร์ NextAcc (Base URL)</label>
                     <input type="text" id="cfgBaseUrl" placeholder="https://api.nexaacc.com" />
-                    <div class="help-text">URL ของ Nexaacc API Server</div>
+                    <div class="help-text">ที่อยู่ของเซิร์ฟเวอร์ NextAcc</div>
                 </div>
                 <div class="config-item">
-                    <label>Integration Key (int_) <span style="color:#c0392b;">*จำเป็น</span></label>
+                    <label>คีย์เชื่อมระบบ — Integration Key (ขึ้นต้น int_) <span style="color:#c0392b;">*จำเป็น</span></label>
                     <input type="password" id="cfgApiKey" placeholder="int_..." />
                     <div id="cfgApiKeyStatus" style="margin-top:4px; font-size:0.85em;"></div>
                     <div class="help-text">สร้างจาก NextAcc → เมนู <b>Integrations</b> (ไม่ใช่ API Keys). ใช้กับ sync หลัก
                         (/api/integration/* ผ่าน X-Integration-Key). คีย์นี้ครอบคลุม company endpoints ได้ด้วย</div>
                 </div>
                 <div class="config-item">
-                    <label>Company API Key (acc_) <span style="color:#7f8c8d;">— ไม่บังคับ</span></label>
+                    <label>คีย์บริษัท — Company API Key (ขึ้นต้น acc_) <span style="color:#7f8c8d;">— ไม่บังคับ</span></label>
                     <input type="password" id="cfgCompanyApiKey" placeholder="acc_... (เว้นว่าง = ใช้ int_ ตัวเดียว)" />
                     <div id="cfgCompanyApiKeyStatus" style="margin-top:4px; font-size:0.85em;"></div>
                     <div class="help-text">สร้างจาก NextAcc → เมนู <b>API Keys</b>. ตั้งคู่กับ int_ เพื่อให้ company endpoints
@@ -130,20 +130,20 @@
                         ผ่าน X-Api-Key (robust สุด ไม่พึ่ง fallback). เว้นว่าง → ใช้ int_ ตัวเดียว</div>
                 </div>
                 <div class="config-item">
-                    <label>Company ID (GUID)</label>
+                    <label>รหัสบริษัทใน NextAcc (Company ID)</label>
                     <input type="text" id="cfgCompanyId" placeholder="00000000-0000-0000-0000-000000000000" />
                 </div>
                 <div class="btn-row">
                     <button type="button" class="btn-success" onclick="saveConfig()"><i class="fas fa-save"></i> บันทึก</button>
-                    <button type="button" class="btn-primary" onclick="testApi()"><i class="fas fa-plug"></i> ทดสอบ Key (int_ + acc_)</button>
-                    <button type="button" class="btn-primary" onclick="syncAccounts()"><i class="fas fa-cloud-download-alt"></i> Sync บัญชี</button>
+                    <button type="button" class="btn-primary" onclick="testApi()"><i class="fas fa-plug"></i> ทดสอบคีย์</button>
+                    <button type="button" class="btn-primary" onclick="syncAccounts()"><i class="fas fa-cloud-download-alt"></i> ดึงผังบัญชี (Sync บัญชี)</button>
                 </div>
                 <div class="test-result" id="apiTestResult"></div>
             </div>
 
             <!-- Sync Settings -->
-            <div class="acc-card">
-                <h3><i class="fas fa-sync-alt"></i> Sync Settings</h3>
+            <div class="acc-card" id="cardSync">
+                <h3><i class="fas fa-sync-alt"></i> การส่งข้อมูลเข้าบัญชี</h3>
 
                 <!-- ⭐ ตั้งค่าแนะนำ (กดทีเดียว ตั้งค่าถูกทั้งชุด) -->
                 <div style="background:#e8f0fe; border:1px solid #4285f4; border-radius:6px; padding:12px; margin-bottom:14px;">
@@ -158,14 +158,14 @@
                 </div>
 
                 <div class="config-item">
-                    <label>เปิดใช้งาน Sync</label>
+                    <label>เปิดการส่งข้อมูลเข้า NextAcc</label>
                     <select id="cfgEnabled">
                         <option value="false">ปิด</option>
                         <option value="true">เปิด</option>
                     </select>
                 </div>
                 <div class="config-item">
-                    <label>โหมดการ Sync (ค่าเริ่มต้น)</label>
+                    <label>รูปแบบการส่งข้อมูล (ค่าเริ่มต้น)</label>
                     <select id="cfgSyncMode">
                         <option value="DOCUMENT">สร้างเอกสาร + บันทึกบัญชีอัตโนมัติ</option>
                         <option value="JOURNAL_ONLY">บันทึกสมุดบัญชีอย่างเดียว</option>
@@ -240,7 +240,7 @@
                         (Dr เงินสด/ธนาคาร · Cr รายได้สินค้า · Cr ภาษีขาย) + ตัดต้นทุน (Dr COGS · Cr สินค้าคงเหลือ)<br />
                         • <b>ลงบิลห้อง (Charge to room)</b> → <b>ตัดต้นทุนอย่างเดียว</b> เพราะรายได้ไปกับใบเสร็จตอนเช็คเอาท์อยู่แล้ว
                         (ไม่โพสต์รายได้ซ้ำ)<br />
-                        ต้องรัน migration <code>PHASE18_20</code> ก่อน — ออเดอร์เก่าก่อนติดตั้งถูกทำเครื่องหมาย LEGACY ไม่ถูกลงย้อนหลัง
+                        ต้องรัน <abbr title="สคริปต์ฐานข้อมูล: PHASE18_20" style="cursor:help;">การอัปเดตฐานข้อมูล</abbr> ก่อน — ออเดอร์เก่าก่อนติดตั้งถูกทำเครื่องหมาย LEGACY ไม่ถูกลงย้อนหลัง
                     </div>
                 </div>
                 <div class="config-item">
@@ -256,7 +256,7 @@
                         แล้วเงินที่ OTA โอนเข้ามาจริงค่อยไปตัดลูกหนี้ก้อนนี้ตอนปิดงวด payout (ค่าคอมเป็นค่าใช้จ่ายแยก)<br />
                         <b>ต้องตั้งก่อน:</b> map บัญชี <code>OTA_RECEIVABLE</code> (ลูกหนี้ OTA) ในผังบัญชี + กด "ดึง Chart of Accounts"
                         + ตั้ง Company ID ให้ใช้ company endpoints ได้ — ถ้ายังไม่ครบ ระบบจะ<b>ข้ามและเขียน log แจ้ง</b>
-                        (ไม่ลงเป็นเงินสดผิด ๆ). ต้องรัน migration <code>PHASE18_20</code> และ <code>PHASE18_11</code>
+                        (ไม่ลงเป็นเงินสดผิด ๆ). ต้องรัน <abbr title="สคริปต์ฐานข้อมูล: PHASE18_20, PHASE18_11" style="cursor:help;">การอัปเดตฐานข้อมูล</abbr>
                     </div>
                 </div>
                 <div class="config-item">
@@ -269,9 +269,9 @@
                         ใช้กับโหมดรับเงินประกันแบบ<b>โอนเข้าบัญชีโรงแรม</b> (Security_Hold_Mode = TRANSFER):
                         รับโอน → <b>Dr ธนาคาร (แหล่งเงินของช่องทางรับโอน) · Cr <code>SECURITY_DEPOSIT_LIABILITY</code></b>;
                         โอนคืน → กลับขา; หักค่าเสียหาย → <b>ไม่มี JE</b> — ส่วนที่หักถูกล้างด้วย<b>ใบเสร็จค่าเสียหาย</b>
-                        ที่เลือกแหล่งเงิน <b>"หักจากเงินประกัน (Security deposit)"</b> (migration <code>PHASE19_25</code>)
+                        ที่เลือกแหล่งเงิน <b>"หักจากเงินประกัน (Security deposit)"</b> (<abbr title="สคริปต์ฐานข้อมูล: PHASE19_25" style="cursor:help;">การอัปเดตฐานข้อมูล</abbr>)
                         → <b>Dr หนี้สิน · Cr รายได้ค่าเสียหาย + VAT</b> (ห้ามเลือกเงินสด/บัญชีรับโอน — นับเงินซ้ำ).
-                        ต้องรัน migration <code>PHASE19_24</code> + <code>PHASE19_25</code> + ผูก <code>SECURITY_DEPOSIT_LIABILITY</code> (ผังโรงแรม NextAcc 21530)
+                        ต้องรัน <abbr title="สคริปต์ฐานข้อมูล: PHASE19_24, PHASE19_25" style="cursor:help;">การอัปเดตฐานข้อมูล</abbr> + ผูก <code>SECURITY_DEPOSIT_LIABILITY</code> (ผังโรงแรม NextAcc 21530)
                         + ผูกบัญชีของแหล่งเงินรับโอน + ผูกแหล่งเงิน "หักจากเงินประกัน" กับ<b>บัญชีเดียวกับ</b> <code>SECURITY_DEPOSIT_LIABILITY</code>.
                         เงินประกันที่รับก่อนเปิดตัวเลือกนี้จะไม่ถูกลงขาออก (ไม่มีหนี้สินให้ล้าง — ออกใบเสร็จด้วยบัญชีรับโอนตามเดิม)
                     </div>
@@ -288,11 +288,11 @@
                         (ตั้งบัญชี/ผู้ซื้อรายช่องทางที่หัวข้อ <b>"OTA → บัญชี/ผู้ซื้อ"</b> ด้านล่าง; ช่องทางที่ยังไม่ตั้งใช้ OTA_RECEIVABLE แทน)<br />
                         เปิดตัวนี้อย่างเดียวก็ทำงาน และ<b>แทนที่</b>ตัวเลือกด้านบน — การจองหนึ่งรายการถูกโพสต์ทางเดียวเสมอ
                         (ใช้เครื่องหมาย <code>Ota_Revenue_Ref</code> ร่วมกัน ไม่ลงซ้ำ). การจองที่เคยโพสต์ไปแล้วไม่ถูกทำซ้ำ.
-                        ต้องรัน migration <code>PHASE19_21</code> + ตั้ง Company ID (company endpoint)
+                        ต้องรัน <abbr title="สคริปต์ฐานข้อมูล: PHASE19_21" style="cursor:help;">การอัปเดตฐานข้อมูล</abbr> + ตั้ง Company ID (company endpoint)
                     </div>
                 </div>
                 <div class="config-item">
-                    <label>Sync จำนวนสต๊อก → NextAcc (ขาออก)</label>
+                    <label>ส่งจำนวนสต๊อก → NextAcc (ขาออก)</label>
                     <select id="cfgStockQtySync">
                         <option value="false">ปิด</option>
                         <option value="true">เปิด — ดันจำนวนรับเข้า/ตัดออก ไป NextAcc (/product/stock/adjust)</option>
@@ -303,7 +303,7 @@
                     </div>
                 </div>
                 <div class="config-item">
-                    <label>Sync จำนวนสต๊อก ← NextAcc (ขากลับ)</label>
+                    <label>ดึงจำนวนสต๊อก ← NextAcc (ขากลับ)</label>
                     <select id="cfgStockQtyPull">
                         <option value="false">ปิด</option>
                         <option value="true">เปิด — ดึงการปรับสต๊อกที่ทำฝั่ง NextAcc กลับเข้า TakeTime</option>
@@ -345,7 +345,7 @@
                     </div>
                 </div>
                 <div class="config-item">
-                    <label>ใบลดหนี้ / คืนเงินลูกค้า (PHASE19_33)</label>
+                    <label>ใบลดหนี้ / คืนเงินลูกค้า</label>
                     <label style="font-weight:normal;display:block">
                         <input type="checkbox" id="cfgCreditNoteEnabled" onchange="this.setAttribute('data-loaded','1');" />
                         เปิดระบบใบลดหนี้ (CreditNote_Enabled)
@@ -592,7 +592,7 @@
                     <div class="help-text">เลือก SMTP เฉพาะกรณี NextAcc email service ปิดอยู่ — ระบบจะดึง PDF/XML มาแนบเอง</div>
                 </div>
                 <div class="config-item">
-                    <label>Fallback ผ่าน TakeTime SMTP</label>
+                    <label>ส่งสำรองผ่านอีเมล (SMTP) ของระบบนี้</label>
                     <select id="cfgEtaxEmailFallback">
                         <option value="true">เปิด — ถ้า NextAcc ส่งไม่สำเร็จ ให้ส่งผ่าน SMTP ของ TakeTime</option>
                         <option value="false">ปิด — รายงาน error อย่างเดียว</option>
@@ -600,22 +600,22 @@
                     <div class="help-text">SMTP จะดึง PDF/XML จาก URL ของ NextAcc มาแนบในอีเมล (ตั้ง SMTP ใน Web.config)</div>
                 </div>
                 <div class="config-item" style="border-top:1px solid #ddd; margin-top:15px; padding-top:15px;">
-                    <label>Sync Interval (วินาที)</label>
+                    <label>รอบตรวจคิว (วินาที)</label>
                     <input type="number" id="cfgSyncInterval" value="30" min="10" max="3600" />
                     <div class="help-text">ระยะเวลาระหว่าง queue processing cycles (10-3600 วินาที)</div>
                 </div>
                 <div class="config-item">
-                    <label>Max Retries</label>
+                    <label>ลองใหม่อัตโนมัติสูงสุด (ครั้ง)</label>
                     <input type="number" id="cfgMaxRetries" value="5" min="1" max="20" />
                     <div class="help-text">จำนวนครั้งสูงสุดที่จะ retry หาก sync ล้มเหลว</div>
                 </div>
                 <div class="config-item">
-                    <label>API Timeout (วินาที)</label>
+                    <label>รอ NextAcc ตอบสูงสุด (วินาที)</label>
                     <input type="number" id="cfgTimeout" value="30" min="5" max="120" />
                 </div>
                 <div class="btn-row">
                     <button type="button" class="btn-success" onclick="saveSyncSettings()"><i class="fas fa-save"></i> บันทึก</button>
-                    <button type="button" class="btn-warning" onclick="processQueue()"><i class="fas fa-play"></i> Process Queue ตอนนี้</button>
+                    <button type="button" class="btn-warning" onclick="processQueue()"><i class="fas fa-play"></i> ส่งคิวตอนนี้</button>
                     <button type="button" class="btn-danger" onclick="reconcileDeleted()"><i class="fas fa-trash-alt"></i> ตรวจ &amp; ลบใบที่หายจาก NextAcc</button>
                     <button type="button" class="btn-warning" onclick="cleanupOrphanReceipts()"><i class="fas fa-broom"></i> เก็บกวาดใบรับเงิน orphan</button>
                     <button type="button" class="btn-danger" onclick="cleanupDepositDebris()"><i class="fas fa-undo"></i> กลับ JV มัดจำค้าง (churn)</button>
@@ -647,7 +647,7 @@
         </div>
 
         <!-- 📧 อ่านอีเมลจอง OTA (STAAH) → ลงจองอัตโนมัติ -->
-        <div class="journey-card">
+        <div class="journey-card" id="cardEmail">
             <h3><i class="fas fa-envelope-open-text"></i> อ่านอีเมลจอง OTA (STAAH) → ลงจองอัตโนมัติ</h3>
             <p style="font-size:13px; color:#666; margin-bottom:15px;">
                 อ่านอีเมลจอง STAAH (Agoda/Booking.com ฯลฯ) จาก Gmail แล้วลงจองในระบบให้อัตโนมัติ — แทนโปรแกรมภายนอกเดิม.<br/>
@@ -986,7 +986,7 @@
             <div id="depositStatusResult"></div>
 
             <div style="border-top:1px solid #ddd; margin-top:20px; padding-top:15px;">
-                <h4 style="margin:0 0 10px 0; font-size:14px;"><i class="fas fa-bolt"></i> Manual Operations (ใช้กรณีระบบ auto ไม่ได้ทำงาน)</h4>
+                <h4 style="margin:0 0 10px 0; font-size:14px;"><i class="fas fa-bolt"></i> ทำรายการด้วยมือ (ใช้เมื่อระบบอัตโนมัติไม่ได้ทำงาน)</h4>
                 <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-bottom:10px;">
                     <div>
                         <label style="font-weight:600;">Reservation ID</label>
@@ -1012,7 +1012,7 @@
 
         <!-- Document Source Lookup (เชื่อมระหว่าง TakeTime ↔ NextAcc ↔ E-Tax) -->
         <div class="journey-card">
-            <h3><i class="fas fa-link"></i> Document Source — ตรวจสอบที่มาของเอกสาร</h3>
+            <h3><i class="fas fa-link"></i> ที่มาของเอกสาร — TakeTime ↔ NextAcc ↔ e-Tax</h3>
             <p style="font-size:13px; color:#666; margin-bottom:15px;">
                 ค้นหาด้วยเลขที่ใบเสร็จหรือเลขจอง — ระบบจะแสดง: ที่มาของเอกสาร (LOCAL/NEXAACC), เลขเอกสาร NextAcc, สถานะ E-Tax, ลูกค้า, ลิงก์ PDF/XML
             </p>
@@ -1026,39 +1026,23 @@
             <div id="docSourceResult"></div>
         </div>
 
-        <!-- Stock Adjustment / Write-off -->
+        <!-- ปรับสต๊อก / ตัดจำหน่าย — เครื่องมือเดิมปลดระวางแล้ว (CLAUDE.md ข้อ 23): ข้ามเหตุผลจ่ายออก/อนุมัติ/หลักฐาน/ภาษีขาย
+             ของสินค้าที่ถือว่าขาย และลงซ้ำกับหน้าตรวจนับได้ → ใช้ Product/Stock. คงแค่ปุ่มส่งข้อมูลสินค้า (ไม่ลงบัญชี) -->
         <div class="journey-card">
-            <h3><i class="fas fa-boxes"></i> Stock Adjustment & Write-off</h3>
-            <p style="font-size:13px; color:#666; margin-bottom:15px;">
-                บันทึกการนับสต็อก (count variance) หรือตัดจำหน่ายสินค้าเสียหาย/หมดอายุ — ระบบจะสร้าง journal entry ใน NextAcc อัตโนมัติ
+            <h3><i class="fas fa-boxes"></i> ปรับสต๊อก / ตัดจำหน่าย — ย้ายไปหน้าตรวจนับแล้ว</h3>
+            <p style="font-size:13px; color:#666; margin-bottom:12px;">
+                เครื่องมือปรับสต๊อก/ตัดจำหน่ายแบบเดิมในหน้านี้<b>ปิดแล้ว</b> — ไม่มีเหตุผลการจ่ายออก การอนุมัติ หลักฐาน
+                และภาษีขายของสินค้าที่ถือว่าขาย (สูญหาย/เจ้าของใช้เอง ม.77/1(8)) และอาจลงบัญชีซ้ำกับการเบิกในหน้าสต๊อก.
+                ใช้หน้า <a href="<%= ResolveUrl("~/Product/Stock") %>"><b>ตรวจนับ / ปรับสต๊อก</b></a> แทน
             </p>
-            <div style="display:grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap:10px; margin-bottom:10px;">
+            <div style="display:flex; gap:10px; align-items:end; flex-wrap:wrap;">
+                <a class="btn-primary" style="text-decoration:none;" href="<%= ResolveUrl("~/Product/Stock") %>"><i class="fas fa-boxes"></i> ไปหน้าตรวจนับ / ปรับสต๊อก</a>
                 <div>
-                    <label style="font-weight:600;">Product ID</label>
-                    <input type="number" id="stockProductId" style="width:100%; padding:8px;" />
+                    <label style="font-weight:600; display:block;">รหัสสินค้า (ส่งข้อมูลสินค้าขึ้น NextAcc)</label>
+                    <input type="number" id="stockProductId" style="width:180px; padding:8px;" />
                 </div>
-                <div>
-                    <label style="font-weight:600;">Quantity</label>
-                    <input type="number" id="stockQuantity" step="0.01" placeholder="+/- จำนวน" style="width:100%; padding:8px;" />
-                </div>
-                <div>
-                    <label style="font-weight:600;">Cost / unit</label>
-                    <input type="number" id="stockCostPerUnit" step="0.01" placeholder="ต้นทุน/หน่วย" style="width:100%; padding:8px;" />
-                </div>
-                <div>
-                    <label style="font-weight:600;">เหตุผล</label>
-                    <input type="text" id="stockReason" placeholder="เช่น นับสต็อก/หมดอายุ/แตก" style="width:100%; padding:8px;" />
-                </div>
-            </div>
-            <div style="display:flex; gap:10px;">
-                <button type="button" class="btn-primary" onclick="stockAdjustment('COUNT_VARIANCE')">
-                    <i class="fas fa-balance-scale"></i> ปรับยอดจากการนับ (+/- diff)
-                </button>
-                <button type="button" class="btn-danger" onclick="stockAdjustment('WRITEOFF')">
-                    <i class="fas fa-trash-alt"></i> ตัดจำหน่ายสินค้า (Write-off)
-                </button>
                 <button type="button" class="btn-success" onclick="stockProductSync()">
-                    <i class="fas fa-sync"></i> Sync Product Master
+                    <i class="fas fa-sync"></i> ส่งข้อมูลสินค้า (ไม่ลงบัญชี)
                 </button>
             </div>
             <div class="test-result" id="stockResult" style="margin-top:10px;"></div>
@@ -1066,7 +1050,7 @@
 
         <!-- E-Tax Manual Operations -->
         <div class="journey-card">
-            <h3><i class="fas fa-file-invoice"></i> E-Tax Manual Operations</h3>
+            <h3><i class="fas fa-file-invoice"></i> e-Tax — สร้าง/ส่งอีเมลด้วยมือ</h3>
             <p style="font-size:13px; color:#666; margin-bottom:15px;">
                 สร้าง E-Tax ด้วยมือ หรือส่งอีเมล E-Tax ให้ลูกค้าซ้ำ — ใช้เมื่อต้องการดำเนินการเฉพาะใบเสร็จ หรือกรณี auto-generate ปิดอยู่
             </p>
@@ -1092,7 +1076,7 @@
 
         <!-- Guest Journey Accounting Map -->
         <div class="journey-card">
-            <h3><i class="fas fa-route"></i> Guest Journey - Accounting Events Map</h3>
+            <h3><i class="fas fa-route"></i> เส้นทางผู้เข้าพัก — รายการบัญชีที่เกิดขึ้น</h3>
             <p style="font-size:13px; color:#666; margin-bottom:20px;">แผนผังแสดงทุก Event ที่เกิดขึ้นตลอด Journey ของการเข้าพัก พร้อมการบันทึกบัญชีอัตโนมัติ</p>
 
             <div class="journey-flow">
@@ -1182,7 +1166,7 @@
 
         <!-- Queue Monitor -->
         <div class="journey-card">
-            <h3><i class="fas fa-tasks"></i> Sync Queue Monitor</h3>
+            <h3><i class="fas fa-tasks"></i> คิวส่งข้อมูลเข้า NextAcc</h3>
 
             <!-- 🩺 ตรวจสุขภาพ integration: จับปัญหา (mapping ชี้บัญชีที่ไม่มี, แหล่งเงินยังไม่ผูก,
                  คิวตายค้าง, NextAcc ล่ม) ก่อนที่เอกสารจริงจะ sync ไม่ผ่าน -->
@@ -1216,11 +1200,11 @@
 
             <div class="queue-stats" id="queueStats">
                 <div class="queue-stat" onclick="filterByStatus('')" id="qsAll"><div class="num" id="qsTotal" style="color:#333;">-</div><div class="lbl">ทั้งหมด</div></div>
-                <div class="queue-stat" onclick="filterByStatus('PENDING')" id="qsPendingCard"><div class="num num-pending" id="qsPending">-</div><div class="lbl">Pending</div></div>
-                <div class="queue-stat" onclick="filterByStatus('PROCESSING')" id="qsProcessingCard"><div class="num num-processing" id="qsProcessing">-</div><div class="lbl">Processing</div></div>
-                <div class="queue-stat" onclick="filterByStatus('COMPLETED')" id="qsCompletedCard"><div class="num num-completed" id="qsCompleted">-</div><div class="lbl">Completed</div></div>
-                <div class="queue-stat" onclick="filterByStatus('FAILED')" id="qsFailedCard"><div class="num num-failed" id="qsFailed">-</div><div class="lbl">Failed</div></div>
-                <div class="queue-stat" onclick="filterByStatus('AWAITING_SLIP')" id="qsSlipCard" title="พักรอตรวจสลิป (PHASE19_34) — ปล่อยเมื่อสลิปผ่าน/อนุมัติ"><div class="num" id="qsSlip" style="color:#8E24AA;">-</div><div class="lbl">รอตรวจสลิป</div></div>
+                <div class="queue-stat" onclick="filterByStatus('PENDING')" id="qsPendingCard"><div class="num num-pending" id="qsPending">-</div><div class="lbl">รอส่ง</div></div>
+                <div class="queue-stat" onclick="filterByStatus('PROCESSING')" id="qsProcessingCard"><div class="num num-processing" id="qsProcessing">-</div><div class="lbl">กำลังส่ง</div></div>
+                <div class="queue-stat" onclick="filterByStatus('COMPLETED')" id="qsCompletedCard"><div class="num num-completed" id="qsCompleted">-</div><div class="lbl">สำเร็จ</div></div>
+                <div class="queue-stat" onclick="filterByStatus('FAILED')" id="qsFailedCard"><div class="num num-failed" id="qsFailed">-</div><div class="lbl">ล้มเหลว</div></div>
+                <div class="queue-stat" onclick="filterByStatus('AWAITING_SLIP')" id="qsSlipCard" title="พักรอตรวจสลิป — ปล่อยเมื่อสลิปผ่าน/อนุมัติที่หน้าตรวจสลิปโอน"><div class="num" id="qsSlip" style="color:#8E24AA;">-</div><div class="lbl">รอตรวจสลิป</div></div>
             </div>
 
             <!-- PHASE19_37: ชนิดปัญหา (ใครต้องทำอะไร) + โหมดตัวตรวจก่อนส่ง -->
@@ -1242,7 +1226,12 @@
             <div class="queue-toolbar">
                 <div class="queue-toolbar-left">
                     <button type="button" class="btn-primary" onclick="loadQueueData()"><i class="fas fa-sync"></i> รีเฟรช</button>
-                    <button type="button" class="btn-warning" onclick="retryAllFailed()"><i class="fas fa-redo"></i> Retry Failed ทั้งหมด</button>
+                    <button type="button" class="btn-warning" onclick="retryAllFailed()" title="ลองใหม่เฉพาะชนิดที่ปลอดภัย (ชั่วคราว/ไม่ทราบสาเหตุ/รอนานเกิน) — ข้ามรายการที่อาจซ้ำ ต้องใบลดหนี้ ต้องตั้งค่า หรือต้องแก้ข้อมูล"><i class="fas fa-redo"></i> ลองใหม่ที่ล้มเหลวทั้งหมด</button>
+                    <input type="search" id="queueSearch" placeholder="ค้นหา: เลขใบเสร็จ / เลขจอง / เลขเอกสาร NextAcc / เลขคิว"
+                           style="padding:6px 8px; min-width:260px; border:1px solid #ddd; border-radius:4px; font-size:13px;"
+                           onkeydown="if(event.key==='Enter'){event.preventDefault();searchQueue();}" />
+                    <button type="button" class="btn-default" onclick="searchQueue()"><i class="fas fa-search"></i> ค้นหา</button>
+                    <button type="button" class="btn-default" id="btnQueueSearchClear" style="display:none;" onclick="clearQueueSearch()">ล้างการค้นหา</button>
                     <button type="button" id="btnDeleteSelected" style="background:#dc3545;color:#fff;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:13px;display:none;" onclick="deleteSelected()"><i class="fas fa-trash"></i> ลบที่เลือก (<span id="selectedCount">0</span>)</button>
                 </div>
                 <div class="queue-toolbar-right">
@@ -1257,20 +1246,22 @@
                 </div>
             </div>
 
+            <div id="retryAllResult" style="margin:0 0 10px;"></div>
+
             <div style="overflow-x:auto;">
                 <table class="queue-table" id="queueTable">
                     <thead>
                         <tr>
                             <th style="width:30px;"><input type="checkbox" id="selectAllQueue" onchange="toggleSelectAll(this)" title="เลือกทั้งหมด" /></th>
-                            <th>ID</th>
-                            <th>Entity</th>
-                            <th>Action</th>
-                            <th>Status</th>
-                            <th>NextAcc Doc</th>
+                            <th>เลขคิว</th>
+                            <th>รายการ</th>
+                            <th>งาน</th>
+                            <th>สถานะ</th>
+                            <th>เอกสาร NextAcc</th>
                             <th>ตรวจสอบ</th>
-                            <th>Retry</th>
-                            <th>Error</th>
-                            <th>Created</th>
+                            <th>ครั้งที่ลอง</th>
+                            <th>ข้อผิดพลาด</th>
+                            <th>สร้างเมื่อ</th>
                             <th></th>
                         </tr>
                     </thead>
@@ -1298,23 +1289,23 @@
 
         <!-- Account Mapping Management -->
         <div class="journey-card">
-            <h3><i class="fas fa-exchange-alt"></i> Account Mapping (TakeTime &harr; Nexaacc)</h3>
+            <h3><i class="fas fa-exchange-alt"></i> ผูกบัญชี (TakeTime &harr; NextAcc)</h3>
             <p style="font-size:13px; color:#666; margin-bottom:10px;">
-                จับคู่รหัสบัญชี TakeTime กับ Nexaacc — กด "Sync บัญชี" ด้านบนเพื่อดึงผังบัญชีล่าสุด
+                จับคู่รหัสบัญชีของระบบนี้กับผังบัญชี NextAcc — กด "ดึงผังบัญชี" ด้านบนเพื่อดึงผังบัญชีล่าสุด
             </p>
             <div style="font-size:12px; color:#888; margin-bottom:15px;" id="accountSyncInfo">
                 <i class="fas fa-info-circle"></i> <span id="accountSyncStatus">ยังไม่ได้โหลดข้อมูล</span>
             </div>
 
             <div class="btn-row" style="margin-bottom:15px;">
-                <button type="button" class="btn-primary" onclick="loadMappingsWithAccounts()"><i class="fas fa-sync"></i> โหลด Mapping</button>
+                <button type="button" class="btn-primary" onclick="loadMappingsWithAccounts()"><i class="fas fa-sync"></i> โหลดการผูกบัญชี</button>
                 <select id="mappingTypeFilter" style="padding:6px 10px; border:1px solid #ddd; border-radius:4px; font-size:13px;" onchange="filterMappingsByType()">
                     <option value="">ทุกประเภท</option>
-                    <option value="PAYMENT_METHOD">PAYMENT_METHOD</option>
-                    <option value="REVENUE">REVENUE</option>
-                    <option value="EXPENSE">EXPENSE</option>
-                    <option value="ASSET">ASSET</option>
-                    <option value="LIABILITY">LIABILITY</option>
+                    <option value="PAYMENT_METHOD">วิธีรับ/จ่ายเงิน</option>
+                    <option value="REVENUE">รายได้</option>
+                    <option value="EXPENSE">ค่าใช้จ่าย</option>
+                    <option value="ASSET">สินทรัพย์</option>
+                    <option value="LIABILITY">หนี้สิน</option>
                 </select>
             </div>
 
@@ -1322,16 +1313,16 @@
                 <table class="queue-table" id="mappingTable">
                     <thead>
                         <tr>
-                            <th>TakeTime Code</th>
+                            <th>รหัสในระบบ</th>
                             <th>คำอธิบาย</th>
-                            <th style="min-width:260px;">บัญชี Nexaacc</th>
+                            <th style="min-width:260px;">บัญชี NextAcc</th>
                             <th>ประเภท</th>
                             <th>สถานะ</th>
                             <th></th>
                         </tr>
                     </thead>
                     <tbody id="mappingBody">
-                        <tr><td colspan="6" style="text-align:center; color:#999;">กดปุ่ม "โหลด Mapping" เพื่อดูข้อมูล</td></tr>
+                        <tr><td colspan="6" style="text-align:center; color:#999;">กดปุ่ม "โหลดการผูกบัญชี" เพื่อดูข้อมูล</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -1368,7 +1359,7 @@
         </div>
 
         <!-- Online gateway → แหล่งเงินรายผู้ให้บริการ -->
-        <div class="journey-card">
+        <div class="journey-card" id="cardGateway">
             <h3><i class="fas fa-globe"></i> รับชำระออนไลน์ (เกตเวย์) &rarr; แหล่งเงิน</h3>
             <p style="font-size:13px; color:#666; margin-bottom:10px;">
                 ยอดที่ลูกค้าจ่ายผ่านเกตเวย์ยังไม่เข้าธนาคารจนกว่าผู้ให้บริการโอน (payout หลังหักค่าธรรมเนียม) — ควรลง
@@ -1397,7 +1388,7 @@
         </div>
 
         <!-- OTA → บัญชี/ผู้ซื้อ (Channel Collect documents) -->
-        <div class="journey-card">
+        <div class="journey-card" id="cardOta">
             <h3><i class="fas fa-hotel"></i> OTA &rarr; บัญชี/ผู้ซื้อ (เงินที่ OTA เก็บแทน)</h3>
             <p style="font-size:13px; color:#666; margin-bottom:10px;">
                 ใช้กับโหมด <b>RECEIPT_DOC</b> (ตั้งที่ Sync Settings): การจอง Channel Collect ของช่องทางนี้จะออกใบเสร็จรับเงินใน NextAcc
@@ -1469,10 +1460,38 @@
 
     <script>
         var pageUrl = '<%= ResolveUrl("~/Admin/Settings/AccountingIntegration") %>';
-        var queueState = { page: 1, pageSize: 20, status: '', cls: '', totalPages: 1 };
+        var queueState = { page: 1, pageSize: 20, status: '', cls: '', q: '', totalPages: 1 };
+        var appBase = '<%= ResolveUrl("~/") %>'.replace(/\/$/, '');
+
+        // ลิงก์จาก Telegram/หน้าอื่น: ?cls=DATA / ?status=FAILED / ?q=REC… → ตั้งตัวกรองคิวก่อนโหลด
+        function initQueueFromQuery() {
+            try {
+                var q = new URLSearchParams(window.location.search);
+                var st = (q.get('status') || '').toUpperCase(), cls = (q.get('cls') || '').toUpperCase(), qq = q.get('q') || '';
+                if (/^[A-Z_]{3,20}$/.test(st)) queueState.status = st;
+                else if (/^[A-Z]{3,12}$/.test(cls)) queueState.cls = cls;
+                if (qq) { queueState.q = qq.substring(0, 100); var box = document.getElementById('queueSearch'); if (box) box.value = queueState.q; }
+            } catch (e) { }
+        }
+
+        function searchQueue() {
+            var box = document.getElementById('queueSearch');
+            queueState.q = box ? box.value.trim() : '';
+            queueState.page = 1;
+            loadQueueData();
+        }
+
+        function clearQueueSearch() {
+            var box = document.getElementById('queueSearch');
+            if (box) box.value = '';
+            queueState.q = '';
+            queueState.page = 1;
+            loadQueueData();
+        }
 
         document.addEventListener('DOMContentLoaded', function () {
             loadConfigData();
+            initQueueFromQuery();
             loadQueueData();
             preloadNexaaccAccounts();
             focusFromQuery();
@@ -1569,7 +1588,7 @@
                         cnEn.disabled = true; cnAp.disabled = true;
                         cnEn.removeAttribute('data-loaded'); cnAp.removeAttribute('data-loaded');
                         var cnHelp = document.getElementById('cfgCreditNoteHelp');
-                        if (cnHelp) cnHelp.textContent = 'ยังไม่ได้รัน Database/PHASE19_Migration_33_Credit_Notes.sql — รันก่อนจึงจะเปิดใช้ได้ (ระหว่างนี้ปุ่มยกเลิกการจองแบบเดิมทำงานตามปกติ)';
+                        if (cnHelp) { cnHelp.textContent = 'ยังไม่ได้อัปเดตฐานข้อมูลส่วนใบลดหนี้ — ให้ผู้ดูแลระบบอัปเดตก่อนจึงจะเปิดใช้ได้ (ระหว่างนี้ปุ่มยกเลิกการจองแบบเดิมทำงานตามปกติ)'; cnHelp.title = 'สคริปต์ฐานข้อมูล: Database/PHASE19_Migration_33_Credit_Notes.sql'; }
                     }
                 }
                 document.getElementById('cfgDepositDrivesJournal').checked = !!cfg.depositDrivesJournal;
@@ -1599,14 +1618,14 @@
                 var intStatus = document.getElementById('cfgApiKeyStatus');
                 if (cfg.hasApiKey) {
                     document.getElementById('cfgApiKey').placeholder = '••••••••  (มี Integration Key อยู่แล้ว — ใส่ค่าใหม่เพื่อเปลี่ยน)';
-                    intStatus.innerHTML = '<span style="color:#27ae60;">✓ ตั้งค่าแล้ว: <code>' + (cfg.apiKeyMask || '••••') + '</code></span>';
+                    intStatus.innerHTML = '<span style="color:#27ae60;">✓ ตั้งค่าแล้ว: <code>' + escapeHtml(cfg.apiKeyMask || '••••') + '</code></span>';
                 } else {
                     intStatus.innerHTML = '<span style="color:#c0392b;">✗ ยังไม่ได้ตั้ง Integration Key (จำเป็น)</span>';
                 }
                 var accStatus = document.getElementById('cfgCompanyApiKeyStatus');
                 if (cfg.hasCompanyApiKey) {
                     document.getElementById('cfgCompanyApiKey').placeholder = '••••••••  (มี acc_ key อยู่แล้ว — ใส่ค่าใหม่เพื่อเปลี่ยน / ใส่ "-" เพื่อล้าง)';
-                    accStatus.innerHTML = '<span style="color:#27ae60;">✓ ตั้งค่าแล้ว (acc_ แยก): <code>' + (cfg.companyApiKeyMask || '••••') + '</code></span>';
+                    accStatus.innerHTML = '<span style="color:#27ae60;">✓ ตั้งค่าแล้ว (acc_ แยก): <code>' + escapeHtml(cfg.companyApiKeyMask || '••••') + '</code></span>';
                 } else {
                     accStatus.innerHTML = '<span style="color:#7f8c8d;">ℹ ยังไม่ได้ตั้ง acc_ แยก — company endpoints จะใช้ Integration Key (int_) ผ่าน X-Api-Key fallback</span>';
                 }
@@ -1660,7 +1679,7 @@
                     : '<span style="color:#7f8c8d;">ℹ ใช้ token ของ LINE OA เดิม</span>';
                 if (cfg.lineDailyLastSent) {
                     var lr = document.getElementById('lineDailyResult');
-                    if (lr) lr.innerHTML = '<span style="color:#7f8c8d;">ส่งอัตโนมัติล่าสุด: ' + cfg.lineDailyLastSent + '</span>';
+                    if (lr) lr.innerHTML = '<span style="color:#7f8c8d;">ส่งอัตโนมัติล่าสุด: ' + escapeHtml(cfg.lineDailyLastSent) + '</span>';
                 }
                 updateJourneyMap();
             } catch (e) { console.error(e); }
@@ -1751,7 +1770,7 @@
                 .then(function(r) { clearTimeout(timeoutId); return r.json(); })
                 .then(function(data) {
                     el.className = 'test-result ' + (data.success ? 'success' : 'error');
-                    el.innerHTML = (data.success ? '<i class="fas fa-check-circle"></i> ' : '<i class="fas fa-times-circle"></i> ') + data.message;
+                    el.innerHTML = (data.success ? '<i class="fas fa-check-circle"></i> ' : '<i class="fas fa-times-circle"></i> ') + escapeHtml(data.message);
                     if (data.success) {
                         nexaaccAccountsCache = [];
                         preloadNexaaccAccounts();
@@ -1761,7 +1780,7 @@
                     clearTimeout(timeoutId);
                     el.className = 'test-result error';
                     var msg = err.name === 'AbortError' ? 'หมดเวลา — เซิร์ฟเวอร์ไม่ตอบกลับภายใน 60 วินาที' : err.message;
-                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + msg;
+                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + escapeHtml(msg);
                 });
         }
 
@@ -1817,7 +1836,7 @@
                 })
                 .catch(function(err) {
                     el.className = 'test-result error';
-                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + err.message;
+                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + escapeHtml(err.message);
                 });
         }
 
@@ -1843,7 +1862,7 @@
                 })
                 .catch(function(err) {
                     el.className = 'test-result error';
-                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + err.message;
+                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + escapeHtml(err.message);
                 });
         }
 
@@ -1857,7 +1876,7 @@
                 .then(function(r) { clearTimeout(timeoutId); return r.json(); })
                 .then(function(data) {
                     el.className = 'test-result ' + (data.success ? 'success' : 'error');
-                    var html = (data.success ? '<i class="fas fa-check-circle"></i> ' : '<i class="fas fa-times-circle"></i> ') + data.message;
+                    var html = (data.success ? '<i class="fas fa-check-circle"></i> ' : '<i class="fas fa-times-circle"></i> ') + escapeHtml(data.message);
                     if (data.detail) html += '<pre style="margin-top:8px; white-space:pre-wrap; font-size:12px;">' + escHtml(data.detail) + '</pre>';
                     el.innerHTML = html;
                 })
@@ -1865,7 +1884,7 @@
                     clearTimeout(timeoutId);
                     el.className = 'test-result error';
                     var msg = err.name === 'AbortError' ? 'หมดเวลา — เซิร์ฟเวอร์ไม่ตอบกลับภายใน 120 วินาที' : err.message;
-                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + msg;
+                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + escapeHtml(msg);
                 });
         }
 
@@ -1888,7 +1907,7 @@
                 .then(function(r) { clearTimeout(timeoutId); return r.json(); })
                 .then(function(data) {
                     el.className = 'test-result ' + (data.success ? 'success' : 'error');
-                    var html = (data.success ? '<i class="fas fa-check-circle"></i> ' : '<i class="fas fa-times-circle"></i> ') + data.message;
+                    var html = (data.success ? '<i class="fas fa-check-circle"></i> ' : '<i class="fas fa-times-circle"></i> ') + escapeHtml(data.message);
                     if (data.detail) html += '<pre style="margin-top:8px; white-space:pre-wrap; font-size:12px;">' + escHtml(data.detail) + '</pre>';
                     el.innerHTML = html;
                 })
@@ -1896,7 +1915,7 @@
                     clearTimeout(timeoutId);
                     el.className = 'test-result error';
                     var msg = err.name === 'AbortError' ? 'หมดเวลา — เซิร์ฟเวอร์ไม่ตอบกลับภายใน 5 นาที (งานอาจยังทำต่อเบื้องหลัง ดู logs)' : err.message;
-                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + msg;
+                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + escapeHtml(msg);
                 });
         }
 
@@ -1916,9 +1935,7 @@
                 .catch(function(err) { alert('ปิดไม่สำเร็จ: ' + err.message); });
         }
 
-        function escHtml(s) {
-            return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        }
+        function escHtml(s) { return escapeHtml(s); }
 
         function loadEmailLog() {
             var el = document.getElementById('emailRsvLog');
@@ -1927,7 +1944,7 @@
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     if (!data.success) {
-                        el.innerHTML = '<div class="test-result error"><i class="fas fa-times-circle"></i> ' + (data.message || 'โหลด logs ไม่สำเร็จ') + '</div>';
+                        el.innerHTML = '<div class="test-result error"><i class="fas fa-times-circle"></i> ' + escapeHtml(data.message || 'โหลด logs ไม่สำเร็จ') + '</div>';
                         return;
                     }
                     if (!data.items || data.items.length === 0) {
@@ -1952,7 +1969,7 @@
                     el.innerHTML = html;
                 })
                 .catch(function(err) {
-                    el.innerHTML = '<div class="test-result error"><i class="fas fa-times-circle"></i> ' + err.message + '</div>';
+                    el.innerHTML = '<div class="test-result error"><i class="fas fa-times-circle"></i> ' + escapeHtml(err.message) + '</div>';
                 });
         }
 
@@ -1988,7 +2005,7 @@
                 .then(function(r) { clearTimeout(timeoutId); return r.json(); })
                 .then(function(data) {
                     el.className = 'test-result ' + (data.success ? 'success' : 'error');
-                    var html = (data.success ? '<i class="fas fa-check-circle"></i> ' : '<i class="fas fa-times-circle"></i> ') + data.message;
+                    var html = (data.success ? '<i class="fas fa-check-circle"></i> ' : '<i class="fas fa-times-circle"></i> ') + escapeHtml(data.message);
                     if (data.detail) html += '<pre style="margin-top:8px; white-space:pre-wrap; font-size:12px;">' + escHtml(data.detail) + '</pre>';
                     el.innerHTML = html;
                     if (withImage && data.imageUrl && prev) {
@@ -2000,7 +2017,7 @@
                     clearTimeout(timeoutId);
                     el.className = 'test-result error';
                     var msg = err.name === 'AbortError' ? 'หมดเวลา (120 วินาที)' : err.message;
-                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + msg;
+                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + escapeHtml(msg);
                 });
         }
 
@@ -2017,7 +2034,7 @@
             fetch(pageUrl + '?action=lineDailyLog&_=' + Date.now())
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
-                    if (!data.success) { el.innerHTML = '<div class="test-result error">' + (data.message || 'โหลดไม่สำเร็จ') + '</div>'; return; }
+                    if (!data.success) { el.innerHTML = '<div class="test-result error">' + escapeHtml(data.message || 'โหลดไม่สำเร็จ') + '</div>'; return; }
                     if (!data.items || data.items.length === 0) { el.innerHTML = '<div class="test-result">ยังไม่มี log</div>'; return; }
                     var html = '<div style="max-height:280px; overflow:auto; border:1px solid #e0e0e0; border-radius:4px;">' +
                         '<table style="width:100%; border-collapse:collapse; font-size:12px;">' +
@@ -2034,7 +2051,7 @@
                     html += '</tbody></table></div>';
                     el.innerHTML = html;
                 })
-                .catch(function(err) { el.innerHTML = '<div class="test-result error">' + err.message + '</div>'; });
+                .catch(function(err) { el.innerHTML = '<div class="test-result error">' + escapeHtml(err.message) + '</div>'; });
         }
 
         function reconcileDeleted() {
@@ -2071,13 +2088,13 @@
                 .then(function(r) { clearTimeout(timeoutId); return r.json(); })
                 .then(function(data) {
                     el.className = 'test-result ' + (data.success ? 'success' : 'error');
-                    el.innerHTML = (data.success ? '<i class="fas fa-check-circle"></i> ' : '<i class="fas fa-times-circle"></i> ') + data.message;
+                    el.innerHTML = (data.success ? '<i class="fas fa-check-circle"></i> ' : '<i class="fas fa-times-circle"></i> ') + escapeHtml(data.message);
                 })
                 .catch(function(err) {
                     clearTimeout(timeoutId);
                     el.className = 'test-result error';
                     var msg = err.name === 'AbortError' ? 'หมดเวลา — เซิร์ฟเวอร์ไม่ตอบกลับภายใน 120 วินาที' : err.message;
-                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + msg;
+                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + escapeHtml(msg);
                 });
         }
 
@@ -2090,10 +2107,10 @@
                 .then(function(r){ return r.json(); })
                 .then(function(d){
                     el.className = 'test-result ' + (d.success ? 'success' : 'error');
-                    el.innerHTML = (d.success ? '<i class="fas fa-check-circle"></i> ' : '<i class="fas fa-times-circle"></i> ') + d.message;
+                    el.innerHTML = (d.success ? '<i class="fas fa-check-circle"></i> ' : '<i class="fas fa-times-circle"></i> ') + escapeHtml(d.message);
                     if (d.success) setTimeout(function(){ location.reload(); }, 2500);
                 })
-                .catch(function(err){ el.className = 'test-result error'; el.innerHTML = '<i class="fas fa-times-circle"></i> ' + err.message; });
+                .catch(function(err){ el.className = 'test-result error'; el.innerHTML = '<i class="fas fa-times-circle"></i> ' + escapeHtml(err.message); });
         }
 
         function grniReconcile() {
@@ -2107,15 +2124,15 @@
                 .then(function(d) {
                     if (!d.success) {
                         el.className = 'test-result error';
-                        el.innerHTML = '<i class="fas fa-times-circle"></i> ' + (d.message || 'ไม่สำเร็จ');
+                        el.innerHTML = '<i class="fas fa-times-circle"></i> ' + escapeHtml(d.message || 'ไม่สำเร็จ');
                         return;
                     }
                     el.className = 'test-result success';
                     var net = parseFloat(d.netOpen || 0);
                     var color = Math.abs(net) < 0.01 ? '#28a745' : '#c0392b';
-                    var html = '<div style="font-size:14px;">บัญชี GRNI <b>' + (d.accountCode || '-') + '</b> · คงค้างสุทธิ '
+                    var html = '<div style="font-size:14px;">บัญชี GRNI <b>' + escapeHtml(d.accountCode || '-') + '</b> · คงค้างสุทธิ '
                         + '<b style="color:' + color + ';">' + net.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) + '</b></div>';
-                    html += '<div style="margin:4px 0 8px;">' + (d.interpretation || '') + '</div>';
+                    html += '<div style="margin:4px 0 8px;">' + escapeHtml(d.interpretation || '') + '</div>';
                     if (d.items && d.items.length) {
                         html += '<table style="width:100%; border-collapse:collapse; font-size:12px;">'
                             + '<thead><tr style="background:#f5f5f5;"><th style="padding:4px 6px; text-align:left;">อ้างอิง</th>'
@@ -2123,9 +2140,9 @@
                             + '<th style="padding:4px 6px; text-align:right;">รับของ (Cr GRNI)</th></tr></thead><tbody>';
                         d.items.forEach(function(it) {
                             html += '<tr' + (it.Voided ? ' style="color:#999;text-decoration:line-through;"' : '') + '>'
-                                + '<td style="padding:3px 6px;">' + (it.Reference||'') + '</td>'
-                                + '<td style="padding:3px 6px;">' + (it.DocNumber||'-') + '</td>'
-                                + '<td style="padding:3px 6px; text-align:center;">' + (it.Date||'') + '</td>'
+                                + '<td style="padding:3px 6px;">' + escapeHtml(it.Reference||'') + '</td>'
+                                + '<td style="padding:3px 6px;">' + escapeHtml(it.DocNumber||'-') + '</td>'
+                                + '<td style="padding:3px 6px; text-align:center;">' + escapeHtml(it.Date||'') + '</td>'
                                 + '<td style="padding:3px 6px; text-align:right;">' + parseFloat(it.Amount||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</td></tr>';
                         });
                         html += '</tbody></table>';
@@ -2135,7 +2152,7 @@
                 .catch(function(err) {
                     clearTimeout(timeoutId);
                     el.className = 'test-result error';
-                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + (err.name === 'AbortError' ? 'หมดเวลา 60 วินาที' : err.message);
+                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + (err.name === 'AbortError' ? 'หมดเวลา 60 วินาที' : escapeHtml(err.message));
                 });
         }
 
@@ -2151,7 +2168,7 @@
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     if (!data.success) {
-                        el.innerHTML = '<div class="test-result error"><i class="fas fa-times-circle"></i> ' + data.message + '</div>';
+                        el.innerHTML = '<div class="test-result error"><i class="fas fa-times-circle"></i> ' + escapeHtml(data.message) + '</div>';
                         return;
                     }
                     if (!data.items || data.items.length === 0) {
@@ -2176,21 +2193,21 @@
                                   : it.depositStatus === 'OVER_CLEARED' ? '#dc3545'
                                   : '#6c757d';
                         html += '<tr style="border-bottom:1px solid #eee;">'
-                              + '<td style="padding:8px; font-family:monospace;">#' + it.reservationId + '<br/><small>' + (it.reservationStatus || '-') + '</small></td>'
-                              + '<td style="padding:8px;">' + (it.customerName || '-') + '<br/><small style="color:#999;">' + (it.customerMobilePhone || '') + '</small></td>'
+                              + '<td style="padding:8px; font-family:monospace;">#' + escapeHtml(it.reservationId) + '<br/><small>' + escapeHtml(it.reservationStatus || '-') + '</small></td>'
+                              + '<td style="padding:8px;">' + escapeHtml(it.customerName || '-') + '<br/><small style="color:#999;">' + escapeHtml(it.customerMobilePhone || '') + '</small></td>'
                               + '<td style="padding:8px;">' + (it.checkoutDate ? new Date(it.checkoutDate).toLocaleDateString('th-TH') : '-') + '</td>'
                               + '<td style="padding:8px; text-align:right;">' + Number(it.depositPaid).toLocaleString('th-TH', {minimumFractionDigits:2}) + '</td>'
                               + '<td style="padding:8px; text-align:right;">' + Number(it.depositCleared).toLocaleString('th-TH', {minimumFractionDigits:2}) + '</td>'
                               + '<td style="padding:8px; text-align:right; font-weight:600;">' + Number(it.depositOutstanding).toLocaleString('th-TH', {minimumFractionDigits:2}) + '</td>'
-                              + '<td style="padding:8px;"><span style="background:' + color + '; color:white; padding:2px 8px; border-radius:3px; font-size:11px;">' + it.depositStatus + '</span></td>'
-                              + '<td style="padding:8px;">' + (it.lastClearAction || '-') + (it.lastClearDate ? '<br/><small>' + new Date(it.lastClearDate).toLocaleString('th-TH') + '</small>' : '') + '</td>'
+                              + '<td style="padding:8px;"><span style="background:' + color + '; color:white; padding:2px 8px; border-radius:3px; font-size:11px;">' + escapeHtml(it.depositStatus) + '</span></td>'
+                              + '<td style="padding:8px;">' + escapeHtml(it.lastClearAction || '-') + (it.lastClearDate ? '<br/><small>' + new Date(it.lastClearDate).toLocaleString('th-TH') + '</small>' : '') + '</td>'
                               + '</tr>';
                     });
                     html += '</tbody></table>';
                     el.innerHTML = html;
                 })
                 .catch(function(err) {
-                    el.innerHTML = '<div class="test-result error"><i class="fas fa-times-circle"></i> ' + err.message + '</div>';
+                    el.innerHTML = '<div class="test-result error"><i class="fas fa-times-circle"></i> ' + escapeHtml(err.message) + '</div>';
                 });
         }
 
@@ -2227,7 +2244,7 @@
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     if (!data.success) {
-                        el.innerHTML = '<div class="test-result error"><i class="fas fa-times-circle"></i> ' + data.message + '</div>';
+                        el.innerHTML = '<div class="test-result error"><i class="fas fa-times-circle"></i> ' + escapeHtml(data.message) + '</div>';
                         return;
                     }
                     if (!data.items || data.items.length === 0) {
@@ -2251,47 +2268,26 @@
                         var syncColor = it.syncStatus === 'COMPLETED' ? '#28a745' : (it.syncStatus === 'FAILED' ? '#dc3545' : '#ffc107');
                         var etaxColor = it.etaxStatus ? (it.etaxStatus === 'FAILED' ? '#dc3545' : '#28a745') : '#999';
                         html += '<tr style="border-bottom:1px solid #eee;">'
-                              + '<td style="padding:8px; font-family:monospace;">' + (it.receiptNumber || '-') + '</td>'
-                              + '<td style="padding:8px;">' + (it.reservationId || '-') + '</td>'
+                              + '<td style="padding:8px; font-family:monospace;">' + escapeHtml(it.receiptNumber || '-') + '</td>'
+                              + '<td style="padding:8px;">' + escapeHtml(it.reservationId || '-') + '</td>'
                               + '<td style="padding:8px; text-align:right;">' + (it.total ? Number(it.total).toLocaleString('th-TH', {minimumFractionDigits:2}) : '-') + '</td>'
-                              + '<td style="padding:8px;"><span style="background:' + sourceColor + '; color:white; padding:2px 8px; border-radius:3px; font-size:11px;">' + it.documentSource + '</span></td>'
-                              + '<td style="padding:8px; font-family:monospace; font-size:11px;">' + (it.nexaaccDocId ? (it.nexaaccUrl ? '<a href="' + it.nexaaccUrl + '" target="_blank" class="nexaacc-doc-link">' + it.nexaaccDocId.substring(0,12) + '... <i class="fas fa-external-link-alt"></i></a>' : it.nexaaccDocId.substring(0,12) + '...') : '-') + '</td>'
-                              + '<td style="padding:8px;"><span style="color:' + syncColor + ';">' + (it.syncStatus || '-') + '</span></td>'
-                              + '<td style="padding:8px;">' + (it.etaxStatus ? '<span style="color:' + etaxColor + ';">' + it.etaxStatus + (it.etaxRefNumber ? ' (' + it.etaxRefNumber + ')' : '') + '</span>' : '-') + (it.etaxEmailSent ? ' ✉' : '') + '</td>'
-                              + '<td style="padding:8px;">' + (it.customerName || '-') + (it.customerEmail ? '<br/><small style="color:#999;">' + it.customerEmail + '</small>' : '') + '</td>'
-                              + '<td style="padding:8px;">' + (it.etaxPdfUrl ? '<a href="' + it.etaxPdfUrl + '" target="_blank">PDF</a>' : '-') + (it.etaxXmlUrl ? ' / <a href="' + it.etaxXmlUrl + '" target="_blank">XML</a>' : '') + '</td>'
+                              + '<td style="padding:8px;"><span style="background:' + sourceColor + '; color:white; padding:2px 8px; border-radius:3px; font-size:11px;">' + escapeHtml(it.documentSource) + '</span></td>'
+                              + '<td style="padding:8px; font-family:monospace; font-size:11px;">' + (it.nexaaccDocId ? (it.nexaaccUrl ? '<a href="' + escapeHtml(it.nexaaccUrl) + '" target="_blank" class="nexaacc-doc-link">' + escapeHtml(String(it.nexaaccDocId).substring(0,12)) + '... <i class="fas fa-external-link-alt"></i></a>' : escapeHtml(String(it.nexaaccDocId).substring(0,12)) + '...') : '-') + '</td>'
+                              + '<td style="padding:8px;"><span style="color:' + syncColor + ';">' + escapeHtml(it.syncStatus || '-') + '</span></td>'
+                              + '<td style="padding:8px;">' + (it.etaxStatus ? '<span style="color:' + etaxColor + ';">' + escapeHtml(it.etaxStatus) + (it.etaxRefNumber ? ' (' + escapeHtml(it.etaxRefNumber) + ')' : '') + '</span>' : '-') + (it.etaxEmailSent ? ' ✉' : '') + '</td>'
+                              + '<td style="padding:8px;">' + escapeHtml(it.customerName || '-') + (it.customerEmail ? '<br/><small style="color:#999;">' + escapeHtml(it.customerEmail) + '</small>' : '') + '</td>'
+                              + '<td style="padding:8px;">' + (it.etaxPdfUrl ? '<a href="' + escapeHtml(it.etaxPdfUrl) + '" target="_blank">PDF</a>' : '-') + (it.etaxXmlUrl ? ' / <a href="' + escapeHtml(it.etaxXmlUrl) + '" target="_blank">XML</a>' : '') + '</td>'
                               + '</tr>';
                     });
                     html += '</tbody></table>';
                     el.innerHTML = html;
                 })
                 .catch(function(err) {
-                    el.innerHTML = '<div class="test-result error"><i class="fas fa-times-circle"></i> ' + err.message + '</div>';
+                    el.innerHTML = '<div class="test-result error"><i class="fas fa-times-circle"></i> ' + escapeHtml(err.message) + '</div>';
                 });
         }
 
-        // ── Stock Adjustment / Write-off / Product Sync ──
-
-        function stockAdjustment(adjustType) {
-            var productId = document.getElementById('stockProductId').value;
-            var qty = document.getElementById('stockQuantity').value;
-            var cost = document.getElementById('stockCostPerUnit').value;
-            var reason = document.getElementById('stockReason').value;
-            var el = document.getElementById('stockResult');
-            if (!productId || !qty || !cost) {
-                el.className = 'test-result error';
-                el.innerHTML = '<i class="fas fa-times-circle"></i> กรุณากรอก Product ID, Quantity, Cost ให้ครบ';
-                return;
-            }
-            postAction({
-                action: 'stockAdjustment',
-                adjustType: adjustType,
-                productId: productId,
-                quantity: qty,
-                costPerUnit: cost,
-                reason: reason
-            }, 'stockResult');
-        }
+        // ── ส่งข้อมูลสินค้า (เครื่องมือปรับสต๊อกเดิมปลดระวางแล้ว — ใช้ Product/Stock) ──
 
         function stockProductSync() {
             var productId = document.getElementById('stockProductId').value;
@@ -2391,7 +2387,7 @@
             var open = item.status === 'FAILED' || (item.status === 'PENDING' && c === 'WAIT');
             if (!open) return '<div style="font-size:10.5px; color:#999;" title="ชนิดปัญหาที่เคยเกิดกับรายการนี้">เคย: ' + m.label + '</div>';
             var t = m.icon + ' ' + m.label + (item.errorRule ? ' · ' + escapeHtml(item.errorRule) : '');
-            if (c === 'WAIT' && item.dependsOn) t += ' #' + item.dependsOn;
+            if (c === 'WAIT' && item.dependsOn) t += ' #' + (parseInt(item.dependsOn, 10) || 0);
             return '<div style="margin-top:3px;"><span style="font-size:11px; padding:2px 7px; border-radius:10px; background:' + m.bg + '; color:' + m.fg + ';"'
                  + (item.waitSince ? ' title="รอตั้งแต่ ' + escapeHtml(item.waitSince) + '"' : '') + '>' + t + '</span></div>';
         }
@@ -2401,11 +2397,11 @@
             var open = item.status === 'FAILED' || (item.status === 'PENDING' && c === 'WAIT');
             if (!open || item.sensitive) return '';
             if (item.fixUrl && /^\/[A-Za-z]/.test(item.fixUrl))
-                return '<a href="' + escapeHtml(item.fixUrl) + '" target="_blank" class="btn-primary" style="padding:4px 10px; font-size:11px; text-decoration:none; display:inline-block; margin:1px 0;" title="เปิดหน้าที่ต้องแก้">🛠 แก้ที่นี่</a> ';
+                return '<a href="' + escapeHtml(appBase + item.fixUrl) + '" target="_blank" class="btn-primary" style="padding:4px 10px; font-size:11px; text-decoration:none; display:inline-block; margin:1px 0;" title="เปิดหน้าที่ต้องแก้">🛠 แก้ที่นี่</a> ';
             if (c === 'WAIT' && item.dependsOn)
-                return '<button type="button" class="btn-default" style="padding:4px 10px; font-size:11px;" onclick="showItemLogs(' + item.dependsOn + ')" title="ดูรายการที่รอ">รอ #' + item.dependsOn + '</button> ';
+                return '<button type="button" class="btn-default" style="padding:4px 10px; font-size:11px;" onclick="showItemLogs(' + (parseInt(item.dependsOn, 10) || 0) + ')" title="ดูรายการที่รอ">รอ #' + (parseInt(item.dependsOn, 10) || 0) + '</button> ';
             if (c === 'DUPLICATE' && item.nexaaccUrl)
-                return '<a href="' + item.nexaaccUrl + '" target="_blank" class="btn-default" style="padding:4px 10px; font-size:11px;">ตรวจบน NextAcc</a> ';
+                return '<a href="' + escapeHtml(item.nexaaccUrl) + '" target="_blank" class="btn-default" style="padding:4px 10px; font-size:11px;">ตรวจบน NextAcc</a> ';
             return '';
         }
 
@@ -2444,26 +2440,50 @@
         function runPreflightScan() { runPfAction('preflightScan&days=30', 'กำลังสแกน'); }
         function runIntegrityScan() { runPfAction('integrityScan', 'กำลังตรวจ'); }
 
-        // ลิงก์ "แก้ที่นี่" ของคิว: ?focus=mapping&key=ROOM_REVENUE / ?focus=paidHow → เลื่อนไปหัวข้อนั้น + ไฮไลต์
+        // ลิงก์ "แก้ที่นี่" (คิว/ตรวจสุขภาพ/Telegram): ?focus=mapping&key=ROOM_REVENUE / paidHow / gateway / ota / api / sync / email / queue
         function focusFromQuery() {
             try {
                 var q = new URLSearchParams(window.location.search);
-                var f = q.get('focus');
-                if (!f) return;
-                var target = f === 'paidHow' ? document.getElementById('paidHowTable') : document.getElementById('mappingTable');
-                if (!target) return;
-                setTimeout(function () {
-                    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    target.style.outline = '3px solid #FFB300';
-                    var key = q.get('key');
-                    if (key) {
-                        var rows = target.querySelectorAll('tr');
-                        for (var i = 0; i < rows.length; i++) {
-                            if ((rows[i].textContent || '').indexOf(key) >= 0) { rows[i].style.background = '#FFF8E1'; rows[i].scrollIntoView({ block: 'center' }); break; }
-                        }
-                    }
-                }, 1500);
+                if (q.get('focus') || q.get('cls') || q.get('status') || q.get('q')) applyFocus(q, true);
             } catch (e) { }
+        }
+
+        function applyFocus(q, fromUrl) {
+            var f = q.get('focus') || ((q.get('cls') || q.get('status') || q.get('q')) ? 'queue' : '');
+            if (!f) return;
+            var key = q.get('key');
+            var loaders = {
+                mapping: { el: 'mappingTable', load: typeof loadMappingsWithAccounts === 'function' ? loadMappingsWithAccounts : null },
+                paidHow: { el: 'paidHowTable', load: typeof loadPaidHowMapping === 'function' ? loadPaidHowMapping : null },
+                gateway: { el: 'cardGateway', load: typeof loadGatewayPaidHow === 'function' ? loadGatewayPaidHow : null },
+                ota: { el: 'cardOta', load: typeof loadOtaChannelMap === 'function' ? loadOtaChannelMap : null },
+                paidType: { el: 'paidTypeTable', load: typeof loadPaidTypeMapping === 'function' ? loadPaidTypeMapping : null },
+                api: { el: 'cardApi' }, sync: { el: 'cardSync' }, email: { el: 'cardEmail' },
+                health: { el: 'healthResult' }, queue: { el: 'queueStats' }
+            };
+            var cfg = loaders[f] || loaders.sync;
+            if (f === 'queue' && !fromUrl) {
+                var st = (q.get('status') || '').toUpperCase(), cls = (q.get('cls') || '').toUpperCase();
+                queueState.status = /^[A-Z_]{3,20}$/.test(st) ? st : '';
+                queueState.cls = !queueState.status && /^[A-Z]{3,12}$/.test(cls) ? cls : '';
+                queueState.page = 1;
+                updateFilterUI();
+                loadQueueData();
+            }
+            if (cfg.load) { try { cfg.load(); } catch (e) { } }
+            setTimeout(function () {
+                var target = document.getElementById(cfg.el);
+                if (!target) return;
+                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                target.style.outline = '3px solid #FFB300';
+                setTimeout(function () { target.style.outline = ''; }, 6000);
+                if (key) {
+                    var rows = target.querySelectorAll('tr');
+                    for (var i = 0; i < rows.length; i++) {
+                        if ((rows[i].textContent || '').indexOf(key) >= 0) { rows[i].style.background = '#FFF8E1'; rows[i].scrollIntoView({ block: 'center' }); break; }
+                    }
+                }
+            }, cfg.load ? 1500 : 200);
         }
 
         function changePageSize() {
@@ -2494,7 +2514,10 @@
                 + '&pageSize=' + queueState.pageSize
                 + (queueState.status ? '&status=' + queueState.status : '')
                 + (queueState.cls ? '&cls=' + queueState.cls : '')
+                + (queueState.q ? '&q=' + encodeURIComponent(queueState.q) : '')
                 + '&_=' + Date.now();
+            var clr = document.getElementById('btnQueueSearchClear');
+            if (clr) clr.style.display = queueState.q ? 'inline-block' : 'none';
 
             fetch(url)
                 .then(function(r) { return r.json(); })
@@ -2540,8 +2563,9 @@
             updateSelectedCount();
 
             if (!items.length) {
-                var msg = queueState.status ? 'ไม่มีรายการสถานะ ' + queueState.status : 'ไม่มีรายการใน Queue';
-                tbody.innerHTML = '<tr><td colspan="11" style="text-align:center; color:#999;">' + msg + '</td></tr>';
+                var msg = queueState.q ? 'ไม่พบรายการที่ตรงกับ "' + queueState.q + '"'
+                        : (queueState.status ? 'ไม่มีรายการสถานะนี้' : 'ไม่มีรายการในคิว');
+                tbody.innerHTML = '<tr><td colspan="11" style="text-align:center; color:#999;">' + escapeHtml(msg) + '</td></tr>';
                 return;
             }
             var html = '';
@@ -2552,25 +2576,26 @@
                 var openCls = (item.status === 'FAILED' || (item.status === 'PENDING' && item.errorClass === 'WAIT')) ? item.errorClass : '';
                 var rowStyle = item.sensitive ? ' style="background:#f9f3ff; opacity:0.85;"' : '';
                 html += '<tr' + rowStyle + '>';
-                html += '<td><input type="checkbox" class="queue-check" value="' + item.id + '" onchange="updateSelectedCount()" /></td>';
-                html += '<td>' + item.id + '</td>';
-                html += '<td>' + item.entityType + ' #' + item.entityId + '</td>';
-                html += '<td>' + item.actionType + '</td>';
-                html += '<td><span class="status-badge ' + statusClass + '">' + item.status + '</span>' + classBadge(item) + '</td>';
+                var qid = parseInt(item.id, 10) || 0;
+                html += '<td><input type="checkbox" class="queue-check" value="' + qid + '" onchange="updateSelectedCount()" /></td>';
+                html += '<td>' + qid + '</td>';
+                html += '<td title="' + escapeHtml(item.entityType) + '">' + escapeHtml(item.entityLabel || item.entityType) + ' #' + escapeHtml(item.entityId) + '</td>';
+                html += '<td title="' + escapeHtml(item.actionType) + '">' + escapeHtml(item.actionLabel || item.actionType) + '</td>';
+                html += '<td><span class="status-badge ' + statusClass + '" title="' + escapeHtml(item.status) + '">' + escapeHtml(item.statusLabel || item.status) + '</span>' + classBadge(item) + '</td>';
                 // NextAcc Document column
                 html += '<td>';
                 if (item.nexaaccDocNumber) {
                     if (item.nexaaccUrl) {
-                        html += '<a href="' + item.nexaaccUrl + '" target="_blank" class="nexaacc-doc-link" title="เปิดใน NextAcc">' + item.nexaaccDocNumber + ' <i class="fas fa-external-link-alt"></i></a>';
+                        html += '<a href="' + escapeHtml(item.nexaaccUrl) + '" target="_blank" class="nexaacc-doc-link" title="เปิดใน NextAcc">' + escapeHtml(item.nexaaccDocNumber) + ' <i class="fas fa-external-link-alt"></i></a>';
                     } else {
-                        html += '<span class="nexaacc-doc-label">' + item.nexaaccDocNumber + '</span>';
+                        html += '<span class="nexaacc-doc-label">' + escapeHtml(item.nexaaccDocNumber) + '</span>';
                     }
                 } else if (item.nexaaccId && item.status === 'COMPLETED') {
-                    var shortId = item.nexaaccId.substring(0, 8) + '...';
+                    var shortId = String(item.nexaaccId).substring(0, 8) + '...';
                     if (item.nexaaccUrl) {
-                        html += '<a href="' + item.nexaaccUrl + '" target="_blank" class="nexaacc-doc-link" title="' + item.nexaaccId + '">' + shortId + ' <i class="fas fa-external-link-alt"></i></a>';
+                        html += '<a href="' + escapeHtml(item.nexaaccUrl) + '" target="_blank" class="nexaacc-doc-link" title="' + escapeHtml(item.nexaaccId) + '">' + escapeHtml(shortId) + ' <i class="fas fa-external-link-alt"></i></a>';
                     } else {
-                        html += '<span class="nexaacc-doc-label" title="' + item.nexaaccId + '">' + shortId + '</span>';
+                        html += '<span class="nexaacc-doc-label" title="' + escapeHtml(item.nexaaccId) + '">' + escapeHtml(shortId) + '</span>';
                     }
                 } else {
                     html += '-';
@@ -2579,39 +2604,44 @@
                 // ตรวจสอบ (post-sync verify) ✅ PASS / ⚠ WARN — tooltip = รายละเอียด
                 html += '<td style="text-align:center;">';
                 if (item.verifyStatus === 'PASS') {
-                    html += '<span title="' + (item.verifyDetail || '').replace(/"/g, '&quot;') + '" style="color:#2E7D32; cursor:help;">✅</span>';
+                    html += '<span title="' + escapeHtml(item.verifyDetail) + '" style="color:#2E7D32; cursor:help;">✅</span>';
                 } else if (item.verifyStatus === 'WARN') {
-                    html += '<span title="' + (item.verifyDetail || '').replace(/"/g, '&quot;') + '" style="color:#C62828; cursor:help; font-weight:600;">⚠</span>';
+                    html += '<span title="' + escapeHtml(item.verifyDetail) + '" style="color:#C62828; cursor:help; font-weight:600;">⚠</span>';
                 } else {
                     html += '<span style="color:#ccc;">–</span>';
                 }
                 html += '</td>';
-                html += '<td>' + item.retryCount + '/' + item.maxRetries + '</td>';
-                html += '<td style="max-width:200px; overflow:hidden; text-overflow:ellipsis;" title="' + (item.error || '').replace(/"/g, '&quot;') + '">' + (item.error || '-') + '</td>';
-                html += '<td>' + item.created + '</td>';
+                html += '<td>' + escapeHtml(item.retryCount) + '/' + escapeHtml(item.maxRetries) + '</td>';
+                // ข้อความ error มาจาก NextAcc/คิว (บางครั้งเป็นหน้า HTML ทั้งหน้า หรือมีชื่อลูกค้า) — encode ทั้งใน title และเนื้อหา
+                html += '<td style="max-width:200px; overflow:hidden; text-overflow:ellipsis;" title="' + escapeHtml(item.error) + '">' + (item.error ? escapeHtml(item.error) : '-') + '</td>';
+                html += '<td>' + escapeHtml(item.created) + '</td>';
                 html += '<td>';
                 if (item.sensitive) {
                     html += '<span style="font-size:11px; color:#999;">🔒</span>';
                 } else {
                     html += fixHereLink(item);
+                    var dup = item.status === 'FAILED' && openCls === 'DUPLICATE';
                     if (item.status === 'FAILED' && openCls === 'DATA') {
-                        // ข้อมูลผิด: Retry เปล่าไม่ช่วย → ตรวจซ้ำ (คืนเข้าคิวเฉพาะเมื่อผ่าน)
-                        html += '<button type="button" class="btn-primary" style="padding:4px 10px; font-size:11px;" onclick="recheckItem(' + item.id + ')" title="ตรวจข้อมูลใบใหม่ — ผ่านแล้วคืนเข้าคิว">ตรวจซ้ำ</button> ';
+                        // ข้อมูลผิด: ลองใหม่เปล่าไม่ช่วย → ตรวจซ้ำ (คืนเข้าคิวเฉพาะเมื่อผ่าน)
+                        html += '<button type="button" class="btn-primary" style="padding:4px 10px; font-size:11px;" onclick="recheckItem(' + qid + ')" title="ตรวจข้อมูลใบใหม่ — ผ่านแล้วคืนเข้าคิว">ตรวจซ้ำ</button> ';
                     } else if (item.status === 'FAILED' && (openCls === 'CONFIG' || openCls === 'POLICY')) {
-                        // ตั้งค่า: กลับเข้าคิวเองเมื่อบันทึก mapping · นโยบาย: ต้องใบลดหนี้ — Retry ซ่อนไว้ (Owner ยังกดได้จากปุ่ม ↻ ยิงใหม่)
+                        // ตั้งค่า: กลับเข้าคิวเองเมื่อบันทึก mapping · นโยบาย: ต้องใบลดหนี้ — ซ่อนปุ่มลองใหม่
+                    } else if (dup) {
+                        // อาจสร้างเอกสารบน NextAcc ไปแล้ว — ตรวจก่อน · ลองใหม่ได้เฉพาะเจ้าของระบบพร้อมเหตุผล (บันทึก log)
+                        html += '<button type="button" class="btn-default" style="padding:4px 10px; font-size:11px;" onclick="retryDuplicate(' + qid + ', \'retryItem\')" title="อาจมีเอกสารบน NextAcc แล้ว — เจ้าของระบบลองใหม่ได้พร้อมเหตุผล">ลองใหม่ (เจ้าของ)</button> ';
                     } else if (item.status === 'FAILED') {
-                        html += '<button type="button" class="btn-primary" style="padding:4px 10px; font-size:11px;" onclick="retryItem(' + item.id + ')" title="Retry"><i class="fas fa-redo"></i></button> ';
+                        html += '<button type="button" class="btn-primary" style="padding:4px 10px; font-size:11px;" onclick="retryItem(' + qid + ')" title="ลองส่งอีกครั้ง"><i class="fas fa-redo"></i></button> ';
                     } else if (item.status === 'PENDING' && openCls === 'WAIT') {
-                        html += '<button type="button" class="btn-default" style="padding:4px 10px; font-size:11px;" onclick="retryItem(' + item.id + ')" title="ไม่รอรอบตรวจถัดไป — ลองตอนนี้">ตรวจตอนนี้</button> ';
+                        html += '<button type="button" class="btn-default" style="padding:4px 10px; font-size:11px;" onclick="retryItem(' + qid + ')" title="ไม่รอรอบตรวจถัดไป — ลองตอนนี้">ตรวจตอนนี้</button> ';
                     }
-                    if (item.status === 'COMPLETED' || item.status === 'FAILED') {
-                        html += '<button type="button" class="btn-warning" style="padding:4px 10px; font-size:11px;" onclick="resyncItem(' + item.id + ')" title="ยิง API ใหม่ (ลบผลเดิม)"><i class="fas fa-sync-alt"></i></button> ';
+                    if (item.status === 'COMPLETED' || (item.status === 'FAILED' && !dup)) {
+                        html += '<button type="button" class="btn-warning" style="padding:4px 10px; font-size:11px;" onclick="resyncItem(' + qid + ')" title="ส่งใหม่ทั้งรายการ (ลบผลเดิม)"><i class="fas fa-sync-alt"></i></button> ';
                     }
                     // ปิดรายการที่ "เสร็จจริงบน NextAcc แล้ว" โดยไม่ยิง API ซ้ำ
                     if (item.status === 'FAILED') {
-                        html += '<button type="button" class="btn-success" style="padding:4px 10px; font-size:11px;" onclick="closeItem(' + item.id + ')" title="ปิดรายการ — งานเสร็จบน NextAcc แล้ว (ไม่ยิง API ซ้ำ)"><i class="fas fa-check"></i></button> ';
+                        html += '<button type="button" class="btn-success" style="padding:4px 10px; font-size:11px;" onclick="closeItem(' + qid + ')" title="ปิดรายการ — งานเสร็จบน NextAcc แล้ว (ไม่ยิง API ซ้ำ)"><i class="fas fa-check"></i></button> ';
                     }
-                    html += '<button type="button" class="btn-secondary" style="padding:4px 10px; font-size:11px;" onclick="showItemLogs(' + item.id + ')" title="ดู log ละเอียด (เต็ม ไม่ตัด)"><i class="fas fa-file-alt"></i> Log</button>';
+                    html += '<button type="button" class="btn-secondary" style="padding:4px 10px; font-size:11px;" onclick="showItemLogs(' + qid + ')" title="ดู log ละเอียด (เต็ม ไม่ตัด)"><i class="fas fa-file-alt"></i> Log</button>';
                 }
                 html += '</td>';
                 html += '</tr>';
@@ -2619,9 +2649,11 @@
             tbody.innerHTML = html;
         }
 
+        // ข้อความทุกตัวที่มาจากเซิร์ฟเวอร์/NextAcc/คิว ต้องผ่านตัวนี้ก่อนใส่ innerHTML (CLAUDE.md ข้อ 23 — P0-1)
         function escapeHtml(s) {
-            return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-                            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+            return (s === null || s === undefined ? '' : String(s))
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
         }
 
         function showItemLogs(queueId) {
@@ -2767,17 +2799,31 @@
             el.innerHTML = html;
         }
 
-        function retryItem(queueId) {
-            fetch(pageUrl + '?action=retryItem&queueId=' + queueId + '&_=' + Date.now())
+        function retryItem(queueId, reason) {
+            fetch(pageUrl + '?action=retryItem&queueId=' + queueId + (reason ? '&reason=' + encodeURIComponent(reason) : '') + '&_=' + Date.now())
                 .then(function(r) { return r.json(); })
-                .then(function(data) { loadQueueData(); })
+                .then(function(data) {
+                    if (!data.success && data.message) alert(data.message);   // เดิมเงียบ — ผู้ใช้ไม่รู้ว่าทำไมไม่ลองใหม่
+                    loadQueueData();
+                })
                 .catch(function(err) { alert(err.message); });
         }
 
-        function resyncItem(queueId) {
-            if (!confirm('ยืนยันยิง API ใหม่สำหรับ Queue #' + queueId + '?\n(จะลบผลเดิมและสร้างใหม่บน NextAcc)'))
+        // รายการชนิด "ตรวจบน NextAcc" (อาจสร้างเอกสารไปแล้ว): เจ้าของระบบลองใหม่ได้พร้อมเหตุผล — เซิร์ฟเวอร์ตรวจสิทธิ์/บันทึก log ซ้ำ
+        function retryDuplicate(queueId, action) {
+            var r = prompt('รายการ #' + queueId + ' อาจสร้างเอกสารบน NextAcc ไปแล้ว — ตรวจบน NextAcc ก่อน\n'
+                         + 'ถ้าเอกสารขึ้นแล้ว ให้กด ✔ ปิดรายการแทน (ไม่ส่งซ้ำ)\n\n'
+                         + 'ยืนยันลองใหม่: พิมพ์เหตุผลอย่างน้อย 10 ตัวอักษร (บันทึกในประวัติ)', '');
+            if (r === null) return;
+            r = r.trim();
+            if (r.length < 10) { alert('เหตุผลต้องยาวอย่างน้อย 10 ตัวอักษร'); return; }
+            if (action === 'resyncItem') resyncItem(queueId, r); else retryItem(queueId, r);
+        }
+
+        function resyncItem(queueId, reason) {
+            if (!reason && !confirm('ยืนยันส่งรายการคิว #' + queueId + ' ขึ้น NextAcc ใหม่?\n(จะลบผลเดิมและสร้างใหม่บน NextAcc)'))
                 return;
-            fetch(pageUrl + '?action=resyncItem&queueId=' + queueId + '&_=' + Date.now())
+            fetch(pageUrl + '?action=resyncItem&queueId=' + queueId + (reason ? '&reason=' + encodeURIComponent(reason) : '') + '&_=' + Date.now())
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     alert(data.message);
@@ -2877,7 +2923,11 @@
                               + '<div style="font-weight:600; color:' + fg + '; font-size:13px;">'
                               + icon + escapeHtml(it.title) + '</div>'
                               + '<div style="font-size:12px; color:#555; white-space:pre-wrap; margin-top:3px;">'
-                              + escapeHtml(it.detail) + '</div></div>';
+                              + escapeHtml(it.detail) + '</div>'
+                              + healthFixLink(it)
+                              + (it.adminCodes ? '<details style="margin-top:4px; font-size:11px; color:#888;"><summary>รายละเอียดสำหรับผู้ดูแล</summary>'
+                                    + 'สคริปต์ฐานข้อมูล: ' + escapeHtml(it.adminCodes) + '</details>' : '')
+                              + '</div>';
                     });
                     el.innerHTML = html;
                 })
@@ -2886,9 +2936,48 @@
                 });
         }
 
+        // "ลองใหม่ทั้งหมด": ดูจำนวนตามชนิดก่อน → ยืนยัน → เซิร์ฟเวอร์รีเซ็ตเฉพาะชนิดที่ปลอดภัย แล้วรายงานสิ่งที่ข้ามข้างปุ่ม
+        // ลิงก์ "แก้ที่นี่" ของตรวจสุขภาพ: "?focus=…" = เลื่อนไปส่วนนั้นในหน้านี้ · "/…" = เปิดหน้าอื่น
+        function healthFixLink(it) {
+            var u = it && it.fixUrl ? String(it.fixUrl) : '';
+            var label = escapeHtml((it && it.fixLabel) || 'แก้ที่นี่');
+            var style = 'display:inline-block; margin-top:6px; padding:3px 10px; font-size:11.5px; text-decoration:none;';
+            if (u.charAt(0) === '?')
+                return '<a href="#" class="btn-primary" style="' + style + '" onclick="return gotoFix(\'' + escapeHtml(u.replace(/[\\']/g, '')) + '\')">🛠 ' + label + '</a>';
+            if (/^\/[A-Za-z]/.test(u))
+                return '<a href="' + escapeHtml(appBase + u) + '" target="_blank" class="btn-primary" style="' + style + '">🛠 ' + label + '</a>';
+            return '';
+        }
+
+        function gotoFix(qs) {
+            try { applyFocus(new URLSearchParams(qs)); } catch (e) { }
+            return false;
+        }
+
         function retryAllFailed() {
-            getAction('retryAllFailed', 'syncTestResult');
-            setTimeout(loadQueueData, 1000);
+            var el = document.getElementById('retryAllResult');
+            el.innerHTML = '<div class="test-result loading" style="display:block;">กำลังนับรายการ...</div>';
+            fetch(pageUrl + '?action=retryAllPreview&_=' + Date.now())
+                .then(function (r) { return r.json(); })
+                .then(function (pv) {
+                    if (!pv.success) { el.innerHTML = '<div class="test-result error" style="display:block;">' + escapeHtml(pv.message) + '</div>'; return; }
+                    if (!pv.retry) {
+                        el.innerHTML = '<pre style="white-space:pre-wrap; margin:0; padding:8px 10px; border-radius:5px; background:#FFFDF3; border:1px solid #FFE082; font-size:12px;">'
+                                     + escapeHtml(pv.message) + '</pre>';
+                        return;
+                    }
+                    if (!confirm(pv.message)) { el.innerHTML = ''; return; }
+                    el.innerHTML = '<div class="test-result loading" style="display:block;">กำลังคืนรายการเข้าคิว...</div>';
+                    return fetch(pageUrl + '?action=retryAllFailed&_=' + Date.now())
+                        .then(function (r) { return r.json(); })
+                        .then(function (data) {
+                            el.innerHTML = '<pre style="white-space:pre-wrap; margin:0; padding:8px 10px; border-radius:5px; font-size:12px; '
+                                         + (data.success ? 'background:#F1F8E9; border:1px solid #C5E1A5;' : 'background:#FFF5F5; border:1px solid #FFCDD2;') + '">'
+                                         + escapeHtml(data.message) + '</pre>';
+                            loadQueueData();
+                        });
+                })
+                .catch(function (err) { el.innerHTML = '<div class="test-result error" style="display:block;">' + escapeHtml(err.message) + '</div>'; });
         }
 
         function getAction(action, resultId) {
@@ -2903,13 +2992,13 @@
                 .then(function(r) { clearTimeout(timeoutId); return r.json(); })
                 .then(function(data) {
                     el.className = 'test-result ' + (data.success ? 'success' : 'error');
-                    el.innerHTML = (data.success ? '<i class="fas fa-check-circle"></i> ' : '<i class="fas fa-times-circle"></i> ') + data.message;
+                    el.innerHTML = (data.success ? '<i class="fas fa-check-circle"></i> ' : '<i class="fas fa-times-circle"></i> ') + escapeHtml(data.message);
                 })
                 .catch(function(err) {
                     clearTimeout(timeoutId);
                     el.className = 'test-result error';
                     var msg = err.name === 'AbortError' ? 'หมดเวลา — เซิร์ฟเวอร์ไม่ตอบกลับภายใน 60 วินาที' : err.message;
-                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + msg;
+                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + escapeHtml(msg);
                 });
         }
 
@@ -2934,7 +3023,7 @@
             .then(function(r) { return r.json(); })
             .then(function(result) {
                 el.className = 'test-result ' + (result.success ? 'success' : 'error');
-                el.innerHTML = (result.success ? '<i class="fas fa-check-circle"></i> ' : '<i class="fas fa-times-circle"></i> ') + result.message;
+                el.innerHTML = (result.success ? '<i class="fas fa-check-circle"></i> ' : '<i class="fas fa-times-circle"></i> ') + escapeHtml(result.message);
                 if (result.success) {
                     setTimeout(function() { window.location.reload(); }, 1200);
                 }
@@ -2942,7 +3031,7 @@
             .catch(function(err) {
                 el.className = 'test-result error';
                 el.innerHTML = '<i class="fas fa-times-circle"></i> ' +
-                    (err.name === 'AbortError' ? 'หมดเวลาการเชื่อมต่อ (60 วินาที) — ลองใหม่อีกครั้ง' : err.message);
+                    (err.name === 'AbortError' ? 'หมดเวลาการเชื่อมต่อ (60 วินาที) — ลองใหม่อีกครั้ง' : escapeHtml(err.message));
             })
             .then(function() { clearTimeout(timer); _postActionBusy = false; });
         }
@@ -2992,10 +3081,10 @@
                     : '<span class="status-badge status-error">Not Linked</span>';
 
                 html += '<tr>';
-                html += '<td><strong>' + item.code + '</strong></td>';
-                html += '<td style="font-size:12px;">' + (item.description || '-') + '</td>';
+                html += '<td><strong>' + escapeHtml(item.code) + '</strong></td>';
+                html += '<td style="font-size:12px;">' + escapeHtml(item.description || '-') + '</td>';
                 html += '<td>' + buildAccountSelect(item.id, item.accountCode, item.accountId) + '</td>';
-                html += '<td><span style="font-size:11px; color:#666;">' + (item.mappingType || '') + '</span></td>';
+                html += '<td><span style="font-size:11px; color:#666;">' + escapeHtml(item.mappingType || '') + '</span></td>';
                 html += '<td>' + statusBadge + '</td>';
                 html += '<td><button class="btn-primary" style="padding:4px 10px; font-size:11px;" onclick="updateMapping(' + item.id + ')"><i class="fas fa-save"></i></button></td>';
                 html += '</tr>';
@@ -3035,7 +3124,7 @@
                     if (currentAccountId && acc.id === currentAccountId) selected = ' selected';
                     else if (!currentAccountId && currentCode && acc.code === currentCode) selected = ' selected';
                     html += '<option value="' + acc.id + '|' + acc.code + '"' + selected + '>'
-                        + indent + acc.code + ' - ' + (acc.name || acc.nameEn || '') + '</option>';
+                        + indent + escapeHtml(acc.code) + ' - ' + escapeHtml(acc.name || acc.nameEn || '') + '</option>';
                 });
                 html += '</optgroup>';
             });
@@ -3050,7 +3139,7 @@
                         if (currentAccountId && acc.id === currentAccountId) selected = ' selected';
                         else if (!currentAccountId && currentCode && acc.code === currentCode) selected = ' selected';
                         html += '<option value="' + acc.id + '|' + acc.code + '"' + selected + '>'
-                            + acc.code + ' - ' + (acc.name || acc.nameEn || '') + '</option>';
+                            + escapeHtml(acc.code) + ' - ' + escapeHtml(acc.name || acc.nameEn || '') + '</option>';
                     });
                     html += '</optgroup>';
                 }
@@ -3097,7 +3186,7 @@
                     var ls = document.getElementById('walletLastSync');
                     if (ls) ls.textContent = data.success
                         ? ('กระเป๋าเงิน NextAcc ' + (data.banks || []).length + ' บัญชี · ดึงล่าสุด ' + (data.lastSync || '-')
-                           + (data.bankCacheReady ? '' : ' (ยังไม่ได้รัน PHASE19_21)'))
+                           + (data.bankCacheReady ? '' : ' (ยังไม่ได้อัปเดตฐานข้อมูลส่วนบัญชีธนาคาร)'))
                         : '';
                     callback();
                 })
@@ -3400,25 +3489,25 @@
                 fetch(pageUrl + '?action=getPaidTypeMapping&_=' + Date.now())
                     .then(function(r) { return r.json(); })
                     .then(function(data) {
-                        if (!data.success) { body.innerHTML = '<tr><td colspan="4" style="color:red;">' + data.message + '</td></tr>'; return; }
+                        if (!data.success) { body.innerHTML = '<tr><td colspan="4" style="color:red;">' + escapeHtml(data.message) + '</td></tr>'; return; }
                         var items = data.items || [];
                         if (items.length === 0) { body.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#999;">ไม่พบข้อมูลประเภทค่าใช้จ่าย</td></tr>'; return; }
                         var html = '';
                         items.forEach(function(item) {
                             var linked = item.accountId && item.accountId !== '' && item.accountId !== '00000000-0000-0000-0000-000000000000';
                             var badge = linked
-                                ? '<span class="status-badge status-connected">' + (item.accountCode || '') + ' ✓</span>'
+                                ? '<span class="status-badge status-connected">' + escapeHtml(item.accountCode || '') + ' ✓</span>'
                                 : '<span class="status-badge status-not-configured">ยังไม่ผูก</span>';
                             html += '<tr>'
                                 + '<td>' + item.id + '</td>'
-                                + '<td><strong>' + (item.name || '') + '</strong></td>'
+                                + '<td><strong>' + escapeHtml(item.name || '') + '</strong></td>'
                                 + '<td>' + buildPaidTypeSelect(item.id, item.accountCode, item.accountId) + '</td>'
                                 + '<td>' + badge + '</td>'
                                 + '</tr>';
                         });
                         body.innerHTML = html;
                     })
-                    .catch(function(err) { body.innerHTML = '<tr><td colspan="4" style="color:red;">' + err.message + '</td></tr>'; });
+                    .catch(function(err) { body.innerHTML = '<tr><td colspan="4" style="color:red;">' + escapeHtml(err.message) + '</td></tr>'; });
             });
         }
 
@@ -3439,7 +3528,7 @@
                     var sel = '';
                     if (currentAccountId && acc.id === currentAccountId) sel = ' selected';
                     else if (!currentAccountId && currentCode && acc.code === currentCode) sel = ' selected';
-                    html += '<option value="' + acc.id + '|' + acc.code + '"' + sel + '>' + acc.code + ' - ' + (acc.name || acc.nameEn || '') + '</option>';
+                    html += '<option value="' + acc.id + '|' + acc.code + '"' + sel + '>' + escapeHtml(acc.code) + ' - ' + escapeHtml(acc.name || acc.nameEn || '') + '</option>';
                 });
                 html += '</optgroup>';
             });
@@ -3449,7 +3538,7 @@
                     groups[t].forEach(function(acc) {
                         var sel = '';
                         if (currentAccountId && acc.id === currentAccountId) sel = ' selected';
-                        html += '<option value="' + acc.id + '|' + acc.code + '"' + sel + '>' + acc.code + ' - ' + (acc.name || acc.nameEn || '') + '</option>';
+                        html += '<option value="' + acc.id + '|' + acc.code + '"' + sel + '>' + escapeHtml(acc.code) + ' - ' + escapeHtml(acc.name || acc.nameEn || '') + '</option>';
                     });
                     html += '</optgroup>';
                 }
@@ -3472,10 +3561,10 @@
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     el.className = 'test-result ' + (data.success ? 'success' : 'error');
-                    el.innerHTML = (data.success ? '✓ ' : '✗ ') + data.message;
+                    el.innerHTML = (data.success ? '✓ ' : '✗ ') + escapeHtml(data.message);
                     if (data.success) loadPaidTypeMapping();
                 })
-                .catch(function(err) { el.className = 'test-result error'; el.innerHTML = '✗ ' + err.message; });
+                .catch(function(err) { el.className = 'test-result error'; el.innerHTML = '✗ ' + escapeHtml(err.message); });
         }
 
         function updateMapping(id) {
@@ -3509,12 +3598,12 @@
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     el.className = 'test-result ' + (data.success ? 'success' : 'error');
-                    el.innerHTML = (data.success ? '<i class="fas fa-check-circle"></i> ' : '<i class="fas fa-times-circle"></i> ') + data.message;
+                    el.innerHTML = (data.success ? '<i class="fas fa-check-circle"></i> ' : '<i class="fas fa-times-circle"></i> ') + escapeHtml(data.message);
                     if (data.success) loadMappingsWithAccounts();
                 })
                 .catch(function(err) {
                     el.className = 'test-result error';
-                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + err.message;
+                    el.innerHTML = '<i class="fas fa-times-circle"></i> ' + escapeHtml(err.message);
                 });
         }
     </script>

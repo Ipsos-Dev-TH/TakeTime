@@ -138,7 +138,7 @@ namespace Take_Time_BangPhra.Integration
                 || (b.IndexOf("<!DOCTYPE html", StringComparison.OrdinalIgnoreCase) >= 0 && b.IndexOf("Exception", StringComparison.Ordinal) >= 0))
                 return "\n💡 วิธีแก้: นี่ไม่ใช่ปัญหาข้อมูลฝั่ง TakeTime — เซิร์ฟเวอร์ NextAcc start ไม่ขึ้น (ตอบเป็นหน้า error page ของ ASP.NET Core) " +
                        "ทุก API ของ NextAcc จะ 500 หมดจนกว่าจะแก้ฝั่งนั้น. แจ้ง dev NextAcc ให้ดู Program.cs (DI/BuildServiceProvider) " +
-                       "→ พอ NextAcc กลับมา ค่อยกด 'Retry ทั้งหมด' ในหน้าคิวนี้";
+                       "→ พอ NextAcc กลับมา ค่อยกด 'ลองใหม่ที่ล้มเหลวทั้งหมด' ในหน้าคิว";
             return "";
         }
 
@@ -5488,6 +5488,7 @@ namespace Take_Time_BangPhra.Integration
             try
             {
                 if (!_config.QueueAlertEnabled) return;
+                SendDailyQueueSummaryIfDue(serverDown);   // สรุปวันละครั้ง "ปกติดี" — แยกจังหวะจากการเตือนปัญหา
                 if ((DateTime.Now - _lastQueueAlert).TotalHours < _config.QueueAlertHours) return;
                 // timer เดินทุก 30 วิ — อย่าไปนับคิวใหม่ทุกรอบ
                 if ((DateTime.Now - _lastQueueHealthCheck).TotalMinutes < 15) return;
@@ -5553,7 +5554,8 @@ namespace Take_Time_BangPhra.Integration
                         + (string.IsNullOrEmpty(recSample) ? "" : $" (เช่น การจอง {System.Net.WebUtility.HtmlEncode(recSample)})")
                         + "\n     เปิดหน้าตารางจอง → ปุ่ม NextAcc ของการจองนั้น → ส่วน \"เอกสารบน NextAcc ที่ไม่ผูกใบเสร็จ\"");
                 sb.AppendLine();
-                sb.Append("<i>ดูรายละเอียด: Admin → ตั้งค่า → NextAcc → คิว</i>");
+                // ลิงก์เต็มไปหน้าคิวที่กรองตามชนิดปัญหาแล้ว (เดิมบอกทางเมนูเป็นข้อความ — ต้องไปหาเอง)
+                sb.Append(NextAccUi.TelegramQueueLinks(QueueLinkSiteBase(), QueueClassCounts()));
 
                 _lastQueueAlert = DateTime.Now;   // ตั้งก่อนส่ง — ส่งไม่ได้ก็ไม่ต้องพยายามซ้ำทุกรอบ
 

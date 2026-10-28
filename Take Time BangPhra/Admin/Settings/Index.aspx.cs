@@ -350,7 +350,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                 "~/Report/NextAccReconciliation",
                 "กระทบยอด reconcile nextacc คิว queue ล้มเหลว ต้นทุนขาย cogs รายได้ ภาษีขาย ส่วนต่าง"));
             taxRep.Items.Add(new Item("ใบลดหนี้ / คืนเงินลูกค้า",
-                "ยกเลิกการจองแล้วคืนเงิน (เต็ม/บางส่วน หักค่าธรรมเนียม) · ลดราคา/ชดเชย/รับคืนสินค้าหลังออกใบกำกับ · เลือกแหล่งเงินคืน · ส่ง NextAcc (ใบลดหนี้/คืนมัดจำ) — PHASE19_33",
+                "ยกเลิกการจองแล้วคืนเงิน (เต็ม/บางส่วน หักค่าธรรมเนียม) · ลดราคา/ชดเชย/รับคืนสินค้าหลังออกใบกำกับ · เลือกแหล่งเงินคืน · ส่ง NextAcc (ใบลดหนี้/คืนมัดจำ)",
                 "~/Account/CreditNotes",
                 "ใบลดหนี้ credit note คืนเงิน refund ยกเลิก การจอง มัดจำ ส่วนลด รับคืนสินค้า 86/10"));
             groups.Add(taxRep);
@@ -444,7 +444,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                         break;
 
                     case "channels":
-                        if (!st.CatalogReady) sb.Append(SettingsUi.Chip("ยังไม่ได้ติดตั้งแคตตาล็อก (PHASE19_20)", "err"));
+                        if (!st.CatalogReady) sb.Append(SettingsUi.Chip("ยังไม่ได้ติดตั้งแคตตาล็อก (ต้องอัปเดตฐานข้อมูล)", "err"));
                         else
                         {
                             sb.Append(SettingsUi.Chip("ลูกค้าเห็น " + st.CustomerChannels + " ช่องทาง",

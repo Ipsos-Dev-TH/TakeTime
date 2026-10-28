@@ -40,6 +40,7 @@ namespace Take_Time_BangPhra
                     // การเงิน / ลูกค้า — เห็นเมื่อมีสิทธิ์ดูอย่างน้อยหนึ่งส่วนในคอลัมน์นั้น
                     pnlFinanceNav.Visible = Perm.CanView(Perm.FinReceipt) || Perm.CanView(Perm.FinVoucher)
                                             || Perm.CanView(Perm.FinReport);
+                    if (pnlFinanceNav.Visible) ApplyFinanceMenuCounts();
                     pnlCrmNav.Visible = Perm.CanView(Perm.CrmCustomer) || Perm.CanView(Perm.CrmLoyalty)
                                         || Perm.CanView(Perm.CrmReview) || Perm.CanView(Perm.CrmAffiliate);
                     pnlHotelMgmt.Visible = Perm.CanView(Perm.MgtDashboard) || Perm.CanView(Perm.MgtReport)
@@ -145,6 +146,63 @@ namespace Take_Time_BangPhra
                 }
                 catch { }
             }
+        }
+
+        // ── ตัวเลขงานค้างในเมนูการเงิน (แคชทั้งแอป 5 นาที — เมนูอยู่ทุกหน้า ห้าม query ทุกคำขอ) ──
+        private static readonly object _finCountLock = new object();
+        private static DateTime _finCountAt = DateTime.MinValue;
+        private static int _finCppPending, _finPrtPending;
+
+        /// <summary>ใบซื้อเชื่อค้างจ่าย (Account_Payment.IsCredit ยังไม่จ่าย) + การคืนสินค้ารอใบลดหนี้ผู้ขาย
+        /// (Purchase_Return_Cn_Link.Cn_Status = PENDING) — ตาราง/คอลัมน์ไม่มี = 0 · พังต้องไม่ทำให้เมนูพัง</summary>
+        private void ApplyFinanceMenuCounts()
+        {
+            try
+            {
+                if ((DateTime.Now - _finCountAt).TotalMinutes >= 5)
+                {
+                    lock (_finCountLock)
+                    {
+                        if ((DateTime.Now - _finCountAt).TotalMinutes >= 5)
+                        {
+                            _finCountAt = DateTime.Now;   // ตั้งก่อน — DB ช้า/พังก็ไม่ถามซ้ำทุกคำขอ
+                            string conn = System.Configuration.ConfigurationManager
+                                .ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                            var db = new code();
+                            _finCppPending = CountOrZero(db, conn,
+                                @"IF COL_LENGTH('dbo.Account_Payment', 'Credit_Paid_Date') IS NOT NULL
+                                      EXEC(N'SELECT COUNT(*) FROM dbo.Account_Payment WHERE IsCredit = 1 AND ISNULL(Status, N''Normal'') <> N''Cancel'' AND Credit_Paid_Date IS NULL')
+                                  ELSE
+                                      EXEC(N'SELECT COUNT(*) FROM dbo.Account_Payment WHERE IsCredit = 1 AND ISNULL(Status, N''Normal'') <> N''Cancel'' AND Nexaacc_Payment_Id IS NULL')");
+                            _finPrtPending = CountOrZero(db, conn,
+                                @"IF OBJECT_ID(N'dbo.Purchase_Return_Cn_Link', N'U') IS NOT NULL
+                                      EXEC(N'SELECT COUNT(*) FROM dbo.Purchase_Return_Cn_Link WHERE Cn_Status = N''PENDING''')
+                                  ELSE SELECT 0");
+                        }
+                    }
+                }
+                litNavCppBadge.Text = MenuCountBadge(_finCppPending, "ใบซื้อเชื่อค้างจ่าย");
+                litNavPrtBadge.Text = MenuCountBadge(_finPrtPending, "การคืนสินค้าที่รอใบลดหนี้จากผู้ขาย");
+            }
+            catch { }
+        }
+
+        private static int CountOrZero(code db, string conn, string sql)
+        {
+            try
+            {
+                var dt = db.DatabaseQuerySafe(conn, sql, null);
+                return dt != null && dt.Rows.Count > 0 && dt.Columns.Count > 0 && dt.Rows[0][0] != DBNull.Value
+                    ? Convert.ToInt32(dt.Rows[0][0]) : 0;
+            }
+            catch { return 0; }
+        }
+
+        private static string MenuCountBadge(int n, string title)
+        {
+            if (n <= 0) return "";
+            return " <span title=\"" + HttpUtility.HtmlAttributeEncode(title) + "\" style=\"display:inline-block;min-width:18px;padding:0 6px;margin-left:4px;"
+                 + "border-radius:9px;background:#e74c3c;color:#fff;font-size:11px;line-height:18px;text-align:center;\">" + (n > 99 ? "99+" : n.ToString()) + "</span>";
         }
 
         private static DateTime _lastChatWidgetLog = DateTime.MinValue;

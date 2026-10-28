@@ -634,6 +634,27 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
      e-Tax ถึง RD = หยุด แนะใบลดหนี้ · ผู้ติดต่อกลาง + ผู้ซื้อยังไม่ครบ = อธิบาย (ชื่อไม่ขึ้นถูกต้อง) **ไม่แก้ชื่อผู้ติดต่อกลางเด็ดขาด**. ข้อความต่อหน้า
      `LastRepostMessage`. `ApplyContactToInvoice`/`BuildCorrectedReceiptInvoice` ใช้ชื่อผู้ติดต่อปัจจุบันแทนชื่อใน payload. ปิดทั้งหมด: `Nexaacc_Repost_Buyer_Sync=0`.
      ข้อจำกัด: แก้ชื่อผู้ติดต่อ = ทุกใบของผู้ติดต่อนั้นพิมพ์ชื่อใหม่ (รวมใบที่ส่ง e-Tax แล้ว — XML เดิมไม่เปลี่ยน); ต้อง company endpoint; ต้อง build+test บน Windows.
+23. **UX/ความปลอดภัยหน้าจอ NextAcc — roadmap P0-1…P0-10 (ต.ค. 2026, ไม่มี migration):** ตัวกลาง `Class/Integration/NextAccUi.cs` (pure, mono test)
+   = คำไทยของสถานะ/งาน/ชนิดรายการ/ชนิดปัญหา, ป้ายแถวคิวในหน้าเอกสาร (`DocQueueBadge` — encode ข้อความเสมอ), กติกาลองใหม่ทั้งหมด,
+   ลิงก์แก้ของตรวจสุขภาพ, ข้อความเงินเดือน, ลิงก์/สรุป Telegram. **ห้ามเขียนรหัสภายใน/ข้อความจาก NextAcc ลง HTML ตรง** — ฝั่ง C# ผ่าน `NextAccUi.H`,
+   ฝั่ง JS หน้าตั้งค่าผ่าน `escapeHtml` (คิว, ตรวจสุขภาพ, ทุก `data.message`/`err.message`, ตารางมัดจำ/ที่มาเอกสาร/ผังบัญชี).
+   - **ลองใหม่ที่ล้มเหลวทั้งหมด** (`retryAllPreview` → confirm นับตามชนิด → `retryAllFailed`): รีเซ็ตเฉพาะ FAILED หมดรอบที่ชนิด TRANSIENT/UNKNOWN/WAIT
+     (รอเกินกำหนด)/ยังไม่จำแนก — **ข้าม DUPLICATE/POLICY/CONFIG/DATA** (`NextAccUi.RetryAllBlockedClasses`) แล้วรายงานข้างปุ่มว่าข้ามอะไรเพราะอะไร + log.
+     ลองใหม่/ยิงใหม่รายแถวของ DUPLICATE = Owner + เหตุผล ≥10 ตัว (`GuardDuplicateRetry`, log AccountingSync); ปุ่มในคิวเป็น "ลองใหม่ (เจ้าของ)".
+   - คิว: ป้าย/หัวตารางไทย (เซิร์ฟเวอร์ส่ง `statusLabel/actionLabel/entityLabel`, รหัสจริงใน tooltip) + ค้นหา `?q=` (เลขใบเสร็จ/เลขจอง `reservationId`/
+     เลขเอกสาร NextAcc/เลขคิว — พารามิเตอร์ทั้งหมด, escape LIKE) + เปิดจากลิงก์ `?cls=`/`?status=`/`?q=`/`?focus=`. ตรวจสุขภาพทุกข้อมี `fixUrl`
+     (`NextAccUi.HealthFixUrl`: `?focus=api|sync|mapping&key=|paidHow|gateway|ota|email|queue` เลื่อน+โหลดตารางให้ / `/Account/CreditNotes` ฯลฯ) และรหัส
+     migration ย้ายไป "รายละเอียดสำหรับผู้ดูแล" (`HideInternalCodes`).
+   - Telegram: ลิงก์เต็มไปคิวที่กรองตามชนิด (`PaymentUrls.SiteBase()` = `Payment_Site_BaseUrl` → `SiteBaseUrl`) + สรุปวันละครั้ง "ปกติดี"
+     (`Nexaacc_Queue_Daily_Summary` 1, `_Hour` 9, จำวันใน `_Last`).
+   - CheckDocument_New/CheckPayment_New: ป้ายตาม `Error_Class` (ซ่อน "ส่งใหม่" ของ CONFIG/POLICY/DUPLICATE, ลิงก์ "แก้ที่นี่"/"ดูในคิว"), คำไทย AWAITING_SLIP/
+     SUPERSEDED, แถบเตือนเมื่อดึง NextAcc ไม่ทัน (20/18 วิ). ตารางรายได้ CheckDocument_New: คอลัมน์ **"อื่น ๆ"** + แจกแจงรายแหล่งเงิน
+     (`Class/Reports/RevenueBySource.cs` — ทุกวิธีชำระลงกล่องเดียว: คำค้นเดิม → `Account_Paid_How.Channel_Type` CASH/DIRECTOR_LOAN → อื่น ๆ) ⇒ ผลรวมคอลัมน์ =
+     ยอดรวม (ตรวจใน `ValidateTotal`); CSV เพิ่มคอลัมน์ + quote ค่า.
+   - เครื่องมือ "Stock Adjustment & Write-off" ในหน้าตั้งค่าปลดระวาง (ซ่อน + server ปฏิเสธ `stockAdjustment` → ใช้ Product/Stock); `Account/CheckDocument.aspx`
+     redirect → `CheckDocument_New` (คงพารามิเตอร์, endResponse). เมนูการเงินเพิ่ม CreditPurchasePayment + PurchaseReturn พร้อมตัวเลขงานค้าง (แคช 5 นาที).
+     เงินเดือน: ข้อความไทยไม่มีรหัสโหมด + ลิงก์คิว; JOURNAL_ONLY เตือนตลอดว่า ภ.ง.ด.1/สปส.1-10/50 ทวิ ต้องยื่นจากระบบนี้. คำ: "ยกเลิก (void)" = เอกสาร NextAcc,
+     "ลบ" = ใบในระบบ. ไม่ทำ: P0-11 (OCR — ทีมอื่น). ต้อง build+test บน Windows.
 
 ## Queue resilience (ส.ค. 2026 — หลังเคส NextAcc ล่มทั้งแอป)
 
