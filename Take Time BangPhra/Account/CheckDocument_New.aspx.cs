@@ -9,6 +9,7 @@ using System.Web.UI;
 using System.Web.UI.WebControls;
 using Take_Time_BangPhra.Class;
 using Take_Time_BangPhra.Integration;
+using RevenueBySource = Take_Time_BangPhra.TaxReports.RevenueBySource;
 
 namespace Take_Time_BangPhra.Account
 {
@@ -166,7 +167,7 @@ namespace Take_Time_BangPhra.Account
                 catch (Exception calcEx)
                 {
                     System.Diagnostics.Debug.WriteLine($"❌ CalculateRevenue failed: {calcEx.Message}");
-                    lblDateRange.Text += $" <span style='color: red;'>[CalculateRevenue Error: {calcEx.Message}]</span>";
+                    lblDateRange.Text += $" <span style='color: red;'>[CalculateRevenue Error: {NextAccUi.H(calcEx.Message)}]</span>";
                     ShowError($"เกิดข้อผิดพลาดในการคำนวณรายได้:\n{calcEx.Message}\n\nStack:\n{calcEx.StackTrace}");
                     // Continue to LoadDetails even if CalculateRevenue fails
                 }
@@ -210,11 +211,12 @@ namespace Take_Time_BangPhra.Account
                 // Always calculate revenue for Normal status only (exclude Cancel)
                 string status = "Normal";
 
-                // Initialize all totals
-                decimal cat1Cash = 0, cat1KBANK = 0, cat1KTB = 0, cat1Director = 0;
-                decimal cat2Cash = 0, cat2KBANK = 0, cat2KTB = 0, cat2Director = 0;
-                decimal cat3Cash = 0, cat3KBANK = 0, cat3KTB = 0, cat3Director = 0;
-                decimal cat4Cash = 0, cat4KBANK = 0, cat4KTB = 0, cat4Director = 0;
+                // แยกยอดตามแหล่งเงินทุกหมวดด้วยกติกาเดียว (RevenueBySource) — แหล่งเงินที่ไม่ใช่ 4 คอลัมน์เดิม
+                // (QR/เกตเวย์/ธนาคารอื่น) ลงคอลัมน์ "อื่น ๆ" + แจกแจงรายแหล่งเงิน ⇒ ผลรวมคอลัมน์ = ยอดรวมทั้งหมด
+                // (เดิมกรองด้วยคำค้นแยกคอลัมน์ → แหล่งเงินใหม่หายจากตารางเงียบ ๆ)
+                var channelTypes = LoadPaidHowChannelTypes();
+                var cats = new RevenueBySource[4];
+                for (int i = 0; i < cats.Length; i++) cats[i] = new RevenueBySource(channelTypes);
                 decimal totalVAT = 0;
                 int docCount = 0;
 
@@ -230,15 +232,7 @@ namespace Take_Time_BangPhra.Account
                         cat1Data = GetCategory1RevenueFallback(startDate, endDate, status);
                         System.Diagnostics.Debug.WriteLine($"Category 1 (Fallback Account_Receipt): {cat1Data?.Rows.Count ?? 0} rows");
                     }
-
-                    if (cat1Data != null)
-                    {
-                        cat1Cash = GetAmountByPaymentMethod(cat1Data, 2);
-                        cat1KBANK = GetAmountByPaymentMethod(cat1Data, 1);
-                        cat1KTB = GetAmountByPaymentMethod(cat1Data, 4);
-                        cat1Director = GetAmountByPaymentMethod(cat1Data, 3);
-                        System.Diagnostics.Debug.WriteLine($"   Cat1: Cash={cat1Cash:N2}, KBANK={cat1KBANK:N2}, KTB={cat1KTB:N2}, Director={cat1Director:N2}");
-                    }
+                    cats[0].AddRows(cat1Data);
                 }
                 catch (Exception ex)
                 {
@@ -257,15 +251,7 @@ namespace Take_Time_BangPhra.Account
                         cat2Data = GetCategory2RevenueFallback(startDate, endDate, status);
                         System.Diagnostics.Debug.WriteLine($"Category 2 (Fallback Account_Receipt): {cat2Data?.Rows.Count ?? 0} rows");
                     }
-
-                    if (cat2Data != null)
-                    {
-                        cat2Cash = GetAmountByPaymentMethod(cat2Data, 2);
-                        cat2KBANK = GetAmountByPaymentMethod(cat2Data, 1);
-                        cat2KTB = GetAmountByPaymentMethod(cat2Data, 4);
-                        cat2Director = GetAmountByPaymentMethod(cat2Data, 3);
-                        System.Diagnostics.Debug.WriteLine($"   Cat2: Cash={cat2Cash:N2}, KBANK={cat2KBANK:N2}, KTB={cat2KTB:N2}, Director={cat2Director:N2}");
-                    }
+                    cats[1].AddRows(cat2Data);
                 }
                 catch (Exception ex)
                 {
@@ -273,87 +259,47 @@ namespace Take_Time_BangPhra.Account
                 }
 
                 // Category 3: Product sales
-                try
-                {
-                    var cat3Data = GetCategory3Revenue(startDate, endDate, status);
-                    System.Diagnostics.Debug.WriteLine($"Category 3: {cat3Data?.Rows.Count ?? 0} rows");
-
-                    if (cat3Data != null)
-                    {
-                        cat3Cash = GetAmountByPaymentMethod(cat3Data, 2);
-                        cat3KBANK = GetAmountByPaymentMethod(cat3Data, 1);
-                        cat3KTB = GetAmountByPaymentMethod(cat3Data, 4);
-                        cat3Director = GetAmountByPaymentMethod(cat3Data, 3);
-                        System.Diagnostics.Debug.WriteLine($"   Cat3: Cash={cat3Cash:N2}, KBANK={cat3KBANK:N2}, KTB={cat3KTB:N2}, Director={cat3Director:N2}");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine($"   ❌ Category 3 failed: {ex.Message}");
-                }
+                try { cats[2].AddRows(GetCategory3Revenue(startDate, endDate, status)); }
+                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"   ❌ Category 3 failed: {ex.Message}"); }
 
                 // Category 4: Others
-                try
-                {
-                    var cat4Data = GetCategory4Revenue(startDate, endDate, status);
-                    System.Diagnostics.Debug.WriteLine($"Category 4: {cat4Data?.Rows.Count ?? 0} rows");
+                try { cats[3].AddRows(GetCategory4Revenue(startDate, endDate, status)); }
+                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"   ❌ Category 4 failed: {ex.Message}"); }
 
-                    if (cat4Data != null)
+                var catLabels = new[]
+                {
+                    new[] { lblCat1Cash, lblCat1KBANK, lblCat1KTB, lblCat1Director, lblCat1Other, lblCat1Total },
+                    new[] { lblCat2Cash, lblCat2KBANK, lblCat2KTB, lblCat2Director, lblCat2Other, lblCat2Total },
+                    new[] { lblCat3Cash, lblCat3KBANK, lblCat3KTB, lblCat3Director, lblCat3Other, lblCat3Total },
+                    new[] { lblCat4Cash, lblCat4KBANK, lblCat4KTB, lblCat4Director, lblCat4Other, lblCat4Total }
+                };
+                var buckets = new[] { RevenueBySource.Cash, RevenueBySource.Kbank, RevenueBySource.Ktb, RevenueBySource.Director, RevenueBySource.Other };
+                var colTotals = new decimal[buckets.Length];
+                for (int c = 0; c < cats.Length; c++)
+                {
+                    for (int b = 0; b < buckets.Length; b++)
                     {
-                        cat4Cash = GetAmountByPaymentMethod(cat4Data, 2);
-                        cat4KBANK = GetAmountByPaymentMethod(cat4Data, 1);
-                        cat4KTB = GetAmountByPaymentMethod(cat4Data, 4);
-                        cat4Director = GetAmountByPaymentMethod(cat4Data, 3);
-                        System.Diagnostics.Debug.WriteLine($"   Cat4: Cash={cat4Cash:N2}, KBANK={cat4KBANK:N2}, KTB={cat4KTB:N2}, Director={cat4Director:N2}");
+                        decimal v = cats[c][buckets[b]];
+                        catLabels[c][b].Text = v.ToString("N2");
+                        colTotals[b] += v;
                     }
+                    catLabels[c][5].Text = cats[c].Total.ToString("N2");
                 }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine($"   ❌ Category 4 failed: {ex.Message}");
-                }
-
-                // Update UI - Category 1
-                lblCat1Cash.Text = cat1Cash.ToString("N2");
-                lblCat1KBANK.Text = cat1KBANK.ToString("N2");
-                lblCat1KTB.Text = cat1KTB.ToString("N2");
-                lblCat1Director.Text = cat1Director.ToString("N2");
-                lblCat1Total.Text = (cat1Cash + cat1KBANK + cat1KTB + cat1Director).ToString("N2");
-
-                // Update UI - Category 2
-                lblCat2Cash.Text = cat2Cash.ToString("N2");
-                lblCat2KBANK.Text = cat2KBANK.ToString("N2");
-                lblCat2KTB.Text = cat2KTB.ToString("N2");
-                lblCat2Director.Text = cat2Director.ToString("N2");
-                lblCat2Total.Text = (cat2Cash + cat2KBANK + cat2KTB + cat2Director).ToString("N2");
-
-                // Update UI - Category 3
-                lblCat3Cash.Text = cat3Cash.ToString("N2");
-                lblCat3KBANK.Text = cat3KBANK.ToString("N2");
-                lblCat3KTB.Text = cat3KTB.ToString("N2");
-                lblCat3Director.Text = cat3Director.ToString("N2");
-                lblCat3Total.Text = (cat3Cash + cat3KBANK + cat3KTB + cat3Director).ToString("N2");
-
-                // Update UI - Category 4
-                lblCat4Cash.Text = cat4Cash.ToString("N2");
-                lblCat4KBANK.Text = cat4KBANK.ToString("N2");
-                lblCat4KTB.Text = cat4KTB.ToString("N2");
-                lblCat4Director.Text = cat4Director.ToString("N2");
-                lblCat4Total.Text = (cat4Cash + cat4KBANK + cat4KTB + cat4Director).ToString("N2");
 
                 // Update UI - Totals
-                decimal totalCash = cat1Cash + cat2Cash + cat3Cash + cat4Cash;
-                decimal totalKBANK = cat1KBANK + cat2KBANK + cat3KBANK + cat4KBANK;
-                decimal totalKTB = cat1KTB + cat2KTB + cat3KTB + cat4KTB;
-                decimal totalDirector = cat1Director + cat2Director + cat3Director + cat4Director;
-
+                decimal totalCash = colTotals[0], totalKBANK = colTotals[1], totalKTB = colTotals[2],
+                        totalDirector = colTotals[3], totalOther = colTotals[4];
                 lblTotalCash.Text = totalCash.ToString("N2");
                 lblTotalKBANK.Text = totalKBANK.ToString("N2");
                 lblTotalKTB.Text = totalKTB.ToString("N2");
                 lblTotalDirector.Text = totalDirector.ToString("N2");
-                lblGrandTotal.Text = (totalCash + totalKBANK + totalKTB + totalDirector).ToString("N2");
+                lblTotalOther.Text = totalOther.ToString("N2");
+                decimal grandTotal = cats.Sum(x => x.Total);
+                lblGrandTotal.Text = grandTotal.ToString("N2");
+                litOtherBreakdown.Text = BuildOtherBreakdownHtml(cats);
 
-                System.Diagnostics.Debug.WriteLine($"   💵 Totals: Cash={totalCash:N2}, KBANK={totalKBANK:N2}, KTB={totalKTB:N2}, Director={totalDirector:N2}");
-                System.Diagnostics.Debug.WriteLine($"   💰 Grand Total: {(totalCash + totalKBANK + totalKTB + totalDirector):N2}");
+                System.Diagnostics.Debug.WriteLine($"   💵 Totals: Cash={totalCash:N2}, KBANK={totalKBANK:N2}, KTB={totalKTB:N2}, Director={totalDirector:N2}, Other={totalOther:N2}");
+                System.Diagnostics.Debug.WriteLine($"   💰 Grand Total: {grandTotal:N2}");
 
                 // Get VAT and document count (count all documents regardless of status to match GridView)
                 try
@@ -383,15 +329,15 @@ namespace Take_Time_BangPhra.Account
                 // Log revenue calculation result (gracefully handle logging errors)
                 try
                 {
-                    decimal grandTotal = totalCash + totalKBANK + totalKTB + totalDirector;
-                    string breakdown = $"Category 1: {(cat1Cash + cat1KBANK + cat1KTB + cat1Director):N2}\n" +
-                                     $"Category 2: {(cat2Cash + cat2KBANK + cat2KTB + cat2Director):N2}\n" +
-                                     $"Category 3: {(cat3Cash + cat3KBANK + cat3KTB + cat3Director):N2}\n" +
-                                     $"Category 4: {(cat4Cash + cat4KBANK + cat4KTB + cat4Director):N2}\n" +
+                    string breakdown = $"Category 1: {cats[0].Total:N2}\n" +
+                                     $"Category 2: {cats[1].Total:N2}\n" +
+                                     $"Category 3: {cats[2].Total:N2}\n" +
+                                     $"Category 4: {cats[3].Total:N2}\n" +
                                      $"Total Cash: {totalCash:N2}\n" +
                                      $"Total KBANK: {totalKBANK:N2}\n" +
                                      $"Total KTB: {totalKTB:N2}\n" +
                                      $"Total Director: {totalDirector:N2}\n" +
+                                     $"Total Other: {totalOther:N2}\n" +
                                      $"Document Count: {docCount}\n" +
                                      $"Total VAT: {totalVAT:N2}";
 
@@ -583,81 +529,44 @@ namespace Take_Time_BangPhra.Account
             return codeInstance.DatabaseQuerySafe(conn, query, parameters);
         }
 
-        private decimal GetAmountByPaymentMethod(DataTable dt, int paymentMethodID)
+        /// <summary>ชื่อแหล่งเงิน → Channel_Type (PHASE19_29) ให้ RevenueBySource จัดแหล่งเงินชื่อไม่มีคำค้นเดิม
+        /// (เช่น "Cash", "เงินยืมกรรมการ") เข้าคอลัมน์ถูก — ไม่มีคอลัมน์/อ่านไม่ได้ = ว่าง (ใช้คำค้นอย่างเดียว)</summary>
+        private Dictionary<string, string> LoadPaidHowChannelTypes()
         {
-            // Legacy payment method mapping (hard-coded, no table lookup needed)
-            // 1 = KBANK (โอนกสิกร), 2 = CASH (เงินสด), 3 = DIRECTOR (เงินกรรมการ), 4 = KTB (โอนกรุงไทย)
-            string paymentMethodName = GetPaymentMethodNameByLegacyId(paymentMethodID);
-            if (string.IsNullOrEmpty(paymentMethodName))
+            var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            try
             {
-                return 0;
+                var dt = codeInstance.DatabaseQuerySafe(conn,
+                    @"IF COL_LENGTH('dbo.Account_Paid_How', 'Channel_Type') IS NOT NULL
+                          EXEC(N'SELECT Paid_How, Channel_Type FROM dbo.Account_Paid_How WHERE Channel_Type IS NOT NULL')", null);
+                if (dt != null && dt.Columns.Contains("Channel_Type"))
+                    foreach (DataRow r in dt.Rows)
+                    {
+                        string n = r["Paid_How"]?.ToString()?.Trim() ?? "";
+                        if (n.Length > 0 && !map.ContainsKey(n)) map[n] = r["Channel_Type"]?.ToString() ?? "";
+                    }
             }
+            catch { }
+            return map;
+        }
 
-            System.Diagnostics.Debug.WriteLine($"   🔍 GetAmountByPaymentMethod: ID={paymentMethodID}, Name='{paymentMethodName}', Rows={dt?.Rows.Count ?? 0}");
-
-            decimal total = 0;
-            HashSet<string> processedPayments = new HashSet<string>(); // Track processed payments to avoid duplicates
-            int matchCount = 0;
-
-            foreach (DataRow row in dt.Rows)
+        /// <summary>แจกแจงคอลัมน์ "อื่น ๆ" รายแหล่งเงิน/รายหมวด (encode ชื่อแหล่งเงินทุกตัว)</summary>
+        private static string BuildOtherBreakdownHtml(RevenueBySource[] cats)
+        {
+            var names = new[] { "1️⃣ จองพัก (เช็คอินในช่วง)", "2️⃣ มัดจำ", "3️⃣ ขายสินค้า", "4️⃣ อื่นๆ" };
+            var sb = new StringBuilder();
+            for (int i = 0; i < cats.Length; i++)
             {
-                // Check if this is Payment_History data (has PaymentHistoryID column)
-                if (dt.Columns.Contains("PaymentHistoryID"))
-                {
-                    // Category 1-2: Use Payment_History data (already split by payment method)
-                    string paymentHistoryID = row["PaymentHistoryID"]?.ToString() ?? "";
-                    string paymentMethod = row["PaymentMethod"]?.ToString() ?? "";
-
-                    if (matchCount < 3) // Log first 3 rows for debugging
-                    {
-                        System.Diagnostics.Debug.WriteLine($"      Row PaymentMethod='{paymentMethod}', Looking for='{paymentMethodName}', Match={paymentMethod.Contains(paymentMethodName)}");
-                    }
-
-                    // Avoid counting same Payment_History row multiple times
-                    if (!string.IsNullOrEmpty(paymentHistoryID) &&
-                        !processedPayments.Contains(paymentHistoryID) &&
-                        paymentMethod.Contains(paymentMethodName))
-                    {
-                        decimal amount = row["PaymentAmount"] != DBNull.Value ?
-                            Convert.ToDecimal(row["PaymentAmount"]) : 0;
-                        total += amount;
-                        processedPayments.Add(paymentHistoryID);
-                        matchCount++;
-                    }
-                }
-                else
-                {
-                    // Category 3-4: Use Account_Receipt data (need to split if multiple payment methods)
-                    string receiptId = row["ID"]?.ToString() ?? "";
-                    string paidType = row["Paid_Type"]?.ToString() ?? "";
-                    decimal receiptAmount = row["Total_Amount"] != DBNull.Value ?
-                        Convert.ToDecimal(row["Total_Amount"]) : 0;
-
-                    if (matchCount < 3) // Log first 3 rows for debugging
-                    {
-                        System.Diagnostics.Debug.WriteLine($"      Row Paid_Type='{paidType}', Looking for='{paymentMethodName}', Match={paidType.Contains(paymentMethodName)}");
-                    }
-
-                    // Check if this payment method is in the Paid_Type using simple string matching
-                    if (!string.IsNullOrEmpty(paidType) && paidType.Contains(paymentMethodName))
-                    {
-                        // Only count this receipt once per payment method
-                        string uniqueKey = $"{receiptId}_{paymentMethodName}";
-                        if (!processedPayments.Contains(uniqueKey))
-                        {
-                            // If multiple payment methods (comma-separated), split the amount evenly
-                            int methodCount = paidType.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries).Length;
-                            decimal amountForThisMethod = methodCount > 1 ? receiptAmount / methodCount : receiptAmount;
-                            total += amountForThisMethod;
-                            processedPayments.Add(uniqueKey);
-                            matchCount++;
-                        }
-                    }
-                }
+                var list = cats[i].OtherBySource;
+                if (list.Count == 0) continue;
+                sb.Append("<div style='margin-top:4px;'><b>").Append(names[i]).Append(":</b> ");
+                sb.Append(string.Join(" · ", list.Select(kv => NextAccUi.H(kv.Key) + " " + kv.Value.ToString("N2"))));
+                sb.Append("</div>");
             }
-
-            System.Diagnostics.Debug.WriteLine($"      ✅ Matched {matchCount} rows, Total={total:N2}");
-            return total;
+            if (sb.Length == 0) return "";
+            return "<div style='margin-top:10px; padding:10px 12px; background:#fff8e1; border:1px solid #ffe082; border-radius:6px; font-size:13px;'>"
+                 + "<b>คอลัมน์ \"อื่น ๆ\" แยกตามแหล่งเงิน</b> <span style='color:#888;'>(แหล่งเงินที่ไม่ใช่ เงินสด/กสิกร/กรุงไทย/กรรมการ — เช่น QR, เกตเวย์, ธนาคารอื่น)</span>"
+                 + sb + "</div>";
         }
 
         private DataTable GetAllReceipts(DateTime startDate, DateTime endDate, string status)
@@ -789,7 +698,7 @@ namespace Take_Time_BangPhra.Account
                 catch (Exception queryEx)
                 {
                     System.Diagnostics.Debug.WriteLine($"   ❌ GetAllReceipts failed: {queryEx.Message}");
-                    lblDateRange.Text += $" <span style='color: red;'>[Query Error: {queryEx.Message}]</span>";
+                    lblDateRange.Text += $" <span style='color: red;'>[Query Error: {NextAccUi.H(queryEx.Message)}]</span>";
                     throw;
                 }
 
@@ -875,7 +784,7 @@ namespace Take_Time_BangPhra.Account
             {
                 System.Diagnostics.Debug.WriteLine($"   ❌ Error in LoadDetails: {ex.Message}");
                 System.Diagnostics.Debug.WriteLine($"   Stack: {ex.StackTrace}");
-                lblDateRange.Text += $" <span style='color: red; font-weight: bold;'>[LoadDetails Error: {ex.Message}]</span>";
+                lblDateRange.Text += $" <span style='color: red; font-weight: bold;'>[LoadDetails Error: {NextAccUi.H(ex.Message)}]</span>";
                 ShowError($"เกิดข้อผิดพลาดในการโหลดข้อมูล:\n{ex.Message}\n\nStack Trace:\n{ex.StackTrace}");
 
                 // Try to bind empty DataTable to prevent further errors
@@ -933,12 +842,15 @@ namespace Take_Time_BangPhra.Account
                 if (task.Wait(20000)) naDocs = task.Result;
                 else
                 {
+                    // เดิมเงียบ (log อย่างเดียว) → ผู้ใช้เห็นรายการไม่ครบโดยไม่รู้ตัวแล้วกด Sync ซ้ำ — บอกบนหน้า
+                    litNaFetchWarn.Text = NextAccUi.FetchWarningHtml(20);
                     try { codeInstance.Logs(conn, "AccountingSync", "CheckDocument: ดึงเอกสาร NextAcc ไม่ทันใน 20 วิ → แสดง local อย่างเดียว", "SYSTEM"); }
                     catch { }
                 }
             }
             catch (Exception ex)
             {
+                litNaFetchWarn.Text = NextAccUi.FetchWarningHtml(20, "ดึงไม่สำเร็จ: " + ex.Message);
                 try { codeInstance.Logs(conn, "AccountingSync", $"CheckDocument: ดึงเอกสาร NextAcc ล้มเหลว ({ex.Message}) → แสดง local อย่างเดียว", "SYSTEM"); }
                 catch { }
                 return;
@@ -1155,21 +1067,33 @@ namespace Take_Time_BangPhra.Account
             decimal calculated = cat1 + cat2 + cat3 + cat4;
 
             decimal grandTotal = Convert.ToDecimal(lblGrandTotal.Text);
+            // ผลรวมรายคอลัมน์แหล่งเงิน (รวม "อื่น ๆ") ต้องเท่ายอดรวมด้วย — กันแหล่งเงินตกหล่นจากตาราง
+            decimal byColumn = Convert.ToDecimal(lblTotalCash.Text) + Convert.ToDecimal(lblTotalKBANK.Text)
+                             + Convert.ToDecimal(lblTotalKTB.Text) + Convert.ToDecimal(lblTotalDirector.Text)
+                             + Convert.ToDecimal(lblTotalOther.Text);
 
             pnlValidation.Visible = true;
 
-            if (Math.Abs(calculated - grandTotal) < 0.01m)
+            if (Math.Abs(calculated - grandTotal) < 0.01m && Math.Abs(byColumn - grandTotal) < 0.01m)
             {
                 pnlValidation.CssClass = "validation-box validation-success";
                 lblValidationIcon.Text = "✅";
-                lblValidationMessage.Text = $"ยอดถูกต้อง: ยอดรวมทั้งหมด {grandTotal:N2} บาท (หมวด 1+2+3+4 = {calculated:N2} บาท)";
+                lblValidationMessage.Text = $"ยอดถูกต้อง: ยอดรวมทั้งหมด {grandTotal:N2} บาท (หมวด 1+2+3+4 = {calculated:N2} บาท · ผลรวมทุกแหล่งเงิน = {byColumn:N2} บาท)";
             }
             else
             {
                 pnlValidation.CssClass = "validation-box validation-error";
                 lblValidationIcon.Text = "⚠️";
-                lblValidationMessage.Text = $"ยอดไม่ตรง! ยอดรวม {grandTotal:N2} บาท แต่ผลรวมหมวด {calculated:N2} บาท (ต่าง {Math.Abs(calculated - grandTotal):N2} บาท)";
+                lblValidationMessage.Text = $"ยอดไม่ตรง! ยอดรวม {grandTotal:N2} บาท แต่ผลรวมหมวด {calculated:N2} บาท / ผลรวมแหล่งเงิน {byColumn:N2} บาท";
             }
+        }
+
+        private static string CsvSafe(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return "";
+            if (value.IndexOfAny(new[] { ',', '"', '\n', '\r' }) >= 0 || value.StartsWith("=") || value.StartsWith("+") || value.StartsWith("@"))
+                return "\"" + value.Replace("\"", "\"\"") + "\"";
+            return value;
         }
 
         protected void btnExport_Click(object sender, EventArgs e)
@@ -1207,12 +1131,14 @@ namespace Take_Time_BangPhra.Account
                 csv.AppendLine();
 
                 // Summary table
-                csv.AppendLine("หมวดรายได้,เงินสด,โอนกสิกร,โอนกรุงไทย,เงินกรรมการ,รวม");
-                csv.AppendLine($"1. จองพัก (เช็คอินในช่วง),{lblCat1Cash.Text},{lblCat1KBANK.Text},{lblCat1KTB.Text},{lblCat1Director.Text},{lblCat1Total.Text}");
-                csv.AppendLine($"2. จองพัก (โอนในช่วง),{lblCat2Cash.Text},{lblCat2KBANK.Text},{lblCat2KTB.Text},{lblCat2Director.Text},{lblCat2Total.Text}");
-                csv.AppendLine($"3. ขายสินค้า,{lblCat3Cash.Text},{lblCat3KBANK.Text},{lblCat3KTB.Text},{lblCat3Director.Text},{lblCat3Total.Text}");
-                csv.AppendLine($"4. อื่นๆ,{lblCat4Cash.Text},{lblCat4KBANK.Text},{lblCat4KTB.Text},{lblCat4Director.Text},{lblCat4Total.Text}");
-                csv.AppendLine($"รวมทั้งหมด,{lblTotalCash.Text},{lblTotalKBANK.Text},{lblTotalKTB.Text},{lblTotalDirector.Text},{lblGrandTotal.Text}");
+                // ค่าเป็น "1,234.00" — ครอบด้วย CsvSafe ไม่งั้นจุลภาคแยกคอลัมน์ผิด
+                csv.AppendLine("หมวดรายได้,เงินสด,โอนกสิกร,โอนกรุงไทย,เงินกรรมการ,อื่น ๆ,รวม");
+                Func<Label[], string> csvRow = ls => string.Join(",", ls.Select(l => CsvSafe(l.Text)));
+                csv.AppendLine("1. จองพัก (เช็คอินในช่วง)," + csvRow(new[] { lblCat1Cash, lblCat1KBANK, lblCat1KTB, lblCat1Director, lblCat1Other, lblCat1Total }));
+                csv.AppendLine("2. จองพัก (โอนในช่วง)," + csvRow(new[] { lblCat2Cash, lblCat2KBANK, lblCat2KTB, lblCat2Director, lblCat2Other, lblCat2Total }));
+                csv.AppendLine("3. ขายสินค้า," + csvRow(new[] { lblCat3Cash, lblCat3KBANK, lblCat3KTB, lblCat3Director, lblCat3Other, lblCat3Total }));
+                csv.AppendLine("4. อื่นๆ," + csvRow(new[] { lblCat4Cash, lblCat4KBANK, lblCat4KTB, lblCat4Director, lblCat4Other, lblCat4Total }));
+                csv.AppendLine("รวมทั้งหมด," + csvRow(new[] { lblTotalCash, lblTotalKBANK, lblTotalKTB, lblTotalDirector, lblTotalOther, lblGrandTotal }));
                 csv.AppendLine();
 
                 // Additional info
@@ -2163,25 +2089,6 @@ namespace Take_Time_BangPhra.Account
         }
 
         /// <summary>
-        /// Get payment method name in Thai by legacy ID (hard-coded, no table lookup)
-        /// Legacy mapping: 1=KBANK, 2=CASH, 3=DIRECTOR, 4=KTB
-        /// Returns keyword to search (flexible matching)
-        /// </summary>
-        private string GetPaymentMethodNameByLegacyId(int legacyId)
-        {
-            // Use keywords that are likely to be in the Paid_Type string
-            // Changed from exact match to keyword match for better flexibility
-            switch (legacyId)
-            {
-                case 1: return "กสิกร"; // KBANK - keyword match (works for "โอนกสิกร", "โอน กสิกร", "โอนเงิน กสิกร" etc.)
-                case 2: return "เงินสด"; // CASH - exact match
-                case 3: return "กรรมการ"; // DIRECTOR - keyword match (works for "เงินกรรมการ", "เงิน กรรมการ" etc.)
-                case 4: return "กรุงไทย"; // KTB - keyword match (works for "โอนกรุงไทย", "โอน กรุงไทย" etc.)
-                default: return "";
-            }
-        }
-
-        /// <summary>
         /// Check if receipt has a payment slip
         /// </summary>
         protected bool HasSlip(object receiptId)
@@ -2300,7 +2207,7 @@ namespace Take_Time_BangPhra.Account
             {
                 var dt = codeInstance.DatabaseQuerySafe(conn,
                     @"SELECT ID, Entity_Type, Action_Type, Status, Error_Message, Payload,
-                             Nexaacc_Response_Id, Nexaacc_Document_Number, Nexaacc_Document_Type
+                             Nexaacc_Response_Id, Nexaacc_Document_Number, Nexaacc_Document_Type" + QueueIssueColsSelect() + @"
                       FROM Accounting_Sync_Queue
                       WHERE (Entity_Type = 'RECEIPT' AND Action_Type = 'CREATE_RECEIPT_DOCUMENT')
                          OR (Entity_Type = 'VOUCHER' AND Action_Type = 'CREATE_VOUCHER_JOURNAL')
@@ -2333,6 +2240,25 @@ namespace Take_Time_BangPhra.Account
             idx += search.Length;
             int end = json.IndexOf("\"", idx);
             return end > idx ? json.Substring(idx, end - idx) : null;
+        }
+
+        /// <summary>คอลัมน์ชนิดปัญหาของคิว (PHASE19_37) — ยังไม่รัน migration = ค่าว่าง (ป้ายแบบเดิม)</summary>
+        private string QueueIssueColsSelect()
+        {
+            return ReceiptPreflight.QueueSchemaReady(conn)
+                ? ", Error_Class, Fix_Url"
+                : ", CAST(NULL AS NVARCHAR(20)) AS Error_Class, CAST(NULL AS NVARCHAR(400)) AS Fix_Url";
+        }
+
+        /// <summary>ป้ายแถวคิวที่ยังไม่สำเร็จ (ตัวเดียวกับ CheckPayment_New — NextAccUi.DocQueueBadge)</summary>
+        private NextAccUi.SyncBadge BuildQueueBadge(DataRow queueRow, string docId)
+        {
+            string cls = queueRow.Table.Columns.Contains("Error_Class") && queueRow["Error_Class"] != DBNull.Value ? queueRow["Error_Class"].ToString() : "";
+            string fix = queueRow.Table.Columns.Contains("Fix_Url") && queueRow["Fix_Url"] != DBNull.Value ? queueRow["Fix_Url"].ToString() : "";
+            string fixResolved = NextAccUi.IsSafeAppPath(fix) ? ResolveUrl("~" + fix) : "";
+            string queueLink = ResolveUrl("~" + NextAccUi.QueueUrl("", q: docId));
+            return NextAccUi.DocQueueBadge(queueRow["Status"]?.ToString(), cls, queueRow["ID"]?.ToString(),
+                queueRow["Error_Message"]?.ToString(), fixResolved, queueLink);
         }
 
         protected void gvDetails_RowDataBound(object sender, GridViewRowEventArgs e)
@@ -2376,7 +2302,7 @@ namespace Take_Time_BangPhra.Account
                             if (c is Button bDel)
                             {
                                 if (voided) bDel.Visible = false;         // ยกเลิกแล้ว — ไม่มีอะไรให้ทำ
-                                else bDel.Text = "🚫 ยกเลิก";             // active → ยกเลิกบน NextAcc ได้
+                                else bDel.Text = "🚫 ยกเลิก (void)";      // active → ยกเลิกบน NextAcc ได้ (ไม่มีใบในระบบให้ลบ)
                             }
                     var bEdit = e.Row.FindControl("btnEdit") as Button;
                     if (bEdit != null)
@@ -2458,27 +2384,20 @@ namespace Take_Time_BangPhra.Account
                             lblSync.Text = $"<span class='sync-badge completed' title='NextAcc ID: {Server.HtmlEncode(nexaaccId)}'>✓ {Server.HtmlEncode(displayLabel)}</span>";
                         btnSync.Visible = false;
                         break;
-                    case "PENDING":
-                    case "PROCESSING":
-                        lblSync.Text = $"<span class='sync-badge pending'>รอดำเนินการ #{queueId}</span>";
-                        btnSync.Visible = false;
-                        break;
-                    case "FAILED":
-                        string err = queueRow["Error_Message"]?.ToString() ?? "";
-                        if (err.Length > 40) err = err.Substring(0, 40) + "...";
-                        lblSync.Text = $"<span class='sync-badge failed' title='{Server.HtmlEncode(err)}'>Failed #{queueId}</span>";
-                        btnSync.Visible = true;
-                        btnSync.Text = "🔄 Retry";
-                        break;
                     default:
-                        lblSync.Text = $"<span class='sync-badge pending'>{syncStatus} #{queueId}</span>";
-                        btnSync.Visible = false;
+                    {
+                        // ป้ายตามชนิดปัญหา (Error_Class) + คำไทยของ AWAITING_SLIP/SUPERSEDED — ซ่อน "ส่งใหม่" เมื่อไม่ช่วย/เสี่ยงซ้ำ
+                        var badge = BuildQueueBadge(queueRow, docId);
+                        lblSync.Text = badge.Html;
+                        btnSync.Visible = badge.ShowRetry;
+                        if (badge.ShowRetry) btnSync.Text = badge.RetryText;
                         break;
+                    }
                 }
             }
             else
             {
-                lblSync.Text = "<span class='sync-badge none'>ยังไม่ sync</span>";
+                lblSync.Text = "<span class='sync-badge none'>ยังไม่ส่งเข้าบัญชี</span>";
                 btnSync.Visible = true;
             }
 

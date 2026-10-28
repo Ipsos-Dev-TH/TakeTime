@@ -264,6 +264,8 @@
                 <asp:Button ID="btnExportSS" runat="server" Text="&#128190; Export ประกันสังคม" CssClass="btn btn-export" OnClick="btnExportSS_Click" />
                 <asp:Button ID="btnExportPND1" runat="server" Text="&#128196; Export ภ.ง.ด.1" CssClass="btn btn-export" OnClick="btnExportPND1_Click" />
             </div>
+            <%-- โหมดลงบัญชีอย่างเดียว: เตือนว่าแบบภาษี/ประกันสังคมต้องยื่นจากข้อมูลระบบนี้ (CLAUDE.md ข้อ 23) --%>
+            <asp:Literal ID="litPayrollModeNote" runat="server" Mode="PassThrough"></asp:Literal>
 
         </asp:Panel>
 

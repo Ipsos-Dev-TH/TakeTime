@@ -22,31 +22,39 @@ namespace Take_Time_BangPhra.Account
         protected global::System.Web.UI.WebControls.Label lblCat1KBANK;
         protected global::System.Web.UI.WebControls.Label lblCat1KTB;
         protected global::System.Web.UI.WebControls.Label lblCat1Director;
+        protected global::System.Web.UI.WebControls.Label lblCat1Other;
         protected global::System.Web.UI.WebControls.Label lblCat1Total;
 
         protected global::System.Web.UI.WebControls.Label lblCat2Cash;
         protected global::System.Web.UI.WebControls.Label lblCat2KBANK;
         protected global::System.Web.UI.WebControls.Label lblCat2KTB;
         protected global::System.Web.UI.WebControls.Label lblCat2Director;
+        protected global::System.Web.UI.WebControls.Label lblCat2Other;
         protected global::System.Web.UI.WebControls.Label lblCat2Total;
 
         protected global::System.Web.UI.WebControls.Label lblCat3Cash;
         protected global::System.Web.UI.WebControls.Label lblCat3KBANK;
         protected global::System.Web.UI.WebControls.Label lblCat3KTB;
         protected global::System.Web.UI.WebControls.Label lblCat3Director;
+        protected global::System.Web.UI.WebControls.Label lblCat3Other;
         protected global::System.Web.UI.WebControls.Label lblCat3Total;
 
         protected global::System.Web.UI.WebControls.Label lblCat4Cash;
         protected global::System.Web.UI.WebControls.Label lblCat4KBANK;
         protected global::System.Web.UI.WebControls.Label lblCat4KTB;
         protected global::System.Web.UI.WebControls.Label lblCat4Director;
+        protected global::System.Web.UI.WebControls.Label lblCat4Other;
         protected global::System.Web.UI.WebControls.Label lblCat4Total;
 
         protected global::System.Web.UI.WebControls.Label lblTotalCash;
         protected global::System.Web.UI.WebControls.Label lblTotalKBANK;
         protected global::System.Web.UI.WebControls.Label lblTotalKTB;
         protected global::System.Web.UI.WebControls.Label lblTotalDirector;
+        protected global::System.Web.UI.WebControls.Label lblTotalOther;
         protected global::System.Web.UI.WebControls.Label lblGrandTotal;
+
+        /// <summary>แจกแจงคอลัมน์ "อื่น ๆ" รายแหล่งเงิน</summary>
+        protected global::System.Web.UI.WebControls.Literal litOtherBreakdown;
 
         protected global::System.Web.UI.WebControls.Panel pnlValidation;
         protected global::System.Web.UI.WebControls.Label lblValidationIcon;
@@ -59,6 +67,9 @@ namespace Take_Time_BangPhra.Account
         protected global::System.Web.UI.WebControls.CheckBox chkEnableDelete;
         /// <summary>hfRelinkTarget control.</summary>
         protected global::System.Web.UI.WebControls.HiddenField hfRelinkTarget;
+
+        /// <summary>แถบเตือนดึง NextAcc ไม่ทัน</summary>
+        protected global::System.Web.UI.WebControls.Literal litNaFetchWarn;
 
         protected global::System.Web.UI.WebControls.GridView gvDetails;
     }

@@ -897,6 +897,7 @@ namespace Take_Time_BangPhra.Account
                 // timeout (>18s) → แสดง last-known จากแคชแทนตารางว่าง. task ที่ทิ้งไปยังวิ่งต่อ + เขียนแคช+status เองเมื่อเสร็จ
                 // → โชว์ "ผลดึง background ล่าสุด" ที่ service เขียนไว้ → เห็นว่าดึงได้จริงไหม/พังตรงไหน แม้ตัวนี้ timeout
                 ShowNextAccDiag("ดึงรายการไม่ทันใน 18 วิ (NextAcc list API ช้า) — กำลังดึงต่อเบื้องหลัง; กดค้นหาอีกครั้งอีก ~10-20 วิ จะขึ้นจากแคช");
+                litNaFetchWarn.Text = NextAccUi.FetchWarningHtml(18, "ระบบกำลังดึงต่อเบื้องหลัง — กดค้นหาอีกครั้งในอีก 10-20 วินาที");
                 string bgStatus = ReadNextAccStatus(fromDate, toDate);
                 if (!string.IsNullOrEmpty(bgStatus))
                     lblDateRange.Text += $"<br/><span style='color:#8e44ad; font-size:12px;'>🕓 <b>ผลดึง background ล่าสุด:</b> {Server.HtmlEncode(bgStatus)}</span>";
@@ -1143,6 +1144,14 @@ namespace Take_Time_BangPhra.Account
             }
         }
 
+        /// <summary>คอลัมน์ชนิดปัญหาของคิว (PHASE19_37) — ยังไม่รัน migration = ค่าว่าง (ป้ายแบบเดิม)</summary>
+        private string QueueIssueColsSelect()
+        {
+            return ReceiptPreflight.QueueSchemaReady(conn)
+                ? ", Error_Class, Fix_Url"
+                : ", CAST(NULL AS NVARCHAR(20)) AS Error_Class, CAST(NULL AS NVARCHAR(400)) AS Fix_Url";
+        }
+
         private void LoadSyncStatusCache()
         {
             _syncStatusCache = new Dictionary<string, DataRow>(StringComparer.OrdinalIgnoreCase);
@@ -1152,7 +1161,7 @@ namespace Take_Time_BangPhra.Account
                 // → คอลัมน์ "Sync บัญชี" ของใบเงินเดือนจะแสดงสถานะ sync จริง ไม่ค้าง "ยังไม่ sync"
                 var dt = codeInstance.DatabaseQuerySafe(conn,
                     @"SELECT ID, Entity_Type, Action_Type, Status, Error_Message, Payload, Created_Date,
-                             Nexaacc_Response_Id, Nexaacc_Document_Number, Nexaacc_Document_Type
+                             Nexaacc_Response_Id, Nexaacc_Document_Number, Nexaacc_Document_Type" + QueueIssueColsSelect() + @"
                       FROM Accounting_Sync_Queue
                       WHERE (Entity_Type = 'VOUCHER' AND Action_Type = 'CREATE_VOUCHER_JOURNAL')
                          OR (Entity_Type = 'PAYROLL' AND Action_Type = 'CREATE_PAYROLL_ENTRY')
@@ -1288,7 +1297,7 @@ namespace Take_Time_BangPhra.Account
                     if (pst == "COMPLETED")
                         lblSync.Text = "<span class='sync-badge completed'>✓ เงินเดือน (GL)</span>";
                     else if (pst == "FAILED")
-                        lblSync.Text = $"<span class='sync-badge failed' title='{Server.HtmlEncode(prow["Error_Message"]?.ToString() ?? "")}'>เงินเดือน: Failed</span>";
+                        lblSync.Text = $"<span class='sync-badge failed' title='{Server.HtmlEncode(prow["Error_Message"]?.ToString() ?? "")}'>เงินเดือน: ล้มเหลว</span>";
                     else
                         lblSync.Text = "<span class='sync-badge pending'>เงินเดือน: รอดำเนินการ</span>";
                 }
@@ -1325,27 +1334,24 @@ namespace Take_Time_BangPhra.Account
                             lblSync.Text = $"<span class='sync-badge completed' title='NextAcc ID: {Server.HtmlEncode(nexaaccId)}'>✓ {Server.HtmlEncode(displayLabel)}</span>";
                         btnSync.Visible = false;
                         break;
-                    case "PENDING":
-                    case "PROCESSING":
-                        lblSync.Text = $"<span class='sync-badge pending'>รอดำเนินการ #{queueId}</span>";
-                        btnSync.Visible = false;
-                        break;
-                    case "FAILED":
-                        string err = queueRow["Error_Message"]?.ToString() ?? "";
-                        if (err.Length > 40) err = err.Substring(0, 40) + "...";
-                        lblSync.Text = $"<span class='sync-badge failed' title='{Server.HtmlEncode(err)}'>Failed #{queueId}</span>";
-                        btnSync.Visible = true;
-                        btnSync.Text = "🔄 Retry";
-                        break;
                     default:
-                        lblSync.Text = $"<span class='sync-badge pending'>{syncStatus} #{queueId}</span>";
-                        btnSync.Visible = false;
+                    {
+                        // ป้ายตามชนิดปัญหา (Error_Class) — ตัวเดียวกับ CheckDocument_New; ซ่อน "ส่งใหม่" เมื่อไม่ช่วย/เสี่ยงซ้ำ
+                        string cls = queueRow.Table.Columns.Contains("Error_Class") && queueRow["Error_Class"] != DBNull.Value ? queueRow["Error_Class"].ToString() : "";
+                        string fix = queueRow.Table.Columns.Contains("Fix_Url") && queueRow["Fix_Url"] != DBNull.Value ? queueRow["Fix_Url"].ToString() : "";
+                        var badge = NextAccUi.DocQueueBadge(syncStatus, cls, queueId, queueRow["Error_Message"]?.ToString(),
+                            NextAccUi.IsSafeAppPath(fix) ? ResolveUrl("~" + fix) : "",
+                            ResolveUrl("~" + NextAccUi.QueueUrl("", q: docId)));
+                        lblSync.Text = badge.Html;
+                        btnSync.Visible = badge.ShowRetry;
+                        if (badge.ShowRetry) btnSync.Text = badge.RetryText;
                         break;
+                    }
                 }
             }
             else
             {
-                lblSync.Text = "<span class='sync-badge none'>ยังไม่ sync</span>";
+                lblSync.Text = "<span class='sync-badge none'>ยังไม่ส่งเข้าบัญชี</span>";
                 btnSync.Visible = true;
             }
         }

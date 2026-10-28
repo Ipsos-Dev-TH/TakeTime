@@ -25,6 +25,7 @@ namespace Take_Time_BangPhra.Admin.Payroll
                 InitializeYearDropdown();
                 LoadPaymentOptions();
                 LoadPayrollData();
+                ShowPayrollModeNotice();
             }
             else
             {
@@ -303,25 +304,16 @@ namespace Take_Time_BangPhra.Admin.Payroll
                             if (acctConfig.IsConfigured && acctConfig.Enabled)
                             {
                                 var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(cs);
-                                if (acctConfig.IsPayrollImportMode)
-                                {
-                                    long qid = sync.EnqueuePayrollRunImport(currentPayrollPeriodId);
-                                    naMsg = qid > 0 ? " + ส่งออกเอกสารเงินเดือนบน NextAcc (DOCUMENT_IMPORT) เข้าคิวแล้ว" : " (แต่ส่ง NextAcc ไม่สำเร็จ)";
-                                }
-                                else if (acctConfig.IsPayrollDocumentMode)
-                                {
-                                    long qid = sync.EnqueuePayrollRunSync(currentPayrollPeriodId);
-                                    naMsg = qid > 0 ? " + ส่งระบบเงินเดือน NextAcc (DOCUMENT) เข้าคิวแล้ว" : " (แต่ส่ง NextAcc ไม่สำเร็จ)";
-                                }
-                                else
-                                {
-                                    naMsg = " (โหมด JOURNAL_ONLY: GL ลง NextAcc ตอนทำจ่ายรายคน)";
-                                }
+                                // ข้อความไทยไม่มีรหัสโหมด + ลิงก์ไปคิว (NextAccUi — CLAUDE.md ข้อ 23)
+                                long qid = 0;
+                                if (acctConfig.IsPayrollImportMode) qid = sync.EnqueuePayrollRunImport(currentPayrollPeriodId);
+                                else if (acctConfig.IsPayrollDocumentMode) qid = sync.EnqueuePayrollRunSync(currentPayrollPeriodId);
+                                naMsg = PayrollNextAccNote(acctConfig, qid);
                             }
                         }
                         catch (Exception ax)
                         {
-                            naMsg = " (ส่ง NextAcc ไม่สำเร็จ: " + ax.Message + ")";
+                            naMsg = "<br/>⚠ ส่งเงินเดือนขึ้น NextAcc ไม่สำเร็จ: " + Server.HtmlEncode(ax.Message);
                         }
 
                         ShowMessage("อนุมัติเงินเดือนสำเร็จ" + naMsg, "success");
@@ -514,21 +506,15 @@ namespace Take_Time_BangPhra.Admin.Payroll
                     if (acctConfig.IsConfigured && acctConfig.Enabled)
                     {
                         var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(cs);
-                        if (acctConfig.IsPayrollImportMode)
-                        {
-                            sync.EnqueuePayrollRunImport(currentPayrollPeriodId);
-                            nextAccMsg = " + ส่งออกเอกสารบน NextAcc (DOCUMENT_IMPORT) เข้าคิวแล้ว";
-                        }
-                        else if (acctConfig.IsPayrollDocumentMode)
-                        {
-                            sync.EnqueuePayrollRunSync(currentPayrollPeriodId);
-                            nextAccMsg = " + ส่งระบบเงินเดือน NextAcc (DOCUMENT) เข้าคิวแล้ว";
-                        }
+                        long qid = 0;
+                        if (acctConfig.IsPayrollImportMode) qid = sync.EnqueuePayrollRunImport(currentPayrollPeriodId);
+                        else if (acctConfig.IsPayrollDocumentMode) qid = sync.EnqueuePayrollRunSync(currentPayrollPeriodId);
+                        nextAccMsg = PayrollNextAccNote(acctConfig, qid);
                     }
                 }
                 catch (Exception accEx)
                 {
-                    nextAccMsg = " (แต่ส่ง NextAcc ไม่สำเร็จ: " + accEx.Message + ")";
+                    nextAccMsg = "<br/>⚠ ส่งเงินเดือนขึ้น NextAcc ไม่สำเร็จ: " + Server.HtmlEncode(accEx.Message);
                 }
 
                 ShowMessage($"ทำจ่ายสำเร็จ ({processedCount} คน){nextAccMsg}", "success");
@@ -1002,6 +988,32 @@ namespace Take_Time_BangPhra.Admin.Payroll
         {
             if (string.IsNullOrEmpty(str)) return "";
             return str.Replace("\\", "\\\\").Replace("'", "\\'").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "\\r");
+        }
+
+        /// <summary>ข้อความหลังอนุมัติ/ทำจ่าย — ตามโหมดเงินเดือนของ NextAcc, ไม่มีรหัสโหมด, ลิงก์ไปคิว (กรองตามเลขคิว/งวด)</summary>
+        private string PayrollNextAccNote(Take_Time_BangPhra.Integration.AccountingConfig cfg, long queueId)
+        {
+            if (cfg == null || cfg.IsPayrollLocal) return "";
+            string mode = cfg.IsPayrollImportMode ? "DOCUMENT_IMPORT" : cfg.IsPayrollDocumentMode ? "DOCUMENT" : "JOURNAL_ONLY";
+            string q = queueId > 0 ? queueId.ToString() : (mode == "JOURNAL_ONLY" ? "" : currentPayrollPeriodId.ToString());
+            string url = ResolveUrl("~" + Take_Time_BangPhra.Integration.NextAccUi.QueueUrl("", q: q));
+            return Take_Time_BangPhra.Integration.NextAccUi.PayrollSyncNoteHtml(mode, queueId, url);
+        }
+
+        /// <summary>โหมดลงบัญชีอย่างเดียว (ค่าเริ่มต้น): เตือนบนหน้าตลอดว่า ภ.ง.ด.1/สปส.1-10/50 ทวิ ต้องยื่นจากข้อมูลระบบนี้</summary>
+        private void ShowPayrollModeNotice()
+        {
+            try
+            {
+                string cs = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                var cfg = new Take_Time_BangPhra.Integration.AccountingConfig(cs);
+                bool journalOnly = cfg.IsConfigured && cfg.Enabled && !cfg.IsPayrollLocal && !cfg.IsPayrollImportMode && !cfg.IsPayrollDocumentMode;
+                litPayrollModeNote.Text = journalOnly
+                    ? "<div class='alert alert-warning' style='margin:8px 0;'>📒 เงินเดือนลงบัญชี NextAcc เป็นรายการบัญชีรายคน (ไม่ออกเอกสาร). "
+                      + Take_Time_BangPhra.Integration.NextAccUi.PayrollStatutoryWarningHtml() + "</div>"
+                    : "";
+            }
+            catch { litPayrollModeNote.Text = ""; }
         }
 
         private void ShowMessage(string message, string type)

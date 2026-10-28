@@ -929,6 +929,13 @@
                                                     <li><a runat="server" href="~/Voucher/MatchTaxInvoice">
                                                         <i class="fas fa-link"></i> จับคู่ใบกำกับซื้อ
                                                     </a></li>
+                                                    <%-- ซื้อเชื่อ/คืนสินค้าผู้ขาย — เดิมเข้าได้จากลิงก์ย่อยเท่านั้น (CLAUDE.md ข้อ 23); ตัวเลข = งานค้าง (แคช 5 นาที) --%>
+                                                    <li><a runat="server" href="~/Account/CreditPurchasePayment">
+                                                        <i class="fas fa-hand-holding-dollar"></i> จ่ายชำระซื้อเชื่อ / ยอดกับผู้ขาย<asp:Literal ID="litNavCppBadge" runat="server" />
+                                                    </a></li>
+                                                    <li><a runat="server" href="~/Product/PurchaseReturn">
+                                                        <i class="fas fa-box-open"></i> คืนสินค้าผู้ขาย / รอใบลดหนี้<asp:Literal ID="litNavPrtBadge" runat="server" />
+                                                    </a></li>
                                                     <li><a runat="server" href="~/Account/Report/Report">
                                                         <i class="fas fa-chart-pie"></i> รายงานบัญชี
                                                     </a></li>

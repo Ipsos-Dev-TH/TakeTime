@@ -212,6 +212,9 @@ namespace Take_Time_BangPhra.Admin.Settings
                 case "retryAllFailed":
                     result = RetryAllFailed();
                     break;
+                case "retryAllPreview":
+                    result = RetryAllPreview();
+                    break;
                 case "syncAccounts":
                     result = SyncChartOfAccounts();
                     break;
@@ -378,7 +381,7 @@ namespace Take_Time_BangPhra.Admin.Settings
             cfg.SetConfig("Nexaacc_Preflight_Mode", mode);
             string who = Session["UserName"]?.ToString() ?? Session["User"]?.ToString() ?? "?";
             _code.Logs(ConnStr, "AccountingConfig", $"โหมดตัวตรวจก่อนส่ง Nexaacc_Preflight_Mode {cur} → {mode} โดย {who}", who);
-            string note = Integration.ReceiptPreflight.QueueSchemaReady(ConnStr) ? "" : " (⚠ ยังไม่ได้รัน PHASE19_37 — มีผลหลังรัน migration)";
+            string note = Integration.ReceiptPreflight.QueueSchemaReady(ConnStr) ? "" : " (⚠ ยังไม่ได้อัปเดตฐานข้อมูลส่วนนี้ — มีผลหลังอัปเดต · สำหรับผู้ดูแลระบบ: สคริปต์ PHASE19_37)";
             return new Dictionary<string, object> { { "success", true }, { "message", $"ตั้งโหมดตัวตรวจก่อนส่ง = {mode}{note}" } };
         }
 
@@ -435,7 +438,11 @@ namespace Take_Time_BangPhra.Admin.Settings
                     result = ManualDepositOperation(data);
                     break;
                 case "stockAdjustment":
-                    result = ManualStockAdjustment(data);
+                    // เครื่องมือเก่า "ปรับสต๊อก/ตัดจำหน่าย" ปลดระวางแล้ว (CLAUDE.md ข้อ 23): ข้ามแคตตาล็อกเหตุผลจ่ายออก,
+                    // การอนุมัติ, หลักฐาน และภาษีขายของสินค้าที่ถือว่าขาย (ม.77/1(8)) + อาจลงซ้ำกับหน้าตรวจนับ/ปรับสต๊อก
+                    // ⇒ ไม่รับคำสั่งจากหน้านี้แล้ว (ManualStockAdjustment คงไว้ให้ย้อนดูเท่านั้น)
+                    result = new Dictionary<string, object> { { "success", false },
+                        { "message", "เครื่องมือนี้ปิดแล้ว — ใช้หน้า \"ตรวจนับ / ปรับสต๊อก\" (Product/Stock) ซึ่งมีเหตุผลจ่ายออก การอนุมัติ และหลักฐานครบ" } };
                     break;
                 case "stockProductSync":
                     result = ManualProductSync(data);
@@ -1264,22 +1271,45 @@ namespace Take_Time_BangPhra.Admin.Settings
                     catch { }
                 }
 
-                // Build WHERE clause for status filter
-                string whereClause = "";
+                // Build WHERE clause: สถานะ / ชนิดปัญหา / ค้นหา (?q= เลขใบเสร็จ เลขจอง เลขเอกสาร NextAcc เลขคิว)
+                var conds = new List<string>();
                 var queryParams = new Dictionary<string, object>();
-                var validStatuses = new HashSet<string> { "PENDING", "PROCESSING", "COMPLETED", "FAILED", "AWAITING_SLIP" };
+                var validStatuses = new HashSet<string> { "PENDING", "PROCESSING", "COMPLETED", "FAILED", "AWAITING_SLIP", "SUPERSEDED", "CANCELLED" };
                 string classFilter = (Request.QueryString["cls"] ?? "").Trim().ToUpperInvariant();
                 if (!string.IsNullOrEmpty(statusFilter) && validStatuses.Contains(statusFilter.ToUpper()))
                 {
-                    whereClause = "WHERE Status = @statusFilter";
+                    conds.Add("Status = @statusFilter");
                     queryParams["@statusFilter"] = statusFilter.ToUpper();
                 }
                 else if (hasIssueCols && Integration.QueueErrors.Parse(classFilter) != null)
                 {
                     // ชนิดปัญหาที่ยังเปิดอยู่ (ล้ม/รอ)
-                    whereClause = "WHERE Error_Class = @cls AND (Status = 'FAILED' OR (Status = 'PENDING' AND Error_Class = 'WAIT'))";
+                    conds.Add("Error_Class = @cls AND (Status = 'FAILED' OR (Status = 'PENDING' AND Error_Class = 'WAIT'))");
                     queryParams["@cls"] = classFilter;
                 }
+                string search = (Request.QueryString["q"] ?? "").Trim();
+                if (search.Length > 100) search = search.Substring(0, 100);
+                if (search.Length >= 2)
+                {
+                    // escape อักขระพิเศษของ LIKE — ค่าทั้งหมดผ่านพารามิเตอร์ (ไม่ต่อ SQL)
+                    string like = search.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]");
+                    var qc = new List<string> { "Payload LIKE @qLike" };
+                    queryParams["@qLike"] = "%" + like + "%";
+                    long qNum;
+                    if (long.TryParse(search, out qNum) && qNum > 0)
+                    {
+                        // ตัวเลขล้วน = เลขคิว / Entity_ID / เลขการจอง (reservationId ใน payload)
+                        qc.Add("ID = @qNum");
+                        qc.Add("CAST(Entity_ID AS NVARCHAR(50)) = @qStr");   // Entity_ID อาจไม่ใช่ตัวเลขทุกแถว — เทียบเป็นข้อความ
+                        qc.Add("Payload LIKE @qRes");
+                        queryParams["@qNum"] = qNum;
+                        queryParams["@qStr"] = qNum.ToString();
+                        queryParams["@qRes"] = "%\"reservationId\":" + qNum + "[,}]%";
+                    }
+                    if (QueueHasDocNumberCol()) qc.Add("Nexaacc_Document_Number LIKE @qLike");
+                    conds.Add("(" + string.Join(" OR ", qc) + ")");
+                }
+                string whereClause = conds.Count > 0 ? "WHERE " + string.Join(" AND ", conds) : "";
 
                 // Get total count for pagination
                 DataTable countDt = _code.DatabaseQuerySafe(ConnStr,
@@ -1296,10 +1326,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "@offset", offset },
                     { "@pageSize", pageSize }
                 };
-                if (queryParams.ContainsKey("@statusFilter"))
-                    itemParams["@statusFilter"] = queryParams["@statusFilter"];
-                if (queryParams.ContainsKey("@cls"))
-                    itemParams["@cls"] = queryParams["@cls"];
+                foreach (var kv in queryParams) itemParams[kv.Key] = kv.Value;
                 string issueCols = hasIssueCols
                     ? ", Error_Class, Error_Rule, Fix_Url, Depends_On_Queue_Id, Wait_Since"
                     : ", CAST(NULL AS NVARCHAR(20)) AS Error_Class, CAST(NULL AS NVARCHAR(40)) AS Error_Rule, CAST(NULL AS NVARCHAR(400)) AS Fix_Url, CAST(NULL AS BIGINT) AS Depends_On_Queue_Id, CAST(NULL AS DATETIME) AS Wait_Since";
@@ -1402,9 +1429,12 @@ namespace Take_Time_BangPhra.Admin.Settings
                         {
                             { "id", ToLongSafe(row["ID"]) },
                             { "entityType", mask ? "PAYROLL" : entityType },
+                            { "entityLabel", Integration.NextAccUi.EntityTh(mask ? "PAYROLL" : entityType) },
                             { "entityId", mask ? 0 : ToIntSafe(row["Entity_ID"]) },
                             { "actionType", actionType },
+                            { "actionLabel", Integration.NextAccUi.ActionTh(actionType) },
                             { "status", row["Status"]?.ToString() },
+                            { "statusLabel", Integration.NextAccUi.StatusTh(row["Status"]?.ToString()) },
                             { "retryCount", ToIntSafe(row["Retry_Count"]) },
                             { "maxRetries", ToIntSafe(row["Max_Retries"]) },
                             { "error", errorMsg },
@@ -1476,12 +1506,64 @@ namespace Take_Time_BangPhra.Admin.Settings
                 return new Dictionary<string, object>
                 {
                     { "success", false },
-                    { "message", "Queue query failed: " + ex.Message },
+                    { "message", "อ่านคิวไม่สำเร็จ: " + ex.Message },
                     { "pending", 0 }, { "processing", 0 }, { "completed", 0 }, { "failed", 0 },
                     { "items", new List<object>() },
                     { "page", 1 }, { "pageSize", 20 }, { "totalItems", 0 }, { "totalPages", 1 }
                 };
             }
+        }
+
+        private static int _queueDocNumCol = -1;
+        /// <summary>มีคอลัมน์ Nexaacc_Document_Number (PHASE12 M14) ไหม — ใช้ค้นเลขเอกสาร NextAcc ในคิว</summary>
+        private bool QueueHasDocNumberCol()
+        {
+            if (_queueDocNumCol < 0)
+            {
+                try
+                {
+                    var c = _code.DatabaseQuerySafe(ConnStr,
+                        "SELECT CASE WHEN COL_LENGTH('dbo.Accounting_Sync_Queue', 'Nexaacc_Document_Number') IS NULL THEN 0 ELSE 1 END", null);
+                    _queueDocNumCol = c != null && c.Rows.Count > 0 && Convert.ToInt32(c.Rows[0][0]) == 1 ? 1 : 0;
+                }
+                catch { _queueDocNumCol = 0; }
+            }
+            return _queueDocNumCol == 1;
+        }
+
+        /// <summary>ชนิดปัญหา (Error_Class) + สถานะของแถวคิว — ยังไม่รัน PHASE19_37 = ชนิดว่าง</summary>
+        private void ReadQueueClass(long queueId, out string status, out string errorClass)
+        {
+            status = ""; errorClass = "";
+            bool cols = Integration.ReceiptPreflight.QueueSchemaReady(ConnStr);
+            var dt = _code.DatabaseQuerySafe(ConnStr,
+                "SELECT Status, " + (cols ? "ISNULL(Error_Class, '')" : "CAST('' AS NVARCHAR(20))") + " AS Cls FROM Accounting_Sync_Queue WHERE ID = @id",
+                new Dictionary<string, object> { { "@id", queueId } });
+            if (dt == null || dt.Rows.Count == 0) return;
+            status = dt.Rows[0]["Status"]?.ToString() ?? "";
+            errorClass = dt.Rows[0]["Cls"]?.ToString() ?? "";
+        }
+
+        /// <summary>
+        /// ลองใหม่/ยิงใหม่รายการที่ "อาจสร้างเอกสารบน NextAcc ไปแล้ว" (Error_Class=DUPLICATE) — เสี่ยงเอกสารซ้ำ
+        /// ⇒ เฉพาะเจ้าของระบบ + เหตุผล ≥ 10 ตัว และบันทึกผู้กด/เหตุผลใน Logs. คืนข้อความปฏิเสธ (null = ผ่าน)
+        /// </summary>
+        private string GuardDuplicateRetry(long queueId, string actionName)
+        {
+            string st, cls;
+            ReadQueueClass(queueId, out st, out cls);
+            if (st != "FAILED" || !Integration.NextAccUi.RetryNeedsOwnerReason(cls)) return null;
+            if (Session["User"]?.ToString() != "Owner")
+                return "รายการนี้อาจสร้างเอกสารบน NextAcc ไปแล้ว (ชนิด \"ตรวจบน NextAcc\") — ตรวจบน NextAcc ก่อน แล้วกด ✔ ปิดรายการ "
+                     + "ถ้าเอกสารขึ้นแล้ว · ลองใหม่ได้เฉพาะเจ้าของระบบพร้อมเหตุผล";
+            string reason = (Request.QueryString["reason"] ?? "").Trim();
+            if (!Integration.NextAccUi.IsReasonAcceptable(reason))
+                return "ต้องระบุเหตุผลอย่างน้อย 10 ตัวอักษร (เช่น \"ตรวจบน NextAcc แล้ว ไม่มีเอกสารของใบนี้\")";
+            if (reason.Length > 300) reason = reason.Substring(0, 300);
+            string who = Session["UserName"]?.ToString() ?? Session["User"]?.ToString() ?? "Owner";
+            _code.Logs(ConnStr, "AccountingSync",
+                $"{actionName} คิว #{queueId} ชนิด DUPLICATE (อาจมีเอกสารบน NextAcc แล้ว) โดย {who} — เหตุผล: {reason}", who);
+            return null;
         }
 
         private bool IsSensitiveQueueItem(long queueId)
@@ -1621,11 +1703,15 @@ namespace Take_Time_BangPhra.Admin.Settings
                         { "message", "รายการนี้กำลังส่งไป NextAcc อยู่ — รอให้จบรอบก่อน (ถ้าค้างเกิน 15 นาที ระบบจะคืนเป็นรอส่งเอง)" } };
                 }
 
+                string dupBlock = GuardDuplicateRetry(queueId, "ลองใหม่");
+                if (dupBlock != null)
+                    return new Dictionary<string, object> { { "success", false }, { "message", dupBlock }, { "needReason", Session["User"]?.ToString() == "Owner" } };
+
                 if (!sync.RetryItem(queueId))
                     return new Dictionary<string, object> { { "success", false },
                         { "message", $"รายการ #{queueId} อยู่ในสถานะ {rowStatus} — Retry ไม่ได้ " +
                             "(ถูกแทนด้วยรายการใหม่/ถูกยกเลิก — ให้ Retry ที่รายการล่าสุดของเอกสารนี้แทน)" } };
-                return new Dictionary<string, object> { { "success", true }, { "message", $"Reset queue item #{queueId} to PENDING" } };
+                return new Dictionary<string, object> { { "success", true }, { "message", $"คืนรายการคิว #{queueId} เข้าคิวแล้ว — ระบบจะส่งรอบถัดไป" } };
             }
             catch (Exception ex)
             {
@@ -1743,8 +1829,22 @@ namespace Take_Time_BangPhra.Admin.Settings
         private Dictionary<string, object> RunIntegrationHealthCheck()
         {
             var issues = new List<Dictionary<string, object>>();
+            // ทุกข้อมีลิงก์ "แก้ที่นี่" (fixUrl: "?focus=…" = ส่วนในหน้านี้, "/…" = หน้าอื่น) และไม่โชว์รหัส migration บนหน้า
+            // (ย้ายไป "รายละเอียดสำหรับผู้ดูแล" — adminCodes)
             Action<string, string, string> add = (level, title, detail) =>
-                issues.Add(new Dictionary<string, object> { { "level", level }, { "title", title }, { "detail", detail } });
+            {
+                var codes = new List<string>();
+                string fix = Integration.NextAccUi.HealthFixUrl(title, detail);
+                issues.Add(new Dictionary<string, object>
+                {
+                    { "level", level },
+                    { "title", Integration.NextAccUi.HideInternalCodes(title, codes) },
+                    { "detail", Integration.NextAccUi.HideInternalCodes(detail, codes) },
+                    { "fixUrl", fix },
+                    { "fixLabel", Integration.NextAccUi.HealthFixLabel(fix) },
+                    { "adminCodes", string.Join(", ", codes) }
+                });
+            };
 
             try
             {
@@ -2033,7 +2133,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                     int stale = q.Rows[0]["Stale"] != DBNull.Value ? Convert.ToInt32(q.Rows[0]["Stale"]) : 0;
                     if (dead > 0)
                         add("error", $"คิวล้มเหลวจนหมด retry: {dead} รายการ",
-                            "เอกสารเหล่านี้ยังไม่ขึ้น NextAcc — เปิดดูสาเหตุที่ตารางคิวด้านล่าง แก้ต้นเหตุแล้วกด 'Retry ทั้งหมด'");
+                            "เอกสารเหล่านี้ยังไม่ขึ้น NextAcc — เปิดดูสาเหตุที่ตารางคิวด้านล่าง แก้ต้นเหตุแล้วกด 'ลองใหม่ที่ล้มเหลวทั้งหมด' (ระบบข้ามรายการที่อาจซ้ำ/ต้องใบลดหนี้/ต้องตั้งค่า/ต้องแก้ข้อมูลให้เอง)");
                     if (stale > 0)
                         add("warn", $"คิวค้างเกิน 6 ชั่วโมง: {stale} รายการ", "ตรวจว่า timer ทำงานอยู่และ NextAcc ตอบปกติ");
                     if (busy > 3)
@@ -2587,6 +2687,57 @@ namespace Take_Time_BangPhra.Admin.Settings
             return Truncate(raw, 20000);
         }
 
+        /// <summary>แถวที่ "ลองใหม่ทั้งหมด" จะแตะ: FAILED ที่หมดรอบลองใหม่ (ไม่ใช่ Owner = ไม่รวมเงินเดือน)</summary>
+        private string RetryAllBaseWhere(bool isOwner)
+        {
+            string w = "WHERE Status = 'FAILED' AND Retry_Count >= Max_Retries";
+            if (!isOwner)
+                w += " AND Action_Type != 'CREATE_PAYROLL_ENTRY' AND ISNULL(Entity_Type,'') != 'PAYROLL'";
+            return w;
+        }
+
+        /// <summary>นับแถว FAILED ที่หมดรอบตามชนิดปัญหา ("" = ยังไม่จำแนก)</summary>
+        private Dictionary<string, int> CountRetryAllByClass(bool isOwner, bool hasIssueCols)
+        {
+            var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var dt = _code.DatabaseQuerySafe(ConnStr,
+                "SELECT " + (hasIssueCols ? "ISNULL(Error_Class, '')" : "CAST('' AS NVARCHAR(20))") + " AS Cls, COUNT(*) AS N FROM Accounting_Sync_Queue "
+                + RetryAllBaseWhere(isOwner) + " GROUP BY " + (hasIssueCols ? "ISNULL(Error_Class, '')" : "CAST('' AS NVARCHAR(20))"), null);
+            if (dt != null)
+                foreach (DataRow r in dt.Rows)
+                    counts[r["Cls"]?.ToString() ?? ""] = Convert.ToInt32(r["N"]);
+            return counts;
+        }
+
+        /// <summary>ก่อนกด "ลองใหม่ทั้งหมด": นับตามชนิด + ข้อความยืนยัน (ไม่แก้อะไร)</summary>
+        private Dictionary<string, object> RetryAllPreview()
+        {
+            try
+            {
+                bool isOwner = Session["User"]?.ToString() == "Owner";
+                bool hasIssueCols = Integration.ReceiptPreflight.QueueSchemaReady(ConnStr);
+                var counts = CountRetryAllByClass(isOwner, hasIssueCols);
+                int retry = counts.Where(kv => Integration.NextAccUi.IsRetryAllSafe(kv.Key)).Sum(kv => kv.Value);
+                return new Dictionary<string, object>
+                {
+                    { "success", true },
+                    { "retry", retry },
+                    { "skip", counts.Values.Sum() - retry },
+                    { "counts", counts.ToDictionary(kv => kv.Key.Length == 0 ? "UNCLASSIFIED" : kv.Key, kv => (object)kv.Value) },
+                    { "message", Integration.NextAccUi.RetryAllConfirmText(counts) + (isOwner ? "" : "\n(ไม่รวมรายการเงินเดือน — ต้องเป็นเจ้าของระบบ)") }
+                };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message } };
+            }
+        }
+
+        /// <summary>
+        /// "ลองใหม่ทั้งหมด" แบบปลอดภัย: รีเซ็ตเฉพาะ FAILED ที่หมดรอบและชนิด TRANSIENT / UNKNOWN / WAIT (รอเกินกำหนด) / ยังไม่จำแนก.
+        /// ข้าม DUPLICATE (อาจสร้างเอกสารไปแล้ว — ยิงซ้ำ = เอกสารซ้ำ; งานที่ไม่ใช่ใบเสร็จไม่มีตัวกันซ้ำ), POLICY (ต้องใบลดหนี้),
+        /// CONFIG (คืนเข้าคิวเองเมื่อแก้ตั้งค่า), DATA (ตัวตรวจก่อนส่งพักไว้ — ต้องแก้ใบ/ตรวจซ้ำ) แล้วรายงานว่าข้ามอะไรเพราะอะไร
+        /// </summary>
         private Dictionary<string, object> RetryAllFailed()
         {
             try
@@ -2594,18 +2745,22 @@ namespace Take_Time_BangPhra.Admin.Settings
                 Integration.AccountingApiClient.ClearServerDown();
 
                 bool isOwner = Session["User"]?.ToString() == "Owner";
+                bool hasIssueCols = Integration.ReceiptPreflight.QueueSchemaReady(ConnStr);
+                var counts = CountRetryAllByClass(isOwner, hasIssueCols);
+
                 string sql = @"UPDATE Accounting_Sync_Queue
                       SET Status = 'PENDING', Retry_Count = 0, Next_Retry_Date = NULL, Error_Message = NULL
-                      WHERE Status = 'FAILED' AND Retry_Count >= Max_Retries";
-                if (!isOwner)
-                    sql += " AND Action_Type != 'CREATE_PAYROLL_ENTRY' AND ISNULL(Entity_Type,'') != 'PAYROLL'";
+                      " + RetryAllBaseWhere(isOwner);
+                if (hasIssueCols) sql += Integration.NextAccUi.SqlRetryAllClassFilter();
 
-                _code.DatabaseInsertSafe(ConnStr, sql, null);
+                int n = _code.DatabaseInsertSafe(ConnStr, sql, null);
+                if (n < 0) n = 0;
 
-                string msg = isOwner
-                    ? "Reset failed items ทั้งหมดเป็น PENDING แล้ว"
-                    : "Reset failed items เป็น PENDING แล้ว (ไม่รวมรายการเงินเดือน)";
-                return new Dictionary<string, object> { { "success", true }, { "message", msg } };
+                string who = Session["UserName"]?.ToString() ?? Session["User"]?.ToString() ?? "?";
+                string msg = Integration.NextAccUi.RetryAllResultText(counts, n)
+                           + (isOwner ? "" : "\n(ไม่รวมรายการเงินเดือน — ต้องเป็นเจ้าของระบบ)");
+                try { _code.Logs(ConnStr, "AccountingSync", "ลองใหม่ทั้งหมด โดย " + who + ": " + msg.Replace("\n", " "), who); } catch { }
+                return new Dictionary<string, object> { { "success", true }, { "message", msg }, { "retried", n } };
             }
             catch (Exception ex)
             {
@@ -2647,6 +2802,10 @@ namespace Take_Time_BangPhra.Admin.Settings
                         return new Dictionary<string, object> { { "success", false }, { "message", cnBlock } };
                 }
 
+                string dupBlockRs = GuardDuplicateRetry(queueId, "ยิงใหม่ (resync)");
+                if (dupBlockRs != null)
+                    return new Dictionary<string, object> { { "success", false }, { "message", dupBlockRs }, { "needReason", Session["User"]?.ToString() == "Owner" } };
+
                 _code.DatabaseInsertSafe(ConnStr,
                     @"UPDATE Accounting_Sync_Queue
                       SET Status = 'PENDING', Retry_Count = 0, Nexaacc_Response_Id = NULL,
@@ -2657,7 +2816,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                 return new Dictionary<string, object>
                 {
                     { "success", true },
-                    { "message", $"Queue #{queueId} reset เป็น PENDING — จะยิง API ใหม่รอบถัดไป" }
+                    { "message", $"คิว #{queueId} กลับเป็นรอส่ง — จะส่งขึ้น NextAcc ใหม่รอบถัดไป" }
                 };
             }
             catch (Exception ex)
@@ -3454,7 +3613,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                     return new Dictionary<string, object>
                     {
                         { "success", false },
-                        { "message", (coaOk ? "✓ " + coaMsg + "\n" : "") + "ยังไม่มีตาราง Accounting_Nexaacc_BankAccounts — รัน migration PHASE19_21 ก่อน" }
+                        { "message", (coaOk ? "✓ " + coaMsg + "\n" : "") + "ยังไม่ได้อัปเดตฐานข้อมูลส่วนบัญชีธนาคาร — ให้ผู้ดูแลระบบอัปเดตก่อน (สำหรับผู้ดูแลระบบ: สคริปต์ PHASE19_21)" }
                     };
 
                 var client = new Integration.AccountingApiClient(config, ConnStr);
@@ -3890,7 +4049,7 @@ namespace Take_Time_BangPhra.Admin.Settings
             try
             {
                 if (!TableExists("Accounting_Ota_Channel_Map"))
-                    return new Dictionary<string, object> { { "success", false }, { "message", "ยังไม่มีตาราง Accounting_Ota_Channel_Map — รัน migration PHASE19_21 ก่อน" } };
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ยังไม่ได้อัปเดตฐานข้อมูลส่วนช่องทาง OTA — ให้ผู้ดูแลระบบอัปเดตก่อน (สำหรับผู้ดูแลระบบ: สคริปต์ PHASE19_21)" } };
 
                 var byKey = new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase);
                 var order = new List<string>();
@@ -3990,7 +4149,7 @@ namespace Take_Time_BangPhra.Admin.Settings
             try
             {
                 if (!TableExists("Accounting_Ota_Channel_Map"))
-                    return new Dictionary<string, object> { { "success", false }, { "message", "ยังไม่มีตาราง Accounting_Ota_Channel_Map — รัน migration PHASE19_21 ก่อน" } };
+                    return new Dictionary<string, object> { { "success", false }, { "message", "ยังไม่ได้อัปเดตฐานข้อมูลส่วนช่องทาง OTA — ให้ผู้ดูแลระบบอัปเดตก่อน (สำหรับผู้ดูแลระบบ: สคริปต์ PHASE19_21)" } };
 
                 Func<string, string> s = k => data.ContainsKey(k) && data[k] != null ? data[k].ToString().Trim() : "";
                 string key = Integration.AccountingSyncService.OtaChannelKey(s("channelKey"));

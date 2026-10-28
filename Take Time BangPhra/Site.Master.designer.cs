@@ -44,6 +44,9 @@ namespace Take_Time_BangPhra
 
         /// <summary>Role-scoped menu columns (Admin/Owner)</summary>
         protected global::System.Web.UI.WebControls.Panel pnlFinanceNav;
+        /// <summary>ตัวเลขงานค้างในเมนูการเงิน: ใบซื้อเชื่อค้างจ่าย / คืนสินค้ารอใบลดหนี้</summary>
+        protected global::System.Web.UI.WebControls.Literal litNavCppBadge;
+        protected global::System.Web.UI.WebControls.Literal litNavPrtBadge;
         protected global::System.Web.UI.WebControls.Panel pnlCrmNav;
 
         /// <summary>Public floating customer chat widget</summary>

@@ -371,11 +371,12 @@
             <table class="revenue-table">
                 <thead>
                     <tr>
-                        <th style="width: 30%">หมวดรายได้</th>
-                        <th style="width: 12%">เงินสด</th>
-                        <th style="width: 15%">โอนกสิกร</th>
-                        <th style="width: 15%">โอนกรุงไทย</th>
-                        <th style="width: 13%">เงินกรรมการ</th>
+                        <th style="width: 26%">หมวดรายได้</th>
+                        <th style="width: 11%">เงินสด</th>
+                        <th style="width: 12%">โอนกสิกร</th>
+                        <th style="width: 12%">โอนกรุงไทย</th>
+                        <th style="width: 11%">เงินกรรมการ</th>
+                        <th style="width: 13%" title="แหล่งเงินอื่น เช่น QR / เกตเวย์ / ธนาคารอื่น — ดูแจกแจงใต้ตาราง">อื่น ๆ</th>
                         <th style="width: 15%">รวม</th>
                     </tr>
                 </thead>
@@ -386,6 +387,7 @@
                         <td class="amount-cell"><asp:Label ID="lblCat1KBANK" runat="server" Text="0.00"></asp:Label></td>
                         <td class="amount-cell"><asp:Label ID="lblCat1KTB" runat="server" Text="0.00"></asp:Label></td>
                         <td class="amount-cell"><asp:Label ID="lblCat1Director" runat="server" Text="0.00"></asp:Label></td>
+                        <td class="amount-cell"><asp:Label ID="lblCat1Other" runat="server" Text="0.00"></asp:Label></td>
                         <td class="amount-cell"><asp:Label ID="lblCat1Total" runat="server" Text="0.00"></asp:Label></td>
                     </tr>
                     <tr>
@@ -394,6 +396,7 @@
                         <td class="amount-cell"><asp:Label ID="lblCat2KBANK" runat="server" Text="0.00"></asp:Label></td>
                         <td class="amount-cell"><asp:Label ID="lblCat2KTB" runat="server" Text="0.00"></asp:Label></td>
                         <td class="amount-cell"><asp:Label ID="lblCat2Director" runat="server" Text="0.00"></asp:Label></td>
+                        <td class="amount-cell"><asp:Label ID="lblCat2Other" runat="server" Text="0.00"></asp:Label></td>
                         <td class="amount-cell"><asp:Label ID="lblCat2Total" runat="server" Text="0.00"></asp:Label></td>
                     </tr>
                     <tr>
@@ -402,6 +405,7 @@
                         <td class="amount-cell"><asp:Label ID="lblCat3KBANK" runat="server" Text="0.00"></asp:Label></td>
                         <td class="amount-cell"><asp:Label ID="lblCat3KTB" runat="server" Text="0.00"></asp:Label></td>
                         <td class="amount-cell"><asp:Label ID="lblCat3Director" runat="server" Text="0.00"></asp:Label></td>
+                        <td class="amount-cell"><asp:Label ID="lblCat3Other" runat="server" Text="0.00"></asp:Label></td>
                         <td class="amount-cell"><asp:Label ID="lblCat3Total" runat="server" Text="0.00"></asp:Label></td>
                     </tr>
                     <tr>
@@ -410,6 +414,7 @@
                         <td class="amount-cell"><asp:Label ID="lblCat4KBANK" runat="server" Text="0.00"></asp:Label></td>
                         <td class="amount-cell"><asp:Label ID="lblCat4KTB" runat="server" Text="0.00"></asp:Label></td>
                         <td class="amount-cell"><asp:Label ID="lblCat4Director" runat="server" Text="0.00"></asp:Label></td>
+                        <td class="amount-cell"><asp:Label ID="lblCat4Other" runat="server" Text="0.00"></asp:Label></td>
                         <td class="amount-cell"><asp:Label ID="lblCat4Total" runat="server" Text="0.00"></asp:Label></td>
                     </tr>
                     <tr class="total-row">
@@ -418,10 +423,13 @@
                         <td class="amount-cell"><asp:Label ID="lblTotalKBANK" runat="server" Text="0.00"></asp:Label></td>
                         <td class="amount-cell"><asp:Label ID="lblTotalKTB" runat="server" Text="0.00"></asp:Label></td>
                         <td class="amount-cell"><asp:Label ID="lblTotalDirector" runat="server" Text="0.00"></asp:Label></td>
+                        <td class="amount-cell"><asp:Label ID="lblTotalOther" runat="server" Text="0.00"></asp:Label></td>
                         <td class="amount-cell"><asp:Label ID="lblGrandTotal" runat="server" Text="0.00"></asp:Label></td>
                     </tr>
                 </tbody>
             </table>
+            <%-- แหล่งเงินที่ตกคอลัมน์ "อื่น ๆ" แยกรายชื่อ (ผลรวมทุกคอลัมน์ = ยอดรวมทั้งหมด) --%>
+            <asp:Literal ID="litOtherBreakdown" runat="server" Mode="PassThrough"></asp:Literal>
 
             <!-- Validation Box -->
             <asp:Panel ID="pnlValidation" runat="server" CssClass="validation-box" Visible="false">
@@ -453,8 +461,10 @@
         <!-- Detail Section -->
         <div class="detail-section">
             <div class="detail-title">📋 รายละเอียดเอกสาร</div>
+            <%-- แถบเตือนเมื่อดึงรายการจาก NextAcc ไม่ทัน (รายการ/สถานะอาจไม่ครบ — อย่ากดส่งซ้ำ) --%>
+            <asp:Literal ID="litNaFetchWarn" runat="server" Mode="PassThrough"></asp:Literal>
             <div style="margin-bottom: 10px;">
-                <asp:CheckBox ID="chkEnableDelete" runat="server" Text="เปิดใช้งานปุ่มลบ (Delete)" />
+                <asp:CheckBox ID="chkEnableDelete" runat="server" Text="เปิดใช้งานปุ่มลบ/ยกเลิก (ลบใบในระบบ + ยกเลิก (void) เอกสารบน NextAcc)" />
             </div>
             <%-- เลขใบเสร็จปลายทางของปุ่ม "ผูกกับใบในระบบ" — ผู้ใช้ยืนยัน/แก้ได้เอง
                  (ระบบเดาให้ไม่ได้เสมอ: การจองหนึ่งมีใบเสร็จหลายใบ มัดจำ+เช็คเอาท์) --%>
@@ -468,7 +478,7 @@
                 OnRowEditing="gvDetails_RowEditing"
                 OnRowDataBound="gvDetails_RowDataBound">
                 <Columns>
-                    <asp:CommandField ButtonType="Button" HeaderText="ลบ" DeleteText="🗑️ ลบ" ShowDeleteButton="True" />
+                    <asp:CommandField ButtonType="Button" HeaderText="ลบ / ยกเลิก" DeleteText="🗑️ ลบ + ยกเลิก (void)" ShowDeleteButton="True" />
                     <asp:CommandField ButtonType="Button" HeaderText="ดู PDF" SelectText="📄 ดู PDF" ShowSelectButton="True" />
                     <asp:TemplateField HeaderText="แก้ไข">
                         <ItemTemplate>
@@ -498,12 +508,12 @@
                     <asp:BoundField DataField="Status" HeaderText="สถานะ" />
                     <asp:BoundField DataField="Remark" HeaderText="หมายเหตุ" />
                     <asp:BoundField DataField="Created_By" HeaderText="ผู้สร้าง" />
-                    <asp:TemplateField HeaderText="Sync บัญชี">
+                    <asp:TemplateField HeaderText="สถานะ NextAcc">
                         <ItemTemplate>
                             <asp:Label ID="lblSyncStatus" runat="server"></asp:Label>
-                            <asp:Button ID="btnSync" runat="server" Text="📤 Sync" CommandName="sync"
+                            <asp:Button ID="btnSync" runat="server" Text="📤 ส่งเข้าบัญชี" CommandName="sync"
                                 CommandArgument='<%# Eval("ID") %>' CssClass="btn-sync-action"
-                                OnClientClick="if(!confirm('ยืนยันส่งข้อมูลเข้าระบบบัญชี?'))return false; this.disabled=true; this.value='⏳ กำลัง Sync...';"
+                                OnClientClick="if(!confirm('ยืนยันส่งข้อมูลเข้าระบบบัญชี?'))return false; this.disabled=true; this.value='⏳ กำลังส่ง...';"
                                 UseSubmitBehavior="false"
                                 Visible="false" />
                         </ItemTemplate>
