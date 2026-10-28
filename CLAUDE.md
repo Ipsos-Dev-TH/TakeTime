@@ -655,6 +655,20 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
      redirect → `CheckDocument_New` (คงพารามิเตอร์, endResponse). เมนูการเงินเพิ่ม CreditPurchasePayment + PurchaseReturn พร้อมตัวเลขงานค้าง (แคช 5 นาที).
      เงินเดือน: ข้อความไทยไม่มีรหัสโหมด + ลิงก์คิว; JOURNAL_ONLY เตือนตลอดว่า ภ.ง.ด.1/สปส.1-10/50 ทวิ ต้องยื่นจากระบบนี้. คำ: "ยกเลิก (void)" = เอกสาร NextAcc,
      "ลบ" = ใบในระบบ. ไม่ทำ: P0-11 (OCR — ทีมอื่น). ต้อง build+test บน Windows.
+26. **หน้าตั้งค่า NextAcc แบ่งแท็บ + วิซาร์ดตั้งค่า 6 ขั้น (ต.ค. 2026, ไม่มี migration):** `Admin/Settings/AccountingIntegration.aspx` = 7 แท็บฝั่งเบราว์เซอร์
+   (การเชื่อมต่อ · ผังบัญชี & แหล่งเงิน · โหมดการส่ง & นโยบาย · คิว & ตรวจสุขภาพ · เครื่องมือ (+ **โซนอันตราย** พับไว้: ลบใบที่หาย/เก็บกวาด/กลับมัดจำค้าง/รีเซ็ตการจอง/
+   มัดจำด้วยมือ/void OTADOC — ทุกปุ่ม confirm) · อีเมลจอง & LINE · บันทึก (`action=recentSyncLog` อ่าน Logs 1-168 ชม., ไม่ใช่ Owner ตัดบรรทัดเงินเดือน)).
+   **id คอนโทรล/ชื่อฟังก์ชัน/action เดิมคงทั้งหมด** (ฟังก์ชันได้พารามิเตอร์เสริมท้ายเท่านั้น เช่น `saveSyncSettings(resultId, opts)`, `postAction(..., {noReload, done})`,
+   `updateMapping(id, idPrefix, resultId, after)`); ทุกปุ่มบันทึกในแท็บนโยบาย = `saveSyncSettings` ตัวเดิม (ส่งค่าทุกข้อพร้อมกัน — ความหมายค่าไม่เปลี่ยน).
+   ลิงก์: `#t-<แท็บ>` (จำแท็บข้ามรีโหลด) · `?focus=api|sync|mapping&key=|paidHow|gateway|ota|paidType|email|health|queue` → แท็บของส่วนนั้น (`ACC_FOCUS_TAB` + `accShowFor` ใน
+   `applyFocus`) · `?cls=/?status=/?q=` → แท็บคิว · `#queueStats` (id ส่วน) → แท็บที่มีส่วนนั้น · `?wizard=1`/`#wizard` เปิดวิซาร์ด. เพิ่มส่วน/การ์ดใหม่ = ใส่ใน `<section id="tab-…">`
+   ที่ถูก (+ เพิ่ม focus ใน `ACC_FOCUS_TAB` ถ้ามีลิงก์). ป้าย "ค่าแนะนำ" = `<span class="rec-badge" data-rec-for="cfgX" data-rec="ค่า" data-rec-label="ไทย">` (เขียว/ส้มอัตโนมัติ;
+   `neutral` = นโยบายกิจการ) — ค่าแนะนำตรงกับ `ApplyRecommendedPreset`. **วิซาร์ด** (modal, Owner/Admin บัญชี = `ReceiptPreflight.CanOverrideCurrentUser`): 1 คีย์ (int_ = "คีย์เชื่อมระบบ",
+   acc_ = "คีย์บริษัท (ไม่บังคับ)", เตือนใส่ผิดช่อง) + saveApi/testApi · 2 syncWallets/syncAccounts · 3 แหล่งเงิน (`wzSuggestPaidHow`: เลข 4 ตัวท้าย/ชื่อธนาคาร/เงินสด 11111/เกตเวย์ 11340/
+   OTA/เงินประกัน 21530/กรรมการ — เลือกให้แต่ไม่บันทึกจนกด) · 4 บัญชีสำคัญ (`WZ_KEYS`: รหัสผังมาตรฐาน → คำในชื่อ; เรียง "จำเป็น/ใช้กับฟีเจอร์ที่เปิด" ก่อน; แถวที่ไม่มีใน
+   `Accounting_Account_Mapping` = ข้าม) · 5 นโยบาย (VAT มัดจำ 3 โหมดพร้อมตัวอย่าง JE มัดจำ 1,000 + เช็คเอาท์ 3,000, ใบลดหนี้, ตัวตรวจก่อนส่ง `setPreflightMode`, ลิงก์ SlipCheckSettings)
+   · 6 healthCheck + สรุป. จำขั้นใน `Accounting_Integration_Config.Nexaacc_Setup_Wizard_Step` (1-6|DONE, `action=saveWizardStep`) → แถบ "ทำต่อ". มือถือ: ไม่มี scroll แนวนอนทั้งหน้า
+   (ตารางเลื่อนในการ์ด). ทดสอบ: static render + Playwright (แท็บ/ลิงก์/วิซาร์ด/escape/390px). ต้อง build+test บน Windows.
 
 ## Queue resilience (ส.ค. 2026 — หลังเคส NextAcc ล่มทั้งแอป)
 

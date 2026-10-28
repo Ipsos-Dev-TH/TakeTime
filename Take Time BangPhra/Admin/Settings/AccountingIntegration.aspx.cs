@@ -112,6 +112,11 @@ namespace Take_Time_BangPhra.Admin.Settings
                     { "maxRetries", config.MaxRetries },
                     { "timeout", config.TimeoutSeconds },
                     { "isConfigured", config.IsConfigured },
+                    // ข้อ 26: แท็บ + วิซาร์ดตั้งค่า (อ่านอย่างเดียว — ค่าที่หน้าใช้แสดงสถานะ/ทำต่อจากขั้นเดิม)
+                    { "canUseCompanyEndpoints", config.CanUseCompanyEndpoints },
+                    { "preflightMode", config.GetConfigValue("Nexaacc_Preflight_Mode", "OFF").ToUpperInvariant() },
+                    { "wizardStep", config.GetConfigValue(WizardStepKey, "") },
+                    { "canWizard", Integration.ReceiptPreflight.CanOverrideCurrentUser() },
                     // Email reservation intake (STAAH)
                     { "emailRsvEnabled", config.IsEmailReservationEnabled },
                     { "emailRsvImapServer", config.EmailRsvImapServer },
@@ -324,6 +329,13 @@ namespace Take_Time_BangPhra.Admin.Settings
                 case "integrityScan":
                     result = RunIntegrityScanNow();
                     break;
+                // ข้อ 26: วิซาร์ดตั้งค่า (จำขั้นที่ทำถึง) + แท็บบันทึก (log ล่าสุด อ่านอย่างเดียว)
+                case "saveWizardStep":
+                    result = SaveWizardStep();
+                    break;
+                case "recentSyncLog":
+                    result = GetRecentSyncLog();
+                    break;
                 default:
                     result = new Dictionary<string, object> { { "success", false }, { "message", "Unknown action" } };
                     break;
@@ -397,6 +409,80 @@ namespace Take_Time_BangPhra.Admin.Settings
             foreach (var kv in r.byRule.OrderByDescending(x => x.Value)) sb.AppendLine($"  {kv.Key}: {kv.Value} ใบ");
             if (r.samples.Count > 0) { sb.AppendLine(); sb.AppendLine("ตัวอย่าง:"); foreach (var s in r.samples) sb.AppendLine("  " + s); }
             return new Dictionary<string, object> { { "success", true }, { "message", sb.ToString() } };
+        }
+
+        /// <summary>ข้อ 26: วิซาร์ดตั้งค่า — จำขั้นที่ทำถึง (1-6 หรือ DONE) ไว้ใน Accounting_Integration_Config ให้ทำต่อได้ข้ามเครื่อง.
+        /// ไม่แตะค่าตั้งใด ๆ (การตั้งค่าจริงยิงผ่าน action เดิม saveApi/syncWallets/updatePaidHowAccount/updateMapping/saveSyncSettings/setPreflightMode)</summary>
+        private Dictionary<string, object> SaveWizardStep()
+        {
+            if (!Integration.ReceiptPreflight.CanOverrideCurrentUser())
+                return new Dictionary<string, object> { { "success", false }, { "message", "วิซาร์ดตั้งค่าใช้ได้เฉพาะ Owner / Admin ที่มีสิทธิ์บัญชี" } };
+            string step = (Request.QueryString["step"] ?? "").Trim().ToUpperInvariant();
+            int n;
+            bool ok = step == "DONE" || (int.TryParse(step, out n) && n >= 1 && n <= 6);
+            if (!ok) return new Dictionary<string, object> { { "success", false }, { "message", "ขั้นต้องเป็น 1-6 หรือ DONE" } };
+            var cfg = new Integration.AccountingConfig(ConnStr);
+            string cur = cfg.GetConfigValue(WizardStepKey, "");
+            if (cur != step)
+            {
+                cfg.SetConfig(WizardStepKey, step);
+                string who = Session["UserName"]?.ToString() ?? Session["User"]?.ToString() ?? "?";
+                _code.Logs(ConnStr, "AccountingConfig", $"วิซาร์ดตั้งค่า NextAcc: ขั้น {(cur.Length == 0 ? "-" : cur)} → {step} โดย {who}", who);
+            }
+            return new Dictionary<string, object> { { "success", true }, { "step", step } };
+        }
+
+        private const string WizardStepKey = "Nexaacc_Setup_Wizard_Step";
+
+        /// <summary>ข้อ 26 แท็บ "บันทึก": log การเชื่อม NextAcc ล่าสุด (AccountingSync + AccountingConfig) — อ่านอย่างเดียว,
+        /// จำกัดช่วงเวลา (ใช้ index LogDateTime) + timeout 20 วิ. ไม่ใช่ Owner = ตัดบรรทัดเงินเดือนออก (เหมือนคิวที่ซ่อนรายการเงินเดือน)</summary>
+        private Dictionary<string, object> GetRecentSyncLog()
+        {
+            try
+            {
+                int hours;
+                if (!int.TryParse(Request.QueryString["hours"] ?? "24", out hours) || hours < 1) hours = 24;
+                if (hours > 168) hours = 168;
+                string kind = (Request.QueryString["kind"] ?? "").Trim();
+                string q = (Request.QueryString["q"] ?? "").Trim();
+                if (q.Length > 60) q = q.Substring(0, 60);
+                var pars = new Dictionary<string, object> { { "@from", DateTime.Now.AddHours(-hours) } };
+                string actions = kind == "config" ? "'AccountingConfig'"
+                               : kind == "sync" ? "'AccountingSync'"
+                               : "'AccountingSync','AccountingConfig','AccountingIntegration'";
+                string where = $"LogAction IN ({actions}) AND LogDateTime >= @from";
+                if (q.Length > 0)
+                {
+                    where += " AND LogDetail LIKE @q ESCAPE '\\'";
+                    pars["@q"] = "%" + q.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_").Replace("[", "\\[") + "%";
+                }
+                bool owner = Session["User"]?.ToString() == "Owner";
+                if (!owner) where += " AND LogDetail NOT LIKE N'%เงินเดือน%' AND LogDetail NOT LIKE '%PAYROLL%' AND LogDetail NOT LIKE '%Payroll%'";
+                bool timedOut;
+                var dt = QueryWithTimeout($"SELECT TOP 200 LogDateTime, LogAction, LogDetail FROM Logs WHERE {where} ORDER BY LogDateTime DESC",
+                                          pars, 20, out timedOut);
+                var items = new List<Dictionary<string, object>>();
+                if (dt != null)
+                    foreach (DataRow r in dt.Rows)
+                        items.Add(new Dictionary<string, object>
+                        {
+                            { "time", r["LogDateTime"] != DBNull.Value ? Convert.ToDateTime(r["LogDateTime"]).ToString("dd/MM/yyyy HH:mm:ss") : "" },
+                            { "kind", r["LogAction"]?.ToString() == "AccountingConfig" ? "ตั้งค่า" : "ส่งข้อมูล" },
+                            { "detail", Truncate(r["LogDetail"]?.ToString() ?? "", 4000) }
+                        });
+                return new Dictionary<string, object>
+                {
+                    { "success", !timedOut },
+                    { "message", timedOut ? "ค้นนานเกิน 20 วินาที — ลดช่วงเวลาหรือใส่คำค้นให้แคบลง" : "" },
+                    { "items", items },
+                    { "hours", hours },
+                    { "payrollHidden", !owner }
+                };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", ex.Message }, { "items", new List<object>() } };
+            }
         }
 
         private Dictionary<string, object> RunIntegrityScanNow()
@@ -1865,7 +1951,7 @@ namespace Take_Time_BangPhra.Admin.Settings
                 catch
                 {
                     add("warn", "ยังไม่มีตารางเก็บผังบัญชี",
-                        "กดปุ่ม \"Sync บัญชี\" (ปุ่มสีน้ำเงินด้านบนสุดของหน้านี้) หนึ่งครั้ง ระบบจะสร้างตารางและดึงผังบัญชีจาก NextAcc ให้");
+                        "กดปุ่ม \"ดึงผังบัญชี\" (แท็บ การเชื่อมต่อ) หนึ่งครั้ง ระบบจะสร้างตารางและดึงผังบัญชีจาก NextAcc ให้");
                 }
                 if (coa != null && coa.Rows.Count > 0)
                 {
@@ -1873,13 +1959,13 @@ namespace Take_Time_BangPhra.Admin.Settings
                     haveCoa = n > 0;
                     if (n == 0)
                         add("warn", "ยังไม่ได้ดึงผังบัญชีจาก NextAcc",
-                            "กดปุ่ม \"Sync บัญชี\" (ปุ่มสีน้ำเงินด้านบนสุดของหน้านี้) ก่อน ระบบจึงจะตรวจ mapping ให้ได้ และ dropdown เลือกบัญชีจะว่าง");
+                            "กดปุ่ม \"ดึงผังบัญชี\" (แท็บ การเชื่อมต่อ) ก่อน ระบบจึงจะตรวจ mapping ให้ได้ และ dropdown เลือกบัญชีจะว่าง");
                     else if (coa.Rows[0]["LastSync"] != DBNull.Value)
                     {
                         var last = Convert.ToDateTime(coa.Rows[0]["LastSync"]);
                         if ((DateTime.Now - last).TotalDays > 30)
                             add("warn", "ผังบัญชีเก่ากว่า 30 วัน",
-                                $"ดึงล่าสุด {last:dd/MM/yyyy HH:mm} — กดปุ่ม \"Sync บัญชี\" (สีน้ำเงิน ด้านบนสุดของหน้านี้) เพื่อดึงผังบัญชีล่าสุด "
+                                $"ดึงล่าสุด {last:dd/MM/yyyy HH:mm} — กดปุ่ม \"ดึงผังบัญชี\" (แท็บ การเชื่อมต่อ) เพื่อดึงผังบัญชีล่าสุด "
                                 + "แล้วกดตรวจสุขภาพซ้ำ — รหัสบัญชีที่ขึ้นว่า \"ไม่มี\" อาจถูกสร้างใน NextAcc ไปแล้ว");
                     }
                 }
@@ -1904,8 +1990,8 @@ namespace Take_Time_BangPhra.Admin.Settings
                             lines.Add($"{r["TakeTime_Code"]} → {r["Nexaacc_AccountCode"]} ({r["TakeTime_Description"]})");
                         add("error", $"mapping ชี้รหัสบัญชีที่ NextAcc ไม่มี ({bad.Rows.Count} รายการ)",
                             string.Join("\n", lines)
-                            + "\n\nวิธีแก้: (1) กดปุ่ม \"Sync บัญชี\" ด้านบนสุดของหน้านี้ก่อนเสมอ — ผังบัญชีที่ใช้เทียบอาจเก่า "
-                            + "(2) ยังไม่หาย = สร้างบัญชีรหัสนี้ใน NextAcc แล้ว Sync บัญชี อีกครั้ง หรือแก้ mapping ให้ชี้รหัสที่มีจริง"
+                            + "\n\nวิธีแก้: (1) กดปุ่ม \"ดึงผังบัญชี\" ที่แท็บ การเชื่อมต่อ ก่อนเสมอ — ผังบัญชีที่ใช้เทียบอาจเก่า "
+                            + "(2) ยังไม่หาย = สร้างบัญชีรหัสนี้ใน NextAcc แล้วดึงผังบัญชีอีกครั้ง หรือแก้ mapping ให้ชี้รหัสที่มีจริง"
                             + " — ถ้าไม่แก้ เอกสารที่ใช้ mapping นี้จะ sync ไม่ผ่าน (API 400 'ไม่พบผังบัญชี')");
                     }
                     }
