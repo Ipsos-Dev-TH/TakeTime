@@ -659,6 +659,10 @@
     <Content Include="Content\pv-voucher.css" />
     <Content Include="Content\responsive-table.css" />
     <Content Include="Content\admin-settings.css" />
+    <Content Include="Content\dining-staff.css" />
+    <Content Include="Scripts\dining-staff.js" />
+    <Content Include="Admin\Dining\Orders.aspx" />
+    <Content Include="Admin\Dining\Tables.aspx" />
     <Content Include="Scripts\admin-settings.js" />
     <Content Include="Scripts\bootstrap.bundle.js" />
     <Content Include="Scripts\bootstrap.bundle.min.js" />
@@ -1025,6 +1029,15 @@
     <Compile Include="Class\Dining\DiningQr.cs" />
     <Compile Include="Class\Dining\DiningTableService.cs" />
     <Compile Include="Class\Dining\DiningTokens.cs" />
+    <Compile Include="Class\Dining\DiningStaffView.cs" />
+    <Compile Include="Admin\Dining\Orders.aspx.cs">
+      <DependentUpon>Orders.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Dining\Tables.aspx.cs">
+      <DependentUpon>Tables.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
     <Compile Include="Class\EmailService.cs" />
     <Compile Include="Class\ExcelCreator.cs" />
     <Compile Include="Class\LoggingService.cs" />

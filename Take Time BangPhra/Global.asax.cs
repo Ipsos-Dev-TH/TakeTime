@@ -149,6 +149,20 @@ namespace Take_Time_BangPhra
                 }
                 catch (Exception rvx) { System.Diagnostics.Trace.TraceError($"RevenuePosting timer error: {rvx.Message}"); }
 
+                // QR สั่งอาหาร (PHASE19_42): รายได้ร้านอาหาร (Dining_Payment CASH/TRANSFER) → นโยบายเอกสารขาย + ตัดสต๊อก/COGS,
+                // และปิดโต๊ะที่จ่ายครบแต่ไม่มีกิจกรรมเกิน Dining_Session_Idle_Minutes — no-op เมื่อฟีเจอร์ปิด/ยังไม่รัน migration; แยก try ต่อ job
+                try
+                {
+                    if (Take_Time_BangPhra.Dining.DiningConfig.Enabled)
+                    {
+                        try { new Take_Time_BangPhra.Dining.DiningPostingService().PostIfDue(); }
+                        catch (Exception dpx) { System.Diagnostics.Trace.TraceError($"DiningPosting timer error: {dpx.Message}"); }
+                        try { new Take_Time_BangPhra.Dining.DiningTableService().AutoCloseIdleSessions(); }
+                        catch (Exception dcx) { System.Diagnostics.Trace.TraceError($"DiningAutoClose timer error: {dcx.Message}"); }
+                    }
+                }
+                catch (Exception dnx) { System.Diagnostics.Trace.TraceError($"Dining timer error: {dnx.Message}"); }
+
                 // ตัวตรวจเทียบเอกสาร NextAcc ↔ ใบเสร็จ รายคืน (PHASE19_35) — วันละครั้งหลัง Nexaacc_Reconcile_Hour, รันเบื้องหลัง
                 // ไม่บล็อก tick · no-op ถ้าปิดสวิตช์ Nexaacc_Reconcile_Nightly / ไม่มี company endpoint
                 try { syncService.ReconcileRecentReservationsIfDue(); }

@@ -31,6 +31,7 @@ namespace Take_Time_BangPhra
         protected global::System.Web.UI.WebControls.PlaceHolder phNavHousekeeping;
         protected global::System.Web.UI.WebControls.PlaceHolder phNavChat;
         protected global::System.Web.UI.WebControls.PlaceHolder phNavRoomService;
+        protected global::System.Web.UI.WebControls.PlaceHolder phNavDining;
         protected global::System.Web.UI.WebControls.PlaceHolder phNavLoyalty;
         protected global::System.Web.UI.WebControls.PlaceHolder phNavReviews;
         protected global::System.Web.UI.WebControls.PlaceHolder phNavChannelMgr;

@@ -861,6 +861,12 @@
                                                     <i class="fas fa-utensils"></i> ออเดอร์รูมเซอร์วิส
                                                 </a></li>
                                                 </asp:PlaceHolder>
+                                                <%-- QR สั่งอาหาร (PHASE19_42) — แสดงเมื่อ Feature Dining เปิด + สิทธิ์ OPS_DINING --%>
+                                                <asp:PlaceHolder ID="phNavDining" runat="server">
+                                                <li><a runat="server" href="~/Admin/Dining/Orders">
+                                                    <i class="fas fa-qrcode"></i> ร้านอาหาร / QR สั่งอาหาร
+                                                </a></li>
+                                                </asp:PlaceHolder>
                                                 <li><a runat="server" href="~/Admin/RoomQRGenerator">
                                                     <i class="fas fa-qrcode"></i> QR Code ประจำห้อง
                                                 </a></li>
@@ -1544,6 +1550,29 @@
                 .room-service-badge.has-unread .count {
                     color: #f57c00;
                 }
+
+                /* QR สั่งอาหาร badge (ออเดอร์ใหม่/สลิปรอตรวจ/เรียกพนักงาน/ขอบิล) */
+                .dining-badge {
+                    background: #757575;
+                }
+
+                .dining-badge.has-unread {
+                    background: linear-gradient(135deg, #00897b, #00695c) !important;
+                    box-shadow: 0 5px 25px rgba(0, 137, 123, 0.4);
+                }
+
+                .dining-badge.has-unread.urgent {
+                    background: linear-gradient(135deg, #d81b60, #880e4f) !important;
+                    box-shadow: 0 5px 25px rgba(216, 27, 96, 0.45);
+                }
+
+                .dining-badge.has-unread .count {
+                    color: #00695c;
+                }
+
+                .dining-badge.has-unread.urgent .count {
+                    color: #880e4f;
+                }
             </style>
 
             <!-- Chat Alert Overlay -->
@@ -1598,6 +1627,32 @@
                 </div>
             </div>
 
+            <!-- QR สั่งอาหาร Alert Overlay (ออเดอร์ใหม่ / เรียกพนักงาน / ขอบิล) — ข้อความทั้งหมดใส่ผ่าน innerText -->
+            <div class="global-chat-alert" id="globalDiningAlert">
+                <div class="chat-alert-box" style="animation: none;">
+                    <i class="fas fa-utensils alert-icon" style="color: #00897b;" id="dnAlertIcon"></i>
+                    <h3 id="dnAlertTitle">ออเดอร์ QR สั่งอาหารใหม่!</h3>
+                    <p id="dnAlertSub">กรุณารับออเดอร์โดยเร็ว</p>
+                    <div class="alert-room-info" style="background: linear-gradient(135deg, #00897b, #00695c);" id="dnAlertInfo">
+                        <div class="room-name" id="dnAlertTable">-</div>
+                        <div class="guest-name" id="dnAlertZone">-</div>
+                    </div>
+                    <div class="alert-message-preview" id="dnAlertPreview">
+                        -
+                    </div>
+                    <div class="alert-count-info" id="dnAlertCountInfo" style="font-size:13px;color:#999;margin-bottom:15px;">
+                    </div>
+                    <div>
+                        <a href="<%= ResolveUrl("~/Admin/Dining/Orders") %>" class="btn-respond-chat" style="background: linear-gradient(135deg, #00897b, #00695c);" id="dnAlertLink">
+                            <i class="fas fa-utensils"></i> เปิดกระดานออเดอร์
+                        </a>
+                        <button type="button" class="btn-dismiss" onclick="dismissDiningAlert()">
+                            ปิดชั่วคราว (5 นาที)
+                        </button>
+                    </div>
+                </div>
+            </div>
+
             <!-- Floating Badge - Chat (always visible as shortcut, expands when has messages) -->
             <a href="<%= ResolveUrl("~/Admin/Chat/ChatManagement") %>" class="chat-notification-badge" id="chatNotificationBadge">
                 <i class="fas fa-comments"></i>
@@ -1611,6 +1666,14 @@
                 <span class="badge-text">ออเดอร์ใหม่</span>
                 <span class="count" id="rsUnreadCount">0</span>
             </a>
+
+            <!-- Floating Badge - QR สั่งอาหาร (ออเดอร์ใหม่ + สลิปรอตรวจ + เรียกพนักงาน + ขอบิล; โชว์เมื่อมีงานค้าง) -->
+            <a href="<%= ResolveUrl("~/Admin/Dining/Orders") %>" class="chat-notification-badge dining-badge" id="diningBadge" style="bottom: 140px;">
+                <i class="fas fa-utensils"></i>
+                <span class="badge-text" id="dnBadgeText">QR สั่งอาหาร</span>
+                <span class="count" id="dnUnreadCount">0</span>
+            </a>
+            <script>var _ttDiningOn = <%= ShowDiningPoll ? "true" : "false" %>;</script>
 
             <!-- Audio for notification -->
             <audio id="globalNotificationSound" preload="auto">
@@ -1889,6 +1952,127 @@
                 }
 
                 // =============================================
+                // QR สั่งอาหาร (DINING) NOTIFICATIONS — NotificationCheck?action=dining
+                // badge = ออเดอร์ใหม่ + สลิปรอตรวจ + เรียกพนักงาน + ขอบิล · modal เมื่อมีออเดอร์ใหม่/เรียกพนักงาน/ขอบิล (ยกเว้นบนหน้า Admin/Dining)
+                // =============================================
+                var dnCheckInterval = null;
+                var dnSoundInterval = null;
+                var dnLastKey = '';
+
+                function checkDiningOrders() {
+                    if (typeof _ttDiningOn === 'undefined' || !_ttDiningOn) return;
+                    var onDining = window.location.href.indexOf('/Admin/Dining/') > -1;
+
+                    fetch('<%= ResolveUrl("~/Admin/NotificationCheck") %>?action=dining&_=' + new Date().getTime())
+                    .then(function(response) { return response.json(); })
+                    .then(function(data) {
+                        var badge = document.getElementById('diningBadge');
+                        var countEl = document.getElementById('dnUnreadCount');
+                        var textEl = document.getElementById('dnBadgeText');
+                        if (!data || !data.success || !data.total) {
+                            if (badge) { badge.classList.remove('show'); badge.classList.remove('has-unread'); badge.classList.remove('urgent'); }
+                            hideDiningAlert();
+                            clearDismissedUntil('dnDismissedUntil');
+                            dnLastKey = '';
+                            return;
+                        }
+                        var urgent = (data.callStaffCount > 0) || (data.billRequestedCount > 0);
+                        if (badge) {
+                            badge.classList.add('show'); badge.classList.add('has-unread');
+                            if (urgent) badge.classList.add('urgent'); else badge.classList.remove('urgent');
+                            if (countEl) countEl.innerText = data.total;
+                            if (textEl) textEl.innerText = data.callStaffCount > 0 ? 'เรียกพนักงาน' : (data.billRequestedCount > 0 ? 'ขอบิล' : (data.newCount > 0 ? 'ออเดอร์ใหม่' : 'สลิปรอตรวจ'));
+                        }
+                        if (onDining) return;   // หน้ากระดานมีเสียง/modal ของตัวเอง
+
+                        // modal เฉพาะเหตุการณ์ที่ต้องมีคนไปทันที (ออเดอร์ใหม่/เรียก/ขอบิล) — สลิปรอตรวจอย่างเดียว = badge พอ
+                        if (data.newCount <= 0 && !urgent) { hideDiningAlert(); return; }
+                        var key = data.newCount + '|' + data.callStaffCount + '|' + data.billRequestedCount + '|' + (data.latest ? data.latest.orderId : 0);
+                        var now = new Date().getTime();
+                        var dismissedUntil = getDismissedUntil('dnDismissedUntil');
+                        var alertEl = document.getElementById('globalDiningAlert');
+                        var isShowing = alertEl && alertEl.classList.contains('show');
+                        var kind = data.callStaffCount > 0 ? 'call' : (data.billRequestedCount > 0 ? 'bill' : 'order');
+                        if (!isShowing && (now > dismissedUntil || key !== dnLastKey)) {
+                            showDiningAlert(kind, data);
+                        } else if (isShowing) {
+                            fillDiningAlert(kind, data);
+                        }
+                        dnLastKey = key;
+                    })
+                    .catch(function(err) { console.log('Dining check error:', err); });
+                }
+
+                function fillDiningAlert(kind, data) {
+                    try {
+                        var latest = data.latest || {};
+                        var set = function(id, v) { var el = document.getElementById(id); if (el) el.innerText = v; };
+                        var titles = { call: '🙋 ลูกค้าเรียกพนักงาน!', bill: '🧾 ลูกค้าขอเช็คบิล!', order: '🍽️ ออเดอร์ QR สั่งอาหารใหม่!' };
+                        var subs = { call: 'กรุณาไปที่โต๊ะโดยเร็ว', bill: 'กรุณาไปรับชำระเงินที่โต๊ะ', order: 'กรุณารับออเดอร์โดยเร็ว' };
+                        set('dnAlertTitle', titles[kind]);
+                        set('dnAlertSub', subs[kind]);
+                        var tableText = kind === 'call' ? (data.callTables || '-') : (kind === 'bill' ? (data.billTables || '-') : (latest.table || '-'));
+                        set('dnAlertTable', tableText);
+                        set('dnAlertZone', kind === 'order' ? (latest.zone || '-') : (kind === 'call' ? (data.callStaffCount + ' โต๊ะ') : (data.billRequestedCount + ' โต๊ะ')));
+                        set('dnAlertPreview', kind === 'order' ? ((latest.itemsPreview || '-') + ' (฿' + (latest.totalAmount || '0') + ')') : (data.newCount > 0 ? ('และมีออเดอร์ใหม่ ' + data.newCount + ' รายการ') : ''));
+                        var parts = [];
+                        if (data.newCount > 0) parts.push('ออเดอร์ใหม่ ' + data.newCount);
+                        if (data.pendingSlipCount > 0) parts.push('สลิปรอตรวจ ' + data.pendingSlipCount);
+                        if (data.callStaffCount > 0) parts.push('เรียกพนักงาน ' + data.callStaffCount);
+                        if (data.billRequestedCount > 0) parts.push('ขอบิล ' + data.billRequestedCount);
+                        set('dnAlertCountInfo', parts.join(' · '));
+                        var info = document.getElementById('dnAlertInfo');
+                        var icon = document.getElementById('dnAlertIcon');
+                        var grad = kind === 'call' ? 'linear-gradient(135deg, #d81b60, #880e4f)' : (kind === 'bill' ? 'linear-gradient(135deg, #5e35b1, #311b92)' : 'linear-gradient(135deg, #00897b, #00695c)');
+                        if (info) info.style.background = grad;
+                        if (icon) { icon.className = (kind === 'call' ? 'fas fa-hand-paper' : (kind === 'bill' ? 'fas fa-receipt' : 'fas fa-utensils')) + ' alert-icon'; icon.style.color = kind === 'call' ? '#d81b60' : (kind === 'bill' ? '#5e35b1' : '#00897b'); }
+                        var link = document.getElementById('dnAlertLink');
+                        if (link) link.href = '<%= ResolveUrl("~/Admin/Dining/Orders") %>' + (kind === 'order' && latest.orderId ? ('?o=' + latest.orderId) : (kind !== 'order' ? '?attn=1' : ''));
+                    } catch(e) { console.log('fillDiningAlert error:', e); }
+                }
+
+                function showDiningAlert(kind, data) {
+                    try {
+                        fillDiningAlert(kind, data);
+                        var alertEl = document.getElementById('globalDiningAlert');
+                        if (alertEl) {
+                            alertEl.style.cssText = 'display:flex !important;position:fixed !important;top:0 !important;left:0 !important;width:100vw !important;height:100vh !important;background:rgba(0,0,0,0.85) !important;z-index:2147483646 !important;align-items:center !important;justify-content:center !important;margin:0 !important;padding:0 !important;';
+                            alertEl.classList.add('show');
+                        }
+                        playNotificationSound();
+                        if (!dnSoundInterval) {
+                            dnSoundInterval = setInterval(function() {
+                                var a = document.getElementById('globalDiningAlert');
+                                if (a && a.classList.contains('show')) {
+                                    playNotificationSound();
+                                } else {
+                                    clearInterval(dnSoundInterval);
+                                    dnSoundInterval = null;
+                                }
+                            }, kind === 'order' ? 5000 : 3000);
+                        }
+                    } catch(e) { console.log('showDiningAlert error:', e); }
+                }
+
+                function hideDiningAlert() {
+                    var alertEl = document.getElementById('globalDiningAlert');
+                    if (alertEl) {
+                        alertEl.style.cssText = '';
+                        alertEl.classList.remove('show');
+                    }
+                    if (dnSoundInterval) {
+                        clearInterval(dnSoundInterval);
+                        dnSoundInterval = null;
+                    }
+                }
+
+                function dismissDiningAlert() {
+                    hideDiningAlert();
+                    var dismissUntil = new Date().getTime() + (5 * 60 * 1000);
+                    setDismissedUntil('dnDismissedUntil', dismissUntil);
+                }
+
+                // =============================================
                 // SHARED: Sound + Session Keep-Alive
                 // =============================================
                 function playNotificationSound() {
@@ -1914,10 +2098,14 @@
                     var rsAlert = document.getElementById('globalRSAlert');
                     var chatBadge = document.getElementById('chatNotificationBadge');
                     var rsBadge = document.getElementById('roomServiceBadge');
+                    var dnAlert = document.getElementById('globalDiningAlert');
+                    var dnBadge = document.getElementById('diningBadge');
                     if (chatAlert) document.body.appendChild(chatAlert);
                     if (rsAlert) document.body.appendChild(rsAlert);
                     if (chatBadge) document.body.appendChild(chatBadge);
                     if (rsBadge) document.body.appendChild(rsBadge);
+                    if (dnAlert) document.body.appendChild(dnAlert);
+                    if (dnBadge) document.body.appendChild(dnBadge);
 
                     // Always show chat badge (as quick-access shortcut to chat page)
                     if (chatBadge) {
@@ -1945,6 +2133,12 @@
                     // so session never expires while browser is open
                     chatCheckInterval = setInterval(checkGlobalChatMessages, 5000);
                     rsCheckInterval = setInterval(checkRoomServiceOrders, 5000);
+
+                    // QR สั่งอาหาร — เฉพาะเมื่อฟีเจอร์เปิดและผู้ใช้มีสิทธิ์ (server ตั้ง _ttDiningOn)
+                    if (typeof _ttDiningOn !== 'undefined' && _ttDiningOn) {
+                        checkDiningOrders();
+                        dnCheckInterval = setInterval(checkDiningOrders, 5000);
+                    }
                 });
 
                 // Cleanup on page unload
@@ -1953,6 +2147,8 @@
                     if (chatSoundInterval) clearInterval(chatSoundInterval);
                     if (rsCheckInterval) clearInterval(rsCheckInterval);
                     if (rsSoundInterval) clearInterval(rsSoundInterval);
+                    if (dnCheckInterval) clearInterval(dnCheckInterval);
+                    if (dnSoundInterval) clearInterval(dnSoundInterval);
                     // sessionKeepAliveInterval removed - chat polling handles session keep-alive
                 });
             </script>
