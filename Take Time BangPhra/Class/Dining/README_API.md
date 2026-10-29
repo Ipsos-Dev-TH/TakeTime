@@ -34,6 +34,7 @@ Namespace `Take_Time_BangPhra.Dining` · โฟลเดอร์ `Class/Dining/
 | `DiningPostingService.cs` | job | `PostIfDue()` รายได้ → `ChannelSalesPostingService` + ตัดสต๊อก/COGS ของรายการ Track_Stock |
 | `DiningNotifier.cs` | service | ส่ง Telegram (`Notify.Send`) + ในระบบ (`NotifyAllStaff`) + กล่องแชทรวม (`OmniChannelService.ReceiveMessage("DINING", "table_{id}", …)`) |
 | `DiningQr.cs` | static | `BuildOrderUrl(token)`, `BuildStatusUrl(sessionToken)`, `RenderSvg/TryRenderSvg/RenderSvgDataUri` (ZXing.BarcodeWriterSvg), `EngineReady` |
+| `DiningStaffView.cs` | pure static (ทีม B เพิ่ม) | แปลงโมเดล → `Dictionary<string,object>` สำหรับ JSON หน้าพนักงาน: `Order(o, now)`, `Table(TableBoardRow)`, `Payment(p, session, now)`, `Session(s)`, `Outstanding(o)`, `Poll(p, now)`, `Result(DiningResult)` + ตัวช่วย `PayState(o)` (UNPAID/PENDING_SLIP/PAID/CHARGED/REFUNDED), `PayStateThai`, `TableStatusThai`, `AgeText(min)`, `ItemsPreview(o, max)`, `Money(v)`. ไม่แตะ DB; ค่าทั้งหมดเป็นข้อความล้วน — หน้าต้อง escapeHtml/HtmlEncode ก่อนลง DOM (ใช้โดย `Admin/Dining/Orders.aspx.cs`, `Tables.aspx.cs`, `NotificationCheck?action=dining`) |
 
 ทดสอบ: `tools/dining-tests/run.sh` (mono; คอมไพล์ 4 ไฟล์ pure + `DiningTests.cs` — 136 กรณี)
 
@@ -122,6 +123,14 @@ Namespace `Take_Time_BangPhra.Dining` · โฟลเดอร์ `Class/Dining/
 * พนักงานเปิดโต๊ะ/สั่งแทนลูกค้า: `OpenOrResumeSession(tableId, "staff", ip)` แล้ว `PlaceOrder(..., sourceChannel: "STAFF")`.
 * **Global.asax timer** (ถัดจาก `PostRoomServiceRevenueIfDue` :141-144): `new DiningPostingService().PostIfDue();` และ `new DiningTableService().AutoCloseIdleSessions();` (ทั้งคู่ไม่ throw, no-op เมื่อยังไม่รัน migration).
 * Site.Master: เมนู "ร้านอาหาร / QR สั่งอาหาร" ภายใต้ `Perm.CanView(Perm.OpsDining) && Feature.On("Dining")`; badge จาก `GetNewOrdersSince(0).NewCount + PendingSlipCount + CallStaffCount + BillRequestedCount`.
+* **สิ่งที่ทีม B ทำแล้ว (ต.ค. 2026):** `Admin/Dining/Orders.aspx(.cs)` (CodeBehind, namespace `Take_Time_BangPhra.Admin.Dining`) = กระดาน + **WebMethod ทั้งหมดของฝั่งพนักงาน**
+  (`LoadBoard`, `Poll`, `SetStatus`, `RecordCash`, `ApproveSlip`, `RejectSlip`, `CloseTable`, `AckCall`, `LoadTables`, `SessionDetail`, `OpenForGuest` — ทุกตัว `EnableSession`,
+  ตรวจ `DiningConfig.Enabled + Perm.CanAccess(OpsDining)` เอง, คืน `{ok, message, code, …}` จาก `DiningStaffView`) · `Admin/Dining/Tables.aspx(.cs)` แผนผังโต๊ะ (เรียก WebMethod ของ Orders.aspx) ·
+  `Scripts/dining-staff.js` (`DnStaff.init(boot)` โหมด board/tables, escapeHtml ทุกค่า, เสียง WebAudio แยกชนิด ออเดอร์/เรียก/ขอบิล, modal/แผงข้าง/kitchen ticket 80 มม.) · `Content/dining-staff.css` ·
+  `Site.Master` (`phNavDining` + badge `diningBadge` + modal `globalDiningAlert` + poll `checkDiningOrders()` ทุก 5 วิ เมื่อ `ShowDiningPoll`) · `Admin/NotificationCheck.aspx.cs` `action=dining`
+  (guard `Perm.OpsDining` เฉพาะ action นี้; JSON `{success,newCount,pendingSlipCount,callStaffCount,billRequestedCount,total,latest{orderId,orderNo,table,zone,itemsPreview,totalAmount},callTables,billTables}`) ·
+  `Global.asax.cs` เรียก `PostIfDue` + `AutoCloseIdleSessions` ใต้ `DiningConfig.Enabled`. ลิงก์ `Orders?o={orderId}` ไฮไลต์การ์ด (แนบมาแม้ไม่เข้าตัวกรอง), `?attn=1` = เฉพาะโต๊ะขอบิล/เรียกพนักงาน, `?table=&zone=&status=&unpaid=1&slip=1`.
+  "เปิดโต๊ะแทนลูกค้า" = `OpenOrResumeSession(tableId, "staff", ip)` แล้วเปิด `DiningQr.BuildOrderUrl(table.QrToken)` ให้พนักงานคีย์บนหน้าลูกค้า (ทีม A — `sourceChannel=STAFF` เป็นเรื่องของ handler ฝั่งนั้น).
 
 ## แอดมิน (ทีม C)
 

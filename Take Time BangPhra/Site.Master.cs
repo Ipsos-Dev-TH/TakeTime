@@ -7,6 +7,9 @@ namespace Take_Time_BangPhra
 {
     public partial class SiteMaster : MasterPage
     {
+        /// <summary>เปิด poll/badge QR สั่งอาหารใน JS ของ master (= เมนู phNavDining มองเห็น)</summary>
+        protected bool ShowDiningPoll;
+
         protected void Page_Load(object sender, EventArgs e)
         {
             try
@@ -240,6 +243,9 @@ namespace Take_Time_BangPhra
                 phNavMaintenance.Visible = Feature.On("Maintenance") && Perm.CanView(Perm.OpsMaintenance);
                 phNavChat.Visible = Feature.On("Chat") && Perm.CanView(Perm.OpsChat);
                 phNavRoomService.Visible = Feature.On("RoomService") && Perm.CanView(Perm.OpsRoomService);
+                // QR สั่งอาหาร (PHASE19_42): เมนู + badge/poll ทั่วระบบ (NotificationCheck?action=dining) เฉพาะผู้มีสิทธิ์
+                phNavDining.Visible = Feature.On(Take_Time_BangPhra.Dining.DiningConfig.FeatureName) && Perm.CanView(Perm.OpsDining);
+                ShowDiningPoll = phNavDining.Visible;
                 phNavLoyalty.Visible = Feature.On("Loyalty") && Perm.CanView(Perm.CrmLoyalty);
                 phNavReviews.Visible = Feature.On("Reviews") && Perm.CanView(Perm.CrmReview);
                 phNavAIReport.Visible = Feature.On("AI") && Perm.CanView(Perm.MgtReport);
