@@ -1013,6 +1013,7 @@
     <Compile Include="Class\Integration\AccountingSyncService.VendorCn.cs" />
     <Compile Include="Class\Integration\QueueErrors.cs" />
     <Compile Include="Class\Integration\NextAccDocRefresh.cs" />
+    <Compile Include="Class\Integration\VendorNoteSide.cs" />
     <Compile Include="Class\Integration\PaymentVoucherForm.cs" />
     <Compile Include="Class\Integration\PaymentVoucherAssist.cs" />
     <Compile Include="Class\Integration\NextAccUi.cs" />

@@ -18617,6 +18617,58 @@ namespace Take_Time_BangPhra.Integration
             return set;
         }
 
+        /// <summary>
+        /// ใบลด/เพิ่มหนี้ "ฝั่งซื้อ" บน NextAcc ในช่วงวันที่ — รวมใบที่สร้างบน NextAcc เอง: company `GET document?types=5,6&fromDate&toDate`
+        /// (DocumentController.cs:251-270 — คืน RelatedDocument + CnDnPurchaseSideOverride) → <see cref="VendorNoteSide"/> (กติกาเดียวกับ NextAcc);
+        /// ไม่มีใบต้นทาง = ดูบทบาทผู้ติดต่อ (GET document/contacts/{id}, แคชต่อรอบ ≤30 ราย). ไม่มี company endpoint/ล้ม = ว่าง (ใช้เฉพาะ id จาก OCR)
+        /// </summary>
+        private async System.Threading.Tasks.Task<HashSet<Guid>> LoadVendorNoteIdsFromNextAccAsync(DateTime fromDate, DateTime toDate)
+        {
+            var set = new HashSet<Guid>();
+            if (!_config.CanUseCompanyEndpoints) return set;
+            var roleCache = new Dictionary<Guid, bool>();
+            int lookups = 0;
+            try
+            {
+                for (int page = 1; page <= 5; page++)
+                {
+                    var resp = await _apiClient.ListDocumentsInRangeAsync(
+                        new[] { NexaaccDocumentType.DebitNote, NexaaccDocumentType.CreditNote }, fromDate, toDate, page, 100);
+                    var items = resp?.data?.Items;
+                    if (items == null || items.Count == 0) break;
+                    foreach (var d in items)
+                    {
+                        if (d == null || d.Id == Guid.Empty) continue;
+                        int? srcType = d.RelatedDocument != null ? d.RelatedDocument.DocumentType : (int?)null;
+                        bool? side = VendorNoteSide.Decide(d.CnDnPurchaseSideOverride, srcType);
+                        if (!side.HasValue && d.Contact != null && d.Contact.Id != Guid.Empty)
+                        {
+                            bool supplierOnly;
+                            if (!roleCache.TryGetValue(d.Contact.Id, out supplierOnly) && lookups < 30)
+                            {
+                                lookups++;
+                                try
+                                {
+                                    var c = (await _apiClient.GetContactAsync(d.Contact.Id))?.data;
+                                    supplierOnly = c != null && VendorNoteSide.FromContactRole(c.IsSupplier, c.IsCustomer);
+                                }
+                                catch { supplierOnly = false; }
+                                roleCache[d.Contact.Id] = supplierOnly;
+                            }
+                            side = supplierOnly;
+                        }
+                        if (side == true) set.Add(d.Id);
+                    }
+                    if (items.Count < 100) break;
+                }
+            }
+            catch (Exception ex)
+            {
+                LogThrottled("vendornote-list", "LoadVendorNoteIdsFromNextAcc ล้มเหลว (แสดงเฉพาะใบจาก OCR): " + ex.Message);
+            }
+            return set;
+        }
+
         public async System.Threading.Tasks.Task<List<NextAccCachedDocument>> DownloadVoucherDocumentsForRangeAsync(
             DateTime fromDate, DateTime toDate, bool includeAttachments = true, bool cacheFiles = true)
         {
@@ -18682,12 +18734,21 @@ namespace Take_Time_BangPhra.Integration
 
             // ใบลด/เพิ่มหนี้ "ของผู้ขาย" ที่สร้างจากหน้า OCR — รายการของ NextAcc ไม่บอกฝั่งซื้อ/ขาย (OutboundDocumentResponse
             // IntegrationDtos.cs:406-416) ⇒ ดึงชนิด CreditNote/DebitNote แล้วรับเฉพาะ id ที่ Ocr_Document_Log รู้ (ใบลดหนี้ลูกค้าไปหน้าใบกำกับ ไม่ปน)
+            // + ใบที่สร้างบน NextAcc เอง: ตัดสินฝั่งจาก company document list (ทำคู่ขนานกับการดึงรายการ, จำกัด ~10 วิ)
             var vendorNoteIds = LoadVendorNoteDocIds();
+            var naNotesTask = LoadVendorNoteIdsFromNextAccAsync(fromDate, toDate);
             var fetchTypes = PaymentDocTypeLabels.Keys.ToList();
-            if (vendorNoteIds.Count > 0) { fetchTypes.Add("CreditNote"); fetchTypes.Add("DebitNote"); }
+            if (vendorNoteIds.Count > 0 || _config.CanUseCompanyEndpoints) { fetchTypes.Add("CreditNote"); fetchTypes.Add("DebitNote"); }
 
             var typeResults = await System.Threading.Tasks.Task.WhenAll(
                 fetchTypes.Select(FetchTypeBoundedAsync));
+            try
+            {
+                var winnerNotes = await System.Threading.Tasks.Task.WhenAny(naNotesTask, System.Threading.Tasks.Task.Delay(10000));
+                if (winnerNotes == naNotesTask) vendorNoteIds.UnionWith(await naNotesTask);
+                else errors.Add("ใบลด/เพิ่มหนี้ฝั่งซื้อบน NextAcc: ไม่ตอบใน 10 วิ (แสดงเฉพาะใบจาก OCR)");
+            }
+            catch { }
 
             foreach (var tr in typeResults)
             {

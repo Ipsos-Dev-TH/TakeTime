@@ -391,6 +391,10 @@ namespace Take_Time_BangPhra.Integration
         // ── หน้าตรวจทาน OCR (กันซ้ำ / ใบต้นทางของใบลดหนี้) — DocumentResponse DocumentDtos.cs:625-818 ──
         /// <summary>DocumentDtos.cs:666 (RelatedDocumentId)</summary>
         public Guid? RelatedDocumentId { get; set; }
+        /// <summary>ใบต้นทางแบบย่อ (DocumentDtos.cs:749 RelatedDocument / DocumentBrief :1190) — ใช้ตัดสินฝั่งซื้อ/ขายของใบลด/เพิ่มหนี้</summary>
+        public NexaaccDocumentBrief RelatedDocument { get; set; }
+        /// <summary>ผู้ใช้สั่งย้ายฝั่งใบลด/เพิ่มหนี้เอง (DocumentDtos.cs:752): true=ซื้อ, false=ขาย, null=ระบบตัดสิน</summary>
+        public bool? CnDnPurchaseSideOverride { get; set; }
         /// <summary>เลขที่ใบของคู่ค้า (DocumentDtos.cs:701)</summary>
         public string SupplierInvoiceNumber { get; set; }
         public DateTime? SupplierTaxInvoiceDate { get; set; }
@@ -425,6 +429,15 @@ namespace Take_Time_BangPhra.Integration
     }
 
     /// <summary>NextAcc DocumentLineResponse (DocumentDtos.cs:1169-1210) — เฉพาะช่องที่ TakeTime ใช้</summary>
+    /// <summary>NextAcc DocumentBrief (DocumentDtos.cs:1190-1196)</summary>
+    public class NexaaccDocumentBrief
+    {
+        public Guid Id { get; set; }
+        public string DocumentNumber { get; set; }
+        [JsonConverter(typeof(DocumentTypeConverter))]
+        public int DocumentType { get; set; }
+    }
+
     public class NexaaccDocLine
     {
         public string Description { get; set; }

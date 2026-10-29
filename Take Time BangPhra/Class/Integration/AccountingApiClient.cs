@@ -1119,6 +1119,17 @@ namespace Take_Time_BangPhra.Integration
             return await GetAsync<ApiResponse<PagedResponse<DocumentResponse>>>($"{CompanyPath}/document?" + string.Join("&", qs));
         }
 
+        /// <summary>รายการเอกสารตามช่วงวันที่ (GET document ?types&fromDate&toDate&page — DocumentController.cs:251-270) — หน้าละ ≤100</summary>
+        public async Task<ApiResponse<PagedResponse<DocumentResponse>>> ListDocumentsInRangeAsync(IEnumerable<int> types, DateTime fromDate, DateTime toDate,
+            int page, int pageSize = 100)
+        {
+            var qs = new List<string> { "page=" + Math.Max(1, page), "pageSize=" + Math.Max(1, Math.Min(pageSize, 100)), "sortBy=date", "sortDesc=true",
+                "fromDate=" + fromDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+                "toDate=" + toDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) };
+            if (types != null) foreach (int t in types) qs.Add("types=" + t);
+            return await GetAsync<ApiResponse<PagedResponse<DocumentResponse>>>($"{CompanyPath}/document?" + string.Join("&", qs));
+        }
+
         /// <summary>ผู้ติดต่อเดี่ยว (GET document/contacts/{id} — DocumentController.cs:1439)</summary>
         public async Task<ApiResponse<ContactResponse>> GetContactAsync(Guid contactId)
         {

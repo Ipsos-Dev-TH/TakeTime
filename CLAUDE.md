@@ -267,7 +267,9 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    - **ใบลด/เพิ่มหนี้ผู้ขายในหน้าตรวจสอบใบสำคัญจ่าย + ทิ้งงาน (ต.ค. 2026):** `DownloadVoucherDocumentsForRangeAsync` ดึงชนิด CreditNote/DebitNote เพิ่ม
      เฉพาะเมื่อมี id ใน `Ocr_Document_Log` (VCN/VDN ที่สร้างเอกสารแล้ว — `LoadVendorNoteDocIds`; รายการ NextAcc ไม่บอกฝั่งซื้อ/ขาย ⇒ ใบลดหนี้ลูกค้าไม่ปน) →
      `NextAccCachedDocument.IsVendorNote`, ป้าย "ใบลดหนี้ (ผู้ขาย)"/"ใบเพิ่มหนี้ (ผู้ขาย)", ใบลดหนี้ยอด/VAT ติดลบ (ผลรวมหน้า = สุทธิ), ไม่ใช้จับคู่ Reference
-     (`CheckPayment_New.MergeNextAccIntoGrid`). ใบลด/เพิ่มหนี้ที่สร้างบน NextAcc เองไม่ขึ้น. **ทิ้งงาน:** `OcrReviewService.DiscardAsync` — ไม่มีเอกสาร = DISCARDED ·
+     (`CheckPayment_New.MergeNextAccIntoGrid`). **ใบที่สร้างบน NextAcc เองก็ขึ้น:** `LoadVendorNoteIdsFromNextAccAsync` (company `GET document?types=5&types=6&fromDate&toDate`,
+     ≤5 หน้า, คู่ขนาน จำกัด 10 วิ) → `VendorNoteSide` (pure, กติกาเดียวกับ NextAcc DocumentService.cs:18158-18187: `CnDnPurchaseSideOverride` → ชนิดใบต้นทาง
+     `RelatedDocument` PI/EXP/CIL/PV = ซื้อ → ไม่มีใบต้นทาง = คู่ค้าผู้ขายอย่างเดียว ผ่าน GET contact แคช ≤30) ∪ id จาก OCR; ไม่มี company endpoint = เฉพาะ OCR. **ทิ้งงาน:** `OcrReviewService.DiscardAsync` — ไม่มีเอกสาร = DISCARDED ·
      ร่างบน NextAcc (status 0) = `DeleteDraftDocumentAsync` (`DELETE document/{id}` DocumentController.cs:1018-1029, เฉพาะ Draft) · 404/ยกเลิกแล้ว = ทิ้งได้ ·
      รออนุมัติ/ตีกลับ/อนุมัติ/APPROVED-DONE = ไม่ทิ้ง (บอกให้ยกเลิกใน NextAcc). ปุ่ม "🗑 ทิ้ง" ในรายการงานที่ยังไม่ส่ง (`btnDiscardRow` + confirm) และปุ่มเดิมในหน้าตรวจทาน
      (แสดงจนกว่าจะอนุมัติ).
