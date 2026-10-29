@@ -134,6 +134,9 @@ Namespace `Take_Time_BangPhra.Dining` · โฟลเดอร์ `Class/Dining/
 
 ## แอดมิน (ทีม C)
 
+* หน้าตั้งค่า (ทีม C — ทำแล้ว): `Admin/Dining/Zones.aspx` (โซน/โต๊ะ + แท็บ "ตั้งค่า & เช็กลิสต์" `?focus=settings`), `Menu.aspx` (`?pid=` เปิดฟอร์มรายการ, `?show=IN|ALL|OUT|SOLD`),
+  `QrSheet.aspx` (`?zone=|?table=`, `?layout=grid8|grid18|tent`, `?contact=0`). สิทธิ์ `Perm.SvcGuest` และ **ไม่ guard ฟีเจอร์** (ต้องตั้งค่าได้ก่อนเปิดสวิตช์).
+* ความพร้อมของตาราง: `DiningTableService.SchemaReady()` (instance — cache 60 วิ) / `DiningTableService.InvalidateSchemaCache()` (static) — ใช้ในเช็กลิสต์หน้าตั้งค่า (เพิ่มเติม ต.ค. 2026, ไม่เปลี่ยน signature เดิม).
 * โซน: `ListZones(includeInactive)`, `GetZone(id)`, `GetZoneByCode`, `SaveZone(DiningZone, updatedBy)` (Code A-Z0-9_- ≤20 ไม่ซ้ำ; ต้องเปิดวิธีจ่าย ≥1), `SetZoneActive`.
   `DiningZone { Code NameTh SortOrder IsActive OpenTime/CloseTime (TimeSpan?) ManualMode(AUTO|OPEN|CLOSED) ClosedMessage AllowCash AllowTransfer AllowRoomCharge KitchenStation }` — `DiningTableService.IsZoneOpen(zone, out msg)` ใช้แสดงสถานะเปิด/ปิด.
 * โต๊ะ: `ListTables(zoneId|null, includeInactive)`, `GetTable`, `SaveTable(DiningTable)` (ใหม่ = ออก QR_Token ให้), `BulkCreateTables(zoneId, "A", 1, 20, seats)`, `RotateTableToken(tableId)` / `RotateZoneTokens(zoneId)` (confirm ก่อน — QR เดิมใช้ไม่ได้ทันที), `SetTableActive`, `DeleteTable` (มีประวัติ = ปิดใช้แทน).

@@ -28,6 +28,12 @@ namespace Take_Time_BangPhra.Dining
               JOIN dbo.Dining_Table t ON t.ID = s.Table_ID
               JOIN dbo.Dining_Zone z ON z.ID = t.Zone_ID ";
 
+        /// <summary>ตารางของ PHASE19_42 พร้อมใช้ (เช็กลิสต์หน้าตั้งค่า Admin/Dining/Zones) — cache 60 วิ</summary>
+        public bool SchemaReady() { return DiningDb.Ready(_conn); }
+
+        /// <summary>ล้าง cache ความพร้อมของตาราง (หลังรัน migration แล้วกด "ตรวจอีกครั้ง")</summary>
+        public static void InvalidateSchemaCache() { DiningDb.InvalidateReady(); }
+
         // ═════════════════════════════════════════════════════════════════════
         // โซน
         // ═════════════════════════════════════════════════════════════════════
