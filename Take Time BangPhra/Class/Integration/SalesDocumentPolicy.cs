@@ -36,6 +36,8 @@ namespace Take_Time_BangPhra.Integration
     {
         public const string ChPos = "POS", ChRoomService = "ROOM_SERVICE", ChActivity = "ACTIVITY", ChAmenity = "AMENITY",
             ChFrontdeskGateway = "FRONTDESK_GATEWAY", ChDamage = "DAMAGE", ChReservation = "RESERVATION";
+        /// <summary>ร้านอาหาร / QR สั่งอาหาร (PHASE19_42) — ไม่ seed กฎ = ตกค่ากลาง (*,CASH)=DAILY_ROLLUP, (*,*)=IMMEDIATE</summary>
+        public const string ChDining = "DINING";
 
         public const string ModeImmediate = "IMMEDIATE", ModeDailyRollup = "DAILY_ROLLUP", ModeOff = "OFF";
         public const string Any = "*";
@@ -46,7 +48,7 @@ namespace Take_Time_BangPhra.Integration
 
         /// <summary>ช่องทางขายทั้งหมด (ไม่รวม '*') — เรียงตามที่แสดงในหน้าตั้งค่า</summary>
         public static readonly string[] SalesChannels =
-            { ChPos, ChRoomService, ChActivity, ChAmenity, ChFrontdeskGateway, ChDamage, ChReservation };
+            { ChPos, ChRoomService, ChDining, ChActivity, ChAmenity, ChFrontdeskGateway, ChDamage, ChReservation };
 
         /// <summary>ชนิดการชำระเงินทั้งหมด (ไม่รวม '*') — ตรงกับ PaymentChannelCatalog.AllTypes</summary>
         public static readonly string[] ChannelTypes =
@@ -273,6 +275,7 @@ namespace Take_Time_BangPhra.Integration
                 case Any: return "ทุกช่องทาง";
                 case ChPos: return "ขายหน้าร้าน (POS)";
                 case ChRoomService: return "รูมเซอร์วิส";
+                case ChDining: return "ร้านอาหาร (QR สั่งอาหาร)";
                 case ChActivity: return "กิจกรรม";
                 case ChAmenity: return "ของใช้/บริการเสริม";
                 case ChFrontdeskGateway: return "จุดรับเงินออนไลน์หน้าเคาน์เตอร์";

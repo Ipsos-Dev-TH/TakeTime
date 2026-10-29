@@ -303,6 +303,8 @@ namespace Take_Time_BangPhra.TaxReports
 
         public const string ChPos = "POS", ChRoomService = "ROOM_SERVICE", ChReservation = "RESERVATION",
             ChOta = "OTA", ChOther = "OTHER";
+        /// <summary>ร้านอาหาร / QR สั่งอาหาร (PHASE19_42) — มาทางสมุด Sales_Channel_Posting (DNP-{paymentId} / DNDAY-…)</summary>
+        public const string ChDining = "DINING";
         /// <summary>ใบลดหนี้/คืนเงินลูกค้า (Credit_Note — PHASE19_33) — ยอดติดลบตามวันที่ใบลดหนี้</summary>
         public const string ChCreditNote = "CREDIT_NOTE";
 
@@ -346,6 +348,7 @@ namespace Take_Time_BangPhra.TaxReports
             {
                 case ChPos: return "ขายหน้าร้าน (POS)";
                 case ChRoomService: return "รูมเซอร์วิส";
+                case ChDining: return "ร้านอาหาร (QR สั่งอาหาร)";
                 case ChReservation: return "ห้องพัก/การจอง";
                 case ChOta: return "OTA (Channel Collect)";
                 // ช่องทางของสมุด Sales_Channel_Posting (PHASE19_32)

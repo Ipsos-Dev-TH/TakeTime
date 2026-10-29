@@ -25,6 +25,8 @@ public static class Perm
     public const string OpsChat = "OPS_CHAT";
     public const string OpsRoomService = "OPS_ROOMSERVICE";
     public const string OpsActivity = "OPS_ACTIVITY";
+    /// <summary>ร้านอาหาร / QR สั่งอาหาร (กระดานออเดอร์ แผนผังโต๊ะ เมนู QR — PHASE19_42)</summary>
+    public const string OpsDining = "OPS_DINING";
     public const string SalesPos = "SALES_POS";
     public const string SalesVoucher = "SALES_VOUCHER";
     public const string SalesStock = "SALES_STOCK";
@@ -71,6 +73,7 @@ public static class Perm
         new ModuleInfo(OpsChat,         "แชทลูกค้า",                "บริการลูกค้า", "กล่องแชทรวมทุกช่องทาง"),
         new ModuleInfo(OpsRoomService,  "รูมเซอร์วิส (ออเดอร์)",    "บริการลูกค้า"),
         new ModuleInfo(OpsActivity,     "กิจกรรม / การจองรอบ",      "บริการลูกค้า"),
+        new ModuleInfo(OpsDining,       "ร้านอาหาร (QR สั่งอาหาร)",  "บริการลูกค้า", "กระดานออเดอร์ แผนผังโต๊ะ รับเงิน/ตรวจสลิป เมนู QR โซน/โต๊ะ/พิมพ์ QR"),
         new ModuleInfo(SalesPos,        "ขายสินค้า (POS)",          "ขายหน้าร้าน"),
         new ModuleInfo(SalesVoucher,    "บัตรกำนัล",                "ขายหน้าร้าน"),
         new ModuleInfo(SalesStock,      "สต๊อกสินค้า",              "ขายหน้าร้าน", "รับเข้า ตรวจนับ รายงานขาย"),
@@ -106,7 +109,7 @@ public static class Perm
     // ── สิทธิ์เริ่มต้นตาม Role เดิม (ใช้เมื่อผู้ใช้ยังไม่ถูกกำหนดกลุ่ม) ────────
     private static readonly HashSet<string> AdminModules = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
-        OpsBooking, OpsHousekeeping, OpsMaintenance, OpsChat, OpsRoomService, OpsActivity,
+        OpsBooking, OpsHousekeeping, OpsMaintenance, OpsChat, OpsRoomService, OpsActivity, OpsDining,
         SalesPos, SalesVoucher, SalesStock,
         FinReceipt, FinVoucher, FinReport,
         CrmCustomer, CrmLoyalty, CrmReview, CrmAffiliate,
@@ -118,7 +121,7 @@ public static class Perm
 
     private static readonly HashSet<string> StaffModules = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
-        OpsBooking, OpsHousekeeping, OpsMaintenance, OpsChat, OpsRoomService, OpsActivity,
+        OpsBooking, OpsHousekeeping, OpsMaintenance, OpsChat, OpsRoomService, OpsActivity, OpsDining,
         SalesPos, SalesVoucher, SalesStock,
         // Role เดิมของ Staff เห็นเมนูการเงิน/ลูกค้าด้วย — คงไว้เพื่อไม่ให้พฤติกรรมเปลี่ยน
         // ก่อนที่ผู้ดูแลจะตั้งกลุ่มเอง (กลุ่มมาตรฐาน "พนักงานหน้าร้าน" ปิดส่วนนี้ไว้แล้ว)

@@ -47,6 +47,12 @@ public static class Notify
         public const string OrderAmenity = "ORDER_AMENITY";
         public const string OrderActivity = "ORDER_ACTIVITY";
 
+        // QR สั่งอาหาร (โต๊ะ/โซน — PHASE19_42, Class/Dining/DiningNotifier) — seed เปิด Telegram ทั้งสี่
+        public const string OrderDining = "ORDER_DINING";
+        public const string OrderDiningStatus = "ORDER_DINING_STATUS";
+        public const string DiningCallStaff = "DINING_CALL_STAFF";
+        public const string DiningBill = "DINING_BILL";
+
         public const string PaymentOnline = "PAYMENT_ONLINE";
         public const string PaymentHold = "PAYMENT_HOLD";
         public const string EtaxRd = "ETAX_RD";
@@ -108,6 +114,15 @@ public static class Notify
             "แขกกดเบิกผ้าเช็ดตัว น้ำดื่ม ฯลฯ", "Guest Portal"),
         new EventInfo(Ev.OrderActivity,    "บริการในที่พัก", "จองกิจกรรมใหม่",
             "แขกจองรอบกิจกรรมในที่พัก", "Guest Portal"),
+
+        new EventInfo(Ev.OrderDining,       "ร้านอาหาร (QR สั่งอาหาร)", "ออเดอร์ใหม่จากโต๊ะ",
+            "ลูกค้าสแกน QR ที่โต๊ะแล้วสั่งอาหาร/เครื่องดื่ม — รายการ ตัวเลือก หมายเหตุ ยอด วิธีจ่าย", "QR สั่งอาหาร"),
+        new EventInfo(Ev.OrderDiningStatus, "ร้านอาหาร (QR สั่งอาหาร)", "สถานะออเดอร์/การชำระ",
+            "รับ-กำลังทำ-เสิร์ฟ-ยกเลิก · สลิปผ่าน/รอตรวจ/ไม่ผ่าน · รับเงินสด — ปิดได้ถ้าถี่เกิน", "QR สั่งอาหาร"),
+        new EventInfo(Ev.DiningCallStaff,   "ร้านอาหาร (QR สั่งอาหาร)", "ลูกค้าเรียกพนักงาน",
+            "ปุ่ม \"เรียกพนักงาน\" บนมือถือลูกค้า (1 ครั้ง/นาที ต่อโต๊ะ) — ควรเปิดไว้เสมอ", "QR สั่งอาหาร", true),
+        new EventInfo(Ev.DiningBill,        "ร้านอาหาร (QR สั่งอาหาร)", "เช็คบิล / ลงบิลห้อง / ปิดโต๊ะ",
+            "ลูกค้าขอเช็คบิล, ลงบิลห้องพัก, ยืนยันเบอร์ผิดจนถูกล็อก, ปิดโต๊ะ (รวมปิดทั้งที่ค้างชำระ)", "QR สั่งอาหาร", true),
 
         new EventInfo(Ev.PaymentOnline,   "เงินและเอกสาร", "รับชำระเงินออนไลน์สำเร็จ",
             "ลูกค้าจ่ายผ่านบัตร/QR ตัดยอดอัตโนมัติสำเร็จ", "ระบบชำระเงิน"),

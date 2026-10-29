@@ -855,6 +855,7 @@ namespace Take_Time_BangPhra.Integration
             switch ((channel ?? "").ToUpperInvariant())
             {
                 case "ROOM_SERVICE": return "RS";
+                case "DINING": return "DN";
                 case "ACTIVITY": return "ACT";
                 case "AMENITY": return "AMN";
                 case "FRONTDESK_GATEWAY": return "FDG";
@@ -868,6 +869,7 @@ namespace Take_Time_BangPhra.Integration
             switch ((channel ?? "").ToUpperInvariant())
             {
                 case "ROOM_SERVICE": return "รูมเซอร์วิส";
+                case "DINING": return "ร้านอาหาร (QR สั่งอาหาร)";
                 case "ACTIVITY": return "ค่ากิจกรรม";
                 case "AMENITY": return "ของใช้ในห้องพัก";
                 case "FRONTDESK_GATEWAY": return "รับเงินหน้าร้าน (เกตเวย์)";
@@ -885,6 +887,7 @@ namespace Take_Time_BangPhra.Integration
                 case "FRONTDESK_GATEWAY": return "PRODUCT_REVENUE";
                 case "DAMAGE": return "DAMAGE_INCOME";
                 case "ROOM_SERVICE": return "PRODUCT_REVENUE";
+                case "DINING": return "DINING_REVENUE";
                 default: return "OTHER_INCOME";
             }
         }
@@ -901,6 +904,7 @@ namespace Take_Time_BangPhra.Integration
                 case "FRONTDESK_GATEWAY": list.AddRange(new[] { "PRODUCT_REVENUE", "OTHER_INCOME" }); break;
                 case "DAMAGE": list.AddRange(new[] { "DAMAGE_INCOME", "OTHER_INCOME" }); break;
                 case "SERVICE_CHARGE": list.AddRange(new[] { "SERVICE_CHARGE_REVENUE", "PRODUCT_REVENUE" }); break;
+                case "DINING": list.AddRange(new[] { "DINING_REVENUE", "PRODUCT_REVENUE" }); break;
                 default: list.Add("OTHER_INCOME"); break;
             }
             list.Add("ROOM_REVENUE");

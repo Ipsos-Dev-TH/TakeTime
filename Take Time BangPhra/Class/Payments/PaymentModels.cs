@@ -44,6 +44,8 @@ namespace Take_Time_BangPhra.Payments
         public const string Receipt = "RECEIPT";
         public const string Pos = "POS";
         public const string Damage = "DAMAGE";
+        /// <summary>QR สั่งอาหาร (โต๊ะ/โซน) — Source_ID = Dining_Table_Session.ID (เกตเวย์: เฟสถัดไป)</summary>
+        public const string Dining = "DINING";
         public const string Other = "OTHER";
 
         public static string Thai(string s)
@@ -57,6 +59,7 @@ namespace Take_Time_BangPhra.Payments
                 case Receipt: return "ใบเสร็จ";
                 case Pos: return "ขายหน้าร้าน";
                 case Damage: return "ค่าเสียหาย";
+                case Dining: return "ร้านอาหาร (QR สั่งอาหาร)";
                 default: return "อื่น ๆ";
             }
         }

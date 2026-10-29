@@ -23,7 +23,9 @@ public static class Feature
         "DynamicPricing",   // ราคาไดนามิก — ยังไม่ได้ต่อเข้ากับราคาจองจริง
         // รับชำระเงินออนไลน์ (บัตรเครดิตผ่านเกตเวย์) — ต้องตั้งค่ากุญแจ+ทดสอบกับ sandbox ก่อน
         // ปิดไว้เป็นค่าเริ่มต้นเสมอ แม้ยังไม่ได้รัน migration ⇒ ระบบเดิมไม่เปลี่ยนพฤติกรรม
-        "OnlinePayment"
+        "OnlinePayment",
+        // QR สั่งอาหาร (โต๊ะ/โซน) — ปิดจนตั้งโซน/โต๊ะ/เมนูที่ Admin/Dining เสร็จ (PHASE19_42)
+        "Dining"
     };
 
     public static bool On(string name)
