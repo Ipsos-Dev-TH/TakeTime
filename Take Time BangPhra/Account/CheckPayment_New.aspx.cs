@@ -1013,7 +1013,8 @@ namespace Take_Time_BangPhra.Account
             foreach (var d in nextAccDocs)
             {
                 string r = (d.Reference ?? "").Trim();
-                if (!string.IsNullOrEmpty(r) && !byRef.ContainsKey(r)) byRef[r] = d;
+                // ใบลด/เพิ่มหนี้ผู้ขาย: Reference = เลขใบเดิม ⇒ ไม่ใช้จับคู่ (กันไปทับลิงก์ของใบสำคัญจ่ายต้นทาง) — แสดงเป็นแถวของตัวเอง
+                if (!d.IsVendorNote && !string.IsNullOrEmpty(r) && !byRef.ContainsKey(r)) byRef[r] = d;
                 if (d.NextAccId != Guid.Empty && !byId.ContainsKey(d.NextAccId)) byId[d.NextAccId] = d;
             }
 

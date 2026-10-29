@@ -18597,6 +18597,26 @@ namespace Take_Time_BangPhra.Integration
         /// error อะไร, ใช้เวลาเท่าไร, ถูกกรองออกกี่ใบ (void/payroll). ตั้งค่าโดย DownloadVoucherDocumentsForRangeAsync.</summary>
         public string LastRangeFetchInfo { get; private set; }
 
+        /// <summary>id เอกสาร NextAcc ของใบลด/เพิ่มหนี้ผู้ขายที่สร้างจากหน้า OCR (Ocr_Document_Log Doc_Kind VCN/VDN ที่สร้างเอกสารแล้ว) —
+        /// ไม่มีตาราง (ยังไม่รัน PHASE19_38) = ว่าง</summary>
+        private HashSet<Guid> LoadVendorNoteDocIds()
+        {
+            var set = new HashSet<Guid>();
+            try
+            {
+                var dt = _code.DatabaseQuerySafe(_connectionString,
+                    @"IF OBJECT_ID('dbo.Ocr_Document_Log','U') IS NOT NULL
+                          SELECT Nexaacc_Doc_Id FROM dbo.Ocr_Document_Log
+                           WHERE Doc_Kind IN (N'VCN', N'VDN') AND Nexaacc_Doc_Id IS NOT NULL
+                             AND Status NOT IN (N'DRAFT', N'DISCARDED', N'EVIDENCE')", null);
+                if (dt != null)
+                    foreach (System.Data.DataRow r in dt.Rows)
+                        if (r[0] != DBNull.Value) set.Add((Guid)r[0]);
+            }
+            catch { }
+            return set;
+        }
+
         public async System.Threading.Tasks.Task<List<NextAccCachedDocument>> DownloadVoucherDocumentsForRangeAsync(
             DateTime fromDate, DateTime toDate, bool includeAttachments = true, bool cacheFiles = true)
         {
@@ -18660,17 +18680,26 @@ namespace Take_Time_BangPhra.Integration
                 return (typeName, new List<OutboundDocumentResponse>(), "ไม่ตอบใน 10 วิ (timeout)");
             }
 
+            // ใบลด/เพิ่มหนี้ "ของผู้ขาย" ที่สร้างจากหน้า OCR — รายการของ NextAcc ไม่บอกฝั่งซื้อ/ขาย (OutboundDocumentResponse
+            // IntegrationDtos.cs:406-416) ⇒ ดึงชนิด CreditNote/DebitNote แล้วรับเฉพาะ id ที่ Ocr_Document_Log รู้ (ใบลดหนี้ลูกค้าไปหน้าใบกำกับ ไม่ปน)
+            var vendorNoteIds = LoadVendorNoteDocIds();
+            var fetchTypes = PaymentDocTypeLabels.Keys.ToList();
+            if (vendorNoteIds.Count > 0) { fetchTypes.Add("CreditNote"); fetchTypes.Add("DebitNote"); }
+
             var typeResults = await System.Threading.Tasks.Task.WhenAll(
-                PaymentDocTypeLabels.Keys.Select(FetchTypeBoundedAsync));
+                fetchTypes.Select(FetchTypeBoundedAsync));
 
             foreach (var tr in typeResults)
             {
                 if (tr.error != null) { errors.Add($"{tr.type}: {tr.error}"); continue; }
+                bool noteType = tr.type == "CreditNote" || tr.type == "DebitNote";
                 int typeRaw = tr.items.Count, typeKept = 0;
-                rawTotal += typeRaw;
+                if (!noteType) rawTotal += typeRaw;
                 foreach (var d in tr.items)
                 {
                     if (d == null || seen.Contains(d.Id)) continue;
+                    if (noteType && !vendorNoteIds.Contains(d.Id)) continue;   // ใบลด/เพิ่มหนี้ฝั่งขาย/ที่ไม่ได้มาจาก OCR — ไม่ใช่ของหน้านี้
+                    if (noteType) rawTotal++;
                     if (IsPayrollDocument(d)) { filteredPayroll++; continue; }   // ยกเว้นเงินเดือน
                     if (IsVoidedDocument(d)) { filteredVoid++; continue; }       // ยกเว้นเอกสารที่ยกเลิก/void บน NextAcc แล้ว
                     seen.Add(d.Id);
@@ -18680,9 +18709,17 @@ namespace Take_Time_BangPhra.Integration
                     var cached = cacheFiles
                         ? await CacheNextAccDocumentAsync(d, basePath, baseUrl, includeAttachments)
                         : BuildDiskOnlyCachedDoc(d, basePath);
+                    if (noteType && cached != null)
+                    {
+                        cached.IsVendorNote = true;
+                        bool cn = tr.type == "CreditNote";
+                        cached.DocumentTypeLabel = cn ? "ใบลดหนี้ (ผู้ขาย)" : "ใบเพิ่มหนี้ (ผู้ขาย)";
+                        // ใบลดหนี้ลดยอดซื้อ/ค่าใช้จ่าย ⇒ ยอดติดลบ ให้ผลรวมของหน้าเป็นยอดสุทธิ
+                        if (cn) { cached.TotalAmount = -Math.Abs(cached.TotalAmount); cached.VatAmount = -Math.Abs(cached.VatAmount); }
+                    }
                     list.Add(cached); typeKept++;
                 }
-                if (typeRaw > 0) typeInfo.Add($"{tr.type}={typeKept}/{typeRaw}");
+                if (typeKept > 0 || (!noteType && typeRaw > 0)) typeInfo.Add($"{tr.type}={typeKept}/{(noteType ? typeKept : typeRaw)}");
             }
 
             sw.Stop();

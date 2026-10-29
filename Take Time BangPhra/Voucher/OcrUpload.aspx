@@ -19,6 +19,8 @@
         .ocr-hint { font-size:12px; color:#777; }
         .badge { display:inline-block; padding:2px 8px; border-radius:10px; font-size:12px; color:#fff; background:#718096; }
         .tbl { width:100%; border-collapse:collapse; font-size:13px; }
+        .ocr-del { margin-left:10px; border:1px solid #feb2b2; background:#fff5f5; color:#c53030; border-radius:6px; padding:3px 9px; font-size:12px; cursor:pointer; min-height:28px; }
+        .ocr-del:hover { background:#fed7d7; }
         .tbl th, .tbl td { padding:6px 8px; border-top:1px solid #eee; text-align:left; vertical-align:top; }
         .tbl th { background:#f7fafc; font-size:12px; color:#4a5568; }
         .num { text-align:right !important; font-variant-numeric: tabular-nums; }
@@ -136,6 +138,22 @@
             <asp:Button ID="btnScan" runat="server" CssClass="ocr-btn" Text="อัปโหลด & สแกน OCR" OnClick="btnScan_Click"
                 OnClientClick="if(this.dataset.busy){return false;} this.dataset.busy='1'; this.value='⏳ กำลังสแกน...'; OCR_overlay('กำลังสแกน OCR… อาจใช้เวลาสักครู่ (อย่าปิดหน้านี้)');" UseSubmitBehavior="false" />
             <asp:Literal ID="litDrafts" runat="server" />
+            <%-- ทิ้งงานจากรายการ "งานที่ยังไม่ส่ง": ปุ่มในแถว → confirm → ใส่ scan id แล้วกดปุ่มซ่อน (มีร่างบน NextAcc = ลบร่างด้วย) --%>
+            <asp:HiddenField ID="hfDiscardScan" runat="server" />
+            <asp:Button ID="btnDiscardRow" runat="server" OnClick="btnDiscardRow_Click" style="display:none;" UseSubmitBehavior="false" CausesValidation="false" />
+            <script>
+                function OCR_discardRow(btn) {
+                    var hasDoc = btn.getAttribute('data-doc') || '';
+                    var msg = 'ทิ้งงานสแกน "' + (btn.getAttribute('data-name') || '') + '" ?' +
+                        (hasDoc ? '\n\nระบบจะลบร่าง ' + hasDoc + ' บน NextAcc ด้วย (ลบได้เฉพาะเอกสารที่ยังเป็นร่าง)' : '') +
+                        '\n\nทิ้งแล้วเปิดทำต่อไม่ได้ ต้องสแกนเอกสารใหม่';
+                    if (!confirm(msg)) return false;
+                    document.getElementById('<%= hfDiscardScan.ClientID %>').value = btn.getAttribute('data-scan');
+                    btn.disabled = true; btn.textContent = '⏳';
+                    document.getElementById('<%= btnDiscardRow.ClientID %>').click();
+                    return false;
+                }
+            </script>
         </asp:Panel>
 
         <asp:UpdatePanel ID="upOcr" runat="server" UpdateMode="Conditional">
@@ -166,7 +184,7 @@
                     <asp:Button ID="btnSaveDraft" runat="server" CssClass="ocr-btn gray" Text="💾 บันทึกร่าง (ทำต่อภายหลัง)" OnClick="btnSaveDraft_Click"
                         OnClientClick="return OCR.beforePost('save');" />
                     <asp:Button ID="btnDiscard" runat="server" CssClass="ocr-btn red" Text="ทิ้งร่างนี้" OnClick="btnDiscard_Click"
-                        OnClientClick="return confirm('ทิ้งร่างนี้? (ยังไม่มีอะไรถูกสร้างบน NextAcc)');" />
+                        OnClientClick="return confirm('ทิ้งร่างนี้?\n\nถ้ามีร่างบน NextAcc แล้ว ระบบจะลบร่างนั้นด้วย (ลบได้เฉพาะเอกสารที่ยังเป็นร่าง)\nทิ้งแล้วเปิดทำต่อไม่ได้ ต้องสแกนใหม่');" />
                 </div>
             </div>
 

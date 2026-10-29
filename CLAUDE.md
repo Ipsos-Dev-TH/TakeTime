@@ -264,6 +264,13 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
      DN = เฉพาะ `PaymentType=Cash` (`AdjustmentNoteAccount.CounterLegIsMoney:197-200`) ⇒ `BuildUpdate` ตั้ง `PaymentAccountId`=`RefundAccountId` เมื่อ Settlement=BANK (+ DN `PaymentType=1`)
      ส่งทั้ง create ตรงและ PUT ร่าง · `TryReclassNoteMoneyLegAsync` เห็นบรรทัดบัญชีปลายทางใน JE แล้ว = ไม่โพสต์ MNY (+ ledger ผู้ขายเมื่อ VENDOR) · NextAcc รุ่นเก่ายังลง 111 ⇒ MNY ย้ายเหมือนเดิม.
      ใบที่ลงไปแล้ว (Dr 11111): ดู JE `OCRCN-{scan8}-MNY` ใน NextAcc — ไม่มี = ลง JE เอง Dr 21230 / Cr 11111.
+   - **ใบลด/เพิ่มหนี้ผู้ขายในหน้าตรวจสอบใบสำคัญจ่าย + ทิ้งงาน (ต.ค. 2026):** `DownloadVoucherDocumentsForRangeAsync` ดึงชนิด CreditNote/DebitNote เพิ่ม
+     เฉพาะเมื่อมี id ใน `Ocr_Document_Log` (VCN/VDN ที่สร้างเอกสารแล้ว — `LoadVendorNoteDocIds`; รายการ NextAcc ไม่บอกฝั่งซื้อ/ขาย ⇒ ใบลดหนี้ลูกค้าไม่ปน) →
+     `NextAccCachedDocument.IsVendorNote`, ป้าย "ใบลดหนี้ (ผู้ขาย)"/"ใบเพิ่มหนี้ (ผู้ขาย)", ใบลดหนี้ยอด/VAT ติดลบ (ผลรวมหน้า = สุทธิ), ไม่ใช้จับคู่ Reference
+     (`CheckPayment_New.MergeNextAccIntoGrid`). ใบลด/เพิ่มหนี้ที่สร้างบน NextAcc เองไม่ขึ้น. **ทิ้งงาน:** `OcrReviewService.DiscardAsync` — ไม่มีเอกสาร = DISCARDED ·
+     ร่างบน NextAcc (status 0) = `DeleteDraftDocumentAsync` (`DELETE document/{id}` DocumentController.cs:1018-1029, เฉพาะ Draft) · 404/ยกเลิกแล้ว = ทิ้งได้ ·
+     รออนุมัติ/ตีกลับ/อนุมัติ/APPROVED-DONE = ไม่ทิ้ง (บอกให้ยกเลิกใน NextAcc). ปุ่ม "🗑 ทิ้ง" ในรายการงานที่ยังไม่ส่ง (`btnDiscardRow` + confirm) และปุ่มเดิมในหน้าตรวจทาน
+     (แสดงจนกว่าจะอนุมัติ).
 3b. **หน้า PaymentVoucher (manual) parity กับ OCR:** ✅ DONE (page-side only, ไม่แตะ mapper/sync).
    เพิ่ม 3 dropdown: (a) `ddlPaidHowNexaacc` แหล่งจ่ายเงินดึงจากผังบัญชีจริง NextAcc (11x/21x, value=
    `Nexaacc_AccountId`) → save บังคับ `paymentAccountId` ตัวนี้ก่อน mapping (`LookupPaidHowAccountId`)

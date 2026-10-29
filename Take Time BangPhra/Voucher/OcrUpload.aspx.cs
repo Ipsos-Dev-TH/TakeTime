@@ -69,7 +69,11 @@ namespace Take_Time_BangPhra.Voucher
                 bool ready = CheckConfig();
                 var scan = QueryScanId;
                 if (scan.HasValue && ready) ShowReview(scan.Value, Request.QueryString["kind"]);
-                else RenderDrafts();
+                else
+                {
+                    if (Request.QueryString["discarded"] == "1") Msg(litStatus, "ok", "ทิ้งงานแล้ว (ถ้ามีร่างบน NextAcc ระบบลบให้แล้ว)");
+                    RenderDrafts();
+                }
             }
         }
 
@@ -324,7 +328,8 @@ namespace Take_Time_BangPhra.Voucher
             pnlReview.Visible = true;
             hfScanId.Value = s.ScanId;
             var row = Svc.Load(scanId);
-            btnDiscard.Visible = row == null || !row.NexaaccDocId.HasValue;
+            // ทิ้งได้จนกว่าจะอนุมัติ (มีร่างบน NextAcc = ลบร่างด้วย — DiscardAsync)
+            btnDiscard.Visible = row == null || (row.Status != OcrReviewService.StApproved && row.Status != OcrReviewService.StDone && row.Status != OcrReviewService.StEvidence);
 
             string fileName = ViewState["fileName"] as string ?? row?.FileName ?? Session[NameKey(scanId)] as string ?? "เอกสาร";
             var head = new StringBuilder();
@@ -642,21 +647,46 @@ namespace Take_Time_BangPhra.Voucher
         {
             var scan = QueryScanId;
             if (!scan.HasValue) { Response.Redirect("OcrUpload.aspx", false); return; }
-            var row = Svc.Load(scan.Value);
-            if (row != null && row.NexaaccDocId.HasValue)
+            string err = DiscardScan(scan.Value);
+            if (err != null)
             {
                 var s = ReadPostedState();
-                _serverErrors.Add("มีเอกสารบน NextAcc แล้ว (" + (row.NexaaccDocNo ?? row.NexaaccDocId.ToString()) + ") — ทิ้งร่างจากหน้านี้ไม่ได้ ให้ส่งต่อหรือยกเลิกเอกสารใน NextAcc");
+                _serverErrors.Add(err);
                 if (s != null) RenderReview(s);
                 return;
             }
-            Svc.SetStatus(scan.Value, OcrReviewService.StDiscarded, null, null, null, UserName);
-            string f = Session[FileKey(scan.Value)] as string;
+            Response.Redirect("OcrUpload.aspx?discarded=1", false);
+        }
+
+        /// <summary>ปุ่ม "ทิ้ง" ในรายการงานที่ยังไม่ส่ง</summary>
+        protected void btnDiscardRow_Click(object sender, EventArgs e)
+        {
+            Guid scanId;
+            if (!Guid.TryParse(hfDiscardScan.Value ?? "", out scanId)) { RenderDrafts(); return; }
+            hfDiscardScan.Value = "";
+            string err = DiscardScan(scanId);
+            if (err != null) { Msg(litStatus, "err", err); RenderDrafts(); return; }
+            Response.Redirect("OcrUpload.aspx?discarded=1", false);
+        }
+
+        /// <summary>ทิ้งงาน (ลบร่างบน NextAcc เมื่อมี) + ล้างไฟล์/ร่างใน session — null = สำเร็จ</summary>
+        private string DiscardScan(Guid scanId)
+        {
+            string err;
+            try
+            {
+                AccountingApiClient client = null;
+                try { client = NewClient(); } catch { client = null; }
+                err = RunSync(() => Svc.DiscardAsync(client, scanId, UserName));
+            }
+            catch (Exception ex) { err = "ทิ้งงานไม่สำเร็จ: " + ex.Message; }
+            if (err != null) return err;
+            string f = Session[FileKey(scanId)] as string;
             if (!string.IsNullOrEmpty(f)) TryDeleteScanFile(f);
-            Session.Remove(FileKey(scan.Value));
-            Session.Remove(DraftKey(scan.Value));
-            Session.Remove(RawKey(scan.Value));
-            Response.Redirect("OcrUpload.aspx", false);
+            Session.Remove(FileKey(scanId));
+            Session.Remove(DraftKey(scanId));
+            Session.Remove(RawKey(scanId));
+            return null;
         }
 
         private void ShowSuccess(OcrSubmitResult r)
@@ -724,7 +754,14 @@ namespace Take_Time_BangPhra.Voucher
                  .Append("</td><td>").Append(Server.HtmlEncode(r.Status)).Append(string.IsNullOrEmpty(r.NexaaccDocNo) ? "" : "<br/><small>" + Server.HtmlEncode(r.NexaaccDocNo) + "</small>")
                  .Append(string.IsNullOrEmpty(r.LastError) ? "" : "<br/><small style=\"color:#c53030;\">" + Server.HtmlEncode(r.LastError.Length > 120 ? r.LastError.Substring(0, 120) + "…" : r.LastError) + "</small>")
                  .Append("</td><td>").Append(r.UpdatedAt.HasValue ? r.UpdatedAt.Value.ToString("dd/MM HH:mm", CultureInfo.InvariantCulture) : "")
-                 .Append("</td><td><a href=\"OcrUpload.aspx?scan=").Append(r.ScanId).Append("\">ทำต่อ →</a></td></tr>");
+                 .Append("</td><td style=\"white-space:nowrap;\"><a href=\"OcrUpload.aspx?scan=").Append(r.ScanId).Append("\">ทำต่อ →</a>");
+                // ทิ้ง: ส่งแล้ว (APPROVED) ทิ้งไม่ได้ — ซ่อนปุ่ม
+                if (r.Status != OcrReviewService.StApproved)
+                    h.Append(" <button type=\"button\" class=\"ocr-del\" onclick=\"return OCR_discardRow(this);\" data-scan=\"").Append(r.ScanId)
+                     .Append("\" data-name=\"").Append(Server.HtmlEncode(r.FileName ?? r.SupplierDocNo ?? ""))
+                     .Append("\" data-doc=\"").Append(r.NexaaccDocId.HasValue ? Server.HtmlEncode(r.NexaaccDocNo ?? "เอกสาร") : "")
+                     .Append("\" title=\"ทิ้งงานนี้").Append(r.NexaaccDocId.HasValue ? " (ลบร่างบน NextAcc ด้วย)" : "").Append("\">🗑 ทิ้ง</button>");
+                h.Append("</td></tr>");
             }
             h.Append("</tbody></table></div>");
             litDrafts.Text = h.ToString();

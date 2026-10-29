@@ -918,6 +918,13 @@ namespace Take_Time_BangPhra.Integration
             return await GetAsync<ApiResponse<DocumentResponse>>($"{CompanyPath}/document/{documentId}");
         }
 
+        /// <summary>ลบเอกสารร่าง — NextAcc `DELETE document/{id}` (DocumentController.cs:1018-1029, สิทธิ์ระดับ Create) ลบได้เฉพาะ Draft
+        /// ที่ยังไม่มี JE/การชำระ (DocumentService.DeleteDocumentAsync ตรวจสถานะเอง ไม่ใช่ร่าง = 400)</summary>
+        public async Task DeleteDraftDocumentAsync(Guid documentId)
+        {
+            await DeleteAsync($"{CompanyPath}/document/{documentId}");
+        }
+
         /// <summary>เอกสารทุกใบที่ผูกเลขจองเดียวกัน (ไม่รวม Voided) — NextAcc
         /// <c>GET /api/companies/{cid}/document/by-booking/{bookingNumber}</c> (DocumentController.cs:515-521 →
         /// DocumentService.GetDocumentsByBookingAsync :5398-5411: BookingNumber == key && Status != Voided, เรียงวันที่เอกสาร).

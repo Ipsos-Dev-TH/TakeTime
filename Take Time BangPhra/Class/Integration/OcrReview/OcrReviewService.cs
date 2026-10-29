@@ -184,6 +184,50 @@ namespace Take_Time_BangPhra.Integration.OcrReview
             return list;
         }
 
+        /// <summary>
+        /// ทิ้งงานที่ยังไม่ส่ง (รายการ "งานที่ยังไม่ส่ง" / ปุ่มในหน้าตรวจทาน): ไม่มีเอกสาร NextAcc = ทิ้งเลย · มีร่างบน NextAcc = ลบร่างก่อน
+        /// (`DELETE document/{id}` — เฉพาะ Draft) · เอกสารหายแล้ว/ถูกยกเลิกแล้ว = ทิ้งได้ · รออนุมัติ/อนุมัติแล้ว = ไม่ทิ้ง (ต้องยกเลิกใน NextAcc/ออกใบลดหนี้)
+        /// คืน null = สำเร็จ, ไม่งั้นข้อความภาษาไทยว่าทำไมทิ้งไม่ได้
+        /// </summary>
+        public async Task<string> DiscardAsync(AccountingApiClient client, Guid scanId, string user)
+        {
+            var row = Load(scanId);
+            if (row != null && (row.Status == StApproved || row.Status == StDone || row.Status == StEvidence))
+                return "งานนี้ส่งเข้า NextAcc แล้ว" + (string.IsNullOrEmpty(row.NexaaccDocNo) ? "" : " (" + row.NexaaccDocNo + ")")
+                    + " — ทิ้งไม่ได้ ถ้าต้องการยกเลิกให้ยกเลิกเอกสารใน NextAcc หรือออกใบลดหนี้";
+            string note = null;
+            if (row != null && row.NexaaccDocId.HasValue)
+            {
+                if (client == null) return "ยังไม่ได้ตั้งค่าการเชื่อมต่อ NextAcc — ลบร่าง " + (row.NexaaccDocNo ?? "") + " บน NextAcc ไม่ได้";
+                Guid docId = row.NexaaccDocId.Value;
+                int? status = null;
+                string docNo = row.NexaaccDocNo;
+                try
+                {
+                    var d = (await client.GetDocumentAsync(docId))?.data;
+                    if (d != null) { status = d.Status; docNo = d.DocumentNumber ?? docNo; }
+                }
+                catch (AccountingApiException gx) when (gx.StatusCode == 404 || gx.StatusCode == 410) { status = -1; }
+                catch (Exception ex) { return "อ่านเอกสาร " + (docNo ?? "") + " บน NextAcc ไม่ได้ (" + ShortError(ex) + ") — ลองใหม่อีกครั้ง"; }
+
+                if (status == -1) note = "เอกสาร " + (docNo ?? "") + " ไม่มีบน NextAcc แล้ว";
+                else if (status == 6) note = "เอกสาร " + (docNo ?? "") + " ถูกยกเลิกบน NextAcc แล้ว";
+                else if (status == 0)
+                {
+                    try { await client.DeleteDraftDocumentAsync(docId); note = "ลบร่าง " + (docNo ?? "") + " บน NextAcc แล้ว"; }
+                    catch (AccountingApiException dx) when (dx.StatusCode == 404) { note = "เอกสาร " + (docNo ?? "") + " ไม่มีบน NextAcc แล้ว"; }
+                    catch (Exception ex) { return "ลบร่าง " + (docNo ?? "") + " บน NextAcc ไม่สำเร็จ: " + ApiMessage(ex); }
+                }
+                else if (status == 1 || status == 8)
+                    return "เอกสาร " + (docNo ?? "") + " บน NextAcc อยู่ระหว่างรออนุมัติ/ถูกตีกลับ — ลบได้เฉพาะร่าง ให้ยกเลิกเอกสารใน NextAcc ก่อน แล้วกดทิ้งอีกครั้ง";
+                else
+                    return "เอกสาร " + (docNo ?? "") + " บน NextAcc อนุมัติแล้ว — ทิ้งไม่ได้ ให้ยกเลิกใน NextAcc หรือออกใบลดหนี้";
+            }
+            SetStatus(scanId, StDiscarded, null, null, note, user);
+            try { _code.Logs(_conn, "OcrReview", "ทิ้งงาน OCR " + scanId + (row != null ? " (" + row.Status + ")" : "") + (note != null ? " · " + note : ""), user ?? "SYSTEM"); } catch { }
+            return null;
+        }
+
         /// <summary>บันทึก draft (upsert ตาม Scan_Id) — ไม่ทับ Ocr_Raw_Json ที่มีแล้ว · ไม่ลดสถานะที่เดินหน้าไปแล้ว</summary>
         public bool SaveDraft(OcrReviewState s, string rawJson, string fileName, string user)
         {

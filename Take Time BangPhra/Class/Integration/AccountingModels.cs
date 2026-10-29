@@ -1934,6 +1934,8 @@ namespace Take_Time_BangPhra.Integration
         public string Reference { get; set; }          // เลขที่อ้างอิง (= เลขใบสำคัญจ่ายฝั่ง TakeTime ถ้ามาจากการ sync)
         public string DocumentNumber { get; set; }     // เลขที่เอกสารฝั่ง NextAcc เช่น EXP-202606-0001
         public string DocumentTypeLabel { get; set; }
+        /// <summary>ใบลด/เพิ่มหนี้ของผู้ขาย (สร้างจากหน้า OCR) — ใบลดหนี้เก็บยอดติดลบ · ไม่ใช้จับคู่ด้วย Reference (Reference = เลขใบเดิม)</summary>
+        public bool IsVendorNote { get; set; }
         public DateTime DocumentDate { get; set; }
         public string ContactName { get; set; }
         public string ContactTaxId { get; set; }
