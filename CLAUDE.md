@@ -257,6 +257,13 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
      ดึงบรรทัด+บัญชี (`AssignAccountsFromSource`: รหัสสินค้า → รายละเอียด → ราคา → บัญชีหลัก; ไม่ทับบรรทัดที่ผู้ใช้แก้) + บัญชีที่ใบเดิมจ่าย (PV `PaymentAccountId` /
      ขาเครดิตเงินของ JE `sourceDocumentId` :20046 ที่อยู่ใน Account_Paid_How) ⇒ `DefaultSettlement`: ค้างจ่าย = ลดเจ้าหนี้ · จ่ายแล้ว = รับคืนเข้าบัญชีเดิม (BANK →
      JE `OCRCN-…-MNY`) · ไม่รู้บัญชี = เครดิตผู้ขาย; dropdown เดียว (แหล่งเงิน / เครดิตผู้ขาย) ผู้ใช้เปลี่ยนได้ (`SettlementUserSet`).
+   - **รวม/ไม่รวม VAT อัตโนมัติ + ขาเงินตรงบัญชี (ต.ค. 2026 — CN-20261021-0001 เลือก 21230 แต่ NextAcc ลง Dr 11111):** (1) `OcrReviewMath.AutoPriceBasis`
+     (JS `OcrMath.autoBasis`, parity) เรียกทุก render + ก่อนส่ง: `PriceBasisSource != USER` ⇒ ตาม `DetectPricesIncludeVat` (สลับ + ล้าง override + FIT_VAT) — เดิมตรวจครั้งเดียว
+     ตอนสแกนแล้วแค่ขึ้นคำใบ้ · OCR ติดธงรวม VAT บางบรรทัด = ลองราคาตามกระดาษทั้งใบก่อน (ตัดสินได้ = ไม่ถอด 7%). (2) NextAcc HEAD (V-CN-03, `DocumentService.cs:18225-18229`)
+     ลงขาเงิน CN/DN ด้วย `UseMoneyAccount()` = `PaymentAccountId` ของเอกสาร (ผังที่ลงรายการได้ทุกชนิด — `DocumentMoneyChannel.Decide`); CN = ขาเงินเมื่อใบต้นทาง BalanceDue≈0,
+     DN = เฉพาะ `PaymentType=Cash` (`AdjustmentNoteAccount.CounterLegIsMoney:197-200`) ⇒ `BuildUpdate` ตั้ง `PaymentAccountId`=`RefundAccountId` เมื่อ Settlement=BANK (+ DN `PaymentType=1`)
+     ส่งทั้ง create ตรงและ PUT ร่าง · `TryReclassNoteMoneyLegAsync` เห็นบรรทัดบัญชีปลายทางใน JE แล้ว = ไม่โพสต์ MNY (+ ledger ผู้ขายเมื่อ VENDOR) · NextAcc รุ่นเก่ายังลง 111 ⇒ MNY ย้ายเหมือนเดิม.
+     ใบที่ลงไปแล้ว (Dr 11111): ดู JE `OCRCN-{scan8}-MNY` ใน NextAcc — ไม่มี = ลง JE เอง Dr 21230 / Cr 11111.
 3b. **หน้า PaymentVoucher (manual) parity กับ OCR:** ✅ DONE (page-side only, ไม่แตะ mapper/sync).
    เพิ่ม 3 dropdown: (a) `ddlPaidHowNexaacc` แหล่งจ่ายเงินดึงจากผังบัญชีจริง NextAcc (11x/21x, value=
    `Nexaacc_AccountId`) → save บังคับ `paymentAccountId` ตัวนี้ก่อน mapping (`LookupPaidHowAccountId`)

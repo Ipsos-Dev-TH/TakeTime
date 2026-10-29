@@ -308,6 +308,25 @@ namespace Take_Time_BangPhra.Integration.OcrReview
             return best;
         }
 
+        /// <summary>
+        /// เลือก "ราคาในรายการรวม VAT แล้ว / ยังไม่รวม" ให้เองตามยอดบนกระดาษ (<see cref="DetectPricesIncludeVat"/>) ตราบใดที่ผู้ใช้ยังไม่เลือกเอง
+        /// (<c>PriceBasisSource != "USER"</c>) — เรียกทุกครั้งที่หน้าคำนวณใหม่และก่อนส่ง (เดิมตรวจครั้งเดียวตอนสแกน แล้วแค่ขึ้นคำใบ้ "ควรเป็น…"
+        /// เมื่อผู้ใช้แก้ยอดตามเอกสาร/รายการ ⇒ ผู้ใช้ต้องสลับเอง). สลับแล้วล้าง VAT override และปรับเศษ VAT ตามกระดาษใหม่ (FIT_VAT).
+        /// ตัวเดียวกับ JS <c>OcrMath.autoBasis</c> — คืน true เมื่อสลับ
+        /// </summary>
+        public static bool AutoPriceBasis(OcrReviewState s)
+        {
+            if (s == null || s.Lines == null || s.Lines.Count == 0) return false;
+            if (string.Equals(s.PriceBasisSource, "USER", StringComparison.Ordinal)) return false;
+            var det = DetectPricesIncludeVat(s.Lines, s.PrintedSubTotal, s.PrintedVat, s.PrintedTotal);
+            if (!det.HasValue || det.Value == s.PricesIncludeVat) return false;
+            s.PricesIncludeVat = det.Value;
+            s.PriceBasisSource = "AUTO";
+            foreach (var l in s.Lines) if (l != null) l.VatOverride = null;
+            if (SuggestFixes(s).Any(f => f.Code == "FIT_VAT")) ApplyFix(s, "FIT_VAT");
+            return true;
+        }
+
         /// <summary>ทำตามปุ่มแก้ด่วน (ตัวเดียวกับ JS OcrMath.applyFix) — คืน true เมื่อเปลี่ยนสถานะ</summary>
         public static bool ApplyFix(OcrReviewState s, string code)
         {

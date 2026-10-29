@@ -364,6 +364,7 @@ namespace Take_Time_BangPhra.Integration.OcrReview
                 // เป็นราคาก่อน VAT ⇒ ยอดก่อน VAT 3,447 / VAT 241.29 ผิดกระดาษ). ถอดรายบรรทัดเฉพาะเมื่อ OCR ติดธงแค่บางบรรทัด
                 bool allIncl = r.ExtractedItems.All(it => it != null && it.PriceIncludesVat);
                 bool anyFlag = r.ExtractedItems.Any(it => it != null && it.PriceIncludesVat);
+                var rawPrices = new List<decimal[]>();   // [ราคา/หน่วย, ส่วนลด] ตามกระดาษ ก่อนถอด 7% — ใช้ตัดสินใหม่เมื่อ OCR ติดธงแค่บางบรรทัด
                 foreach (var it in r.ExtractedItems)
                 {
                     if (it == null) continue;
@@ -380,6 +381,7 @@ namespace Take_Time_BangPhra.Integration.OcrReview
                     decimal disc = it.LineDiscountAmount ?? 0m;
                     decimal amount = it.Amount ?? OcrReviewMath.R2(qty * (it.UnitPrice ?? 0m) - disc);
                     decimal unit = it.UnitPrice ?? (qty != 0 ? amount / qty : amount);
+                    rawPrices.Add(new[] { unit, disc });
                     if (it.PriceIncludesVat && !allIncl)
                     {
                         unit = Math.Round(unit / 1.07m, 4, MidpointRounding.AwayFromZero);
@@ -395,6 +397,22 @@ namespace Take_Time_BangPhra.Integration.OcrReview
                     s.Lines.Add(l);
                 }
                 if (allIncl && hasVat) { s.PricesIncludeVat = true; s.PriceBasisSource = "OCR"; }
+                // OCR ติดธง "รวม VAT" แค่บางบรรทัด: ลองราคาตามกระดาษ (ไม่ถอด) ทั้งใบก่อน — ยอดบนกระดาษตัดสินได้ = ใช้ราคาตามกระดาษ + ฐานนั้นทั้งใบ
+                // (เดิมถอด 7% เฉพาะบรรทัดที่ติดธงแล้วข้ามการตัดสิน ⇒ ใบรวม VAT ทั้งใบที่ OCR พลาดธงบางบรรทัดออกมาเป็น "ไม่รวม VAT" ยอดผิด)
+                if (anyFlag && !allIncl && rawPrices.Count == s.Lines.Count)
+                {
+                    var rawLines = s.Lines.Select((x, i) => new OcrReviewLine
+                    {
+                        Qty = x.Qty, UnitPrice = rawPrices[i][0], Discount = rawPrices[i][1], VatType = x.VatType, WhtRate = x.WhtRate, VatClaimable = x.VatClaimable
+                    }).ToList();
+                    var detRaw = OcrReviewMath.DetectPricesIncludeVat(rawLines, s.PrintedSubTotal, s.PrintedVat, s.PrintedTotal);
+                    if (detRaw.HasValue)
+                    {
+                        for (int i = 0; i < s.Lines.Count; i++) { s.Lines[i].UnitPrice = rawPrices[i][0]; s.Lines[i].Discount = rawPrices[i][1]; }
+                        s.PricesIncludeVat = detRaw.Value;
+                        s.PriceBasisSource = "AUTO";
+                    }
+                }
                 // ตัดสินรวม/ไม่รวม VAT จากยอดบนกระดาษ (Σยอดบรรทัด = ยอดรวม ⇒ รวม VAT · = ยอดก่อน VAT ⇒ ไม่รวม) — ข้ามเมื่อ OCR ติดธงบางบรรทัด (ถอดไปแล้ว)
                 if (!anyFlag || allIncl)
                 {
@@ -827,6 +845,17 @@ namespace Take_Time_BangPhra.Integration.OcrReview
             else
             {
                 upd.CnDnPurchaseSideOverride = true;
+                // ใบต้นทางจ่ายครบ + ผู้ใช้เลือก "รับ/จ่ายผ่านบัญชี…" (เช่น 21230 เจ้าหนี้กรรมการ ที่ใบเดิมจ่ายออก) ⇒ ตั้งแหล่งเงินของใบลด/เพิ่มหนี้เป็นบัญชีนั้น —
+                // NextAcc รุ่นใหม่ลงขาเงินของ CN/DN ผ่าน UseMoneyAccount() = PaymentAccountId ของเอกสาร (DocumentService.cs:18225-18229 "V-CN-03",
+                // ตัวตัดสิน DocumentMoneyChannel: ผังที่ลงรายการได้ทุกชนิด) แทน 111 ตายตัว. รุ่นเก่าไม่สนช่องนี้ ⇒ JE ย้ายขา (TryReclassNoteMoneyLegAsync) ทำแทน
+                Guid refundAcc;
+                if (s.Settlement == OcrNoteSettlement.Bank && Guid.TryParse(s.RefundAccountId ?? "", out refundAcc) && refundAcc != Guid.Empty)
+                {
+                    upd.PaymentAccountId = refundAcc;
+                    // ใบเพิ่มหนี้: NextAcc รุ่นใหม่ลงขาเงินเฉพาะใบที่ระบุ "จ่ายทันที" (PaymentType=Cash — AdjustmentNoteAccount.CounterLegIsMoney:197-200)
+                    // ไม่งั้นตั้งเจ้าหนี้ ⇒ เลือกจ่ายทันทีจากบัญชี = Cash. ใบลดหนี้ตัดสินจากยอดค้างของใบต้นทางเอง (ไม่ต้องส่ง)
+                    if (s.DocKind == OcrDocKind.VendorDebitNote) upd.PaymentType = 1;
+                }
                 int reason = ResolveNoteReason(s);
                 if (s.DocKind == OcrDocKind.VendorCreditNote) upd.CreditNoteReason = reason;
                 else upd.DebitNoteReason = reason;
@@ -914,6 +943,10 @@ namespace Take_Time_BangPhra.Integration.OcrReview
                         : (s.DocKind == OcrDocKind.VendorCreditNote ? "เก็บเป็นเครดิตกับผู้ขาย" : "ตั้งเจ้าหนี้รอจ่าย")) + " (ไม่ลงเงินสด 111 ที่ไม่มีเงินเข้า-ออกจริง)");
                 s.Settlement = eff;
             }
+
+            // ── รวม/ไม่รวม VAT: ผู้ใช้ยังไม่เลือกเอง ⇒ ตามยอดบนกระดาษ (ตัวเดียวกับหน้าเว็บ — กันหน้าเก่า/สคริปต์ไม่ทำงาน) ──
+            if (OcrReviewMath.AutoPriceBasis(s))
+                res.Notes.Add("ระบบเลือก \"" + (s.PricesIncludeVat ? "ราคาในรายการรวม VAT แล้ว" : "ราคายังไม่รวม VAT") + "\" ให้ตามยอดบนเอกสาร");
 
             // ── ตรวจทั้งใบ (ตัวตัดสินฝั่งเซิร์ฟเวอร์) ──
             var v = OcrReviewMath.Validate(s);
@@ -1008,6 +1041,8 @@ namespace Take_Time_BangPhra.Integration.OcrReview
                             Notes = upd.Notes,
                             Lines = upd.Lines,
                             PricesIncludeVat = s.PricesIncludeVat,
+                            PaymentAccountId = upd.PaymentAccountId,   // ขาเงินของใบที่ต้นทางจ่ายครบ → บัญชีที่เลือก (ดู BuildUpdate)
+                            PaymentType = upd.PaymentType,             // ใบเพิ่มหนี้ "จ่ายทันที" = Cash
                             SupplierInvoiceNumber = upd.SupplierInvoiceNumber,
                             SupplierTaxInvoiceDate = upd.SupplierTaxInvoiceDate,
                             SupplierBranchCode = upd.SupplierBranchCode,
@@ -1322,8 +1357,9 @@ namespace Take_Time_BangPhra.Integration.OcrReview
         }
 
         /// <summary>
-        /// ใบลด/เพิ่มหนี้ที่ใบต้นทางชำระครบ: NextAcc ลงขาเงินที่บัญชีเงินสด "111" เสมอ (DocumentService.cs:17899, :17920-17924) —
-        /// ถ้าผู้ใช้เลือกบัญชีอื่น (ธนาคารที่ผู้ขายโอนคืน / เก็บเป็นยอดกับผู้ขาย = เจ้าหนี้) โพสต์ JE ย้ายขา (ExternalRef idempotent)
+        /// ใบลด/เพิ่มหนี้ที่ใบต้นทางชำระครบ: เราตั้ง PaymentAccountId ของใบ = บัญชีที่เลือกแล้ว (BuildUpdate) — NextAcc HEAD ลงขาเงินที่บัญชีนั้นตรง
+        /// (DocumentService.cs:18225-18229 V-CN-03) ⇒ ตรงนี้แค่ยืนยัน · NextAcc รุ่นก่อน ลง "111" ตายตัว ⇒ โพสต์ JE ย้ายขา (ExternalRef idempotent)
+        /// ไปบัญชีที่เลือก (ธนาคาร/21230 ที่ใบเดิมจ่าย · เก็บเป็นยอดกับผู้ขาย = เจ้าหนี้)
         /// </summary>
         private async Task<string> TryReclassNoteMoneyLegAsync(AccountingApiClient client, Guid docId, Guid scanId, OcrReviewState s, OcrSubmitResult res,
             bool cnPrimary, VendorCnService vcs, string user)
@@ -1359,6 +1395,16 @@ namespace Take_Time_BangPhra.Integration.OcrReview
                              && j.Status != 2 && j.Status != 6 && j.Lines != null && j.Lines.Count > 0)   // 2 = JE voided, 6 = ชื่อ "Voided" ผ่าน DocumentStatusConverter
                     .OrderByDescending(j => j.CreatedAt).FirstOrDefault();
                 if (je == null) { res.Notes.Add("⚠ ไม่พบ JE ของเอกสาร — ตรวจขาเงินใน NextAcc เอง"); return null; }
+                // NextAcc รุ่นใหม่ลงบัญชีที่เลือกเองแล้ว (PaymentAccountId ของใบ / ใบเพิ่มหนี้เงินเชื่อ = เจ้าหนี้ของใบต้นทาง) ⇒ ไม่ต้องย้าย
+                var direct = je.Lines.FirstOrDefault(l => string.Equals(l.AccountCode, target, StringComparison.OrdinalIgnoreCase)
+                                                       && (cn ? l.DebitAmount > 0 : l.CreditAmount > 0));
+                if (direct != null)
+                {
+                    decimal damt = OcrReviewMath.R2(cn ? direct.DebitAmount : direct.CreditAmount);
+                    res.Notes.Add("NextAcc ลงบัญชี " + target + " ตรงตามที่เลือกแล้ว " + OcrReviewMath.Money(damt) + " (ไม่ผ่านเงินสด)");
+                    if (vendorLeg && cnPrimary) RecordVendorBalance(vcs, s, scanId, res, cn, damt, target, null, user);
+                    return null;
+                }
                 var leg = je.Lines.FirstOrDefault(l => (l.AccountCode ?? "").StartsWith("111", StringComparison.Ordinal)
                                                    && (cn ? l.DebitAmount > 0 : l.CreditAmount > 0));
                 if (leg == null)

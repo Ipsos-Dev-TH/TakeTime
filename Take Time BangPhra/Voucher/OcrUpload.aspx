@@ -323,6 +323,16 @@
             if (nt && !ns) return true; if (ns && !nt) return false;
             return null;
         }
+        /* OcrReviewMath.AutoPriceBasis — ผู้ใช้ยังไม่เลือกเอง ⇒ ตามยอดบนกระดาษ (สลับ + ล้าง override + ปรับเศษ VAT) */
+        function autoBasis(s) {
+            if (!s || !(s.Lines || []).length || s.PriceBasisSource === 'USER') return false;
+            var det = detectIncl(s);
+            if (det === null || det === !!s.PricesIncludeVat) return false;
+            s.PricesIncludeVat = det; s.PriceBasisSource = 'AUTO';
+            s.Lines.forEach(function (l) { if (l) l.VatOverride = null; });
+            if (suggestFixes(s).some(function (f) { return f.code === 'FIT_VAT'; })) applyFix(s, 'FIT_VAT');
+            return true;
+        }
         function fitLine(cs) { var b = -1; cs.forEach(function (c, i) { if (c.rate > 0 && (b < 0 || Math.abs(c.net) > Math.abs(cs[b].net))) b = i; }); return b; }
         /* OcrReviewMath.SuggestFixes — ปุ่มแก้ด่วน */
         function suggestFixes(s) {
@@ -483,7 +493,7 @@
         }
         return { r2: r2, digits: digits, isValidTaxId: isValidTaxId, isJuristic: isJuristic, normBranch: normBranch, isValidBranch: isValidBranch,
                  vatRate: vatRate, calcLine: calcLine, calcLines: calcLines, calcTotals: calcTotals, reconcile: reconcile, capCheck: capCheck, missing8604: missing8604,
-                 detectIncl: detectIncl, suggestFixes: suggestFixes, applyFix: applyFix, setReasons: setReasons, findReason: findReason,
+                 detectIncl: detectIncl, autoBasis: autoBasis, suggestFixes: suggestFixes, applyFix: applyFix, setReasons: setReasons, findReason: findReason,
                  validate: validate, money: money };
     })();
 
@@ -598,6 +608,8 @@
             if (isNote()) h += renderNote();
 
             // ── 4) รายการ ──
+            // รวม/ไม่รวม VAT: ผู้ใช้ยังไม่เลือกเอง ⇒ ระบบเลือกตามยอดบนกระดาษทุกครั้งที่คำนวณใหม่ (แก้ยอดตามเอกสาร/รายการแล้วสลับให้เอง)
+            OcrMath.autoBasis(S);
             var incl = !!S.PricesIncludeVat, cs = OcrMath.calcLines(S.Lines, incl), hasSrcAcc = (S.Lines || []).some(function (l) { return !!l.SourceAccountCode; });
             h += '<div class="rv-sec"><h4>4. รายการ</h4>';
             // ราคาในรายการรวม VAT หรือยัง — ระบบตรวจจากยอดบนกระดาษ (OcrReviewMath.DetectPricesIncludeVat) ผู้ใช้สลับได้
