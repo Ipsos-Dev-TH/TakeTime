@@ -655,6 +655,7 @@
     <Content Include="Scripts\slip-first.js" />
     <Content Include="Scripts\pv-voucher.js" />
     <Content Include="Content\slip-first.css" />
+    <Content Include="Content\reservation-confirmed.css" />
     <Content Include="Content\pv-voucher.css" />
     <Content Include="Content\responsive-table.css" />
     <Content Include="Content\admin-settings.css" />
@@ -1618,6 +1619,7 @@
     <Compile Include="Class\ReservationBalance.cs" />
     <Compile Include="Class\Reviews\ReviewQuery.cs" />
     <Compile Include="Class\BookingPolicy.cs" />
+    <Compile Include="Class\PolicySummary.cs" />
     <Compile Include="Class\PetStay.cs" />
     <Compile Include="Admin\LineLinkCallback.aspx.cs">
       <DependentUpon>LineLinkCallback.aspx</DependentUpon>

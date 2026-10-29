@@ -822,6 +822,20 @@ Linked_Voucher_Id, Receipt_Batch`; `Account_Payment.Linked_Goods_Receipt` (= Rec
 - ภาษีซื้อเคลมได้เฉพาะใบกำกับเต็มรูป ม.86/4 (อย่างย่อ/ใบเสร็จธรรมดา = ต้องห้าม ม.82/5(3)); ผู้ขายออกใบเสร็จไม่ได้ ⇒ ใบรับรองแทนใบเสร็จ (type 15).
 - รายงานสินค้าและวัตถุดิบ ม.87(3) ต้องจัดทำสำหรับสินค้าที่มีไว้ขาย — NextAcc ไม่มีตัวสร้าง (คำขอ ข้อ ฎ.) ⇒ ใช้ `Report/StockMovementReport`.
 
+## Booking policies & confirmation page (ต.ค. 2026)
+นโยบายการจอง = `Class/BookingPolicy.cs` (ตาราง `Booking_Policy_Config`, cache 60 วิ, ไม่มีตาราง = ข้อความสำรอง; `ToHtml` encode เสมอ) — แก้ที่
+`Admin/Settings/BookingPolicies.aspx` · หน้าสาธารณะ `Policy/*.aspx` (`PolicyPage.cs` + `PolicyView.ascx`) · หน้าจอง `Reserve.aspx`
+`SetupPolicySection` แสดงนโยบายการยกเลิก + modal 4 ข้อ + ติ๊กยอมรับ (`RecordAcceptance` → `Reservation.Policy_Accepted_*`).
+**หน้ายืนยันการจอง `Reservation_Confirmed.aspx` (`?id=&check=เบอร์`):** ลำดับ สถานะ/ขั้นตอนถัดไป → รายละเอียด (ผู้จอง/วันเข้าพัก/ห้อง/
+ของเช่า/สัตว์เลี้ยง/หมายเหตุ) → ชำระเงิน + สลิป/เอกสาร → **นโยบายการยกเลิกการจอง** (`pnlCancelPolicy`, ข้อความเดียวกับหน้าจอง ผ่าน
+`Class/PolicySummary.cs` pure: บรรทัด = ข้อ, ตัดเครื่องหมายนำหน้า, 4 ข้อแรกแสดงเสมอ ที่เหลือ `<details>` "อ่านเพิ่มเติม", เน้นตัวเลข วัน/%/บาท,
+ว่าง = ซ่อน; ลิงก์ /Policy/Cancellation + /Policy/Refund) → นโยบายอื่นพับ (`pnlPolicies`, ไม่ติดรูป) → เช็คอิน/ติดต่อ → ปุ่ม (นอกกรอบจับภาพ, มือถือ
+sticky ล่าง). CSS `Content/reservation-confirmed.css` (mobile-first; ≥1024 สองคอลัมน์ การจองซ้าย / ชำระเงิน+นโยบายขวา; print). **รูปยืนยัน** =
+html2canvas (CDN) จับ `#rcCapture` ฝั่งเบราว์เซอร์ (ไม่มี System.Drawing): ใส่ `body.rc-capturing` (ซ่อน `.rc-no-capture`, ปลด max-height
+ของกล่องเลื่อน) + เปิด details ของนโยบายให้ติดรูปครบ แล้วคืนสถานะ; ชื่อไฟล์ `การยืนยันการจอง_{id}.png`. ปุ่ม "เพิ่มลงปฏิทิน" = .ics ฝั่งเบราว์เซอร์
+(`lnkCalendar` data-* วันที่ InvariantCulture, DTEND exclusive = เช็คเอาท์+1). อีเมล/LINE/Telegram ยืนยันการจองยังไม่มีนโยบาย (ทำแยก).
+ทดสอบ: mono `PolicySummary` + Playwright mock (ไม่มี Windows). ต้อง build+test บน Windows.
+
 ## Git / workflow
 Feature branch: `claude/vibrant-davinci-nzwlgq` (based on default branch
 `claude/restructure-system-architecture-szeM0`). Remote: `Ipsos-Dev-TH/TakeTime`

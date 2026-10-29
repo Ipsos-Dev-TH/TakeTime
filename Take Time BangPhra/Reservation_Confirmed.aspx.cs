@@ -7,7 +7,9 @@ using System.Web.UI.WebControls;
 using System.Data;
 using System.Data.SqlClient;
 using System.Configuration;
+using System.Globalization;
 using System.IO;
+using System.Text;
 
 namespace Take_Time_BangPhra
 {
@@ -55,6 +57,7 @@ namespace Take_Time_BangPhra
 
                 // Set basic information
                 Label1.Text = id;
+                try { if (rcCapture != null) rcCapture.Attributes["data-booking"] = id; } catch { }   // ชื่อไฟล์รูปยืนยัน
                 Label2.Text = dtReservationAccommodation.Rows[0]["Name"].ToString();
                 Label3.Text = dtReservationAccommodation.Rows[0]["NickName"].ToString();
                 Label4.Text = check;
@@ -65,6 +68,7 @@ namespace Take_Time_BangPhra
                 Label5.Text = datesPending ? "ยังไม่กำหนด (เลื่อนเข้าพัก)" : confIn.Value.ToString("dd MMMM yyyy");
                 Label6.Text = datesPending || !confOut.HasValue ? "ยังไม่กำหนด" : confOut.Value.ToString("dd MMMM yyyy");
                 Label7.Text = dtReservationAccommodation.Rows[0]["StayDays"].ToString() + " คืน";
+                SetupCalendarLink(id, datesPending ? (DateTime?)null : confIn, datesPending ? (DateTime?)null : confOut);
 
                 // Set accommodation details with number of guests
                 var resParams = new Dictionary<string, object> { { "@ReservationID", id } };
@@ -185,7 +189,9 @@ namespace Take_Time_BangPhra
                 catch { hasPets = false; }
                 LoadNextSteps(resIdNum, check, bal, datesPending ? (DateTime?)null : confIn, hasPets);
 
-                // นโยบายการจอง + ฉบับที่ลูกค้ายอมรับ (ส่วนเสริม — ล้มก็ไม่กระทบหน้ายืนยัน)
+                // นโยบายการยกเลิกการจอง (ส่วนหลัก เห็นทันที + ติดในรูปยืนยัน) และนโยบายอื่น ๆ + ฉบับที่ลูกค้ายอมรับ
+                // (ส่วนเสริม — ล้มก็ไม่กระทบหน้ายืนยัน)
+                LoadCancellationPolicy(dtReservationAccommodation.Rows[0]);
                 LoadPolicies(dtReservationAccommodation.Rows[0]);
 
                 // 🐾 สัตว์เลี้ยงเข้าพัก: จำนวนต่อห้อง ค่าบริการ การยอมรับนโยบาย (ส่วนเสริม — ล้มก็ไม่กระทบ)
@@ -213,6 +219,27 @@ namespace Take_Time_BangPhra
             DateTime d;
             if (v is DateTime) return (DateTime)v;
             return DateTime.TryParse(Convert.ToString(v), out d) ? (DateTime?)d : null;
+        }
+
+        /// <summary>
+        /// ปุ่ม "เพิ่มลงปฏิทิน" (.ics ทั้งวัน เช็คอิน → เช็คเอาท์; สคริปต์ rcAddToCalendar ในหน้า) — ไม่มีวันเข้าพัก = ซ่อน
+        /// วันที่ใช้ InvariantCulture เสมอ (culture ไทยจะพิมพ์ปี พ.ศ.) · DTEND ของ event ทั้งวันเป็น exclusive จึง +1 วัน
+        /// </summary>
+        private void SetupCalendarLink(string id, DateTime? checkin, DateTime? checkout)
+        {
+            try
+            {
+                if (lnkCalendar == null || !checkin.HasValue) { if (lnkCalendar != null) lnkCalendar.Visible = false; return; }
+                DateTime start = checkin.Value.Date;
+                DateTime end = checkout.HasValue && checkout.Value.Date > start ? checkout.Value.Date : start.AddDays(1);
+                lnkCalendar.Attributes["data-start"] = start.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
+                lnkCalendar.Attributes["data-end"] = end.AddDays(1).ToString("yyyyMMdd", CultureInfo.InvariantCulture);
+                lnkCalendar.Attributes["data-code"] = id ?? "";
+                lnkCalendar.Attributes["data-title"] = "เข้าพัก Take Time Nature Resort (#" + (id ?? "") + ")";
+                lnkCalendar.Attributes["onclick"] = "return rcAddToCalendar(this);";
+                lnkCalendar.Visible = true;
+            }
+            catch { try { lnkCalendar.Visible = false; } catch { } }
         }
 
         /// <summary>
@@ -553,61 +580,102 @@ namespace Take_Time_BangPhra
         {
             string path = BookingPolicy.PublicPath(key);
             if (path == null) return "";
-            return "<div style=\"margin-top:4px; font-size:0.9em;\"><a href=\""
+            return "<div class=\"rc-pol-link\"><a href=\""
                 + System.Web.HttpUtility.HtmlAttributeEncode(ResolveUrl(path))
                 + "\" target=\"_blank\" rel=\"noopener\">เปิดอ่านหน้าเต็ม ↗</a></div>";
         }
 
         /// <summary>
-        /// แสดงนโยบายการจอง (ยกเลิก / คืนเงิน / เงื่อนไข / ความเป็นส่วนตัว) + วันเวลาและฉบับที่ลูกค้ายอมรับ
-        /// ข้อความแปลงผ่าน BookingPolicy.ToHtml (encode ก่อนเสมอ) — แทรก HTML/สคริปต์ไม่ได้
+        /// "ผู้จองยอมรับเงื่อนไขและนโยบายแล้ว เมื่อ … (ฉบับที่ …)" จากคอลัมน์ PHASE19 migration 22 — ไม่มีคอลัมน์/ยังไม่ยอมรับ = ""
+        /// </summary>
+        private string AcceptanceStampHtml(DataRow res)
+        {
+            try
+            {
+                if (res == null || !res.Table.Columns.Contains("Policy_Accepted_At") || res["Policy_Accepted_At"] == DBNull.Value)
+                    return "";
+                DateTime acceptedAt = Convert.ToDateTime(res["Policy_Accepted_At"]);
+                string ver = res.Table.Columns.Contains("Policy_Accepted_Version") && res["Policy_Accepted_Version"] != DBNull.Value
+                    ? res["Policy_Accepted_Version"].ToString() : "-";
+                return "<div class=\"rc-accepted\">✅ ผู้จองยอมรับเงื่อนไขและนโยบายแล้ว เมื่อ "
+                    + Server.HtmlEncode(acceptedAt.ToString("dd/MM/yyyy HH:mm")) + " น. (ฉบับที่ " + Server.HtmlEncode(ver) + ")</div>";
+            }
+            catch { return ""; }
+        }
+
+        /// <summary>
+        /// นโยบายการยกเลิกการจอง — ส่วนหลักที่เห็นทันทีและติดในรูปยืนยันการจอง: ข้อความชุดเดียวกับหน้าจอง/หน้า /Policy
+        /// (BookingPolicy.KeyCancellation) สรุปผ่าน <see cref="PolicySummary"/> (กฎสำคัญ = ข้อแรก ๆ แสดงเสมอ ที่เหลือพับ
+        /// "อ่านเพิ่มเติม" ซึ่งสคริปต์บันทึกรูปเปิดให้เอง) + ฉบับ/การยอมรับ + ลิงก์ฉบับเต็มและนโยบายการคืนเงิน
+        /// ข้อความว่าง = ซ่อนทั้งส่วน (พฤติกรรมเดิม) · encode เสมอ
+        /// </summary>
+        private void LoadCancellationPolicy(DataRow res)
+        {
+            try
+            {
+                string text = BookingPolicy.Get(BookingPolicy.KeyCancellation);
+                string body = PolicySummary.BuildHtml(text, PolicySummary.DefaultKeyLines);
+                if (string.IsNullOrEmpty(body)) { pnlCancelPolicy.Visible = false; return; }
+
+                var sb = new StringBuilder();
+                sb.Append("<p class=\"rc-pol-lead\">ใช้กับทุกช่องทางการชำระเงิน — กรุณาอ่านก่อนเลื่อนวันหรือยกเลิกการจอง</p>");
+                sb.Append(body);
+
+                sb.Append("<div class=\"rc-pol-foot\">").Append(AcceptanceStampHtml(res));
+                sb.Append("นโยบายฉบับที่ ").Append(BookingPolicy.VersionFor(BookingPolicy.KeyCancellation));
+                string abs = PolicyPages.PolicyPage.AbsoluteUrl(this, BookingPolicy.KeyCancellation);
+                if (!string.IsNullOrEmpty(abs))
+                    sb.Append(" · ฉบับเต็ม: <span class=\"rc-pol-url\">").Append(Server.HtmlEncode(abs)).Append("</span>");
+                sb.Append("</div>");
+
+                // ปุ่มลิงก์ — ไม่ติดในรูป (ในรูปมี URL ข้อความด้านบนแล้ว)
+                sb.Append("<div class=\"rc-pol-links rc-no-capture\">");
+                string cancelPath = BookingPolicy.PublicPath(BookingPolicy.KeyCancellation);
+                if (cancelPath != null)
+                    sb.Append("<a href=\"").Append(HttpUtility.HtmlAttributeEncode(ResolveUrl(cancelPath)))
+                      .Append("\" target=\"_blank\" rel=\"noopener\">📅 อ่านฉบับเต็ม ↗</a>");
+                string refundPath = BookingPolicy.PublicPath(BookingPolicy.KeyRefund);
+                if (refundPath != null && !string.IsNullOrWhiteSpace(BookingPolicy.Get(BookingPolicy.KeyRefund)))
+                    sb.Append("<a href=\"").Append(HttpUtility.HtmlAttributeEncode(ResolveUrl(refundPath)))
+                      .Append("\" target=\"_blank\" rel=\"noopener\">💸 นโยบายการคืนเงิน ↗</a>");
+                sb.Append("</div>");
+
+                litCancelPolicy.Text = sb.ToString();
+                pnlCancelPolicy.Visible = true;
+            }
+            catch (Exception ex)
+            {
+                try { pnlCancelPolicy.Visible = false; } catch { }
+                try { code2.Logs(conn, "Reservation_Confirmed Cancellation Policy Error", ex.Message, "SYSTEM"); } catch { }
+            }
+        }
+
+        /// <summary>
+        /// นโยบายอื่น ๆ (คืนเงิน / เงื่อนไข / ความเป็นส่วนตัว — การยกเลิกมีส่วนของตัวเองด้านบน) + วันเวลาและฉบับที่ลูกค้ายอมรับ
+        /// พับไว้ทั้งก้อน ไม่ติดในรูปยืนยัน · ข้อความแปลงผ่าน BookingPolicy.ToHtml (encode ก่อนเสมอ) — แทรก HTML/สคริปต์ไม่ได้
         /// </summary>
         private void LoadPolicies(DataRow res)
         {
             try
             {
-                var sb = new System.Text.StringBuilder();
+                var sb = new StringBuilder();
                 sb.Append("<div style=\"font-size:0.95em; line-height:1.65;\">");
+                sb.Append(AcceptanceStampHtml(res));
 
-                // ใบจองที่ลูกค้ายอมรับเงื่อนไขไว้ (คอลัมน์จาก PHASE19 migration 22 — ไม่มีคอลัมน์ = ข้าม)
-                try
-                {
-                    if (res != null && res.Table.Columns.Contains("Policy_Accepted_At")
-                        && res["Policy_Accepted_At"] != DBNull.Value)
-                    {
-                        DateTime acceptedAt = Convert.ToDateTime(res["Policy_Accepted_At"]);
-                        string ver = res.Table.Columns.Contains("Policy_Accepted_Version")
-                                     && res["Policy_Accepted_Version"] != DBNull.Value
-                            ? res["Policy_Accepted_Version"].ToString() : "-";
-                        sb.Append("<div style=\"background:#e8f5e9; color:#2e7d32; border-radius:4px; padding:5px 8px; margin-bottom:6px;\">")
-                          .Append("✅ ผู้จองยอมรับเงื่อนไขและนโยบายแล้ว เมื่อ ")
-                          .Append(Server.HtmlEncode(acceptedAt.ToString("dd/MM/yyyy HH:mm")))
-                          .Append(" น. (ฉบับที่ ").Append(Server.HtmlEncode(ver)).Append(")</div>");
-                    }
-                }
-                catch { }
-
-                // นโยบายการยกเลิก = นโยบายหลัก เปิดไว้ให้เห็นเลย ที่เหลือพับไว้
-                foreach (string key in new[] { BookingPolicy.KeyCancellation, BookingPolicy.KeyRefund,
-                                               BookingPolicy.KeyTerms, BookingPolicy.KeyPrivacy })
+                foreach (string key in new[] { BookingPolicy.KeyRefund, BookingPolicy.KeyTerms, BookingPolicy.KeyPrivacy })
                 {
                     string text = BookingPolicy.Get(key);
                     if (string.IsNullOrWhiteSpace(text)) continue;
-                    bool open = key == BookingPolicy.KeyCancellation;
-                    sb.Append("<details").Append(open ? " open" : "")
-                      .Append(" style=\"margin:4px 0; background:#fafafa; border:1px solid #eee; border-radius:4px; padding:5px 8px;\">")
-                      .Append("<summary style=\"cursor:pointer; font-weight:bold; color:#5d4037;\">")
+                    sb.Append("<details><summary>")
                       .Append(Server.HtmlEncode(BookingPolicy.Title(key)))
-                      .Append(" <span style=\"font-weight:normal; color:#999;\">(")
-                      .Append(Server.HtmlEncode(BookingPolicy.TitleEn(key)))
-                      .Append(")</span></summary><div style=\"margin-top:4px; color:#555;\">")
+                      .Append(" <span>(").Append(Server.HtmlEncode(BookingPolicy.TitleEn(key))).Append(")</span></summary>")
+                      .Append("<div class=\"rc-pol-body\">")
                       .Append(BookingPolicy.ToHtml(text))
                       .Append(FullPolicyLinkHtml(key))
                       .Append("</div></details>");
                 }
 
-                sb.Append("<div style=\"color:#999; margin-top:4px;\">นโยบายฉบับปัจจุบัน: ")
-                  .Append(BookingPolicy.Version).Append("</div></div>");
+                sb.Append("<div class=\"rc-pol-ver\">นโยบายฉบับปัจจุบัน: ").Append(BookingPolicy.Version).Append("</div></div>");
 
                 litPolicies.Text = sb.ToString();
                 pnlPolicies.Visible = true;

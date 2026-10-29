@@ -1,198 +1,16 @@
 ﻿<%@ Page Title="" Async="true" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="Reservation_Confirmed.aspx.cs" Inherits="Take_Time_BangPhra.Reservation_Confirmed" %>
 <asp:Content ID="Content1" ContentPlaceHolderID="MainContent" runat="server">
-    <style type="text/css">
-        body {
-            background: linear-gradient(135deg, #6d4c41 0%, #8d6e63 100%);
-            min-height: 100vh;
-            padding: 10px;
-            margin: 0;
-        }
-
-        .confirmation-container {
-            font-family: 'Prompt', Arial, sans-serif;
-            max-width: 1000px;
-            margin: 0 auto;
-            background: white;
-            border-radius: 15px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-            overflow: hidden;
-            color: #3E2723;
-            font-size: 15px;
-            line-height: 1.55;
-        }
-
-        .confirmation-header {
-            text-align: center;
-            padding: 16px 15px 14px;
-            background: linear-gradient(135deg, #5d4037 0%, #8d6e63 100%);
-            color: white;
-        }
-
-        .confirmation-header h1 { margin: 6px 0 0; font-size: 1.45em; }
-        .confirmation-header p { margin: 0; opacity: 0.9; font-size: 0.9em; }
-
-        .success-badge, .error-badge {
-            color: white;
-            padding: 5px 14px;
-            border-radius: 14px;
-            font-size: 0.85em;
-            font-weight: bold;
-            display: inline-block;
-        }
-        .success-badge { background: #4caf50; }
-        .error-badge { background: #e53935; }
-
-        .rc-code {
-            display: inline-block; margin-top: 10px; background: rgba(255,255,255,0.16); border-radius: 10px;
-            padding: 6px 14px; font-size: 1em;
-        }
-        .rc-code b { font-size: 1.35em; letter-spacing: 0.04em; }
-
-        .instruction-text {
-            text-align: center;
-            color: rgba(255,255,255,0.92);
-            font-size: 0.85em;
-            margin-top: 8px;
-        }
-
-        /* สถานะการชำระเงิน + ขั้นตอนถัดไป */
-        .rc-status { margin: 14px 14px 4px; border-radius: 12px; padding: 12px 16px; border: 1px solid; }
-        .rc-status h2 { margin: 0 0 4px; font-size: 1.08em; }
-        .rc-status p { margin: 0 0 4px; }
-        .rc-ok { background: #E8F5E9; border-color: #A5D6A7; color: #1B5E20; }
-        .rc-wait { background: #FFF8E1; border-color: #FFE082; color: #6D4C41; }
-        .rc-info { background: #E3F2FD; border-color: #90CAF9; color: #0D47A1; }
-        .rc-bad { background: #FFEBEE; border-color: #EF9A9A; color: #B71C1C; }
-        .rc-off { background: #F5F5F5; border-color: #E0E0E0; color: #616161; }
-        .rc-pay-btn {
-            display: inline-flex; align-items: center; justify-content: center; min-height: 44px; margin-top: 8px;
-            padding: 8px 20px; border-radius: 22px; background: #2E7D32; color: #fff !important; font-weight: bold; text-decoration: none;
-        }
-        .rc-next { margin: 8px 14px 0; background: #FAFAFA; border: 1px solid #EEE; border-radius: 12px; padding: 10px 16px; }
-        .rc-next b { color: #5D4037; }
-        .rc-next ol { margin: 6px 0 0; padding-left: 20px; }
-        .rc-next li { margin: 2px 0; }
-
-        .main-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 0;
-        }
-
-        .left-column { padding: 12px; background: #fafafa; min-width: 0; }
-        .right-column { padding: 12px; background: #f5f5f5; border-left: 2px solid #d7ccc8; min-width: 0; }
-
-        .info-card, .detail-card, .slip-card {
-            background: white;
-            padding: 10px 12px;
-            border-radius: 8px;
-            margin-bottom: 10px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-        }
-        .info-card { border-left: 3px solid #8d6e63; }
-        .slip-card { text-align: left; }
-
-        .info-card h3, .detail-card h3, .slip-card h3 {
-            color: #5d4037;
-            margin: 0 0 6px 0;
-            font-size: 1em;
-            border-bottom: 1px solid #d7ccc8;
-            padding-bottom: 4px;
-        }
-
-        .info-row {
-            display: flex;
-            justify-content: space-between;
-            gap: 10px;
-            padding: 3px 0;
-            font-size: 0.95em;
-        }
-        .info-label { font-weight: bold; color: #5d4037; flex: 0 0 auto; }
-        .info-value { color: #333; text-align: right; flex: 1; min-width: 0; word-break: break-word; }
-
-        .payment-card {
-            background: linear-gradient(135deg, #fff8e1 0%, #ffecb3 100%);
-            padding: 8px 10px;
-            border-radius: 8px;
-            border: 1px solid #ffd54f;
-        }
-        .rc-due { font-size: 1.1em; }
-
-        .slip-image {
-            width: 100%;
-            max-height: 220px;
-            border-radius: 6px;
-            border: 1px solid #d7ccc8;
-            object-fit: contain;
-            background: #f9f9f9;
-        }
-
-        .accommodation-box, .items-box, .remark-box {
-            background: #f9f9f9;
-            padding: 8px 10px;
-            border-radius: 6px;
-            font-size: 0.93em;
-            line-height: 1.6;
-            border-left: 2px solid #8d6e63;
-        }
-        .items-box { max-height: 220px; overflow-y: auto; }
-        .remark-box { background: #fff3e0; border-left-color: #ff9800; max-height: 160px; overflow-y: auto; }
-
-        .rc-slip-item { margin-bottom: 8px; padding: 8px 10px; background: #f5f5f5; border-radius: 6px; font-size: 0.9em; }
-        .rc-slip-item a { color: #1976d2; text-decoration: none; font-weight: bold; display: inline-block; padding: 6px 0; }
-        .rc-docs { margin-top: 8px; padding: 8px 10px; background: linear-gradient(135deg, #e8f5e8 0%, #f1f8e9 100%); border-radius: 6px; border: 1px solid #c8e6c9; }
-        .rc-docs a { color: #2e7d32; text-decoration: none; font-weight: bold; display: inline-block; padding: 6px 0; }
-
-        /* นโยบาย/สัตว์เลี้ยง (พับได้) */
-        .rc-section { margin: 0 12px 10px; }
-        .rc-collapse > summary { cursor: pointer; font-weight: bold; color: #5d4037; padding: 8px 0; min-height: 28px; list-style-position: inside; }
-        .rc-collapse > summary span { font-weight: normal; color: #999; font-size: 0.9em; }
-
-        .action-buttons {
-            text-align: center;
-            padding: 12px;
-            background: white;
-            border-top: 1px solid #d7ccc8;
-        }
-
-        .btn-print {
-            background: linear-gradient(135deg, #8d6e63 0%, #5d4037 100%);
-            color: white;
-            min-height: 48px;
-            padding: 10px 24px;
-            border: none;
-            border-radius: 24px;
-            font-size: 1em;
-            font-weight: bold;
-            cursor: pointer;
-            margin: 4px;
-            font-family: inherit;
-        }
-
-        @media print {
-            .action-buttons, .instruction-text, .rc-pay-btn { display: none; }
-            body { background: #fff; }
-        }
-
-        /* มือถือ: คอลัมน์เดียว ตัวอักษรอ่านง่าย */
-        @media (max-width: 700px) {
-            body { padding: 4px; }
-            .confirmation-container { border-radius: 10px; font-size: 15px; }
-            .main-grid { grid-template-columns: 1fr; }
-            .right-column { border-left: 0; border-top: 2px solid #d7ccc8; }
-            .left-column, .right-column { padding: 10px; }
-            .rc-status, .rc-next { margin-left: 10px; margin-right: 10px; }
-            .rc-section { margin: 0 10px 10px; }
-            .btn-print { width: 100%; }
-        }
-    </style>
+    <%-- สไตล์ทั้งหน้าอยู่ใน Content/reservation-confirmed.css (mobile-first · โหมดจับภาพ .rc-capturing · print) --%>
+    <link rel="stylesheet" href="/Content/reservation-confirmed.css?v=1" />
     <br />
-    <div class="confirmation-container">
+    <div class="rc-wrap">
+    <%-- #rcCapture = กรอบที่ปุ่ม "โหลดรูปยืนยันการจอง" จับภาพ (html2canvas) — ปุ่มอยู่นอกกรอบ --%>
+    <div class="confirmation-container" id="rcCapture" runat="server" ClientIDMode="Static">
         <!-- Header Section -->
         <div class="confirmation-header">
             <asp:Label ID="Label10" runat="server" Text="" CssClass="success-badge"></asp:Label>
             <h1>การยืนยันการจอง</h1>
-            <p>Reservation Confirmation</p>
+            <p class="rc-h-en" lang="en">Reservation Confirmation</p>
             <div class="rc-code">รหัสการจอง (Booking No.) <b>#<asp:Label ID="Label1" runat="server"></asp:Label></b></div>
             <div class="instruction-text">
                 <strong>📱 กรุณาบันทึกหน้านี้ไว้ และแสดงรหัสการจองตอนเช็คอิน</strong><br />
@@ -200,15 +18,14 @@
             </div>
         </div>
 
-        <%-- สถานะการชำระเงิน + ขั้นตอนถัดไป (โอน: ได้รับสลิป/รอตรวจ · ออนไลน์: ชำระแล้ว/รอชำระ) --%>
+        <%-- 1) สถานะการชำระเงิน + ขั้นตอนถัดไป (โอน: ได้รับสลิป/รอตรวจ · ออนไลน์: ชำระแล้ว/รอชำระ) --%>
         <asp:Literal ID="litNextSteps" runat="server" />
 
-        <div class="main-grid">
-            <!-- Left Column -->
-            <div class="left-column">
-                <!-- Basic Information -->
+        <div class="rc-grid">
+            <%-- 2) รายละเอียดการจอง: ผู้จอง → วันเข้าพัก → ห้อง → ของเช่า/ค่าบริการ → สัตว์เลี้ยง → หมายเหตุ --%>
+            <div class="rc-col rc-col-main">
                 <div class="info-card">
-                    <h3>👤 ข้อมูลผู้จอง <span style="font-weight:normal; color:#999; font-size:0.85em;">Guest</span></h3>
+                    <h3>👤 ข้อมูลผู้จอง <span class="rc-h-sub">Guest</span></h3>
                     <div class="info-row">
                         <span class="info-label">ชื่อ-นามสกุล:</span>
                         <span class="info-value"><asp:Label ID="Label2" runat="server"></asp:Label></span>
@@ -219,20 +36,19 @@
                     </div>
                     <div class="info-row">
                         <span class="info-label">เบอร์โทรศัพท์:</span>
-                        <span class="info-value"><asp:Label ID="Label4" runat="server" style="font-family: monospace;"></asp:Label></span>
+                        <span class="info-value"><asp:Label ID="Label4" runat="server" CssClass="rc-mono"></asp:Label></span>
                     </div>
                 </div>
 
-                <!-- Stay Information -->
                 <div class="info-card">
-                    <h3>🏨 ข้อมูลการเข้าพัก <span style="font-weight:normal; color:#999; font-size:0.85em;">Stay</span></h3>
+                    <h3>🏨 ข้อมูลการเข้าพัก <span class="rc-h-sub">Stay</span></h3>
                     <div class="info-row">
                         <span class="info-label">เช็คอิน:</span>
-                        <span class="info-value"><asp:Label ID="Label5" runat="server" style="color: #388e3c; font-weight: bold;"></asp:Label></span>
+                        <span class="info-value"><asp:Label ID="Label5" runat="server" CssClass="rc-date"></asp:Label></span>
                     </div>
                     <div class="info-row">
                         <span class="info-label">เช็คเอาท์:</span>
-                        <span class="info-value"><asp:Label ID="Label6" runat="server" style="color: #388e3c; font-weight: bold;"></asp:Label></span>
+                        <span class="info-value"><asp:Label ID="Label6" runat="server" CssClass="rc-date"></asp:Label></span>
                     </div>
                     <div class="info-row">
                         <span class="info-label">จำนวนคืน:</span>
@@ -240,63 +56,57 @@
                     </div>
                 </div>
 
-                <!-- Payment Summary -->
-                <div class="info-card">
-                    <h3>💰 สรุปการชำระเงิน <span style="font-weight:normal; color:#999; font-size:0.85em;">Payment</span></h3>
-                    <div class="payment-card">
-                        <div class="info-row">
-                            <span class="info-label">ราคารวมทั้งหมด:</span>
-                            <span class="info-value" style="color: #d32f2f; font-weight: bold;">
-                                ฿<asp:Label ID="Label11" runat="server"></asp:Label>
-                            </span>
-                        </div>
-                        <div class="info-row">
-                            <span class="info-label">ชำระแล้ว:</span>
-                            <span class="info-value" style="color: #388e3c; font-weight: bold;">
-                                ฿<asp:Label ID="Label12" runat="server"></asp:Label>
-                            </span>
-                        </div>
-                        <div class="info-row rc-due">
-                            <span class="info-label">ยอดคงเหลือ:</span>
-                            <span class="info-value" style="color: #e65100; font-weight: bold;">
-                                ฿<asp:Label ID="Label13" runat="server"></asp:Label>
-                            </span>
-                        </div>
+                <div class="detail-card">
+                    <h3>🛌 ห้องพัก <span class="rc-h-sub">Room(s)</span></h3>
+                    <div class="accommodation-box">
+                        <asp:Label ID="Label8" runat="server" style="white-space: pre-line;"></asp:Label>
                     </div>
                 </div>
 
-                <!-- Remark -->
                 <div class="detail-card">
-                    <h3>📝 หมายเหตุ / คำขอพิเศษ</h3>
+                    <h3>🛍️ ของเช่า / ค่าบริการเพิ่มเติม <span class="rc-h-sub">Extras</span></h3>
+                    <div class="items-box">
+                        <asp:Label ID="Label9" runat="server" style="white-space: pre-line;"></asp:Label>
+                    </div>
+                </div>
+
+                <!-- 🐾 สัตว์เลี้ยงเข้าพัก (แสดงเฉพาะใบจองที่มีสัตว์เลี้ยง — ตั้งค่าที่ Admin/Settings/PetStay) -->
+                <asp:Panel ID="pnlPetInfo" runat="server" Visible="false" CssClass="detail-card">
+                    <h3>🐾 สัตว์เลี้ยงเข้าพัก <span class="rc-h-sub">Pets</span></h3>
+                    <asp:Literal ID="litPetInfo" runat="server" />
+                </asp:Panel>
+
+                <div class="detail-card">
+                    <h3>📝 หมายเหตุ / คำขอพิเศษ <span class="rc-h-sub">Remarks</span></h3>
                     <div class="remark-box">
                         <asp:Label ID="Label14" runat="server" style="white-space: pre-line;"></asp:Label>
                     </div>
                 </div>
             </div>
 
-            <!-- Right Column -->
-            <div class="right-column">
-                <!-- Accommodation Details -->
-                <div class="detail-card">
-                    <h3>🛌 ห้องพัก <span style="font-weight:normal; color:#999; font-size:0.85em;">Room(s)</span></h3>
-                    <div class="accommodation-box">
-                        <asp:Label ID="Label8" runat="server" style="white-space: pre-line;"></asp:Label>
+            <%-- 3) การชำระเงิน → 4) นโยบายการยกเลิกการจอง --%>
+            <div class="rc-col rc-col-side">
+                <div class="info-card">
+                    <h3>💰 สรุปการชำระเงิน <span class="rc-h-sub">Payment</span></h3>
+                    <div class="payment-card">
+                        <div class="info-row">
+                            <span class="info-label">ราคารวมทั้งหมด:</span>
+                            <span class="info-value rc-amt-total">฿<asp:Label ID="Label11" runat="server"></asp:Label></span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">ชำระแล้ว:</span>
+                            <span class="info-value rc-amt-paid">฿<asp:Label ID="Label12" runat="server"></asp:Label></span>
+                        </div>
+                        <div class="info-row rc-due">
+                            <span class="info-label">ยอดคงเหลือ:</span>
+                            <span class="info-value rc-amt-due">฿<asp:Label ID="Label13" runat="server"></asp:Label></span>
+                        </div>
                     </div>
                 </div>
 
-                <!-- Rent Items and Product Charges -->
-                <div class="detail-card">
-                    <h3>🛍️ ของเช่า / ค่าบริการเพิ่มเติม</h3>
-                    <div class="items-box">
-                        <asp:Label ID="Label9" runat="server" style="white-space: pre-line;"></asp:Label>
-                    </div>
-                </div>
-
-                <!-- Slip Image & Receipts -->
                 <div class="slip-card">
-                    <h3>📷 หลักฐานการชำระเงิน &amp; เอกสาร</h3>
-                    <asp:Label ID="lblSlipCount" runat="server"
-                        style="display: block; color: #2e7d32; font-weight: bold; margin-bottom: 6px; font-size: 0.9em;"></asp:Label>
+                    <h3>📷 หลักฐานการชำระเงิน &amp; เอกสาร <span class="rc-h-sub">Slips &amp; documents</span></h3>
+                    <asp:Label ID="lblSlipCount" runat="server" CssClass="rc-slip-count"></asp:Label>
 
                     <asp:Repeater ID="rptPaymentSlips" runat="server">
                         <ItemTemplate>
@@ -312,7 +122,7 @@
                             </div>
                         </ItemTemplate>
                         <FooterTemplate>
-                            <div style="color: #999; font-style: italic; margin-top: 6px; font-size: 0.9em;">
+                            <div class="rc-slip-none">
                                 <%# (((System.Web.UI.WebControls.Repeater)Container.Parent).Items.Count == 0) ? "ไม่พบสลิปการโอนเงิน" : "" %>
                             </div>
                         </FooterTemplate>
@@ -322,9 +132,7 @@
 
                     <!-- Receipt Links Section -->
                     <asp:Panel ID="pnlReceiptLinks" runat="server" Visible="false" CssClass="rc-docs">
-                        <div style="font-size: 0.9em; color: #2e7d32; font-weight: bold; margin-bottom: 2px;">
-                            🧾 เอกสารการชำระเงิน (ใบเสร็จ/ใบกำกับภาษี)
-                        </div>
+                        <div class="rc-docs-h">🧾 เอกสารการชำระเงิน (ใบเสร็จ/ใบกำกับภาษี)</div>
                         <asp:Repeater ID="rptReceipts" runat="server">
                             <ItemTemplate>
                                 <div>
@@ -336,75 +144,172 @@
                         </asp:Repeater>
                     </asp:Panel>
                 </div>
+
+                <%-- นโยบายการยกเลิกการจอง — ข้อความเดียวกับหน้าจอง/หน้า /Policy/Cancellation (ศูนย์ตั้งค่า → นโยบายการจอง)
+                     กฎสำคัญแสดงเสมอ ที่เหลือพับ "อ่านเพิ่มเติม" · ติดในรูปยืนยันการจองด้วย · ไม่มีข้อความ = ซ่อนทั้งส่วน --%>
+                <asp:Panel ID="pnlCancelPolicy" runat="server" Visible="false" CssClass="rc-policy">
+                    <h3>📅 นโยบายการยกเลิกการจอง <span class="rc-h-sub">Cancellation policy</span></h3>
+                    <asp:Literal ID="litCancelPolicy" runat="server" />
+                </asp:Panel>
             </div>
         </div>
 
-        <!-- 🐾 สัตว์เลี้ยงเข้าพัก (แสดงเฉพาะใบจองที่มีสัตว์เลี้ยง — ตั้งค่าที่ Admin/Settings/PetStay) -->
-        <asp:Panel ID="pnlPetInfo" runat="server" Visible="false" CssClass="detail-card rc-section">
-            <h3>🐾 สัตว์เลี้ยงเข้าพัก <span style="font-weight:normal; color:#999; font-size:0.85em;">Pets</span></h3>
-            <asp:Literal ID="litPetInfo" runat="server" />
-        </asp:Panel>
-
-        <!-- Booking Policies (ตั้งค่าที่ Admin/Settings/BookingPolicies) — พับไว้ แตะเพื่อดู -->
-        <asp:Panel ID="pnlPolicies" runat="server" Visible="false" CssClass="detail-card rc-section">
+        <!-- นโยบายอื่น ๆ (คืนเงิน / ข้อกำหนด / ความเป็นส่วนตัว) + ฉบับที่ลูกค้ายอมรับ — พับไว้ ไม่ติดในรูป -->
+        <asp:Panel ID="pnlPolicies" runat="server" Visible="false" CssClass="detail-card rc-section rc-other-pol rc-no-capture">
             <details class="rc-collapse">
-                <summary>📜 เงื่อนไขและนโยบายการจอง <span>(แตะเพื่อดู · Booking policies)</span></summary>
+                <summary>📜 เงื่อนไขและนโยบายอื่น ๆ <span>(แตะเพื่อดู · Other booking policies)</span></summary>
                 <asp:Literal ID="litPolicies" runat="server" />
             </details>
         </asp:Panel>
 
-        <!-- Action Buttons -->
-        <div class="action-buttons">
-            <button type="button" class="btn-print" onclick="captureAndDownload(this)">📥 บันทึกหน้านี้เป็นรูป (Save as image)</button>
-            <button type="button" class="btn-print" onclick="window.print()">🖨️ พิมพ์ (Print)</button>
+        <%-- 5) เช็คอิน / ติดต่อที่พัก --%>
+        <div class="rc-card rc-contact">
+            <h3>🕑 เช็คอิน &amp; ติดต่อที่พัก <span class="rc-h-sub">Check-in &amp; contact</span></h3>
+            <div class="rc-contact-grid">
+                <div><b>เช็คอิน:</b> <span>14:00 น. เป็นต้นไป (Check-in from 14:00)</span></div>
+                <div><b>แสดงตอนเช็คอิน:</b> <span>รหัสการจอง + บัตรประชาชน/หนังสือเดินทาง</span></div>
+                <div><b>โทร:</b> <a href="tel:0634161496">063-416-1496</a></div>
+                <div><b>LINE:</b> <a href="https://lin.ee/U8N29MP" target="_blank" rel="noopener">@taketime</a></div>
+                <div><b>ที่อยู่:</b> <span>Take Time Nature Resort 202/24 หมู่ 5 ต.บางพระ อ.ศรีราชา จ.ชลบุรี 20110</span></div>
+            </div>
+            <div class="rc-contact-btns rc-no-capture">
+                <a class="rc-btn-call" href="tel:0634161496">📞 โทรหาที่พัก</a>
+                <a class="rc-btn-line" href="https://lin.ee/U8N29MP" target="_blank" rel="noopener">💬 LINE @taketime</a>
+                <a class="rc-btn-map" href="/Contact">📍 แผนที่ / ติดต่ออื่น ๆ</a>
+            </div>
         </div>
+    </div>
+
+    <%-- ปุ่มหลัก — อยู่นอกกรอบที่จับภาพ · มือถือติดขอบล่าง --%>
+    <div class="action-buttons rc-actions rc-no-capture">
+        <button type="button" class="rc-btn rc-btn-primary" onclick="captureAndDownload(this)">📥 โหลดรูปยืนยันการจอง (Save as image)</button>
+        <asp:HyperLink ID="lnkCalendar" runat="server" Visible="false" CssClass="rc-btn rc-btn-ghost" NavigateUrl="#">📆 เพิ่มลงปฏิทิน</asp:HyperLink>
+        <button type="button" class="rc-btn rc-btn-ghost" onclick="window.print()">🖨️ พิมพ์ (Print)</button>
+        <p class="rc-actions-hint">รูปยืนยันมีรหัสการจอง ยอดชำระ และนโยบายการยกเลิก — เก็บไว้แสดงตอนเช็คอิน</p>
+    </div>
     </div>
 
     <!-- Include html2canvas library -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 
     <script>
-        // Capture and download page as image
-        function captureAndDownload(btn) {
-            var element = document.querySelector('.confirmation-container');
-            var buttons = document.querySelector('.action-buttons');
-            if (!element) return;
-            if (typeof html2canvas === 'undefined') {
-                alert('ไม่สามารถสร้างรูปได้ในขณะนี้ — กรุณาใช้การจับภาพหน้าจอแทน');
-                return;
+        (function () {
+            var CAPTURE_ID = 'rcCapture';
+
+            function captureRoot() {
+                return document.getElementById(CAPTURE_ID) || document.querySelector('.confirmation-container');
             }
 
-            // เปิดนโยบายที่พับไว้ให้ติดในรูป แล้วคืนสถานะเดิมหลังบันทึก
-            var details = element.querySelectorAll('details');
-            var wasOpen = [];
-            for (var i = 0; i < details.length; i++) { wasOpen.push(details[i].open); details[i].open = true; }
-
-            if (buttons) buttons.style.display = 'none';
-            var originalText = btn ? btn.textContent : '';
-            if (btn) { btn.textContent = '⏳ กำลังสร้างรูป...'; btn.disabled = true; }
-
-            function restore() {
-                for (var j = 0; j < details.length; j++) details[j].open = wasOpen[j];
-                if (buttons) buttons.style.display = 'block';
-                if (btn) { btn.textContent = originalText; btn.disabled = false; }
+            function inNoCapture(el) {
+                while (el && el !== document) {
+                    if (el.classList && el.classList.contains('rc-no-capture')) return true;
+                    el = el.parentNode;
+                }
+                return false;
             }
 
-            html2canvas(element, {
-                scale: 2, // Higher quality
-                useCORS: true,
-                logging: false,
-                backgroundColor: '#ffffff'
-            }).then(function (canvas) {
+            // เปิดทุก <details> ในกรอบ (ยกเว้นส่วนที่ไม่ติดรูป) แล้วคืนฟังก์ชันสำหรับคืนสถานะเดิม
+            function openDetails(root, skipNoCapture) {
+                var list = root ? root.querySelectorAll('details') : [];
+                var was = [];
+                for (var i = 0; i < list.length; i++) {
+                    was.push(list[i].open);
+                    if (!skipNoCapture || !inNoCapture(list[i])) list[i].open = true;
+                }
+                return function () { for (var j = 0; j < list.length; j++) list[j].open = was[j]; };
+            }
+
+            function download(href, name, revoke) {
                 var link = document.createElement('a');
-                link.download = 'การยืนยันการจอง_' + new Date().getTime() + '.png';
-                link.href = canvas.toDataURL('image/png');
+                link.download = name;
+                link.href = href;
+                link.rel = 'noopener';
+                document.body.appendChild(link);
                 link.click();
-                restore();
-            }).catch(function (error) {
-                console.error('Error capturing page:', error);
-                restore();
-                alert('❌ เกิดข้อผิดพลาดในการบันทึกรูป กรุณาลองใหม่อีกครั้ง หรือจับภาพหน้าจอแทน');
-            });
-        }
+                document.body.removeChild(link);
+                if (revoke && window.URL && URL.revokeObjectURL) setTimeout(function () { URL.revokeObjectURL(href); }, 15000);
+            }
+
+            // บันทึกหน้านี้เป็นรูป — จับเฉพาะกรอบ #rcCapture (ไม่รวมปุ่ม/นโยบายอื่นที่พับ) และเปิด "อ่านเพิ่มเติม"
+            // ของนโยบายการยกเลิกให้ติดในรูปครบ แล้วคืนสถานะเดิมทุกอย่างหลังบันทึก
+            window.captureAndDownload = function (btn) {
+                var element = captureRoot();
+                if (!element) return;
+                if (typeof html2canvas === 'undefined') {
+                    alert('ไม่สามารถสร้างรูปได้ในขณะนี้ — กรุณาใช้การจับภาพหน้าจอแทน');
+                    return;
+                }
+                var code = element.getAttribute('data-booking') || '';
+                var restoreDetails = openDetails(element, true);
+                var scrollY = window.pageYOffset || 0;
+                document.body.className += ' rc-capturing';
+                var originalHtml = btn ? btn.innerHTML : '';
+                if (btn) { btn.textContent = '⏳ กำลังสร้างรูป...'; btn.disabled = true; }
+                window.scrollTo(0, 0);
+
+                function restore() {
+                    document.body.className = document.body.className.replace(/\s*rc-capturing/g, '');
+                    restoreDetails();
+                    if (btn) { btn.innerHTML = originalHtml; btn.disabled = false; }
+                    window.scrollTo(0, scrollY);
+                }
+
+                html2canvas(element, {
+                    scale: 2, // คมชัดบนจอมือถือ
+                    useCORS: true,
+                    logging: false,
+                    backgroundColor: '#ffffff'
+                }).then(function (canvas) {
+                    // ชื่อไฟล์ ASCII — Chromium ทิ้งชื่อไฟล์ภาษาไทยใน download attribute (กลายเป็น "download")
+                    var name = 'TakeTime_Booking_' + (code ? code : new Date().getTime()) + '.png';
+                    if (canvas.toBlob && window.URL && URL.createObjectURL) {
+                        canvas.toBlob(function (blob) {
+                            if (blob) download(URL.createObjectURL(blob), name, true);
+                            else download(canvas.toDataURL('image/png'), name, false);
+                            restore();
+                        }, 'image/png');
+                    } else {
+                        download(canvas.toDataURL('image/png'), name, false);
+                        restore();
+                    }
+                }).catch(function (error) {
+                    if (window.console && console.error) console.error('Error capturing page:', error);
+                    restore();
+                    alert('❌ เกิดข้อผิดพลาดในการบันทึกรูป กรุณาลองใหม่อีกครั้ง หรือจับภาพหน้าจอแทน');
+                });
+            };
+
+            // เพิ่มลงปฏิทิน (.ics ทั้งวัน: เช็คอิน → เช็คเอาท์) — ข้อมูลวันที่จาก data-* ที่ฝั่งเซิร์ฟเวอร์ตั้งให้
+            window.rcAddToCalendar = function (a) {
+                try {
+                    var s = a.getAttribute('data-start'), e = a.getAttribute('data-end');
+                    var code = a.getAttribute('data-code') || '', title = a.getAttribute('data-title') || 'เข้าพัก Take Time Nature Resort';
+                    if (!s || !e || !window.Blob || !window.URL || !URL.createObjectURL) return true;
+                    function esc(t) { return String(t).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n'); }
+                    var stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
+                    var lines = [
+                        'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Take Time Nature Resort//Booking//TH', 'CALSCALE:GREGORIAN',
+                        'BEGIN:VEVENT',
+                        'UID:booking-' + code + '@taketimebangphra.com',
+                        'DTSTAMP:' + stamp,
+                        'DTSTART;VALUE=DATE:' + s,
+                        'DTEND;VALUE=DATE:' + e,
+                        'SUMMARY:' + esc(title),
+                        'DESCRIPTION:' + esc('รหัสการจอง #' + code + '\nเช็คอิน 14:00 น. เป็นต้นไป — แสดงรหัสการจองตอนเช็คอิน'),
+                        'LOCATION:' + esc('Take Time Nature Resort, 202/24 หมู่ 5 ต.บางพระ อ.ศรีราชา จ.ชลบุรี 20110'),
+                        'END:VEVENT', 'END:VCALENDAR'];
+                    var blob = new Blob([lines.join('\r\n')], { type: 'text/calendar;charset=utf-8' });
+                    download(URL.createObjectURL(blob), 'taketime-booking-' + (code || 'stay') + '.ics', true);
+                } catch (err) {
+                    if (window.console && console.error) console.error('calendar', err);
+                }
+                return false;
+            };
+
+            // พิมพ์: เปิดส่วนที่พับทั้งหมดให้ติดกระดาษ แล้วคืนสถานะเดิม
+            var restorePrint = null;
+            window.addEventListener('beforeprint', function () { restorePrint = openDetails(captureRoot(), false); });
+            window.addEventListener('afterprint', function () { if (restorePrint) { restorePrint(); restorePrint = null; } });
+        })();
     </script>
 </asp:Content>

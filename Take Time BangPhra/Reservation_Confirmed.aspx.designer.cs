@@ -33,6 +33,15 @@ namespace Take_Time_BangPhra
         protected global::System.Web.UI.WebControls.Label Label1;
 
         /// <summary>
+        /// rcCapture control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.HtmlControls.HtmlGenericControl rcCapture;
+
+        /// <summary>
         /// litNextSteps control.
         /// </summary>
         /// <remarks>
@@ -195,6 +204,24 @@ namespace Take_Time_BangPhra
         protected global::System.Web.UI.WebControls.Repeater rptReceipts;
 
         /// <summary>
+        /// pnlCancelPolicy control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Panel pnlCancelPolicy;
+
+        /// <summary>
+        /// litCancelPolicy control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Literal litCancelPolicy;
+
+        /// <summary>
         /// pnlPolicies control.
         /// </summary>
         /// <remarks>
@@ -229,5 +256,14 @@ namespace Take_Time_BangPhra
         /// To modify move field declaration from designer file to code-behind file.
         /// </remarks>
         protected global::System.Web.UI.WebControls.Literal litPetInfo;
+
+        /// <summary>
+        /// lnkCalendar control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.HyperLink lnkCalendar;
     }
 }

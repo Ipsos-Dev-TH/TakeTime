@@ -1,0 +1,307 @@
+/* ============================================================================
+   Reservation_Confirmed.aspx — หน้ายืนยันการจอง (ลูกค้า + พนักงานเปิดจากรายการจอง)
+   mobile-first · โทนสีน้ำตาลของเว็บ · ลำดับอ่าน: สถานะ → รายละเอียด → ชำระเงิน → นโยบายยกเลิก → เช็คอิน/ติดต่อ
+   โหมดพิเศษ: .rc-capturing (ตอนสร้างรูปยืนยันด้วย html2canvas) และ @media print
+   ============================================================================ */
+
+body {
+    background: linear-gradient(135deg, #6d4c41 0%, #8d6e63 100%);
+    min-height: 100vh;
+    padding: 8px;
+    margin: 0;
+}
+
+.rc-wrap {
+    max-width: 760px;
+    margin: 0 auto;
+    font-family: 'Prompt', Arial, sans-serif;
+    color: #3E2723;
+    font-size: 15px;
+    line-height: 1.55;
+    min-width: 0;
+}
+
+.confirmation-container {
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    overflow: hidden;
+    min-width: 0;
+}
+
+/* ── หัว: สถานะ + รหัสการจอง ─────────────────────────────────────────── */
+.confirmation-header {
+    text-align: center;
+    padding: 18px 16px 16px;
+    background: linear-gradient(135deg, #5d4037 0%, #8d6e63 100%);
+    color: #fff;
+}
+.confirmation-header h1 { margin: 8px 0 0; font-size: 1.4em; font-weight: 600; line-height: 1.3; }
+.confirmation-header .rc-h-en { margin: 0; opacity: 0.9; font-size: 0.9em; }
+
+.success-badge, .error-badge {
+    color: #fff;
+    padding: 5px 14px;
+    border-radius: 14px;
+    font-size: 0.85em;
+    font-weight: 600;
+    display: inline-block;
+}
+.success-badge { background: #2E7D32; }
+.error-badge { background: #C62828; }
+
+.rc-code {
+    display: inline-block;
+    margin-top: 10px;
+    background: rgba(255, 255, 255, 0.16);
+    border-radius: 10px;
+    padding: 6px 16px;
+    font-size: 1em;
+}
+.rc-code b { font-size: 1.4em; letter-spacing: 0.04em; }
+
+.instruction-text {
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 0.85em;
+    margin-top: 10px;
+    line-height: 1.5;
+}
+
+/* ── สถานะการชำระเงิน + ขั้นตอนถัดไป ─────────────────────────────────── */
+.rc-status { margin: 12px 12px 0; border-radius: 12px; padding: 12px 16px; border: 1px solid; }
+.rc-status h2 { margin: 0 0 4px; font-size: 1.08em; font-weight: 600; }
+.rc-status p { margin: 0 0 4px; }
+.rc-ok   { background: #E8F5E9; border-color: #A5D6A7; color: #1B5E20; }
+.rc-wait { background: #FFF8E1; border-color: #FFE082; color: #6D4C41; }
+.rc-info { background: #E3F2FD; border-color: #90CAF9; color: #0D47A1; }
+.rc-bad  { background: #FFEBEE; border-color: #EF9A9A; color: #B71C1C; }
+.rc-off  { background: #F5F5F5; border-color: #E0E0E0; color: #616161; }
+.rc-pay-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-height: 44px; margin-top: 8px; padding: 8px 20px; border-radius: 22px;
+    background: #2E7D32; color: #fff !important; font-weight: 600; text-decoration: none;
+}
+.rc-next { margin: 8px 12px 0; background: #FAFAFA; border: 1px solid #EEE; border-radius: 12px; padding: 10px 16px; }
+.rc-next b { color: #5D4037; }
+.rc-next ol { margin: 6px 0 0; padding-left: 20px; }
+.rc-next li { margin: 2px 0; }
+
+/* ── คอลัมน์: มือถือเรียงเดียว · จอกว้าง ≥1024 แบ่งซ้าย (การจอง) / ขวา (ชำระเงิน + นโยบาย) ── */
+.rc-grid { padding: 12px 12px 0; }
+.rc-col { min-width: 0; }
+.rc-col-side { margin-top: 4px; }
+
+/* ── การ์ด ───────────────────────────────────────────────────────────── */
+.info-card, .detail-card, .slip-card, .rc-card {
+    background: #fff;
+    border: 1px solid #EFEBE9;
+    padding: 12px 14px;
+    border-radius: 12px;
+    margin-bottom: 12px;
+    box-shadow: 0 2px 6px rgba(62, 39, 35, 0.05);
+    min-width: 0;
+}
+.info-card { border-left: 3px solid #8d6e63; }
+
+.info-card h3, .detail-card h3, .slip-card h3, .rc-card h3 {
+    color: #5d4037;
+    margin: 0 0 8px;
+    font-size: 1em;
+    font-weight: 600;
+    border-bottom: 1px solid #D7CCC8;
+    padding-bottom: 6px;
+}
+.rc-h-sub { font-weight: 400; color: #6D6D6D; font-size: 0.85em; }
+
+.info-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 4px 0;
+    font-size: 0.95em;
+}
+.info-label { font-weight: 600; color: #5d4037; flex: 0 0 auto; }
+.info-value { color: #333; text-align: right; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.rc-date { color: #2E7D32; font-weight: 600; }
+.rc-mono { font-family: Consolas, Menlo, monospace; }
+
+.payment-card {
+    background: linear-gradient(135deg, #fff8e1 0%, #ffecb3 100%);
+    padding: 8px 12px;
+    border-radius: 10px;
+    border: 1px solid #ffd54f;
+}
+.rc-amt-total { color: #B71C1C; font-weight: 600; }
+.rc-amt-paid { color: #2E7D32; font-weight: 600; }
+.rc-amt-due { color: #E65100; font-weight: 700; }
+.rc-due { font-size: 1.12em; border-top: 1px dashed #E0C06A; margin-top: 4px; padding-top: 8px; }
+
+.accommodation-box, .items-box, .remark-box {
+    background: #F9F9F9;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 0.93em;
+    line-height: 1.6;
+    border-left: 2px solid #8d6e63;
+    overflow-wrap: anywhere;
+}
+.items-box { max-height: 220px; overflow-y: auto; }
+.remark-box { background: #FFF3E0; border-left-color: #FF9800; max-height: 160px; overflow-y: auto; }
+
+.slip-image {
+    width: 100%;
+    max-height: 220px;
+    border-radius: 8px;
+    border: 1px solid #D7CCC8;
+    object-fit: contain;
+    background: #F9F9F9;
+}
+.rc-slip-count { display: block; color: #2E7D32; font-weight: 600; margin-bottom: 6px; font-size: 0.9em; }
+.rc-slip-item { margin-bottom: 8px; padding: 8px 12px; background: #F5F5F5; border-radius: 8px; font-size: 0.9em; }
+.rc-slip-item a { color: #1565C0; text-decoration: none; font-weight: 600; display: inline-block; padding: 6px 0; }
+.rc-slip-none { color: #6D6D6D; font-style: italic; margin-top: 6px; font-size: 0.9em; }
+.rc-docs { margin-top: 8px; padding: 8px 12px; background: linear-gradient(135deg, #e8f5e8 0%, #f1f8e9 100%); border-radius: 8px; border: 1px solid #C8E6C9; }
+.rc-docs-h { font-size: 0.9em; color: #2E7D32; font-weight: 600; margin-bottom: 2px; }
+.rc-docs a { color: #2E7D32; text-decoration: none; font-weight: 600; display: inline-block; padding: 6px 0; }
+
+/* ── นโยบายการยกเลิกการจอง (ส่วนหลัก — ติดในรูปยืนยันด้วย) ───────────── */
+.rc-policy {
+    background: #FFFBEB;
+    border: 1px solid #FDE68A;
+    border-left: 4px solid #F59E0B;
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+}
+.rc-policy h3 { border-bottom-color: #FDE68A; color: #78350F; }
+.rc-policy .rc-pol-lead { margin: 0 0 6px; color: #78350F; font-size: 0.9em; }
+.rc-pol-p { margin: 0; color: #4E342E; line-height: 1.7; }
+.rc-pol-list { list-style: none; margin: 0; padding: 0; color: #4E342E; }
+.rc-pol-list li { position: relative; padding: 4px 0 4px 20px; line-height: 1.6; }
+.rc-pol-list li::before {
+    content: ""; position: absolute; left: 4px; top: 0.78em;
+    width: 7px; height: 7px; border-radius: 50%; background: #F59E0B;
+}
+.rc-pol-num { color: #B45309; font-weight: 700; white-space: nowrap; }
+.rc-pol-more { margin-top: 2px; }
+.rc-pol-more > summary {
+    cursor: pointer; font-weight: 600; color: #92400E; font-size: 0.92em;
+    min-height: 44px; display: flex; align-items: center; list-style: none;
+}
+.rc-pol-more > summary::-webkit-details-marker { display: none; }
+.rc-pol-more > summary::before { content: "▸"; margin-right: 6px; transition: transform .15s; }
+.rc-pol-more[open] > summary::before { transform: rotate(90deg); }
+.rc-pol-more > summary span { font-weight: 400; color: #92400E; opacity: .8; margin-left: 6px; }
+.rc-pol-foot { margin-top: 8px; padding-top: 8px; border-top: 1px dashed #FDE68A; font-size: 0.86em; color: #6D6D6D; }
+.rc-pol-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.rc-pol-links a {
+    display: inline-flex; align-items: center; min-height: 40px; padding: 6px 14px; border-radius: 20px;
+    background: #fff; border: 1px solid #FDE68A; color: #92400E; text-decoration: none; font-size: 0.9em; font-weight: 500;
+}
+.rc-pol-links a:hover, .rc-pol-links a:focus { background: #FEF3C7; text-decoration: none; color: #78350F; }
+.rc-accepted { background: #E8F5E9; color: #2E7D32; border-radius: 6px; padding: 5px 10px; margin: 6px 0; font-size: 0.9em; }
+
+/* ── นโยบายอื่น ๆ / สัตว์เลี้ยง (พับไว้) ─────────────────────────────── */
+.rc-section { margin: 0 12px 12px; }
+.rc-collapse > summary { cursor: pointer; font-weight: 600; color: #5d4037; padding: 8px 0; min-height: 44px; display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.rc-collapse > summary span { font-weight: 400; color: #6D6D6D; font-size: 0.9em; }
+.rc-other-pol details { margin: 4px 0; background: #FAFAFA; border: 1px solid #EEE; border-radius: 8px; padding: 6px 10px; }
+.rc-other-pol summary { cursor: pointer; font-weight: 600; color: #5d4037; min-height: 36px; display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.rc-other-pol summary span { font-weight: 400; color: #6D6D6D; }
+.rc-other-pol .rc-pol-body { margin-top: 4px; color: #555; }
+.rc-pol-link { margin-top: 4px; font-size: 0.9em; }
+.rc-pol-ver { color: #6D6D6D; margin-top: 4px; font-size: 0.9em; }
+
+/* ── เช็คอิน / ติดต่อที่พัก ───────────────────────────────────────────── */
+.rc-contact { margin: 0 12px 12px; background: #FAF8F7; border-color: #EFEBE9; }
+.rc-contact-grid { display: grid; grid-template-columns: 1fr; gap: 6px 14px; font-size: 0.95em; }
+.rc-contact-grid div { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+.rc-contact-grid b { color: #5d4037; flex: 0 0 auto; }
+.rc-contact-grid a { color: #5d4037; font-weight: 500; overflow-wrap: anywhere; }
+.rc-contact-btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.rc-contact-btns a {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: 1 1 140px;
+    min-height: 44px; padding: 8px 14px; border-radius: 22px; text-decoration: none; font-weight: 600; font-size: 0.95em;
+}
+.rc-btn-call { background: #5D4037; color: #fff; }
+.rc-btn-line { background: #06C755; color: #fff; }
+.rc-btn-map { background: #fff; color: #5D4037; border: 1.5px solid #D7CCC8; }
+.rc-contact-btns a:hover, .rc-contact-btns a:focus { text-decoration: none; filter: brightness(0.95); }
+
+/* ── ปุ่มหลัก (นอกกรอบที่จับภาพ) — มือถือติดขอบล่าง ───────────────────── */
+.rc-actions {
+    position: sticky; bottom: 0; z-index: 20;
+    margin: 10px auto 0; max-width: 760px;
+    background: rgba(255, 255, 255, 0.97);
+    border: 1px solid #D7CCC8; border-radius: 14px;
+    box-shadow: 0 -4px 18px rgba(62, 39, 35, 0.18);
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+    display: flex; flex-wrap: wrap; gap: 8px; justify-content: center;
+}
+.rc-btn {
+    box-sizing: border-box;   /* <a> และ <button> สูง/กว้างเท่ากัน (ลิงก์เป็น content-box โดยปริยาย) */
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    min-height: 48px; padding: 8px 16px; border-radius: 24px; border: 0; line-height: 1.3;
+    font-family: inherit; font-size: 1em; font-weight: 600; cursor: pointer; text-decoration: none;
+    flex: 1 1 calc(50% - 8px); min-width: 0;
+}
+.rc-btn-primary { background: linear-gradient(135deg, #8d6e63 0%, #5d4037 100%); color: #fff; flex-basis: 100%; }
+.rc-btn-ghost { background: #fff; color: #5D4037; border: 1.5px solid #D7CCC8; min-height: 44px; font-size: 0.95em; }
+.rc-btn:hover, .rc-btn:focus { filter: brightness(0.96); text-decoration: none; color: inherit; }
+.rc-btn-primary:hover, .rc-btn-primary:focus { color: #fff; }
+.rc-btn[disabled] { opacity: .7; cursor: wait; }
+.rc-actions-hint { display: none; flex-basis: 100%; text-align: center; font-size: 0.82em; color: #6D6D6D; margin: 0; }
+
+/* ── จอกว้าง ─────────────────────────────────────────────────────────── */
+@media (min-width: 1024px) {
+    body { padding: 20px 10px; }
+    .rc-wrap, .rc-actions { max-width: 1080px; }
+    .confirmation-header { padding: 22px 20px 18px; }
+    .confirmation-header h1 { font-size: 1.6em; }
+    .rc-status, .rc-next { margin-left: 16px; margin-right: 16px; }
+    .rc-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
+        gap: 0 16px;
+        align-items: start;
+        padding: 14px 16px 0;
+    }
+    .rc-col-side { margin-top: 0; }
+    .rc-section, .rc-contact { margin-left: 16px; margin-right: 16px; }
+    .rc-contact-grid { grid-template-columns: 1fr 1fr; }
+    .rc-actions { position: static; box-shadow: 0 4px 18px rgba(62, 39, 35, 0.18); padding: 12px 16px; }
+    .rc-btn { flex: 0 1 auto; min-width: 200px; padding: 10px 26px; white-space: nowrap; }
+    .rc-btn-primary { flex-basis: auto; }
+    .rc-btn-ghost { min-height: 48px; font-size: 1em; }
+    .rc-actions-hint { display: block; }
+}
+
+@media (min-width: 600px) and (max-width: 1023px) {
+    .rc-contact-grid { grid-template-columns: 1fr 1fr; }
+    .rc-btn-primary { flex-basis: 100%; }
+}
+
+/* ── โหมดจับภาพ (html2canvas): เปิดทุกอย่างที่พับ/เลื่อน ไม่ให้รูปตัด ─── */
+.rc-capturing .rc-no-capture { display: none !important; }
+.rc-capturing .items-box, .rc-capturing .remark-box { max-height: none; overflow: visible; }
+.rc-capturing .rc-pol-more > summary { display: none; }
+.rc-capturing .rc-pol-more > ul { display: block; }
+
+/* ── พิมพ์ ───────────────────────────────────────────────────────────── */
+@media print {
+    .navbar, footer, .body-content > hr, .rc-actions, .instruction-text, .rc-pay-btn, .rc-no-print { display: none !important; }
+    body { background: #fff !important; padding: 0 !important; margin: 0 !important; }
+    .container, .body-content { width: auto !important; max-width: none !important; padding: 0 !important; margin: 0 !important; }
+    .rc-wrap { max-width: none; font-size: 11pt; }
+    .confirmation-container { box-shadow: none; border-radius: 0; }
+    .confirmation-header { background: none !important; color: #000 !important; border-bottom: 2px solid #000; padding: 0 0 8px; }
+    .confirmation-header .rc-code { background: none; color: #000; padding: 4px 0; }
+    .success-badge { background: none; color: #1B5E20; border: 1px solid #1B5E20; }
+    .rc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; padding: 10px 0 0; }
+    .rc-status, .rc-next, .rc-section, .rc-contact { margin-left: 0; margin-right: 0; }
+    .info-card, .detail-card, .slip-card, .rc-card, .rc-policy { box-shadow: none; break-inside: avoid; page-break-inside: avoid; }
+    .items-box, .remark-box { max-height: none; overflow: visible; }
+    .rc-pol-more > summary { display: none; }
+    .rc-contact-btns { display: none; }
+    a[href]:after { content: none !important; }
+}
