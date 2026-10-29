@@ -210,6 +210,19 @@ body {
 .rc-other-pol summary span { font-weight: 400; color: #6D6D6D; }
 .rc-other-pol .rc-pol-body { margin-top: 4px; color: #555; }
 .rc-pol-link { margin-top: 4px; font-size: 0.9em; }
+/* นโยบายอื่น = ลิงก์ + URL เต็ม (ติดในรูป: ในรูปกดไม่ได้ ต้องเห็นที่อยู่เว็บ) */
+.rc-other-pol .rc-pol-lead { margin: 0 0 8px; color: #6D6D6D; font-size: 0.88em; }
+.rc-pol-rows { display: flex; flex-direction: column; gap: 8px; }
+.rc-pol-row {
+    position: relative; display: flex; flex-direction: column; gap: 2px; min-height: 44px;
+    padding: 8px 32px 8px 12px; border: 1px solid #EEE; border-radius: 8px; background: #FAFAFA;
+    color: #5d4037; text-decoration: none;
+}
+.rc-pol-row:hover, .rc-pol-row:focus { background: #FFF8E1; border-color: #FDE68A; text-decoration: none; color: #5d4037; }
+.rc-pol-row-t { font-weight: 600; }
+.rc-pol-row-en { font-weight: 400; color: #6D6D6D; font-size: 0.9em; }
+.rc-pol-url { color: #1565C0; font-size: 0.86em; word-break: break-all; overflow-wrap: anywhere; }
+.rc-pol-row-go { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); color: #92400E; }
 .rc-pol-ver { color: #6D6D6D; margin-top: 4px; font-size: 0.9em; }
 
 /* ── เช็คอิน / ติดต่อที่พัก ───────────────────────────────────────────── */

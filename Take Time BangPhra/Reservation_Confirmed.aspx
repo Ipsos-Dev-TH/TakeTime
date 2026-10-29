@@ -154,12 +154,11 @@
             </div>
         </div>
 
-        <!-- นโยบายอื่น ๆ (คืนเงิน / ข้อกำหนด / ความเป็นส่วนตัว) + ฉบับที่ลูกค้ายอมรับ — พับไว้ ไม่ติดในรูป -->
-        <asp:Panel ID="pnlPolicies" runat="server" Visible="false" CssClass="detail-card rc-section rc-other-pol rc-no-capture">
-            <details class="rc-collapse">
-                <summary>📜 เงื่อนไขและนโยบายอื่น ๆ <span>(แตะเพื่อดู · Other booking policies)</span></summary>
-                <asp:Literal ID="litPolicies" runat="server" />
-            </details>
+        <%-- นโยบายอื่น ๆ (คืนเงิน / ข้อกำหนดและเงื่อนไข / ความเป็นส่วนตัว) — แสดงเป็นลิงก์ + URL เต็มเท่านั้น ไม่แสดงเนื้อหา
+             ติดในรูปยืนยันด้วย: ในรูปกดลิงก์ไม่ได้ จึงพิมพ์ที่อยู่เว็บไว้ให้พิมพ์เข้าไปอ่านเองได้ --%>
+        <asp:Panel ID="pnlPolicies" runat="server" Visible="false" CssClass="detail-card rc-section rc-other-pol">
+            <h3>📜 ข้อกำหนดและนโยบายอื่น ๆ <span class="rc-h-sub">Other booking policies</span></h3>
+            <asp:Literal ID="litPolicies" runat="server" />
         </asp:Panel>
 
         <%-- 5) เช็คอิน / ติดต่อที่พัก --%>
@@ -185,7 +184,7 @@
         <button type="button" class="rc-btn rc-btn-primary" onclick="captureAndDownload(this)">📥 โหลดรูปยืนยันการจอง (Save as image)</button>
         <asp:HyperLink ID="lnkCalendar" runat="server" Visible="false" CssClass="rc-btn rc-btn-ghost" NavigateUrl="#">📆 เพิ่มลงปฏิทิน</asp:HyperLink>
         <button type="button" class="rc-btn rc-btn-ghost" onclick="window.print()">🖨️ พิมพ์ (Print)</button>
-        <p class="rc-actions-hint">รูปยืนยันมีรหัสการจอง ยอดชำระ และนโยบายการยกเลิก — เก็บไว้แสดงตอนเช็คอิน</p>
+        <p class="rc-actions-hint">รูปยืนยันมีรหัสการจอง ยอดชำระ นโยบายการยกเลิก และที่อยู่เว็บของนโยบายอื่น — เก็บไว้แสดงตอนเช็คอิน</p>
     </div>
     </div>
 
@@ -230,7 +229,7 @@
                 if (revoke && window.URL && URL.revokeObjectURL) setTimeout(function () { URL.revokeObjectURL(href); }, 15000);
             }
 
-            // บันทึกหน้านี้เป็นรูป — จับเฉพาะกรอบ #rcCapture (ไม่รวมปุ่ม/นโยบายอื่นที่พับ) และเปิด "อ่านเพิ่มเติม"
+            // บันทึกหน้านี้เป็นรูป — จับเฉพาะกรอบ #rcCapture (ไม่รวมปุ่ม; นโยบายอื่นติดเป็น URL) และเปิด "อ่านเพิ่มเติม"
             // ของนโยบายการยกเลิกให้ติดในรูปครบ แล้วคืนสถานะเดิมทุกอย่างหลังบันทึก
             window.captureAndDownload = function (btn) {
                 var element = captureRoot();

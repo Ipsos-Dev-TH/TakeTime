@@ -575,14 +575,35 @@ namespace Take_Time_BangPhra
             }
         }
 
-        /// <summary>ลิงก์ "เปิดอ่านหน้าเต็ม" ไปหน้าสาธารณะของนโยบาย (/Policy/…) แท็บใหม่</summary>
+        /// <summary>
+        /// ลิงก์ฉบับเต็มไปหน้าสาธารณะของนโยบาย (/Policy/…) แท็บใหม่ — ข้อความลิงก์ = URL เต็ม
+        /// (ในรูปยืนยัน/ภาพหน้าจอกดลิงก์ไม่ได้ ลูกค้าต้องเห็นที่อยู่เว็บเพื่อพิมพ์เข้าไปเอง)
+        /// </summary>
         private string FullPolicyLinkHtml(string key)
         {
             string path = BookingPolicy.PublicPath(key);
             if (path == null) return "";
-            return "<div class=\"rc-pol-link\"><a href=\""
-                + System.Web.HttpUtility.HtmlAttributeEncode(ResolveUrl(path))
-                + "\" target=\"_blank\" rel=\"noopener\">เปิดอ่านหน้าเต็ม ↗</a></div>";
+            string abs = PolicyPages.PolicyPage.AbsoluteUrl(this, key);
+            if (string.IsNullOrEmpty(abs)) abs = ResolveUrl(path);
+            return "<div class=\"rc-pol-link\">อ่านฉบับเต็ม: <a class=\"rc-pol-url\" href=\""
+                + HttpUtility.HtmlAttributeEncode(ResolveUrl(path))
+                + "\" target=\"_blank\" rel=\"noopener\">" + Server.HtmlEncode(abs) + "</a></div>";
+        }
+
+        /// <summary>
+        /// แถวลิงก์นโยบาย (ชื่อไทย/อังกฤษ + URL เต็มที่กดได้) — ไม่มีเนื้อหานโยบาย · ข้อความว่าง/ไม่มีหน้าสาธารณะ = ""
+        /// </summary>
+        private string PolicyLinkRowHtml(string key)
+        {
+            string path = BookingPolicy.PublicPath(key);
+            if (path == null || string.IsNullOrWhiteSpace(BookingPolicy.Get(key))) return "";
+            string abs = PolicyPages.PolicyPage.AbsoluteUrl(this, key);
+            if (string.IsNullOrEmpty(abs)) abs = ResolveUrl(path);
+            return "<a class=\"rc-pol-row\" href=\"" + HttpUtility.HtmlAttributeEncode(ResolveUrl(path)) + "\" target=\"_blank\" rel=\"noopener\">"
+                + "<span class=\"rc-pol-row-t\">" + Server.HtmlEncode(BookingPolicy.Title(key))
+                + " <span class=\"rc-pol-row-en\">(" + Server.HtmlEncode(BookingPolicy.TitleEn(key)) + ")</span></span>"
+                + "<span class=\"rc-pol-url\">" + Server.HtmlEncode(abs) + "</span>"
+                + "<span class=\"rc-pol-row-go rc-no-capture\" aria-hidden=\"true\">↗</span></a>";
         }
 
         /// <summary>
@@ -651,31 +672,23 @@ namespace Take_Time_BangPhra
         }
 
         /// <summary>
-        /// นโยบายอื่น ๆ (คืนเงิน / เงื่อนไข / ความเป็นส่วนตัว — การยกเลิกมีส่วนของตัวเองด้านบน) + วันเวลาและฉบับที่ลูกค้ายอมรับ
-        /// พับไว้ทั้งก้อน ไม่ติดในรูปยืนยัน · ข้อความแปลงผ่าน BookingPolicy.ToHtml (encode ก่อนเสมอ) — แทรก HTML/สคริปต์ไม่ได้
+        /// นโยบายอื่น ๆ (คืนเงิน / ข้อกำหนดและเงื่อนไข / ความเป็นส่วนตัว — การยกเลิกมีส่วนของตัวเองด้านบน):
+        /// แสดงเป็นลิงก์ + URL เต็มเท่านั้น (ไม่แสดงเนื้อหายาว) และติดในรูปยืนยันด้วย — ในรูปกดลิงก์ไม่ได้ จึงพิมพ์ที่อยู่เว็บไว้ให้เห็น
+        /// ไม่มีนโยบายใดมีข้อความ = ซ่อนทั้งส่วน
         /// </summary>
         private void LoadPolicies(DataRow res)
         {
             try
             {
+                var rows = new StringBuilder();
+                foreach (string key in new[] { BookingPolicy.KeyTerms, BookingPolicy.KeyPrivacy, BookingPolicy.KeyRefund })
+                    rows.Append(PolicyLinkRowHtml(key));
+                if (rows.Length == 0) { pnlPolicies.Visible = false; return; }
+
                 var sb = new StringBuilder();
-                sb.Append("<div style=\"font-size:0.95em; line-height:1.65;\">");
-                sb.Append(AcceptanceStampHtml(res));
-
-                foreach (string key in new[] { BookingPolicy.KeyRefund, BookingPolicy.KeyTerms, BookingPolicy.KeyPrivacy })
-                {
-                    string text = BookingPolicy.Get(key);
-                    if (string.IsNullOrWhiteSpace(text)) continue;
-                    sb.Append("<details><summary>")
-                      .Append(Server.HtmlEncode(BookingPolicy.Title(key)))
-                      .Append(" <span>(").Append(Server.HtmlEncode(BookingPolicy.TitleEn(key))).Append(")</span></summary>")
-                      .Append("<div class=\"rc-pol-body\">")
-                      .Append(BookingPolicy.ToHtml(text))
-                      .Append(FullPolicyLinkHtml(key))
-                      .Append("</div></details>");
-                }
-
-                sb.Append("<div class=\"rc-pol-ver\">นโยบายฉบับปัจจุบัน: ").Append(BookingPolicy.Version).Append("</div></div>");
+                sb.Append("<p class=\"rc-pol-lead\">อ่านฉบับเต็มได้ที่ลิงก์ด้านล่าง (ถ้าดูจากรูป ให้พิมพ์ที่อยู่เว็บในเบราว์เซอร์)</p>");
+                sb.Append("<div class=\"rc-pol-rows\">").Append(rows).Append("</div>");
+                sb.Append("<div class=\"rc-pol-ver\">นโยบายฉบับปัจจุบัน: ").Append(BookingPolicy.Version).Append("</div>");
 
                 litPolicies.Text = sb.ToString();
                 pnlPolicies.Visible = true;
