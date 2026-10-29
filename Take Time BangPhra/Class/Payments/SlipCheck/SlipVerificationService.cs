@@ -161,31 +161,59 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
         /// <summary>ข้อเท็จจริงของรูป: QR (ฟรี) → SlipOK (ถ้ามีโควต้า) → OCR ในเครื่อง (ถ้า SlipOK ไม่ได้ยอด)</summary>
         public static SlipInspection Inspect(byte[] bytes, string fileName, bool force)
         {
+            return Inspect(bytes, fileName, force, false, false);
+        }
+
+        /// <summary>ลายนิ้วมือค่าตั้ง SlipOK ปัจจุบัน (Branch/คีย์/โควต้า) — ส่วนหนึ่งของ cache key: เปลี่ยนค่าตั้ง = ตรวจรูปเดิมใหม่</summary>
+        public static string ConfigFingerprint()
+        {
+            try { return SlipVendorGate.ConfigFingerprint(AppCfg.Get(CfgBranchId, ""), AppCfg.Get(CfgApiKey, ""), MonthlyQuota); }
+            catch { return "-"; }
+        }
+
+        /// <summary>เหตุผลที่จะข้าม SlipOK ตอนนี้ (null = เรียกได้) — ข้อความระบุที่มา (ไม่ตั้งค่า / ธงจาก SlipOK / ตัวนับในระบบ / โควต้า 0 / ไม่ใช่สลิป)</summary>
+        public static string VendorSkipReasonNow(ISlipVerifier vendor, SlipQrInfo qr, bool ignoreLocalQuota)
+        {
+            bool flag = false;
+            int used = 0;
+            int quota = MonthlyQuota;
+            if (!ignoreLocalQuota) used = GetUsage(SlipOkVerifier.ProviderName, YearMonth(DateTime.Now), out flag);
+            else if (quota <= 0) quota = 1;   // บังคับเรียก: ข้ามเฉพาะธง/ตัวนับในระบบ (ไม่ใช่ตั้งค่า/ไม่ใช่สลิป)
+            return SlipVendorGate.SkipReason(vendor != null && vendor.IsConfigured, flag, used, quota, qr != null && qr.IsPaymentQr, YearMonth(DateTime.Now));
+        }
+
+        /// <summary>
+        /// force = ไม่ใช้ cache · ignoreLocalQuota = ข้ามธง/ตัวนับโควต้าในระบบ (ปุ่มบังคับเรียก SlipOK — error โควต้าจริงของ SlipOK ยังตั้งธงตามปกติ) ·
+        /// skipLocalOcr = ไม่อ่านยอดจากรูป (ทดสอบ SlipOK อย่างเดียว — ผลนี้ไม่เก็บ cache เพราะไม่ครบ)
+        /// cache key ผูกลายนิ้วมือค่าตั้ง + รายการ cache ที่ "ข้าม SlipOK" ถือว่าเก่าทันทีที่ตอนนี้เรียกได้ (เคส: ทดสอบก่อนบันทึกคีย์)
+        /// </summary>
+        public static SlipInspection Inspect(byte[] bytes, string fileName, bool force, bool ignoreLocalQuota, bool skipLocalOcr)
+        {
             string hash = Sha256(bytes ?? new byte[0]);
-            string key = "slipinsp:" + hash;
+            string key = SlipVendorGate.CacheKey(hash, ConfigFingerprint());
+            var vendor = CreateVendor();
             if (!force)
             {
                 var cached = HttpRuntime.Cache[key] as SlipInspection;
-                if (cached != null) return cached;
+                if (cached != null && !SlipVendorGate.IsStaleSkip(cached, VendorSkipReasonNow(vendor, cached.Qr, ignoreLocalQuota)))
+                {
+                    cached.FromCache = true;
+                    return cached;
+                }
             }
 
-            var insp = new SlipInspection { FileHash = hash };
+            var insp = new SlipInspection { FileHash = hash, LocalQuotaIgnored = ignoreLocalQuota };
             insp.Qr = SlipQrDecoder.TryDecode(bytes);
             if (insp.Qr == null) insp.Notes.Add("ไม่พบ/อ่าน QR ในรูปไม่ได้");
             else if (insp.Qr.IsPaymentQr) insp.Notes.Add("รูปนี้เป็น QR รับเงิน (PromptPay) ไม่ใช่สลิปโอน");
-            else if (insp.Qr.IsSlip && !insp.Qr.CrcValid) insp.Notes.Add("QR ของสลิป CRC ไม่ถูกต้อง (รูปอาจถูกแก้ไข/อ่านผิด)");
+            else if (insp.Qr.IsSlip && !insp.Qr.CrcValid) insp.Notes.Add("QR ของสลิป CRC ไม่ถูกต้อง (รูปอาจถูกแก้ไข/อ่านผิด) — ส่งรูปให้ SlipOK อ่านเอง");
 
             // ── ระดับ 1: SlipOK ──
-            var vendor = CreateVendor();
-            if (!vendor.IsConfigured)
-                insp.VendorSkipReason = "ยังไม่ได้ตั้งค่า SlipOK";
-            else if (IsQuotaExhausted(SlipOkVerifier.ProviderName))
-                insp.VendorSkipReason = "โควต้า SlipOK เดือนนี้หมดแล้ว (" + MonthlyQuota + ")";
-            else if (insp.Qr != null && insp.Qr.IsPaymentQr)
-                insp.VendorSkipReason = "ไม่ใช่สลิป";
-            else
+            insp.VendorSkipReason = VendorSkipReasonNow(vendor, insp.Qr, ignoreLocalQuota);
+            if (insp.VendorSkipReason == null)
             {
-                string payload = insp.Qr != null && insp.Qr.IsSlip && !insp.Qr.IsTrueMoney ? insp.Qr.RawPayload : null;
+                // ส่ง QR payload (JSON data) เฉพาะที่ถอดได้ครบ + CRC ถูก — ไม่งั้นส่งรูป (SlipOK อ่าน QR เอง); data ไม่ผ่าน → verifier ส่งรูปซ้ำเอง
+                string payload = SlipVendorGate.UsePayload(insp.Qr) ? insp.Qr.RawPayload : null;
                 SlipVendorResponse vr = vendor.Verify(bytes, fileName, payload);
                 insp.Vendor = vr;
                 if (vr.Charged) IncrementUsage(SlipOkVerifier.ProviderName);
@@ -196,12 +224,17 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
                 }
                 else if (vr.Kind == SlipVendorResponse.KindConfig)
                     insp.Notes.Add("SlipOK ปฏิเสธการตั้งค่า (" + vr.Code + " " + vr.Message + ") — ตรวจ Branch ID / API key");
-                Log("SlipOK " + vr.Kind + " code=" + (vr.Code ?? "-") + " " + vr.ElapsedMs + "ms hash=" + hash.Substring(0, 12));
+                Log("SlipOK " + vr.Kind + " code=" + (vr.Code ?? "-") + " http=" + vr.HttpStatus + " body=" + (vr.BodyType ?? "-")
+                    + (string.IsNullOrEmpty(vr.Attempts) ? "" : " [" + vr.Attempts + "]") + " charged=" + (vr.Charged ? "1" : "0")
+                    + " " + vr.ElapsedMs + "ms hash=" + hash.Substring(0, 12)
+                    + (vr.Kind == SlipVendorResponse.KindOk || string.IsNullOrEmpty(vr.Message) ? "" : " msg=" + vr.Message));
             }
+            else
+                Log("SlipOK ข้าม: " + insp.VendorSkipReason + " hash=" + hash.Substring(0, 12));
 
             // ── ระดับ 2: อ่านยอดจากรูปเอง (เมื่อ SlipOK ไม่ได้ข้อมูลรายการ) ──
             bool vendorHasAmount = insp.Vendor != null && insp.Vendor.HasData && insp.Vendor.Amount.HasValue;
-            if (!vendorHasAmount)
+            if (!vendorHasAmount && !skipLocalOcr)
             {
                 insp.OcrAttempted = true;
                 var ocr = LocalSlipAmountReader.ReadText(bytes);
@@ -209,12 +242,13 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
                 else insp.OcrError = ocr.Error;
             }
 
-            // ผลชั่วคราวของธนาคาร (1009/1010) ห้าม cache นาน — ให้กดตรวจใหม่ได้ผลจริง
+            // ผลชั่วคราวของธนาคาร (1009/1010) ห้าม cache นาน — ให้กดตรวจใหม่ได้ผลจริง · ผลที่ไม่ครบ (ข้าม OCR) ไม่เก็บ
             bool transient = insp.Vendor != null && (insp.Vendor.Kind == SlipVendorResponse.KindPendingBank
                                                      || insp.Vendor.Kind == SlipVendorResponse.KindError);
             try
             {
-                HttpRuntime.Cache.Insert(key, insp, null, DateTime.UtcNow.AddMinutes(transient ? 2 : 60), Cache.NoSlidingExpiration);
+                if (!(skipLocalOcr && !vendorHasAmount))
+                    HttpRuntime.Cache.Insert(key, insp, null, DateTime.UtcNow.AddMinutes(transient ? 2 : 60), Cache.NoSlidingExpiration);
             }
             catch { }
             return insp;

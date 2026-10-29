@@ -31,6 +31,7 @@ namespace Take_Time_BangPhra.Admin.Settings
         protected global::System.Web.UI.WebControls.FileUpload fuTest;
         protected global::System.Web.UI.WebControls.TextBox txtTestAmount;
         protected global::System.Web.UI.WebControls.Button btnTest;
+        protected global::System.Web.UI.WebControls.Button btnTestVendor;
         protected global::System.Web.UI.WebControls.Literal litTest;
     }
 }

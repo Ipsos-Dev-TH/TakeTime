@@ -21,8 +21,9 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
     /// (ส่วนล่างนี้คือที่มาเดิมจากโค้ดสาธารณะ — สอดคล้องกับเอกสารทางการ):
     ///   POST https://api.slipok.com/api/line/apikey/{branchId}
     ///   header  x-authorization: {API key}
-    ///   body    multipart/form-data: data = ข้อความจาก QR | files = รูปสลิป | url = ลิงก์รูป (อย่างใดอย่างหนึ่ง),
-    ///           amount (ไม่บังคับ — เราไม่ส่ง เทียบยอดเองด้วย tolerance), log = true (เก็บประวัติ/ตรวจซ้ำฝั่ง SlipOK)
+    ///   body    data = ข้อความจาก QR (ส่งเป็น JSON {data, log} ตาม Data Example) | files = รูปสลิป (multipart/form-data) | url = ลิงก์รูป
+    ///           (อย่างใดอย่างหนึ่ง), amount (ไม่บังคับ — เราไม่ส่ง เทียบยอดเองด้วย tolerance), log = true (เก็บประวัติ/ตรวจซ้ำฝั่ง SlipOK)
+    ///   ต.ค. 2026: เส้น data ส่ง JSON (เดิมส่งเป็น multipart text part) + ตอบไม่มี QR/ไม่พบรายการ → ส่งรูปซ้ำ 1 ครั้ง (SlipVendorGate.ShouldRetryWithFile)
     ///   อ้างอิง: github.com/PrakritManStudio/slipok-sdk README (baseUrl https://api.slipok.com/api/line/apikey, ฟิลด์ data/url/files/
     ///            amount/log, ตารางรหัส 1000–1014); github.com/jakapobrs-oss/concert-antibot lib/slipok.ts (header x-authorization,
     ///            multipart files|data|url, shape คำตอบ); github.com/timelessnesses/accountery-cron src/slipOK.ts (ชนิด receiver.proxy/account)
@@ -56,39 +57,71 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
         public string Name => ProviderName;
         public bool IsConfigured => _branchId.Length > 0 && _apiKey.Length > 0;
 
+        public const string BodyData = "data";    // JSON {data, log} — ข้อความจาก QR (API Guide: Data Example)
+        public const string BodyFiles = "files";  // multipart/form-data files + log — รูปสลิป
+
+        /// <summary>
+        /// ส่ง QR payload เป็น JSON (field data) ถ้ามี ไม่งั้นส่งรูป (multipart files) · ส่ง data แล้ว SlipOK ตอบ "ไม่มี QR/ไม่พบรายการ"
+        /// (1000/1005-1008/1011 — error ไม่เสียโควต้า) = ลองส่งรูปอีก 1 ครั้งให้ SlipOK อ่าน QR เอง (กัน QR ที่เราถอดผิด)
+        /// </summary>
         public SlipVendorResponse Verify(byte[] image, string fileName, string qrPayload)
         {
-            var sw = Stopwatch.StartNew();
-            var r = new SlipVendorResponse();
             if (!IsConfigured)
             {
-                r.Kind = SlipVendorResponse.KindConfig;
-                r.Message = "ยังไม่ได้ตั้ง SlipOK Branch ID / API key";
-                return r;
+                return new SlipVendorResponse { Kind = SlipVendorResponse.KindConfig, Message = "ยังไม่ได้ตั้ง SlipOK Branch ID / API key" };
             }
+            bool hasImage = image != null && image.Length > 0;
+            if (string.IsNullOrEmpty(qrPayload))
+                return Post(BuildMultipartBody(NewBoundary(), SafeName(fileName), image, out string ct), ct, BodyFiles);
+
+            SlipVendorResponse r = Post(Encoding.UTF8.GetBytes(BuildJsonBody(qrPayload)), "application/json; charset=utf-8", BodyData);
+            if (hasImage && SlipVendorGate.ShouldRetryWithFile(r.Kind))
+            {
+                SlipVendorResponse r2 = Post(BuildMultipartBody(NewBoundary(), SafeName(fileName), image, out string ct2), ct2, BodyFiles);
+                r2.Attempts = "data→" + (r.Code ?? r.Kind) + " แล้วส่งรูป→" + (r2.Code ?? r2.Kind);
+                r2.ElapsedMs += r.ElapsedMs;
+                return r2;
+            }
+            return r;
+        }
+
+        private static string NewBoundary() => "----tt" + Guid.NewGuid().ToString("N");
+
+        /// <summary>JSON body ของเส้น data: {"data":"…","log":true} (public เพื่อทดสอบ)</summary>
+        public static string BuildJsonBody(string qrPayload)
+        {
+            var o = new Dictionary<string, object> { { "data", qrPayload ?? "" }, { "log", true } };
+            return new JavaScriptSerializer().Serialize(o);
+        }
+
+        /// <summary>multipart body ของเส้น files: ส่วน files (รูป) + log=true (public เพื่อทดสอบ — contentType คืน header พร้อม boundary)</summary>
+        public static byte[] BuildMultipartBody(string boundary, string safeFileName, byte[] image, out string contentType)
+        {
+            contentType = "multipart/form-data; boundary=" + boundary;
+            using (var ms = new MemoryStream())
+            {
+                WriteFile(ms, boundary, "files", safeFileName, image);
+                WriteField(ms, boundary, "log", "true");
+                WriteAscii(ms, "--" + boundary + "--\r\n");
+                return ms.ToArray();
+            }
+        }
+
+        private SlipVendorResponse Post(byte[] body, string contentType, string bodyType)
+        {
+            var sw = Stopwatch.StartNew();
+            var r = new SlipVendorResponse { BodyType = bodyType };
             try
             {
                 ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
-                string boundary = "----tt" + Guid.NewGuid().ToString("N");
-                byte[] body;
-                using (var ms = new MemoryStream())
-                {
-                    if (!string.IsNullOrEmpty(qrPayload))
-                        WriteField(ms, boundary, "data", qrPayload);
-                    else
-                        WriteFile(ms, boundary, "files", SafeName(fileName), image);
-                    WriteField(ms, boundary, "log", "true");
-                    WriteAscii(ms, "--" + boundary + "--\r\n");
-                    body = ms.ToArray();
-                }
-
                 var req = (HttpWebRequest)WebRequest.Create(BaseUrl + Uri.EscapeDataString(_branchId));
                 req.Method = "POST";
                 req.Timeout = _timeoutMs;
                 req.ReadWriteTimeout = _timeoutMs;
-                req.ContentType = "multipart/form-data; boundary=" + boundary;
+                req.ContentType = contentType;
                 req.Accept = "application/json";
                 req.Headers["x-authorization"] = _apiKey;
+                try { req.ServicePoint.Expect100Continue = false; } catch { }   // ไม่รอ 100-continue (บาง proxy/Node ตอบช้า/ตัด)
                 req.ContentLength = body.Length;
                 using (var rs = req.GetRequestStream()) rs.Write(body, 0, body.Length);
 
@@ -97,21 +130,28 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
                 {
                     using (var resp = (HttpWebResponse)req.GetResponse())
                     using (var sr = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
+                    {
+                        r.HttpStatus = (int)resp.StatusCode;
                         json = sr.ReadToEnd();
+                    }
                 }
                 catch (WebException wex) when (wex.Response != null)
                 {
                     // 4xx ของ SlipOK มี JSON {success:false, code, message, data?}
+                    var hr = wex.Response as HttpWebResponse;
+                    r.HttpStatus = hr != null ? (int)hr.StatusCode : 0;
                     using (var sr = new StreamReader(wex.Response.GetResponseStream(), Encoding.UTF8))
                         json = sr.ReadToEnd();
                     if (string.IsNullOrWhiteSpace(json) || json.TrimStart()[0] != '{')
                     {
                         r.Kind = SlipVendorResponse.KindError;
-                        r.Message = "SlipOK HTTP " + (int)((HttpWebResponse)wex.Response).StatusCode;
+                        r.Message = "SlipOK HTTP " + r.HttpStatus;
+                        r.RawError = Cut(json, 300);
                         return r;
                     }
                 }
                 Parse(json, r);
+                if (r.Kind != SlipVendorResponse.KindOk) r.RawError = Cut(json, 1500);
             }
             catch (WebException wex)
             {
@@ -128,6 +168,13 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
                 r.ElapsedMs = sw.ElapsedMilliseconds;
             }
             return r;
+        }
+
+        private static string Cut(string s, int n)
+        {
+            if (string.IsNullOrEmpty(s)) return null;
+            s = s.Trim();
+            return s.Length > n ? s.Substring(0, n) + "…" : s;
         }
 
         /// <summary>แปลง JSON คำตอบ → รูปกลาง (public เพื่อทดสอบ/หน้าตั้งค่า)</summary>

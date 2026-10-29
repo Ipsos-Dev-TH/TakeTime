@@ -1671,6 +1671,7 @@
     <Compile Include="Class\Payments\SlipCheck\SlipUploadStore.cs" />
     <Compile Include="Class\Payments\SlipCheck\SlipOkVerifier.cs" />
     <Compile Include="Class\Payments\SlipCheck\SlipQrDecoder.cs" />
+    <Compile Include="Class\Payments\SlipCheck\SlipVendorGate.cs" />
     <Compile Include="Class\Payments\SlipCheck\SlipVerificationService.cs" />
     <Compile Include="Class\Payments\SlipCheck\SlipVerifyModels.cs" />
     <Compile Include="Class\Payments\PaymentTransactionStore.cs" />

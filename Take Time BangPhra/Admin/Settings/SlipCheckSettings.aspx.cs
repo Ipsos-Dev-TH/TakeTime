@@ -267,27 +267,59 @@ namespace Take_Time_BangPhra.Admin.Settings
             RenderStatus();
         }
 
+        /// <summary>ทดสอบทุกขั้น (QR / SlipOK / OCR) — บังคับตรวจใหม่เสมอ (ไม่ใช้ cache 60 นาที; สลิปเดิมซ้ำ SlipOK ตอบ 1012 ไม่เสียโควต้า)</summary>
         protected void btnTest_Click(object sender, EventArgs e)
+        {
+            RunTest(false);
+        }
+
+        /// <summary>ทดสอบ SlipOK อย่างเดียว: ข้าม cache + ธง/ตัวนับโควต้าในระบบ (ไม่ข้าม error โควต้าจริงของ SlipOK) และไม่อ่าน OCR</summary>
+        protected void btnTestVendor_Click(object sender, EventArgs e)
+        {
+            RunTest(true);
+        }
+
+        private void RunTest(bool vendorOnly)
         {
             if (!fuTest.HasFile) { Msg(false, "เลือกรูปสลิปก่อน"); return; }
             decimal amt;
             decimal? expected = decimal.TryParse(txtTestAmount.Text, NumberStyles.Any, CultureInfo.InvariantCulture, out amt) && amt > 0m ? amt : (decimal?)null;
             byte[] bytes = fuTest.FileBytes;
+            string ym = SlipVerificationService.YearMonth(DateTime.Now);
+            bool exBefore, exAfter;
+            int usedBefore = SlipVerificationService.GetUsage(SlipOkVerifier.ProviderName, ym, out exBefore);
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            SlipInspection insp = SlipVerificationService.Inspect(bytes, fuTest.FileName, false);
+            SlipInspection insp = SlipVerificationService.Inspect(bytes, fuTest.FileName, true, vendorOnly, vendorOnly);
             var r = SlipVerificationService.Evaluate(insp, expected, new SlipVerifyContext { SourceType = "TEST", User = Session["UserName"]?.ToString() });
             sw.Stop();
+            int usedAfter = SlipVerificationService.GetUsage(SlipOkVerifier.ProviderName, ym, out exAfter);
+            int quota = SlipVerificationService.MonthlyQuota;
 
             var sb = new StringBuilder(r.ToHtml());
             sb.Append("<div class='sub' style='margin-top:8px'>เวลา ").Append(sw.ElapsedMilliseconds).Append(" ms · hash ")
-              .Append(HttpUtility.HtmlEncode(insp.FileHash.Substring(0, 12))).Append("</div>");
+              .Append(HttpUtility.HtmlEncode(insp.FileHash.Substring(0, 12))).Append(vendorOnly ? " · โหมดบังคับเรียก SlipOK (ไม่ใช้ cache/ธง/ตัวนับในระบบ, ไม่อ่าน OCR)" : " · ตรวจใหม่ (ไม่ใช้ cache)").Append("</div>");
             sb.Append("<pre class='sc-raw'>");
             sb.Append("QR: ").Append(HttpUtility.HtmlEncode(insp.Qr == null ? "ไม่พบ (" + (SlipQrDecoder.LastEngineError ?? "-") + ")"
                 : (insp.Qr.IsPaymentQr ? "QR รับเงิน (ไม่ใช่สลิป)" : "ธนาคาร " + insp.Qr.SendingBank + " · transRef " + insp.Qr.TransRef
-                   + " · CRC " + (insp.Qr.CrcValid ? "ถูก" : "ผิด"))));
-            sb.Append("\nSlipOK: ").Append(HttpUtility.HtmlEncode(insp.Vendor == null ? "ไม่ได้เรียก — " + (insp.VendorSkipReason ?? "-")
-                : insp.Vendor.Kind + " code=" + (insp.Vendor.Code ?? "-") + " " + (insp.Vendor.Message ?? "") + " (" + insp.Vendor.ElapsedMs + " ms)"));
-            sb.Append("\nOCR ในเครื่อง: ").Append(HttpUtility.HtmlEncode(!insp.OcrAttempted ? "ไม่ได้ใช้ (SlipOK ได้ยอดแล้ว)"
+                   + " · CRC " + (insp.Qr.CrcValid ? "ถูก" : "ผิด") + (SlipVendorGate.UsePayload(insp.Qr) ? " → ส่ง QR (data) ให้ SlipOK" : " → ส่งรูป (files) ให้ SlipOK"))));
+            sb.Append("\nSlipOK: ");
+            var v = insp.Vendor;
+            if (v == null)
+                sb.Append(HttpUtility.HtmlEncode("ไม่ได้เรียก — ข้าม SlipOK เพราะ " + (insp.VendorSkipReason ?? "-")));
+            else
+            {
+                sb.Append(HttpUtility.HtmlEncode("เรียกแล้ว · ผล " + v.Kind + " · HTTP " + (v.HttpStatus > 0 ? v.HttpStatus.ToString(CultureInfo.InvariantCulture) : "-")
+                    + " · code=" + (v.Code ?? "-") + " · " + (v.Message ?? "") + " · ส่งแบบ " + (v.BodyType ?? "-")
+                    + (string.IsNullOrEmpty(v.Attempts) ? "" : " [" + v.Attempts + "]") + " · " + v.ElapsedMs + " ms · นับโควต้า=" + (v.Charged ? "ใช่" : "ไม่")
+                    + (v.HasData ? " · ธนาคารให้ข้อมูล: ยอด " + (v.Amount.HasValue ? v.Amount.Value.ToString("N2") : "-") + " transRef " + (v.TransRef ?? "-") : " · ไม่มีข้อมูลรายการจากธนาคาร")));
+                if (!string.IsNullOrEmpty(v.RawError))
+                    sb.Append("\n  คำตอบดิบ: ").Append(HttpUtility.HtmlEncode(v.RawError));
+            }
+            sb.Append("\nตัวนับ SlipOK ในระบบเดือน ").Append(HttpUtility.HtmlEncode(ym)).Append(": ก่อน ").Append(usedBefore).Append(" → หลัง ").Append(usedAfter)
+              .Append(" / โควต้าตั้งไว้ ").Append(quota).Append(" · ธงโควต้าหมดจาก SlipOK: ").Append(exAfter ? "ติด" : "ไม่ติด")
+              .Append(exBefore != exAfter ? " (เปลี่ยนในรอบนี้)" : "");
+            sb.Append("\nOCR ในเครื่อง: ").Append(HttpUtility.HtmlEncode(!insp.OcrAttempted
+                ? (vendorOnly ? "ไม่ได้ใช้ (โหมดทดสอบ SlipOK อย่างเดียว)" : "ไม่ได้ใช้ (SlipOK ได้ยอดแล้ว)")
                 : (insp.OcrText != null ? "อ่านได้ " + insp.OcrText.Length + " ตัวอักษร" : "ล้ม — " + insp.OcrError)));
             if (insp.OcrResult != null)
             {

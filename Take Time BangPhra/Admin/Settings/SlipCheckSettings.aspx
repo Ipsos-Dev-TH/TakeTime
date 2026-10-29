@@ -124,10 +124,13 @@
 
         <div class="sc-card" style="margin-top:16px;">
             <h3>ทดสอบด้วยสลิป</h3>
-            <div class="sub">อัปโหลดรูปสลิป + ยอดที่คาดไว้ → ดูผลทุกขั้น (QR / SlipOK / อ่านจากรูป) · ทดสอบไม่บันทึกลงสลิปใด ๆ แต่ใช้โควต้า SlipOK 1 ครั้ง (รูปเดิมซ้ำใน 1 ชม. ไม่เสียซ้ำ)</div>
+            <div class="sub">อัปโหลดรูปสลิป + ยอดที่คาดไว้ → ดูผลทุกขั้น (QR / SlipOK / อ่านจากรูป) · ทดสอบไม่บันทึกลงสลิปใด ๆ และ<b>ตรวจใหม่ทุกครั้ง</b> (ไม่ใช้ผลที่จำไว้ 1 ชม.)
+                — ใช้โควต้า SlipOK 1 ครั้งต่อสลิป (สลิปเดิมส่งซ้ำ SlipOK ตอบ 1012 ไม่เสียโควต้า) · ผลจะบอกชัดว่าเรียก SlipOK หรือไม่ เพราะอะไร, HTTP/code, ส่งแบบ QR หรือรูป และตัวนับก่อน/หลัง ·
+                ปุ่ม "บังคับเรียก SlipOK" ข้ามธง/ตัวนับโควต้าในระบบและไม่อ่าน OCR (ใช้ไล่ปัญหาคีย์/โควต้า)</div>
             <asp:FileUpload ID="fuTest" runat="server" accept="image/*" />
             <asp:TextBox ID="txtTestAmount" runat="server" CssClass="sc-in" placeholder="ยอดที่คาดไว้ เช่น 1000" style="max-width:200px; display:inline-block;" />
             <asp:Button ID="btnTest" runat="server" Text="🔎 ตรวจ" CssClass="sc-btn" OnClick="btnTest_Click" CausesValidation="false" />
+            <asp:Button ID="btnTestVendor" runat="server" Text="ทดสอบ SlipOK อย่างเดียว (บังคับเรียก)" CssClass="sc-btn sec" OnClick="btnTestVendor_Click" CausesValidation="false" />
             <asp:Literal ID="litTest" runat="server" />
         </div>
     </div>

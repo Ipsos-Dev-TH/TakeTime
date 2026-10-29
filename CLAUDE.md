@@ -495,6 +495,12 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    `SlipOkVerifier` (`POST https://api.slipok.com/api/line/apikey/{branch}` header `x-authorization`, multipart `data`=QR payload (หรือ `files`), `log=true`,
    ไม่ส่ง `amount`; รหัส 1003/1004/1015 โควต้า/แพ็กเกจ → ธง `Slip_Verify_Usage.Exhausted`, 1012/1013/1014 แนบ data, 1010 = รอ `data.delay` นาที, 1007+"หมดอายุ/ไม่มีรายการ" = NotFound;
    นับโควต้าเองรายเดือน; ปุ่มเช็คโควต้า `GET …/quota` → `ParseQuota` (quota+specialQuota = 0 → ธงหมด; overQuota>0 เตือน) — ยืนยันกับ **SlipOK API Guide v1.13 (28 ก.พ. 2026)**),
+   - **ต.ค. 2026 — "ทดสอบสลิปแล้ว SlipOK ไม่ถูกเรียก/โควต้าไม่ลด":** ต้นเหตุ cache `Inspect` 60 นาทีจำผล "ยังไม่ได้ตั้งค่า SlipOK" ของรูปที่ทดสอบก่อนบันทึกคีย์ + ปุ่มทดสอบไม่ force.
+     แก้: cache key ผูก `SlipVendorGate.ConfigFingerprint` (Branch/คีย์/โควต้า) + รายการที่ข้าม SlipOK ถือว่าเก่าเมื่อตอนนี้เรียกได้ (`IsStaleSkip`) · เหตุผลข้ามระบุที่มา (`SkipReason`: ไม่ตั้งค่า/ธง
+     Exhausted/ตัวนับในระบบ/โควต้า 0/ไม่ใช่สลิป) · เส้น `data` ส่ง JSON `{data,log}` (`BuildJsonBody`) เฉพาะ QR ที่ CRC ถูก (`UsePayload`) ไม่งั้น multipart `files` (`BuildMultipartBody`);
+     data ตอบไม่มี QR/ไม่พบรายการ → ส่งรูปซ้ำ 1 ครั้ง (`ShouldRetryWithFile`); `Expect: 100-continue` ปิด; `SlipVendorResponse.HttpStatus/BodyType/Attempts/RawError` ·
+     หน้าตั้งค่า: ปุ่มตรวจ = force เสมอ + แสดง เรียก/ไม่เรียก-เพราะอะไร, HTTP/code, ส่งแบบ data|files, ตัวนับก่อน→หลัง, ธง; ปุ่ม "ทดสอบ SlipOK อย่างเดียว (บังคับเรียก)" =
+     `Inspect(bytes,name,force:true,ignoreLocalQuota:true,skipLocalOcr:true)` (ไม่เก็บ cache เมื่อไม่ได้ยอด).
    `SlipQrDecoder` (ZXing.Net 0.16.11 `lib\net47\zxing.dll` + TLV mini-QR ธปท.: ธนาคาร+transRef+CRC16 — ไม่มี DLL = คืน null),
    `LocalSlipAmountReader` (**tesseract.exe ผ่าน Process** ไม่ใช่ P/Invoke — native crash ไม่ล้ม w3wp, timeout kill ได้). ผลอ่านจาก OCR ไม่ใช่ข้อมูลธนาคาร.
    **OCR 2 รอบ + โหวต** (พอร์ต 1:1 จาก `tools/slip-ocr-bench/reader.py` — แก้คู่กัน): EXIF → ตัดการ์ดสลิป (รูปถ่ายจอ: ก้อน min(R,G,B) สว่าง) → เทา/กลับสีโหมดมืด/กว้าง 1500/ยืด
