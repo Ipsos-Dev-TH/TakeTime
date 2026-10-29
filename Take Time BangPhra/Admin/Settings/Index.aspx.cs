@@ -242,6 +242,10 @@ namespace Take_Time_BangPhra.Admin.Settings
                 "เปิด/ปิดรับออเดอร์, เวลาให้บริการ, และค่าบริการ (% / ต่อชิ้น / ต่อครั้ง)",
                 "~/Admin/RoomService/OrderSettings",
                 "รูมเซอร์วิส room service สั่งอาหาร เวลา เปิดปิด ค่าบริการ service charge เปอร์เซ็นต์", false, "RoomService"));
+            svc.Items.Add(new Item("QR สั่งอาหาร (โต๊ะ/โซน)",
+                "โซน/โต๊ะ + พิมพ์ QR ติดโต๊ะ, เมนู QR (หมวด/ตัวเลือก/sold-out), เปิดสวิตช์ + เช็กลิสต์ — ลูกค้าสแกนสั่งได้หลายรอบ เงินสด/โอน(ตรวจสลิป)/ลงบิลห้อง",
+                "~/Admin/Dining/Zones",
+                "qr สั่งอาหาร ร้านอาหาร โต๊ะ โซน เมนู dining scan order พิมพ์ qr เช็คบิล สลิป ลงบิลห้อง PHASE19_42", false, "Dining"));
             svc.Items.Add(new Item("จัดการกิจกรรม",
                 "เพิ่ม/แก้กิจกรรมในที่พัก ราคา รอบเวลาให้จอง และรูปภาพ",
                 "~/Admin/Settings/ActivityManagement",

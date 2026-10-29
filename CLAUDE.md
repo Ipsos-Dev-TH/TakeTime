@@ -747,6 +747,47 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    · 6 healthCheck + สรุป. จำขั้นใน `Accounting_Integration_Config.Nexaacc_Setup_Wizard_Step` (1-6|DONE, `action=saveWizardStep`) → แถบ "ทำต่อ". มือถือ: ไม่มี scroll แนวนอนทั้งหน้า
    (ตารางเลื่อนในการ์ด). ทดสอบ: static render + Playwright (แท็บ/ลิงก์/วิซาร์ด/escape/390px). ต้อง build+test บน Windows.
 
+## QR สั่งอาหาร/เครื่องดื่ม แยกโต๊ะ/โซน (Dining — ต.ค. 2026, PHASE19_42)
+โมดูลแยกจากรูมเซอร์วิส/POS ทั้งหมด (ไม่แตะ flow เดิม) ใช้ซ้ำ Product/Product_Images, ตรวจสลิป (ข้อ 18), แคตตาล็อกแหล่งเงิน, สมุดขายรายช่องทาง (PHASE19_32),
+Notify/NotificationService/กล่องแชทรวม. **สัญญา API ของชั้น Foundation = `Take Time BangPhra/Class/Dining/README_API.md` (อ่านก่อนแก้ทุกครั้ง).**
+ไม่มีตาราง (ยังไม่รัน migration) = service อ่านคืนว่าง/เขียนคืน `NOT_READY`, ฟีเจอร์ปิด, หน้าตั้งค่าขึ้นเตือน. **C# 7.3 เท่านั้น.**
+- **คำตัดสินเจ้าของ (29 ต.ค. 2026):** ราคาเมนูรวม VAT, **ไม่มี service charge/ทิป** · เงินสด = พนักงานเก็บที่โต๊ะแล้วกด "รับเงินสด" บนกระดาน · โอน = ระบบตรวจสลิปเอง
+  (SlipOK/OCR ผ่าน+ยอดตรง = PAID ทันที; ไม่ผ่านตาม `SlipVerify_Customer_Fail_Mode`; ซ้ำ = ไม่รับเสมอ) · สั่งได้หลายรอบต่อโต๊ะ (session) + ปุ่ม "เช็คบิล" ·
+  ลงบิลห้องพักลูกค้าทำเอง (เลือกเลขห้องที่เช็คอินอยู่ + กรอกเบอร์ที่จอง; ผิดครบ `Dining_Room_Charge_Max_Fail` = ล็อก 15 นาที + Telegram).
+- **ข้อมูล (migration `Database/PHASE19_Migration_42_Dining_QR_Ordering.sql`, idempotent):** `Dining_Zone` (Code, เวลาเปิด-ปิด, Manual_Mode AUTO|OPEN|CLOSED, Allow_Cash/Transfer/Room_Charge,
+  Kitchen_Station) → `Dining_Table` (QR_Token 32 ไบต์ CSPRNG base64url หมุนได้ → QR_Version; Status FREE|OCCUPIED|BILL_REQUESTED|NEEDS_STAFF|DISABLED) → `Dining_Table_Session`
+  (1 รอบลูกค้า, Session_Token = cookie `dnsess` คนละตัวกับ QR_Token; OPEN|BILL_REQUESTED|CLOSED) → `Dining_Order` (Order_No `DN{yyMMdd}-####`, Round_No; NEW→ACCEPTED→PREPARING→SERVED/CANCELLED;
+  Payment_Status UNPAID|PAID|CHARGED|REFUNDED) + `Dining_Order_Item` (snapshot) · เมนู `Dining_Menu_Category/Item (Product_ID PK, Is_Dining, Display_Name, Sold_Out_Until, Available_Zones CSV,
+  Track_Stock)/Option_Group/Option/Menu_Item_Option` · `Dining_Payment` (1 แถวต่อการจ่ายของ "บิล" session: Method CASH|TRANSFER|ROOM_CHARGE, Status CONFIRMED|PENDING_SLIP|REJECTED|VOID,
+  Covers_Order_Ids, Acct_Post_Ref `DNP-{id}`/`RC:{ref}`) · `Dining_Room_Charge_Attempt` · `Dining_Event_Log`. Seeds: mapping `DINING_REVENUE` (ไม่ผูก → PRODUCT_REVENUE), Perm `OPS_DINING`,
+  Notification_Rules 4 เหตุการณ์ (Telegram เปิด), OmniChannel `DINING`, System_Config `Feature_Dining=0` + `Dining_Session_Idle_Minutes` (30) / `Dining_Min_Order` (0) / `Dining_Guest_Poll_Sec` (5) /
+  `Dining_Staff_Poll_Sec` (3) / `Dining_Room_Charge_Max_Fail` (5). **ไม่ seed Sales_Doc_Policy แถว DINING** → ค่ากลาง (*,CASH)=DAILY_ROLLUP ใบสรุป `DNDAY-{yyyyMMdd}-{paidHowId}`, (*,*)=IMMEDIATE `DNP-{id}`.
+- **โค้ด `Class/Dining/*` (namespace `Take_Time_BangPhra.Dining`):** pure = `DiningModels` (POCO + `DiningStatus.*`/`DiningError`), `DiningPricing` (server คิดราคาเสมอ), `DiningTokens`, `DiningNotifyText`
+  (mono test `tools/dining-tests/run.sh` 136 กรณี) · `DiningConfig` · `DiningDb` (internal, guard OBJECT_ID) · `DiningTableService` (โซน/โต๊ะ CRUD, `BulkCreateTables`, `RotateTableToken/RotateZoneTokens`,
+  `ResolveTable`, session, `RequestBill`, `CloseSession`, `AutoCloseIdleSessions`, `GetBoard`, `SchemaReady`) · `DiningMenuService` (cache 60 วิ, admin CRUD ล้าง cache เอง) · `DiningOrderService`
+  (Quote/PlaceOrder idempotent/UpdateStatus/CallStaff) · `DiningPaymentService` (RecordCash/SubmitTransferSlip/Approve-RejectPendingSlip/ChargeToRoom) · `DiningPostingService.PostIfDue` (timer) ·
+  `DiningNotifier` (Telegram+ในระบบ+แชทรวม — service ยิงเอง หน้าไม่ต้องเรียก) · `DiningQr` (`BuildOrderUrl` = `{SiteBase}/Order/{token}`, `RenderSvg` ZXing.BarcodeWriterSvg ฝั่ง server ไม่ส่ง token ออกนอก;
+  ไม่มี zxing.dll → หน้าพิมพ์ fallback qrcodejs CDN).
+- **หน้า:** ลูกค้า (ทีม A) `Order/Default.aspx` (เมนู+ตะกร้า) / `Order/Status.aspx` (สถานะ/เช็คบิล/จ่าย) / `API/DiningOrder.ashx` (`X-Dining: 1` + same-origin + rate limit) / `Content/dining.css`
+  / `Scripts/dining.js` / route `Order/{token}` · พนักงาน (ทีม B) `Admin/Dining/Orders.aspx` (กระดาน+เสียง+poll, `?o=`) / `Admin/Dining/Tables.aspx` (สถานะโต๊ะสด, ปิดโต๊ะ) / `Admin/NotificationCheck`
+  `action=dining` / badge ใน `Site.Master` / timer `Global.asax` (`PostIfDue` + `AutoCloseIdleSessions`) — สิทธิ์ `Perm.OpsDining` + `Feature.Guard("Dining")` ·
+  **แอดมิน (ทีม C):** `Admin/Dining/Zones.aspx` (โซน/โต๊ะ CRUD, สร้างหลายโต๊ะ A1–A20, หมุน QR รายโต๊ะ/ทั้งโซน confirm, ปิดใช้, ลิงก์+คัดลอก+QR ย่อต่อโต๊ะ; แท็บ "ตั้งค่า & เช็กลิสต์" `?focus=settings`:
+  migration/ฟีเจอร์/โซน/โต๊ะ/เมนู/ตรวจสลิป/บัญชีรับโอน/zxing/นโยบายเอกสารขาย + สวิตช์ `Feature_Dining` + ค่า `Dining_*` + ทดสอบ Telegram + การ์ดลิงก์ SalesDocPolicy/SlipCheckSettings/
+  PaymentChannels/Notifications/AccountingIntegration?focus=mapping&key=DINING_REVENUE) · `Admin/Dining/Menu.aspx` (แท็บ รายการ/หมวด/กลุ่มตัวเลือก: เลือก Product เข้าเมนู, ชื่อแสดง TH/EN,
+  sold-out + "หมดวันนี้"/"หมดถึงเวลา", เตรียมกี่นาที, แพ้อาหาร, โซนที่ขาย, Track_Stock, แนะนำ, ผูกกลุ่มตัวเลือก; `?pid=` `?show=`; รูป = ลิงก์ `Admin/ProductImages`) · `Admin/Dining/QrSheet.aspx`
+  (`?zone=|?table=`, `?layout=grid8` A4 2×4 | `grid18` 3×6 | `tent` ป้ายตั้งโต๊ะ 10×15 ซม.; การ์ด = โลโก้ `~/Images/Logo.png` + `Business_Info.Company_Name` + "สแกนสั่งอาหาร / Scan to order" + SVG QR +
+  รหัสโต๊ะ + โซน + คำแนะนำไทย/EN + ติดต่อ `SlipVerificationService.CustomerContactText`; `@media print` ซ่อนทุกอย่างนอก `#qsPrintRoot`) · การ์ดในศูนย์ตั้งค่า (หมวด "บริการในที่พัก") ·
+  `Content/dining-admin.css`. หน้าตั้งค่าใช้สิทธิ์ `Perm.SvcGuest` และ **ไม่ guard ฟีเจอร์** (ต้องตั้งค่าได้ก่อนเปิด). ปุ่มในตาราง = `dnAct(act,id,confirm)` → hidden field + ปุ่มซ่อน `btnAct` (ไม่มี AJAX);
+  encode ทุกอย่างผ่าน `H()`, confirm ผ่าน `JsStr`.
+- **แจ้งเตือน:** `Notify.Ev.OrderDining` (ออเดอร์ใหม่, HIGH) / `OrderDiningStatus` (รับ-ทำ-เสิร์ฟ-ยกเลิก, สลิป, รับเงินสด) / `DiningCallStaff` (urgent) / `DiningBill` (เช็คบิล/ลงบิลห้อง/ปิดโต๊ะ) +
+  `NotifyAllStaff(…,"DINING_ORDER")` + แชทรวมช่องทาง `DINING` 1 conversation ต่อโต๊ะ (`table_{id}`, ปิดโต๊ะ = RESOLVED). ลิงก์ในข้อความ → `Admin/Dining/Orders?o={orderId}`.
+- **บัญชี:** `Dining_Payment` CASH/TRANSFER CONFIRMED → `ChannelSalesPostingService.Record(Channel="DINING", SourceKey="DNP-{id}")` ตามนโยบายเอกสารขาย; รายการ `Track_Stock=1` → `Product_Out`
+  (Remark `ร้านอาหาร`) + `EnqueueStockOutCogs("DNCOGS-{orderId}-{pid}")`; ลงบิลห้อง = `RoomChargeService.ChargeToRoom` ไปกับใบเช็คเอาท์ (ไม่โพสต์ซ้ำ). ยกเลิกหลังลงบัญชี = ใบลดหนี้ (ข้อ 17).
+  รายงานภาษีเห็นช่องทาง `DINING` อัตโนมัติ (`TaxReportKit.ChDining`).
+- **ข้อจำกัด/ยังไม่ทำ:** ต้อง build+test บน Windows (Linux = compile-check + mono test + Playwright mock) · ไม่มีจ่ายผ่านเกตเวย์ (`PaymentSource.Dining` จองไว้) · ไม่มีแยกบิล/ย้ายโต๊ะ ·
+  ไม่มี kitchen ticket/ใบเสร็จอย่างย่อให้ลูกค้า (ม.86/6 — ดู `Sales_Doc_Local_Slip_Required`) · ตอบแชทกลับถึงมือถือลูกค้า/รายงานยอดขายร้านอาหาร · ตรวจสลิปต้องมี PHASE19_34/36 + `SlipVerify_Enabled`
+  ไม่งั้นสลิปทุกใบรอพนักงาน · หน้าตั้งค่าใช้ postback ล้วน (ไม่มี JS framework) — ตารางยาวเลื่อนในการ์ด.
+
 ## Queue resilience (ส.ค. 2026 — หลังเคส NextAcc ล่มทั้งแอป)
 
 NextAcc เคย start ไม่ขึ้น (DI circular dependency ใน `Program.cs`) → ทุก endpoint ตอบ HTTP 500

@@ -528,6 +528,9 @@
     <Content Include="Admin\Settings\ProductAccounting.aspx" />
     <Content Include="Admin\Settings\StockOutReasons.aspx" />
     <Content Include="Admin\Settings\SalesDocPolicy.aspx" />
+    <Content Include="Admin\Dining\Zones.aspx" />
+    <Content Include="Admin\Dining\Menu.aspx" />
+    <Content Include="Admin\Dining\QrSheet.aspx" />
     <Content Include="Admin\Settings\SlipCheckSettings.aspx" />
     <Content Include="Admin\CRM\MemberVouchers.aspx" />
     <Content Include="Admin\CRM\MemberHub.aspx" />
@@ -659,6 +662,7 @@
     <Content Include="Content\pv-voucher.css" />
     <Content Include="Content\responsive-table.css" />
     <Content Include="Content\admin-settings.css" />
+    <Content Include="Content\dining-admin.css" />
     <Content Include="Scripts\admin-settings.js" />
     <Content Include="Scripts\bootstrap.bundle.js" />
     <Content Include="Scripts\bootstrap.bundle.min.js" />
@@ -1591,6 +1595,27 @@
     </Compile>
     <Compile Include="Admin\Settings\SalesDocPolicy.aspx.designer.cs">
       <DependentUpon>SalesDocPolicy.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Dining\Zones.aspx.cs">
+      <DependentUpon>Zones.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Dining\Zones.aspx.designer.cs">
+      <DependentUpon>Zones.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Dining\Menu.aspx.cs">
+      <DependentUpon>Menu.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Dining\Menu.aspx.designer.cs">
+      <DependentUpon>Menu.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Dining\QrSheet.aspx.cs">
+      <DependentUpon>QrSheet.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Dining\QrSheet.aspx.designer.cs">
+      <DependentUpon>QrSheet.aspx</DependentUpon>
     </Compile>
     <Compile Include="Admin\Settings\ProductAccounting.aspx.cs">
       <DependentUpon>ProductAccounting.aspx</DependentUpon>
