@@ -437,6 +437,11 @@
     <Content Include="API\PaymentWebhook.ashx" />
     <Content Include="API\PaymentStatus.ashx" />
     <Content Include="API\SlipCheck.ashx" />
+    <Content Include="API\DiningOrder.ashx" />
+    <Content Include="Order\Default.aspx" />
+    <Content Include="Order\Status.aspx" />
+    <Content Include="Content\dining.css" />
+    <Content Include="Scripts\dining.js" />
     <Content Include="API\PvAssist.ashx" />
     <Content Include="About.aspx" />
     <Content Include="Account\CheckDocument.aspx" />
@@ -766,6 +771,17 @@
     </Compile>
     <Compile Include="API\SlipCheck.ashx.cs">
       <DependentUpon>SlipCheck.ashx</DependentUpon>
+    </Compile>
+    <Compile Include="API\DiningOrder.ashx.cs">
+      <DependentUpon>DiningOrder.ashx</DependentUpon>
+    </Compile>
+    <Compile Include="Order\Default.aspx.cs">
+      <DependentUpon>Default.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Order\Status.aspx.cs">
+      <DependentUpon>Status.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
     </Compile>
     <Compile Include="API\PvAssist.ashx.cs">
       <DependentUpon>PvAssist.ashx</DependentUpon>

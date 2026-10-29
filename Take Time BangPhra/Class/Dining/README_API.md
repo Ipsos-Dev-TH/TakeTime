@@ -101,6 +101,13 @@ Namespace `Take_Time_BangPhra.Dining` · โฟลเดอร์ `Class/Dining/
      - สำเร็จ = ออเดอร์ `CHARGED`, ยอดไปกับใบเสร็จเช็คเอาท์ (RoomChargeService ตัดสต๊อก+COGS ของรายการ Track_Stock แล้ว).
 9. handler `API/DiningOrder.ashx` (IRequiresSessionState): แนะนำ actions `menu|quote|place|status|call|bill|slip|rooms|roomcharge`; ต้อง header `X-Dining: 1` + same-origin (ลอก `API/SlipCheck.ashx.cs:45`),
    rate limit ต่อ session/IP (`SlipUploadStore.TryRate` ใช้ซ้ำได้), ไฟล์ ≤ 8 MB + `SlipUploadStore.SniffImage`. `Web.config` `maxRequestLength` เฉพาะ path นี้เหมือน SlipCheck.
+   **ที่ทำจริง (ทีม A, ต.ค. 2026):** `API/DiningOrder.ashx` POST form `a=menu|quote|place|status|call|bill|slip|roomcandidates|roomcharge` + `nonce`
+   (หน้าออกให้ผ่าน `DiningGuest.IssueNonce(Session, sessionToken)` ใน `API/DiningOrder.ashx.cs` — API อ่าน session token จาก nonce ไม่เชื่อ body;
+   cookie `dnsess` ต่างจาก token ของ nonce = `{code:"expired", reload:true}`) · ตอบ `{ok, code, message, …}` · `closed:true` = ลบ cookie แล้ว (หน้าแสดง "สแกน QR ใหม่") ·
+   `status` ส่ง `v` = `VersionTicks` เดิม → `{same:true}` (แตะ `TouchSession` ทุกครั้ง) · rate ต่อ session/10 นาที: place 10 · slip 5 · call 3 · roomcharge 8 · bill 10 ·
+   IP 120 เฉพาะ action ที่เขียน (status/menu/quote ไม่นับ — ร้านใช้ Wi-Fi NAT เดียว) · `DiningGuest.ReceiverCards()/ReceiverCardsHtml()` = การ์ดบัญชีรับโอน
+   (แคตตาล็อก DINING ∩ `LoadReceiverAccounts`) ใช้ซ้ำได้จากหน้าอื่น · route `Order/{token}` (43 ตัว) ใน `App_Start/RouteConfig.cs` · cookie `dntable` จำ QR ของโต๊ะ
+   (เปิด `Order/Default` หลังปิดบิล = เปิด session ใหม่ให้โดยไม่ต้องสแกนซ้ำ).
 
 ## Flow พนักงาน (ทีม B)
 
