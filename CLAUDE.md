@@ -279,7 +279,15 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
      `Nexaacc_Voucher_Doc_Marker` หรือคิว CREATE_VOUCHER_JOURNAL ที่สำเร็จ → `SearchSourceDocsAsync(..., localHits)` นับเป็น Exact · `OcrReviewMath.PickSource` (pure):
      Exact ใบเดียว = เลือก · หลายใบ คัด ผู้ขายเดียวกัน (ContactId/ชื่อ `NormalizeName`) → วันที่ไม่หลังใบนี้ → ยอดลดได้อีกพอ (CN) · เหลือหลายใบ = ให้ผู้ใช้เลือก.
      ใช้ใน `FindAndPickSource` (สแกนใหม่ + เปิดร่างที่ยังไม่เลือก + ปุ่มค้นหา). หน้า: `renderNoteSource()` (กรอบน้ำเงิน `#rvSrcTop`) อยู่ถัดจาก "1. ชนิดเอกสาร" ·
-     เหตุผล/การคืนสินค้า/ขาเงิน = `renderNoteRest()` ก่อน "4. รายการ".
+     เหตุผล/การคืนสินค้า/ขาเงิน = `renderNoteRest()` ก่อน "4. รายการ". ตารางผลค้น: ปุ่ม "เลือก" คอลัมน์แรก + กดทั้งแถวได้ (`data-act="pick"` บน `<tr>`).
+   - **กระทบยอดกระดาษก่อนใช้ (ต.ค. 2026 — เคส Makro CN 005911029988: OCR NextAcc อ่าน "มูลค่าตามใบกำกับภาษีเดิม 19,604" เป็นยอดก่อน VAT; ใบจริง
+     3,466.58 + 72.42 = 3,539):** NextAcc จับ SubTotal ด้วยป้ายคำ (OcrService.cs:6385-6404 / AmountTripleExtractor) และเดิม `BuildInitialState` รับ 3 ช่องมาตรง ๆ.
+     ตอนนี้ `Class/Integration/OcrReview/OcrPaperTotals.cs` (pure, mono test `scratchpad/ocr_cn_fix/PaperTotalsTests.cs` 47 เคส) `Reconcile(ocrSub, ocrVat, ocrTotal,
+     Σรายการ, ΣVAT บรรทัด, มูลค่าเดิม, มูลค่าที่ถูกต้อง, ผลต่าง, RawText, isNote)`: ผู้สมัครต่อช่องจาก OCR · ตัวเลขหลังป้าย (`ReadAllLabeled`) · แถว "รวม a b c" ในตาราง
+     (`ReadSumRows`) · Σรายการ/ΣVAT · §86/10 · ค่าอนุมาน (รวม−VAT ฯลฯ, น้ำหนัก 0) → ทุกชุดที่บวกลงตัว ±0.02 → คะแนน (ค่าที่อ่านจากกระดาษ > อนุมาน; ยอดรวม OCR +1 ตัดสินเสมอ;
+     ตรง Σรายการ +3, แถวรวม +4, ผลต่าง §86/10 +3; VAT > 7.5% ของฐาน −8; ช่องที่เท่ากับมูลค่าเดิม/ที่ถูกต้อง (ไม่ใช่ผลต่าง) −6). ชุด OCR เดิมที่ลงตัว = คงเดิม เว้นแต่ชุดใหม่ชนะ ≥ 4 คะแนน
+     (Σรายการอ่านขาดไม่สลับ). ผล → `OcrReviewState.PaperNotes` (หน้าแสดง "🔎 ที่มาของยอดตามเอกสาร" เหนือตารางเทียบยอด, encode) · Confidence LOW = ไฮไลต์ 3 ช่อง (`LowConfidence`).
+     มูลค่าเดิม/ที่ถูกต้อง/ผลต่างอ่านก่อนกระทบยอด. ยังไม่แก้ฝั่ง NextAcc (repo อื่น) — `TryCorrectScanAsync` ส่งยอดที่ยืนยันกลับผ่าน `ocr/{id}/correct` อยู่แล้ว.
 3b. **หน้า PaymentVoucher (manual) parity กับ OCR:** ✅ DONE (page-side only, ไม่แตะ mapper/sync).
    เพิ่ม 3 dropdown: (a) `ddlPaidHowNexaacc` แหล่งจ่ายเงินดึงจากผังบัญชีจริง NextAcc (11x/21x, value=
    `Nexaacc_AccountId`) → save บังคับ `paymentAccountId` ตัวนี้ก่อน mapping (`LookupPaidHowAccountId`)

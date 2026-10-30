@@ -235,6 +235,8 @@ namespace Take_Time_BangPhra.Integration.OcrReview
         public decimal? PrintedTotal { get; set; }
         /// <summary>WHT ตามเอกสาร — ว่าง = ไม่เทียบ (ใบผู้ขายส่วนใหญ่ไม่พิมพ์ภาษีที่เราหัก)</summary>
         public decimal? PrintedWht { get; set; }
+        /// <summary>ที่มา/เหตุที่แก้ยอดตามเอกสาร (<see cref="OcrPaperTotals"/>) — หน้าเว็บแสดงเหนือตารางเทียบยอด; ว่าง = ใช้ค่าที่ OCR อ่านตรง ๆ</summary>
+        public List<string> PaperNotes { get; set; } = new List<string>();
 
         // ── ใบลด/เพิ่มหนี้ ──
         public string SourceMode { get; set; } = OcrNoteSource.NextAcc;

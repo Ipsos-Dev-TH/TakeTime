@@ -381,6 +381,34 @@ namespace Take_Time_BangPhra.Integration.OcrReview
 
             bool paperTaxInvoice = IsTaxInvoicePaper(r);
             decimal? sub = r.ExtractedSubTotal, vat = r.ExtractedVatAmount, total = r.ExtractedTotalAmount;
+
+            // §86/10 บนใบลด/เพิ่มหนี้ (มูลค่าเดิม/ที่ถูกต้อง/ผลต่าง) — อ่านก่อนเพราะใช้กระทบยอดด้วย: OCR ของ NextAcc เคยอ่าน "มูลค่าตามใบกำกับภาษีเดิม 19,604"
+            // เป็นยอดก่อน VAT ของใบลดหนี้ Makro (ยอดจริง 3,466.58 + 72.42 = 3,539.00)
+            string raw = r.RawTextContent;
+            s.OrigAmount = OcrCnPaperReader.ReadOriginalAmount(raw);
+            s.CorrectAmount = OcrCnPaperReader.ReadCorrectAmount(raw);
+            s.DiffAmount = OcrCnPaperReader.ReadDiffAmount(raw);
+
+            // กระทบยอดกระดาษ 3 ช่องให้บวกกันลงตัวก่อนใช้ (OcrPaperTotals — ผู้สมัครจาก OCR/ป้ายในข้อความดิบ/แถว "รวม"/Σรายการ/§86/10 → ชุดที่หลักฐานมากสุด)
+            decimal? linesSum = null, linesVat = null;
+            if (r.ExtractedItems != null && r.ExtractedItems.Any(it => it != null))
+            {
+                linesSum = 0m;
+                foreach (var it in r.ExtractedItems)
+                {
+                    if (it == null) continue;
+                    decimal q = it.Quantity.HasValue && it.Quantity.Value > 0 ? it.Quantity.Value : 1m;
+                    linesSum += it.Amount ?? OcrReviewMath.R2(q * (it.UnitPrice ?? 0m) - (it.LineDiscountAmount ?? 0m));
+                    if (it.VatAmount.HasValue) linesVat = (linesVat ?? 0m) + it.VatAmount.Value;
+                }
+                linesSum = OcrReviewMath.R2(linesSum.Value);
+                if (linesVat.HasValue) linesVat = OcrReviewMath.R2(linesVat.Value);
+            }
+            var paper = OcrPaperTotals.Reconcile(sub, vat, total, linesSum, linesVat, s.OrigAmount, s.CorrectAmount, s.DiffAmount, raw, OcrDocKind.IsNote(s.DocKind));
+            if (paper.Changed) { sub = paper.SubTotal; vat = paper.Vat; total = paper.Total; }
+            s.PaperNotes.AddRange(paper.Notes);
+            if (paper.Confidence == "LOW") { s.LowConfidence.Add("SubTotal"); s.LowConfidence.Add("VatAmount"); s.LowConfidence.Add("TotalAmount"); }
+
             // ไม่ใช่ใบกำกับ + ไม่พบ VAT → ไม่มีภาษีซื้อให้แยก: ยอดก่อน VAT = ยอดรวม (ตรรกะเดียวกับหน้าเดิม)
             if (!paperTaxInvoice && (!vat.HasValue || vat.Value == 0m))
             {
@@ -495,8 +523,7 @@ namespace Take_Time_BangPhra.Integration.OcrReview
             if (hasVat && OcrReviewMath.SuggestFixes(s).Any(f => f.Code == "FIT_VAT"))
                 OcrReviewMath.ApplyFix(s, "FIT_VAT");
 
-            // §86/9-10 บนใบลด/เพิ่มหนี้ (อ้างใบเดิม/มูลค่า/เหตุผล/วิธีชำระ) — อ่านจากข้อความดิบ; ใช้แสดงเมื่อชนิดเป็นใบลด/เพิ่มหนี้
-            string raw = r.RawTextContent;
+            // §86/9-10 บนใบลด/เพิ่มหนี้ (อ้างใบเดิม/เหตุผล/วิธีชำระ) — อ่านจากข้อความดิบ (มูลค่าเดิม/ที่ถูกต้อง/ผลต่าง อ่านไว้ด้านบนแล้ว); ใช้แสดงเมื่อชนิดเป็นใบลด/เพิ่มหนี้
             string origNo, origDate;
             if (OcrCnPaperReader.ReadOriginalInvoice(raw, out origNo, out origDate)
                 && !string.Equals(OcrReviewMath.NormalizeDocNo(origNo), OcrReviewMath.NormalizeDocNo(s.SupplierDocNo), StringComparison.Ordinal))
@@ -504,9 +531,6 @@ namespace Take_Time_BangPhra.Integration.OcrReview
                 s.OrigTaxInvoiceNo = origNo;
                 s.OrigTaxInvoiceDate = origDate;
             }
-            s.OrigAmount = OcrCnPaperReader.ReadOriginalAmount(raw);
-            s.CorrectAmount = OcrCnPaperReader.ReadCorrectAmount(raw);
-            s.DiffAmount = OcrCnPaperReader.ReadDiffAmount(raw);
             s.PaperPaymentType = OcrCnPaperReader.ReadPaymentType(raw);
             s.NoteReasonCode = OcrCnPaperReader.ReadReasonCode(raw, s.DocKind == OcrDocKind.VendorDebitNote);
             var rs = OcrNoteReasons.Find(s.DocKind, s.NoteReasonCode);

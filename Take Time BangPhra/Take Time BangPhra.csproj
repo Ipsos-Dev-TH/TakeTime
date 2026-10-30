@@ -1032,6 +1032,7 @@
     <Compile Include="Class\Integration\AccountingModels.cs" />
     <Compile Include="Class\Integration\AccountingDataMapper.cs" />
     <Compile Include="Class\Integration\OcrReview\OcrReviewModels.cs" />
+    <Compile Include="Class\Integration\OcrReview\OcrPaperTotals.cs" />
     <Compile Include="Class\Integration\OcrReview\OcrReviewMath.cs" />
     <Compile Include="Class\Integration\OcrReview\OcrReviewService.cs" />
     <Compile Include="Class\CheckoutService.cs" />

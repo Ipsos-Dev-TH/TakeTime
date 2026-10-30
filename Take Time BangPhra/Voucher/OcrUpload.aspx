@@ -712,11 +712,11 @@
                 (M.cnNotes || []).forEach(function (n) { h += '<div class="ocr-msg info">' + esc(n) + '</div>'; });
                 var rs = M.cnResults || [];
                 if (rs.length) {
-                    h += '<div style="overflow-x:auto;"><table class="tbl"><thead><tr><th>เลขที่</th><th>ชนิด</th><th>วันที่</th><th>ผู้ขาย</th><th class="num">ยอด</th><th class="num">ค้างจ่าย</th><th class="num">ลดหนี้แล้ว</th><th class="num">ลดได้อีก</th><th></th></tr></thead><tbody>';
+                    // ปุ่ม "เลือก" อยู่คอลัมน์แรก + กดทั้งแถวได้ (เดิมอยู่ท้ายตาราง 9 คอลัมน์ — มือถือต้องเลื่อนขวาถึงเห็น)
+                    h += '<div style="overflow-x:auto;"><table class="tbl"><thead><tr><th></th><th>เลขที่</th><th>ชนิด</th><th>วันที่</th><th>ผู้ขาย</th><th class="num">ยอด</th><th class="num">ค้างจ่าย</th><th class="num">ลดหนี้แล้ว</th><th class="num">ลดได้อีก</th></tr></thead><tbody>';
                     rs.forEach(function (r, i) {
-                        h += '<tr class="src-pick' + (S.SourceDocId === r.Id ? ' src-sel' : '') + '"><td>' + esc(r.No) + (r.SupplierDocNo ? '<br/><small>ใบผู้ขาย ' + esc(r.SupplierDocNo) + '</small>' : '') + (r.Reason ? '<br/><small style="color:' + (r.Exact ? '#2f855a;font-weight:700' : '#2b6cb0') + ';">' + (r.Exact ? '✓ ' : '') + esc(r.Reason) + '</small>' : '') + '</td><td>' + esc(r.TypeLabel) + '</td><td>' + esc(r.Date) + '</td><td>' + esc(r.ContactName || '') + '</td>' +
-                             '<td class="num">' + money(r.Total) + '</td><td class="num">' + money(r.BalanceDue) + '</td><td class="num">' + money(r.Credited) + '</td><td class="num"><b>' + money(r.Remaining) + '</b></td>' +
-                             '<td><button type="button" class="ocr-btn" style="padding:4px 10px;" data-act="pick" data-i="' + i + '">' + (S.SourceDocId === r.Id ? '✓ เลือกแล้ว' : 'เลือก') + '</button></td></tr>';
+                        h += '<tr class="src-pick' + (S.SourceDocId === r.Id ? ' src-sel' : '') + '" data-act="pick" data-i="' + i + '"><td><button type="button" class="ocr-btn" style="padding:4px 10px; white-space:nowrap;" data-act="pick" data-i="' + i + '">' + (S.SourceDocId === r.Id ? '✓ เลือกแล้ว' : 'เลือก') + '</button></td><td>' + esc(r.No) + (r.SupplierDocNo ? '<br/><small>ใบผู้ขาย ' + esc(r.SupplierDocNo) + '</small>' : '') + (r.Reason ? '<br/><small style="color:' + (r.Exact ? '#2f855a;font-weight:700' : '#2b6cb0') + ';">' + (r.Exact ? '✓ ' : '') + esc(r.Reason) + '</small>' : '') + '</td><td>' + esc(r.TypeLabel) + '</td><td>' + esc(r.Date) + '</td><td>' + esc(r.ContactName || '') + '</td>' +
+                             '<td class="num">' + money(r.Total) + '</td><td class="num">' + money(r.BalanceDue) + '</td><td class="num">' + money(r.Credited) + '</td><td class="num"><b>' + money(r.Remaining) + '</b></td></tr>';
                     });
                     h += '</tbody></table></div>';
                 }
@@ -849,7 +849,9 @@
             var cc = $('capChk'); if (cc && S.DocKind === 'VCN') { var cap = OcrMath.capCheck(t.net, +S.SourceTotal || 0, +S.SourceCredited || 0, +S.SourceBalanceDue || 0); cc.innerHTML = cap ? '<span class="badmark">✗ ' + esc(cap) + '</span>' : '<span class="okmark">✓ ใบนี้ ' + money(t.net) + ' ≤ ลดได้อีก — อยู่ในเพดาน §86/10</span>'; }
             var pc = $('paperChk'); if (pc) { pc.innerHTML = has(S.OrigAmount) && has(S.CorrectAmount) && has(S.DiffAmount) ? (Math.abs(OcrMath.r2(+S.OrigAmount - (+S.CorrectAmount)) - (+S.DiffAmount)) <= 0.01 ? '<span class="okmark">✓ เดิม − ที่ถูกต้อง = ผลต่าง</span>' : '<span class="badmark">✗ เดิม − ที่ถูกต้อง = ' + money(OcrMath.r2(+S.OrigAmount - (+S.CorrectAmount))) + '</span>') : ''; }
             // recon
-            var r = '<div style="overflow-x:auto;"><table class="tbl recon"><thead><tr><th>ช่อง</th><th class="num">ตามเอกสาร (แก้ได้)</th><th class="num">คำนวณจากรายการ</th><th class="num">ต่าง</th><th></th></tr></thead><tbody>';
+            var r = '';
+            if (S.PaperNotes && S.PaperNotes.length) r += '<div class="ocr-msg info" style="margin-bottom:8px;"><b>🔎 ที่มาของยอดตามเอกสาร</b> (ระบบกระทบยอดกระดาษให้บวกกันลงตัวก่อนใช้ — แก้ได้ในตาราง)<ul style="margin:4px 0 0 18px; padding:0;">' + S.PaperNotes.map(function (n) { return '<li>' + esc(n) + '</li>'; }).join('') + '</ul></div>';
+            r += '<div style="overflow-x:auto;"><table class="tbl recon"><thead><tr><th>ช่อง</th><th class="num">ตามเอกสาร (แก้ได้)</th><th class="num">คำนวณจากรายการ</th><th class="num">ต่าง</th><th></th></tr></thead><tbody>';
             var rows = [['PrintedSubTotal', 'ยอดก่อน VAT', t.sub], ['PrintedVat', 'ภาษีมูลค่าเพิ่ม', t.vat], ['PrintedTotal', 'ยอดรวมตามเอกสาร', t.total], ['PrintedWht', 'หัก ณ ที่จ่าย (ถ้าเอกสารระบุ)', t.wht]];
             rows.forEach(function (row) {
                 var it = null; v.recon.forEach(function (x) { if (x.key === row[0]) it = x; });
