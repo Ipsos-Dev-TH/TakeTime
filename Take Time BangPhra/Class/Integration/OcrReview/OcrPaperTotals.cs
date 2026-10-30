@@ -20,6 +20,15 @@ namespace Take_Time_BangPhra.Integration.OcrReview
         public List<string> Notes { get; } = new List<string>();
     }
 
+    /// <summary>VAT รายบรรทัดที่ OCR อ่านได้จริง (OcrLineItemDto.VatRate / VatAmount) — ใช้ตัดสินชนิด VAT ของบรรทัด</summary>
+    public sealed class OcrLineVatHint
+    {
+        /// <summary>OCR ส่งอัตรา VAT ของบรรทัดมาเอง (7/0/-1) — ไม่ทับ</summary>
+        public bool ExplicitRate { get; set; }
+        /// <summary>ยอด VAT ของบรรทัดตามกระดาษ (0 = บรรทัดไม่มี VAT)</summary>
+        public decimal? VatAmount { get; set; }
+    }
+
     /// <summary>
     /// ตัวกระทบยอดบนกระดาษ — pure (mono test). OCR ของ NextAcc คืน ExtractedSubTotal/VatAmount/TotalAmount โดยจับป้ายคำ
     /// (OcrService.cs:6385-6404 "ราคาสินค้า|ก่อนภาษี|รวมเงิน|…" / AmountTripleExtractor) ⇒ ใบลดหนี้ Makro ที่พิมพ์กล่อง §86/10
@@ -140,6 +149,111 @@ namespace Take_Time_BangPhra.Integration.OcrReview
                 + (linesSum.HasValue && (Eq(linesSum.Value, bs.Value) || Eq(linesSum.Value, bt.Value)) ? " (= Σรายการที่ OCR อ่าน)" : "")
                 + (isNote && diffAmount.HasValue && Eq(diffAmount.Value, bt.Value) ? " · เท่ากับผลต่าง §86/10 บนใบ" : ""));
             return res;
+        }
+
+        // ──────────────────────────────────────────────────────────────
+        // VAT รายบรรทัดตามกระดาษ
+        // ──────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// ตั้ง <c>VatType</c> ของบรรทัดที่ OCR ไม่ได้ส่งอัตรามา ให้ตรงกระดาษ (Makro: คอลัมน์ "รหัส ภ.พ." 1 = ไม่มี VAT, 2 = 7%). ลำดับหลักฐาน:
+        /// (ก) ยอด VAT ของบรรทัดที่ OCR อ่าน (0 ⇒ "0", &gt;0 ⇒ "7") · (ข) แถว "ฐาน VAT รวม" ในข้อความดิบที่ฐาน (หรือยอดรวม) ตรงยอดบรรทัด ·
+        /// (ค) เมื่อ VAT รวมที่คิดจากบรรทัดยังไม่ตรง VAT บนกระดาษ: หา <b>ชุดเดียว</b> ของบรรทัดที่ 7% บวกกันได้เท่า VAT กระดาษ (±0.05) ⇒ บรรทัดนอกชุด = "0".
+        /// คืนคำอธิบายของบรรทัดที่เปลี่ยน (ว่าง = ไม่แตะ). บรรทัดที่ OCR ส่งอัตรามาเอง / ผู้ใช้ตั้ง override ไม่ถูกทับ.
+        /// </summary>
+        public static List<string> InferLineVatTypes(List<OcrReviewLine> lines, List<OcrLineVatHint> hints, string rawText, decimal? printedVat, bool pricesIncludeVat)
+        {
+            var notes = new List<string>();
+            if (lines == null || lines.Count == 0 || hints == null || hints.Count != lines.Count) return notes;
+            var amount = lines.Select(l => OcrReviewMath.R2(l.Qty * l.UnitPrice - l.Discount)).ToList();
+            var open = new bool[lines.Count];   // ยังตัดสินไม่ได้
+            for (int i = 0; i < lines.Count; i++)
+            {
+                var h = hints[i]; var l = lines[i];
+                if (h.ExplicitRate || l.VatOverride.HasValue || l.VatType == "EX") continue;
+                if (h.VatAmount.HasValue)
+                {
+                    string want = h.VatAmount.Value <= 0.005m ? "0" : "7";
+                    if (l.VatType != want) { Set(l, want); notes.Add(LineNote(i, amount[i], want, "OCR อ่าน VAT ของบรรทัด = " + OcrReviewMath.Money(h.VatAmount.Value))); }
+                    continue;
+                }
+                open[i] = true;
+            }
+            if (!open.Any(x => x)) return notes;
+
+            // (ข) แถวในตาราง "ฐาน VAT รวม" (a + b = c) ที่ฐาน/ยอดรวมตรงยอดบรรทัด
+            var rows = ReadVatRows(rawText);
+            if (rows.Count > 0)
+            {
+                for (int i = 0; i < lines.Count; i++)
+                {
+                    if (!open[i]) continue;
+                    var hit = rows.FirstOrDefault(rw => Eq(rw[0], amount[i]) || Eq(rw[2], amount[i]));
+                    if (hit == null) continue;
+                    // แถวเดียวกันห้ามเป็นทั้ง "ฐาน" และ "รวม" ของบรรทัดต่างกัน — ถ้าทั้งสองบรรทัดจับแถวเดียวกัน ให้ข้าม (กำกวม)
+                    string want = hit[1] <= 0.005m ? "0" : "7";
+                    if (lines[i].VatType != want) { Set(lines[i], want); notes.Add(LineNote(i, amount[i], want, "บนกระดาษบรรทัดนี้ VAT " + OcrReviewMath.Money(hit[1]))); }
+                    open[i] = false;
+                }
+            }
+            if (!open.Any(x => x) || !printedVat.HasValue) return notes;
+
+            // (ค) ชุดบรรทัดที่ 7% บวกกันเท่า VAT กระดาษ — เฉพาะเมื่อตอนนี้ยังไม่ตรง และหาได้ชุดเดียว
+            Func<int, decimal> vatOf = i => pricesIncludeVat
+                ? OcrReviewMath.R2(amount[i] - OcrReviewMath.R2(amount[i] * 100m / 107m))
+                : OcrReviewMath.R2(amount[i] * 0.07m);
+            decimal fixedVat = 0m;   // VAT ของบรรทัดที่ตัดสินแล้ว (7%)
+            var idx = new List<int>();
+            for (int i = 0; i < lines.Count; i++)
+            {
+                if (open[i]) idx.Add(i);
+                else if (lines[i].VatType == "7") fixedVat += vatOf(i);
+            }
+            decimal target = printedVat.Value - fixedVat;
+            decimal nowVat = fixedVat + idx.Where(i => lines[i].VatType == "7").Sum(i => vatOf(i));
+            if (Math.Abs(nowVat - printedVat.Value) <= 0.05m || idx.Count > 16 || target < -0.05m) return notes;
+            int found = -1, hits = 0;
+            for (int mask = 0; mask < (1 << idx.Count); mask++)
+            {
+                decimal sum = 0m;
+                for (int k = 0; k < idx.Count; k++) if ((mask & (1 << k)) != 0) sum += vatOf(idx[k]);
+                if (Math.Abs(sum - target) <= 0.05m) { hits++; found = mask; if (hits > 1) break; }
+            }
+            if (hits != 1) return notes;
+            for (int k = 0; k < idx.Count; k++)
+            {
+                int i = idx[k]; string want = (found & (1 << k)) != 0 ? "7" : "0";
+                if (lines[i].VatType != want) { Set(lines[i], want); notes.Add(LineNote(i, amount[i], want, "VAT บนกระดาษ " + OcrReviewMath.Money(printedVat.Value) + " = 7% ของบรรทัดที่มี VAT เท่านั้น")); }
+            }
+            return notes;
+        }
+
+        private static void Set(OcrReviewLine l, string vatType)
+        {
+            l.VatType = vatType;
+            l.VatOverride = null;
+            if (vatType != "7") l.VatClaimable = true;
+        }
+
+        private static string LineNote(int i, decimal amount, string want, string why) =>
+            "รายการ " + (i + 1) + " (" + OcrReviewMath.Money(amount) + "): " + (want == "0" ? "ไม่มี VAT" : "VAT 7%") + " — " + why;
+
+        /// <summary>แถว "ฐาน VAT รวม" (ตัวเลขเงิน 3 ตัวติดกันบนบรรทัดเดียว a + b = c) — ใช้จับ VAT รายบรรทัดจากตารางสรุปตามรหัส ภ.พ.</summary>
+        public static List<decimal[]> ReadVatRows(string raw)
+        {
+            var list = new List<decimal[]>();
+            if (string.IsNullOrWhiteSpace(raw)) return list;
+            foreach (Match m in Regex.Matches(raw, MoneyPat + @"[^\S\n]+" + MoneyPat + @"[^\S\n]+" + MoneyPat, Opt))
+            {
+                decimal a, b, c;
+                if (decimal.TryParse(m.Groups[1].Value.Replace(",", ""), NumberStyles.Number, CultureInfo.InvariantCulture, out a)
+                    && decimal.TryParse(m.Groups[2].Value.Replace(",", ""), NumberStyles.Number, CultureInfo.InvariantCulture, out b)
+                    && decimal.TryParse(m.Groups[3].Value.Replace(",", ""), NumberStyles.Number, CultureInfo.InvariantCulture, out c)
+                    && a > 0m && b >= 0m && Math.Abs(a + b - c) <= SumTol && b <= a * 0.075m)
+                    list.Add(new[] { a, b, c });
+                if (list.Count >= 60) break;
+            }
+            return list;
         }
 
         private static int Score(Cand s, Cand v, Cand t, decimal? ocrSub, decimal? ocrVat, decimal? ocrTotal, decimal? linesSum, decimal? linesVat,

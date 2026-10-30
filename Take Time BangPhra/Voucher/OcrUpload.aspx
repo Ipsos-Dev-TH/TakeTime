@@ -864,9 +864,10 @@
                  ' · หัก ณ ที่จ่าย ' + money(t.wht) + (t.wht > 0 ? ' (' + (OcrMath.isJuristic(S.SupplierTaxId) ? 'ภ.ง.ด.53' : 'ภ.ง.ด.3') + ')' : '') + ' · <b>ยอด' + (OcrDocIsNote() ? 'ใบนี้' : 'จ่าย') + 'สุทธิ ' + money(t.net) + '</b></div>';
             var rc = $('rvRecon');
             if (rc) {
-                var act = document.activeElement, actF = act && act.getAttribute ? act.getAttribute('data-f') : null, selS = act && act.selectionStart, selE = act && act.selectionEnd;
+                // คงข้อความที่กำลังพิมพ์ (เช่น "3466." / "3466.5") — เดิมใส่ค่าที่แปลงเป็นตัวเลขกลับไป ทำให้จุดทศนิยม/ศูนย์ท้ายหายทันทีที่พิมพ์
+                var act = document.activeElement, actF = act && act.getAttribute ? act.getAttribute('data-f') : null, actVal = act ? act.value : null, selS = act && act.selectionStart, selE = act && act.selectionEnd;
                 rc.innerHTML = r;
-                if (actF && /^Printed/.test(actF)) { var ne = rc.querySelector('[data-f="' + actF + '"]'); if (ne) { ne.focus(); try { ne.setSelectionRange(selS, selE); } catch (e) { } } }
+                if (actF && /^Printed/.test(actF)) { var ne = rc.querySelector('[data-f="' + actF + '"]'); if (ne) { if (actVal !== null && ne.value !== actVal) ne.value = actVal; ne.focus(); try { ne.setSelectionRange(selS, selE); } catch (e) { } } }
             }
             // checks — ข้อที่ต้องแก้ + "แก้อย่างไร" + ปุ่มแก้ด่วน 1 แตะ (OcrMath.suggestFixes ≡ OcrReviewMath.SuggestFixes)
             var c = '', seenHint = {};

@@ -437,9 +437,11 @@ namespace Take_Time_BangPhra.Integration.OcrReview
                 bool allIncl = r.ExtractedItems.All(it => it != null && it.PriceIncludesVat);
                 bool anyFlag = r.ExtractedItems.Any(it => it != null && it.PriceIncludesVat);
                 var rawPrices = new List<decimal[]>();   // [ราคา/หน่วย, ส่วนลด] ตามกระดาษ ก่อนถอด 7% — ใช้ตัดสินใหม่เมื่อ OCR ติดธงแค่บางบรรทัด
+                var vatHints = new List<OcrLineVatHint>();   // VAT รายบรรทัดที่ OCR อ่านได้จริง (อัตรา/ยอด) — ไม่มี = ให้ InferLineVatTypes ตัดสินจากกระดาษ
                 foreach (var it in r.ExtractedItems)
                 {
                     if (it == null) continue;
+                    vatHints.Add(new OcrLineVatHint { ExplicitRate = it.VatRate.HasValue, VatAmount = it.VatAmount });
                     var l = new OcrReviewLine
                     {
                         Description = (it.Description ?? "").Trim(),
@@ -492,6 +494,10 @@ namespace Take_Time_BangPhra.Integration.OcrReview
                     if (det.HasValue && det.Value != s.PricesIncludeVat) { s.PricesIncludeVat = det.Value; s.PriceBasisSource = "AUTO"; }
                     else if (det.HasValue) s.PriceBasisSource = s.PriceBasisSource ?? "AUTO";
                 }
+                // VAT รายบรรทัดตามกระดาษ — เดิมทุกบรรทัดได้ 7% เมื่อ OCR ไม่ส่งอัตรา ⇒ ใบ Makro บรรทัด "รหัส ภ.พ. 1" (VAT 0.00) ถูกบวก 7% (242.66 แทน 72.42).
+                // ตัดสินจาก (ก) ยอด VAT รายบรรทัดที่ OCR อ่าน (ข) แถว "ฐาน VAT รวม" ในข้อความดิบที่ฐานตรงกับยอดบรรทัด (ค) ชุดบรรทัดที่ 7% บวกกันได้เท่า VAT บนกระดาษ (ชุดเดียว)
+                if (hasVat && s.Lines.Count > 1 && vatHints.Count == s.Lines.Count)
+                    s.PaperNotes.AddRange(OcrPaperTotals.InferLineVatTypes(s.Lines, vatHints, raw, s.PrintedVat, s.PricesIncludeVat));
                 // ส่วนลดท้ายบิลที่บรรทัดยังไม่รวม → ใส่ที่บรรทัดยอดสูงสุด (ผู้ใช้ปรับได้) — เฉพาะราคาไม่รวม VAT
                 decimal hdrDisc = r.ExtractedDiscountAmount ?? 0m;
                 if (hdrDisc > 0m && s.PrintedSubTotal.HasValue && !s.PricesIncludeVat)

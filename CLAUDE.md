@@ -288,6 +288,10 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
      ตรง Σรายการ +3, แถวรวม +4, ผลต่าง §86/10 +3; VAT > 7.5% ของฐาน −8; ช่องที่เท่ากับมูลค่าเดิม/ที่ถูกต้อง (ไม่ใช่ผลต่าง) −6). ชุด OCR เดิมที่ลงตัว = คงเดิม เว้นแต่ชุดใหม่ชนะ ≥ 4 คะแนน
      (Σรายการอ่านขาดไม่สลับ). ผล → `OcrReviewState.PaperNotes` (หน้าแสดง "🔎 ที่มาของยอดตามเอกสาร" เหนือตารางเทียบยอด, encode) · Confidence LOW = ไฮไลต์ 3 ช่อง (`LowConfidence`).
      มูลค่าเดิม/ที่ถูกต้อง/ผลต่างอ่านก่อนกระทบยอด. ยังไม่แก้ฝั่ง NextAcc (repo อื่น) — `TryCorrectScanAsync` ส่งยอดที่ยืนยันกลับผ่าน `ocr/{id}/correct` อยู่แล้ว.
+     **VAT รายบรรทัดตามกระดาษ** (`OcrPaperTotals.InferLineVatTypes`, เรียกหลังตัดสินฐานราคา): เดิม OCR ไม่ส่งอัตรา ⇒ ทุกบรรทัด 7% (Makro "รหัส ภ.พ. 1" = VAT 0.00 ถูกบวก 7%
+     → 242.66 แทน 72.42). ลำดับ (ก) `OcrLineItemDto.VatAmount` 0/>0 · (ข) `ReadVatRows` แถว "ฐาน VAT รวม" (a+b=c, b ≤ 7.5%a) ที่ฐาน/รวมตรงยอดบรรทัด · (ค) ชุด**เดียว**ของบรรทัด
+     ที่ 7% บวกได้เท่า VAT กระดาษ ±0.05 (brute force ≤16 บรรทัด; กำกวม = ไม่แตะ). ไม่ทับ: OCR ส่ง `VatRate` เอง / ผู้ใช้ตั้ง `VatOverride` / EX. คำอธิบาย → `PaperNotes`.
+     ช่อง "ตามเอกสาร (แก้ได้)": `updateDynamic` คืนข้อความที่กำลังพิมพ์ (`actVal`) หลัง re-render — เดิมใส่ตัวเลขที่แปลงแล้วกลับ ⇒ พิมพ์จุดทศนิยมไม่ได้.
 3b. **หน้า PaymentVoucher (manual) parity กับ OCR:** ✅ DONE (page-side only, ไม่แตะ mapper/sync).
    เพิ่ม 3 dropdown: (a) `ddlPaidHowNexaacc` แหล่งจ่ายเงินดึงจากผังบัญชีจริง NextAcc (11x/21x, value=
    `Nexaacc_AccountId`) → save บังคับ `paymentAccountId` ตัวนี้ก่อน mapping (`LookupPaidHowAccountId`)
