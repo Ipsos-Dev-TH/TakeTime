@@ -18,8 +18,7 @@ namespace Take_Time_BangPhra.Integration
     /// </summary>
     public class CreditNoteDocumentRequest : CreateDocumentRequest
     {
-        public Guid? RelatedDocumentId { get; set; }
-        public int? CreditNoteReason { get; set; }
+        // RelatedDocumentId / CreditNoteReason อยู่ใน CreateDocumentRequest แล้ว (ชนิดเดียวกัน) — ไม่ประกาศซ้ำ (เดิมซ่อนของ base = CS0108)
     }
 
     /// <summary>POST /document/{depositId}/refund-deposit — DocumentDtos.cs:406-414

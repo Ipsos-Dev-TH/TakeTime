@@ -1167,10 +1167,10 @@ namespace Take_Time_BangPhra.Integration
         }
 
         /// <summary>
-        /// DEPRECATED: ใช้ /document/{id}/void (JWT-only). Process* flow ใช้ credit note แทนแล้ว
-        /// คงไว้สำหรับ admin tools ที่อาจมี API Key (JWT) แยก
+        /// ยกเลิกเอกสาร (company `POST document/{id}/void` — DocumentController.cs:862; ไม่มี RejectApiKey ⇒ X-Api-Key acc_/int_ ใช้ได้).
+        /// ใช้กับเอกสารที่สร้างผ่าน company /document (ใบเสร็จ/ใบกำกับ DOCUMENT mode, OTADOC, ใบสำคัญจ่าย company) — เอกสาร integration เก่ายังใช้เส้นใบลดหนี้ได้.
+        /// (เดิมติด [Obsolete] "JWT-only" ซึ่งไม่จริงแล้ว ⇒ เตือน CS0618 ทุกจุดที่เรียก)
         /// </summary>
-        [Obsolete("Use ProcessVoidReceipt's credit-note path. JWT-only endpoint — will 401 with Integration Key.")]
         public async Task VoidDocumentAsync(Guid documentId)
         {
             await PostActionAsync($"{CompanyPath}/document/{documentId}/void");

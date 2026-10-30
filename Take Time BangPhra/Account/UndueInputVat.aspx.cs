@@ -68,7 +68,7 @@ namespace Take_Time_BangPhra.Account
             if (i > 0) Msg(f.Substring(0, i), f.Substring(i + 1));
         }
 
-        private List<NxUndueInputVatSummary> Load()
+        private List<NxUndueInputVatSummary> LoadUndueList()
         {
             var svc = new AccountingSyncService(conn);
             try
@@ -86,7 +86,7 @@ namespace Take_Time_BangPhra.Account
 
         private void BindList(bool rebuildMonths)
         {
-            var all = Load();
+            var all = LoadUndueList();
             if (rebuildMonths)
             {
                 string keep = IsPostBack ? ddlMonth.SelectedValue : (Request.QueryString["m"] ?? "");
@@ -203,7 +203,7 @@ namespace Take_Time_BangPhra.Account
         private void ServePdf(Guid id)
         {
             var svc = new AccountingSyncService(conn);
-            var list = Load();
+            var list = LoadUndueList();
             if (!list.Any(x => x.Id == id))
             {
                 Response.StatusCode = 404;

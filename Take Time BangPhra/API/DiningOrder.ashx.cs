@@ -417,6 +417,7 @@ namespace Take_Time_BangPhra.API
         private static readonly TimeSpan RateWindow = TimeSpan.FromMinutes(10);
         private const int RatePerIpMutations = 120;
 
+#pragma warning disable 0649   // ฟิลด์ถูกเติมโดย JavaScriptSerializer.Deserialize — ไม่มีโค้ดกำหนดค่าตรง
         private sealed class CartLineDto
         {
             public int pid;
@@ -424,6 +425,7 @@ namespace Take_Time_BangPhra.API
             public int[] opt;
             public string note;
         }
+#pragma warning restore 0649
 
         public void ProcessRequest(HttpContext ctx)
         {
