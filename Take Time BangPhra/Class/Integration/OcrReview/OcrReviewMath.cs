@@ -309,6 +309,59 @@ namespace Take_Time_BangPhra.Integration.OcrReview
         }
 
         /// <summary>
+        /// เลือกใบกำกับเดิมให้อัตโนมัติจากผู้สมัครที่ "ตรงเลขใบกำกับเดิม" (Exact): ใบเดียว = เลือก · หลายใบ = คัดทีละขั้น
+        /// (ผู้ขายเดียวกัน → ลงวันที่ไม่หลังใบลด/เพิ่มหนี้ → ยอดที่ลดได้อีกพอ) จนเหลือใบเดียว · ยังเหลือหลายใบ/ไม่มี = null (ให้ผู้ใช้เลือกเอง)
+        /// </summary>
+        public static OcrSourcePick PickSource(IList<OcrSourcePick> candidates, OcrReviewState s)
+        {
+            if (candidates == null) return null;
+            var set = candidates.Where(c => c != null && c.Exact).ToList();
+            if (set.Count <= 1) return set.FirstOrDefault();
+            Func<List<OcrSourcePick>, List<OcrSourcePick>, List<OcrSourcePick>> narrow = (cur, next) => next.Count > 0 ? next : cur;
+
+            // ผู้ขายเดียวกัน
+            string cid = s?.SourceContactId;
+            string name = NormalizeName(s?.SupplierName);
+            var bySupplier = set.Where(c => (!string.IsNullOrEmpty(cid) && string.Equals(c.ContactId, cid, StringComparison.OrdinalIgnoreCase))
+                                         || (name.Length >= 4 && NormalizeName(c.ContactName).Length >= 4
+                                             && (NormalizeName(c.ContactName).Contains(name) || name.Contains(NormalizeName(c.ContactName))))).ToList();
+            set = narrow(set, bySupplier);
+            if (set.Count == 1) return set[0];
+
+            // ลงวันที่ไม่หลังใบลด/เพิ่มหนี้
+            DateTime noteDate;
+            string nd = s?.SupplierDocDate ?? s?.DocDate;
+            if (!string.IsNullOrEmpty(nd) && DateTime.TryParseExact(nd, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out noteDate))
+            {
+                var before = set.Where(c => { DateTime d; return DateTime.TryParseExact(c.Date ?? "", "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out d) && d <= noteDate; }).ToList();
+                set = narrow(set, before);
+                if (set.Count == 1) return set[0];
+            }
+
+            // ยอดที่ลดได้อีกพอสำหรับใบนี้ (ใบเพิ่มหนี้ไม่มีเพดาน — ข้าม)
+            if (s != null && s.DocKind == OcrDocKind.VendorCreditNote)
+            {
+                decimal need = Math.Abs(CalcTotals(s).Total);
+                if (need > 0m)
+                {
+                    var enough = set.Where(c => c.Remaining + Tolerance >= need).ToList();
+                    set = narrow(set, enough);
+                    if (set.Count == 1) return set[0];
+                }
+            }
+            return null;
+        }
+
+        /// <summary>ชื่อผู้ขายเพื่อเทียบหยาบ ๆ: ตัดคำนำหน้านิติบุคคล/วงเล็บ/ช่องว่าง/จุด, ตัวพิมพ์เล็ก</summary>
+        public static string NormalizeName(string n)
+        {
+            if (string.IsNullOrWhiteSpace(n)) return "";
+            string x = Regex.Replace(n, @"\(.*?\)", " ");
+            x = Regex.Replace(x, @"บริษัท|บจก\.?|บมจ\.?|ห้างหุ้นส่วนจำกัด|หจก\.?|จำกัด|มหาชน|co\.?|ltd\.?|limited|public|company|plc\.?", " ", RegexOptions.IgnoreCase);
+            return Regex.Replace(x, @"[\s\.\-,]", "").ToLowerInvariant();
+        }
+
+        /// <summary>
         /// เลือก "ราคาในรายการรวม VAT แล้ว / ยังไม่รวม" ให้เองตามยอดบนกระดาษ (<see cref="DetectPricesIncludeVat"/>) ตราบใดที่ผู้ใช้ยังไม่เลือกเอง
         /// (<c>PriceBasisSource != "USER"</c>) — เรียกทุกครั้งที่หน้าคำนวณใหม่และก่อนส่ง (เดิมตรวจครั้งเดียวตอนสแกน แล้วแค่ขึ้นคำใบ้ "ควรเป็น…"
         /// เมื่อผู้ใช้แก้ยอดตามเอกสาร/รายการ ⇒ ผู้ใช้ต้องสลับเอง). สลับแล้วล้าง VAT override และปรับเศษ VAT ตามกระดาษใหม่ (FIT_VAT).
@@ -811,13 +864,29 @@ namespace Take_Time_BangPhra.Integration.OcrReview
         {
             number = null; isoDate = null;
             if (string.IsNullOrWhiteSpace(raw)) return false;
-            var m = Regex.Match(raw,
-                @"(?:อ้างอิง\s*ใบ\s*กำกับ\s*ภาษี\s*(?:เดิม)?\s*(?:เลข\s*ที่|เลขที่|No\.?)?|ใบ\s*กำกับ\s*ภาษี\s*เดิม\s*(?:เลข\s*ที่|เลขที่)?|Ref(?:erence)?\.?\s*(?:Tax\s*)?Invoice\s*(?:No\.?)?)\s*[:：]?\s*([A-Z0-9][A-Z0-9\-/]{3,30})"
-                + @"(?:[^\n\d]{0,30}?(\d{1,2}[/.\-]\d{1,2}[/.\-]\d{2,4}))?", Opt);
-            if (!m.Success) return false;
-            number = m.Groups[1].Value.Trim();
-            if (m.Groups[2].Success) isoDate = ParseDate(m.Groups[2].Value);
-            return true;
+            // ป้ายที่พบบนใบลด/เพิ่มหนี้ของผู้ขายแต่ละเจ้า (เรียงจากชัดสุด) — เลขที่ = ตัวอักษร/ตัวเลขต่อกัน 4-31 ตัว (มี - / ได้), ตามด้วยวันที่ได้
+            string[] labels =
+            {
+                @"อ้าง\s*(?:อิง|ถึง)\s*(?:ใบ\s*เสร็จ\s*(?:รับ\s*เงิน)?\s*/\s*)?ใบ\s*กำกับ\s*(?:ภาษี)?\s*(?:เดิม)?\s*(?:เลข\s*ที่|No\.?)?",
+                @"(?:เลข\s*ที่\s*)?ใบ\s*กำกับ\s*ภาษี\s*เดิม\s*(?:เลข\s*ที่)?",
+                @"ตาม\s*ใบ\s*กำกับ\s*ภาษี\s*(?:เลข\s*ที่)?",
+                @"อ้าง\s*(?:อิง|ถึง)\s*(?:ใบ\s*)?(?:แจ้งหนี้|ส่งของ|ส่งสินค้า|อินวอยซ์|เอกสาร)\s*(?:เดิม)?\s*(?:เลข\s*ที่|No\.?)?",
+                @"Ref(?:erence)?\.?\s*(?:Tax\s*)?Inv(?:oice)?\.?\s*(?:No\.?)?",
+                @"Orig(?:inal)?\.?\s*(?:Tax\s*)?Inv(?:oice)?\.?\s*(?:No\.?)?",
+                @"Invoice\s*Ref(?:erence)?\.?\s*(?:No\.?)?"
+            };
+            foreach (var lb in labels)
+            {
+                var m = Regex.Match(raw, "(?:" + lb + @")\s*[:：#]?\s*([A-Z0-9][A-Z0-9\-/]{3,30})"
+                    + @"(?:[^\n\d]{0,30}?(\d{1,2}[/.\-]\d{1,2}[/.\-]\d{2,4}))?", Opt);
+                if (!m.Success) continue;
+                string no = m.Groups[1].Value.Trim().TrimEnd('-', '/');
+                if (!Regex.IsMatch(no, @"\d")) continue;   // ต้องมีตัวเลข (กันคำอย่าง "DATE")
+                number = no;
+                if (m.Groups[2].Success) isoDate = ParseDate(m.Groups[2].Value);
+                return true;
+            }
+            return false;
         }
 
         /// <summary>วันที่ dd/MM/yyyy (พ.ศ. &gt; 2400 แปลงเป็น ค.ศ.) → yyyy-MM-dd · ปี 2 หลัก = 20xx</summary>

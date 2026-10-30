@@ -273,6 +273,13 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
      ร่างบน NextAcc (status 0) = `DeleteDraftDocumentAsync` (`DELETE document/{id}` DocumentController.cs:1018-1029, เฉพาะ Draft) · 404/ยกเลิกแล้ว = ทิ้งได้ ·
      รออนุมัติ/ตีกลับ/อนุมัติ/APPROVED-DONE = ไม่ทิ้ง (บอกให้ยกเลิกใน NextAcc). ปุ่ม "🗑 ทิ้ง" ในรายการงานที่ยังไม่ส่ง (`btnDiscardRow` + confirm) และปุ่มเดิมในหน้าตรวจทาน
      (แสดงจนกว่าจะอนุมัติ).
+   - **เลือกใบกำกับเดิมให้อัตโนมัติ + ย้ายส่วนอ้างอิงขึ้นบน (ต.ค. 2026):** `OcrCnPaperReader.ReadOriginalInvoice` รับหลายป้าย (อ้างอิง/อ้างถึงใบกำกับภาษี, ใบกำกับภาษีเดิม,
+     ตามใบกำกับภาษี, อ้างอิงใบส่งของ/แจ้งหนี้, Ref./Original Invoice No; เลขต้องมีตัวเลข) · `OcrReviewService.FindLocalSourceDocIds` ค้น "ระบบเรา" จากเลขใบเดิม:
+     `Ocr_Document_Log` (PV/EXP ส่งแล้ว) · `Account_Payment.Supplier_Invoice_No_Norm` · `Product_In.Supplier_Doc_No`→`Linked_Voucher_Id` → id NextAcc จาก
+     `Nexaacc_Voucher_Doc_Marker` หรือคิว CREATE_VOUCHER_JOURNAL ที่สำเร็จ → `SearchSourceDocsAsync(..., localHits)` นับเป็น Exact · `OcrReviewMath.PickSource` (pure):
+     Exact ใบเดียว = เลือก · หลายใบ คัด ผู้ขายเดียวกัน (ContactId/ชื่อ `NormalizeName`) → วันที่ไม่หลังใบนี้ → ยอดลดได้อีกพอ (CN) · เหลือหลายใบ = ให้ผู้ใช้เลือก.
+     ใช้ใน `FindAndPickSource` (สแกนใหม่ + เปิดร่างที่ยังไม่เลือก + ปุ่มค้นหา). หน้า: `renderNoteSource()` (กรอบน้ำเงิน `#rvSrcTop`) อยู่ถัดจาก "1. ชนิดเอกสาร" ·
+     เหตุผล/การคืนสินค้า/ขาเงิน = `renderNoteRest()` ก่อน "4. รายการ".
 3b. **หน้า PaymentVoucher (manual) parity กับ OCR:** ✅ DONE (page-side only, ไม่แตะ mapper/sync).
    เพิ่ม 3 dropdown: (a) `ddlPaidHowNexaacc` แหล่งจ่ายเงินดึงจากผังบัญชีจริง NextAcc (11x/21x, value=
    `Nexaacc_AccountId`) → save บังคับ `paymentAccountId` ตัวนี้ก่อน mapping (`LookupPaidHowAccountId`)

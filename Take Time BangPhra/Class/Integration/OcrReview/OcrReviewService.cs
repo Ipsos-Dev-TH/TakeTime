@@ -583,9 +583,121 @@ namespace Take_Time_BangPhra.Integration.OcrReview
                 .Where(d => d.RelatedDocumentId == sourceId && IsLiveStatus(d.Status)).Sum(d => d.TotalAmount));
         }
 
+        /// <summary>
+        /// ค้นใบกำกับเดิมใน "ระบบเรา" จากเลขใบของผู้ขาย (อ้างอิงบนใบลด/เพิ่มหนี้) → id เอกสาร NextAcc + ที่มา:
+        /// (1) ประวัติสแกน OCR (`Ocr_Document_Log` PV/EXP ที่อนุมัติแล้ว, `Supplier_Doc_No_Norm`) · (2) ใบสำคัญจ่ายที่บันทึกในระบบ
+        /// (`Account_Payment.Supplier_Invoice_No_Norm`, PHASE19_40) · (3) รับของ (`Product_In.Supplier_Doc_No` → `Linked_Voucher_Id`, PHASE19_31)
+        /// — (2)(3) หาเอกสาร NextAcc จาก `Account_Payment.Nexaacc_Voucher_Doc_Marker` (GUID) หรือคิว CREATE_VOUCHER_JOURNAL ที่สำเร็จ.
+        /// ไม่มีตาราง/คอลัมน์ = ข้ามขั้นนั้น
+        /// </summary>
+        public List<KeyValuePair<Guid, string>> FindLocalSourceDocIds(string origNo)
+        {
+            var list = new List<KeyValuePair<Guid, string>>();
+            var seen = new HashSet<Guid>();
+            string norm = OcrReviewMath.NormalizeDocNo(origNo);
+            if (norm.Length < 4) return list;
+            Action<Guid, string> add = (g, why) => { if (g != Guid.Empty && seen.Add(g)) list.Add(new KeyValuePair<Guid, string>(g, why)); };
+            Func<string, bool> colExists = sql =>
+            {
+                try { var t = _code.DatabaseQuerySafe(_conn, sql, null); return t != null && t.Rows.Count > 0 && Convert.ToInt32(t.Rows[0][0]) == 1; }
+                catch { return false; }
+            };
+
+            // (1) ประวัติสแกน OCR
+            if (HasLogTable())
+            {
+                try
+                {
+                    var dt = _code.DatabaseQuerySafe(_conn,
+                        @"SELECT TOP 10 Nexaacc_Doc_Id, Nexaacc_Doc_No FROM Ocr_Document_Log
+                           WHERE Supplier_Doc_No_Norm = @n AND Doc_Kind IN (N'PV', N'EXP') AND Nexaacc_Doc_Id IS NOT NULL
+                             AND Status IN (N'APPROVED', N'DONE')
+                           ORDER BY ISNULL(Updated_At, Created_At) DESC",
+                        new Dictionary<string, object> { { "@n", norm } });
+                    if (dt != null)
+                        foreach (DataRow r in dt.Rows)
+                            add((Guid)r["Nexaacc_Doc_Id"], "พบในระบบ: สแกน OCR ที่ส่งแล้ว " + (r["Nexaacc_Doc_No"] == DBNull.Value ? "" : r["Nexaacc_Doc_No"].ToString()));
+                }
+                catch { }
+            }
+
+            // (2)(3) ใบสำคัญจ่าย / รับของ → เลขใบสำคัญจ่ายในระบบ
+            var payIds = new List<KeyValuePair<string, string>>();
+            if (colExists("SELECT CASE WHEN COL_LENGTH('dbo.Account_Payment','Supplier_Invoice_No_Norm') IS NULL THEN 0 ELSE 1 END"))
+            {
+                try
+                {
+                    var dt = _code.DatabaseQuerySafe(_conn,
+                        "SELECT TOP 10 CAST(ID AS NVARCHAR(100)) AS PID FROM Account_Payment WHERE Supplier_Invoice_No_Norm = @n ORDER BY Created_Date DESC",
+                        new Dictionary<string, object> { { "@n", norm } });
+                    if (dt != null) foreach (DataRow r in dt.Rows) payIds.Add(new KeyValuePair<string, string>(r["PID"].ToString(), "ใบสำคัญจ่าย"));
+                }
+                catch { }
+            }
+            if (colExists("SELECT CASE WHEN COL_LENGTH('dbo.Product_In','Supplier_Doc_No') IS NULL OR COL_LENGTH('dbo.Product_In','Linked_Voucher_Id') IS NULL THEN 0 ELSE 1 END"))
+            {
+                try
+                {
+                    // เทียบแบบตัดสัญลักษณ์ในโค้ด — กรองหยาบด้วยตัวท้าย 4 ตัวก่อน
+                    string tail = norm.Substring(norm.Length - 4);
+                    var dt = _code.DatabaseQuerySafe(_conn,
+                        @"SELECT TOP 50 Supplier_Doc_No, CAST(Linked_Voucher_Id AS NVARCHAR(100)) AS PID FROM Product_In
+                           WHERE Linked_Voucher_Id IS NOT NULL AND Supplier_Doc_No LIKE @t",
+                        new Dictionary<string, object> { { "@t", "%" + tail + "%" } });
+                    if (dt != null)
+                        foreach (DataRow r in dt.Rows)
+                            if (OcrReviewMath.NormalizeDocNo(r["Supplier_Doc_No"]?.ToString()) == norm && !string.IsNullOrWhiteSpace(r["PID"]?.ToString()))
+                                payIds.Add(new KeyValuePair<string, string>(r["PID"].ToString().Trim(), "รับของเข้าสต๊อก"));
+                }
+                catch { }
+            }
+            bool hasMarker = colExists("SELECT CASE WHEN COL_LENGTH('dbo.Account_Payment','Nexaacc_Voucher_Doc_Marker') IS NULL THEN 0 ELSE 1 END");
+            foreach (var p in payIds.GroupBy(x => x.Key, StringComparer.OrdinalIgnoreCase).Select(g => g.First()).Take(10))
+            {
+                Guid doc = Guid.Empty;
+                try
+                {
+                    if (hasMarker)
+                    {
+                        var mt = _code.DatabaseQuerySafe(_conn, "SELECT TOP 1 Nexaacc_Voucher_Doc_Marker FROM Account_Payment WHERE CAST(ID AS NVARCHAR(100)) = @id",
+                            new Dictionary<string, object> { { "@id", p.Key } });
+                        string mk = mt != null && mt.Rows.Count > 0 && mt.Rows[0][0] != DBNull.Value ? mt.Rows[0][0].ToString() : null;
+                        Guid g;
+                        if (Guid.TryParse(mk ?? "", out g)) doc = g;
+                    }
+                    if (doc == Guid.Empty)
+                    {
+                        string idLike = p.Key.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]");
+                        var qt = _code.DatabaseQuerySafe(_conn,
+                            @"SELECT TOP 1 Nexaacc_Response_Id FROM Accounting_Sync_Queue
+                               WHERE Entity_Type = 'VOUCHER' AND Action_Type = 'CREATE_VOUCHER_JOURNAL' AND Status = 'COMPLETED'
+                                 AND Payload LIKE @p ORDER BY ID DESC",
+                            new Dictionary<string, object> { { "@p", "%\"documentNumber\":\"" + idLike + "\"%" } });
+                        Guid g;
+                        if (qt != null && qt.Rows.Count > 0 && Guid.TryParse(qt.Rows[0][0]?.ToString() ?? "", out g)) doc = g;
+                    }
+                }
+                catch { }
+                add(doc, "พบในระบบ: " + p.Value + " " + p.Key);
+            }
+            return list;
+        }
+
+        /// <summary>ใบกำกับเดิมที่ควรเลือกให้อัตโนมัติจากผลค้น (<see cref="OcrReviewMath.PickSource"/>) — null = ให้ผู้ใช้เลือกเอง</summary>
+        public static OcrSourceCandidate PickCandidate(List<OcrSourceCandidate> results, OcrReviewState s)
+        {
+            if (results == null || results.Count == 0) return null;
+            var pick = OcrReviewMath.PickSource(results.Select(r => new OcrSourcePick
+            {
+                Id = r.Id, Exact = r.Exact, ContactId = r.ContactId, ContactName = r.ContactName, Date = r.Date, Remaining = r.Remaining
+            }).ToList(), s);
+            return pick == null ? null : results.FirstOrDefault(r => r.Id == pick.Id);
+        }
+
         /// <summary>ค้นใบต้นทาง (PI/Expense/PV ที่อนุมัติแล้ว) ของผู้ขาย — คำค้น = เลขที่เอกสาร/ชื่อผู้ขาย · ผู้ติดต่อที่ OCR จับคู่ได้ช่วยกรอง
-        /// + ใบที่ NextAcc จัดอันดับให้สแกน (predecessor-candidates) เมื่อมี</summary>
-        public static async Task<List<OcrSourceCandidate>> SearchSourceDocsAsync(AccountingApiClient client, OcrReviewState s, List<string> notes)
+        /// + ใบที่ NextAcc จัดอันดับให้สแกน (predecessor-candidates) เมื่อมี + ใบที่พบใน "ระบบเรา" (<see cref="FindLocalSourceDocIds"/>)</summary>
+        public static async Task<List<OcrSourceCandidate>> SearchSourceDocsAsync(AccountingApiClient client, OcrReviewState s, List<string> notes,
+            IList<KeyValuePair<Guid, string>> localHits = null)
         {
             var map = new Dictionary<Guid, OcrSourceCandidate>();
             Guid contactId;
@@ -630,6 +742,27 @@ namespace Take_Time_BangPhra.Integration.OcrReview
                     }
                     map[d.Id] = cand;
                 }
+            }
+
+            // ใบที่พบใน "ระบบเรา" จากเลขใบกำกับเดิม (ใบสำคัญจ่าย/รับของ/สแกน OCR) — นับเป็นตรงเลขใบเดิม
+            foreach (var hit in localHits ?? new List<KeyValuePair<Guid, string>>())
+            {
+                OcrSourceCandidate known;
+                if (map.TryGetValue(hit.Key, out known)) { if (!known.Exact) { known.Exact = true; known.Reason = hit.Value; } continue; }
+                try
+                {
+                    var d = (await client.GetDocumentAsync(hit.Key))?.data;
+                    if (d == null || !IsLiveStatus(d.Status) || !PurchaseSourceTypes.Contains(d.DocumentType)) continue;
+                    map[d.Id] = new OcrSourceCandidate
+                    {
+                        Id = d.Id.ToString(), No = d.DocumentNumber, Type = d.DocumentType.ToString(CultureInfo.InvariantCulture),
+                        TypeLabel = TypeLabel(d.DocumentType), Date = d.DocumentDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                        Total = d.TotalAmount, BalanceDue = d.BalanceDue, SubTotal = d.SubTotal,
+                        ContactId = d.Contact?.Id.ToString(), ContactName = d.Contact?.Name, SupplierDocNo = d.SupplierInvoiceNumber,
+                        Exact = true, Reason = hit.Value + (orig.Length > 0 ? " (เลขใบกำกับเดิม " + orig + ")" : "")
+                    };
+                }
+                catch { /* เอกสารหาย/ถูกลบบน NextAcc — ข้าม */ }
             }
 
             // ผู้สมัครที่ NextAcc จัดอันดับ (เมื่อสแกนนี้ถูกตีเป็นใบลด/เพิ่มหนี้อยู่แล้ว)

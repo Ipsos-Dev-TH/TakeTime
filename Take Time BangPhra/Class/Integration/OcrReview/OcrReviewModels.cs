@@ -140,6 +140,18 @@ namespace Take_Time_BangPhra.Integration.OcrReview
     }
 
     /// <summary>บรรทัดของใบต้นทางใน NextAcc (อ่านอย่างเดียว — ใช้แสดงข้างฟอร์มและจับคู่บัญชีของบรรทัดใบลด/เพิ่มหนี้)</summary>
+    /// <summary>ข้อมูลผู้สมัครใบกำกับเดิมที่ <see cref="OcrReviewMath.PickSource"/> ใช้ตัดสิน (สกัดจาก OcrSourceCandidate)</summary>
+    public sealed class OcrSourcePick
+    {
+        public string Id { get; set; }
+        public bool Exact { get; set; }
+        public string ContactId { get; set; }
+        public string ContactName { get; set; }
+        /// <summary>yyyy-MM-dd</summary>
+        public string Date { get; set; }
+        public decimal Remaining { get; set; }
+    }
+
     public sealed class OcrSourceLine
     {
         public string Description { get; set; }

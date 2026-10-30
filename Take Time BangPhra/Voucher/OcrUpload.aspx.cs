@@ -315,6 +315,12 @@ namespace Take_Time_BangPhra.Voucher
                 ViewState["ocrMeta"] = OcrReviewService.ToJson(OcrMeta(ocr));
                 ViewState["fileName"] = ocr.OriginalFileName;
             }
+            // ร่างที่เปิดต่อแต่ยังไม่ได้เลือกใบกำกับเดิม (เช่นสแกนก่อนมีการค้นในระบบเรา) — ค้นให้หนึ่งครั้ง
+            if (state != null && OcrDocKind.IsNote(state.DocKind) && ViewState["cnResults"] == null && (row == null || !row.NexaaccDocId.HasValue))
+            {
+                AutoFindSource(state);
+                if (!string.IsNullOrWhiteSpace(state.SourceDocId)) Session[DraftKey(scanId)] = OcrReviewService.ToJson(state);
+            }
             if (row != null && row.NexaaccDocId.HasValue)
                 _serverNotes.Add("มีเอกสารบน NextAcc แล้ว (" + (row.NexaaccDocNo ?? row.NexaaccDocId.ToString()) + ", สถานะ " + row.Status
                     + ") — กดส่งจะทำต่อจากขั้นที่ค้าง ไม่สร้างใหม่" + (string.IsNullOrEmpty(row.LastError) ? "" : " · ล่าสุด: " + row.LastError));
@@ -495,24 +501,7 @@ namespace Take_Time_BangPhra.Voucher
             var s = ReadPostedState();
             if (s == null) { ReviewLost(); return; }
             var notes = new List<string>();
-            try
-            {
-                var results = RunSync(() => OcrReviewService.SearchSourceDocsAsync(NewClient(), s, notes));
-                ViewState["cnResults"] = OcrReviewService.ToJson(results);
-                // ตรงเลขใบกำกับเดิมใบเดียว และยังไม่ได้เลือก ⇒ เลือกให้เลย
-                var exact = results.Where(x => x.Exact).ToList();
-                if (string.IsNullOrWhiteSpace(s.SourceDocId) && exact.Count == 1)
-                {
-                    s.SourceDocId = exact[0].Id;
-                    LoadSource(s, notes);
-                    notes.Insert(0, "เลือกใบต้นทาง " + exact[0].No + " ให้แล้ว (ตรงเลขใบกำกับเดิม " + s.OrigTaxInvoiceNo + ") — เปลี่ยนได้");
-                }
-            }
-            catch (Exception ex)
-            {
-                notes.Add("ค้นเอกสารต้นทางไม่สำเร็จ: " + OcrReviewService.ApiMessage(ex));
-                ViewState["cnResults"] = null;
-            }
+            FindAndPickSource(s, notes, string.IsNullOrWhiteSpace(s.SourceDocId));
             ViewState["cnNotes"] = OcrReviewService.ToJson(notes);
             Svc.SaveDraft(s, null, null, UserName);
             RenderReview(s);
@@ -545,26 +534,45 @@ namespace Take_Time_BangPhra.Voucher
             catch (Exception ex) { notes.Add("โหลดใบต้นทางไม่สำเร็จ: " + OcrReviewService.ApiMessage(ex)); }
         }
 
-        /// <summary>ครั้งแรกที่เปิดใบลด/เพิ่มหนี้: ค้นด้วยเลขใบกำกับเดิม (best-effort ไม่บล็อกหน้า)</summary>
+        /// <summary>เปิดใบลด/เพิ่มหนี้ (สแกนใหม่/เปิดร่างที่ยังไม่เลือกใบเดิม): ค้นด้วยเลขใบกำกับเดิมแล้วเลือกให้ (best-effort ไม่บล็อกหน้า)</summary>
         private void AutoFindSource(OcrReviewState s)
         {
             if (string.IsNullOrWhiteSpace(s.OrigTaxInvoiceNo) || !string.IsNullOrWhiteSpace(s.SourceDocId)) return;
             var notes = new List<string>();
+            FindAndPickSource(s, notes, true);
+            ViewState["cnNotes"] = OcrReviewService.ToJson(notes);
+        }
+
+        /// <summary>
+        /// ค้นใบกำกับเดิม = NextAcc (เลขที่/ชื่อผู้ขาย/ผู้ติดต่อ/ผู้สมัครที่ NextAcc แนะนำ) + "ระบบเรา" จากเลขใบกำกับเดิมบนใบลดหนี้
+        /// (ใบสำคัญจ่าย/รับของ/สแกน OCR — <see cref="OcrReviewService.FindLocalSourceDocIds"/>) แล้ว <paramref name="autoPick"/> = เลือกให้เมื่อ
+        /// ตัดสินได้ใบเดียว (<see cref="OcrReviewService.PickCandidate"/>: ตรงเลข → ผู้ขายเดียวกัน → วันที่ไม่หลังใบนี้ → ยอดลดได้พอ)
+        /// </summary>
+        private void FindAndPickSource(OcrReviewState s, List<string> notes, bool autoPick)
+        {
             try
             {
-                var results = RunSync(() => OcrReviewService.SearchSourceDocsAsync(NewClient(), s, notes));
+                var local = Svc.FindLocalSourceDocIds(s.OrigTaxInvoiceNo);
+                var results = RunSync(() => OcrReviewService.SearchSourceDocsAsync(NewClient(), s, notes, local));
                 ViewState["cnResults"] = OcrReviewService.ToJson(results);
-                var exact = results.Where(x => x.Exact).ToList();
-                if (exact.Count == 1)
+                int exact = results.Count(x => x.Exact);
+                var pick = autoPick ? OcrReviewService.PickCandidate(results, s) : null;
+                if (pick != null)
                 {
-                    s.SourceDocId = exact[0].Id;
+                    s.SourceDocId = pick.Id;
                     LoadSource(s, notes);
-                    notes.Insert(0, "พบใบต้นทาง " + exact[0].No + " จากเลขใบกำกับเดิม " + s.OrigTaxInvoiceNo + " — เลือกให้แล้ว (เปลี่ยนได้)");
+                    notes.Insert(0, "เลือกใบกำกับเดิม " + pick.No + " ให้แล้ว — " + (pick.Reason ?? ("ตรงเลข " + s.OrigTaxInvoiceNo))
+                        + (exact > 1 ? " (คัดจาก " + exact + " ใบที่อ้างเลขเดียวกัน: ผู้ขาย/วันที่/ยอดที่ลดได้)" : "") + " · เปลี่ยนได้ที่ตาราง");
                 }
-                else if (exact.Count > 1) notes.Insert(0, "พบใบต้นทางที่อ้างเลข " + s.OrigTaxInvoiceNo + " หลายใบ — เลือกใบที่ถูกจากตาราง");
+                else if (exact > 1) notes.Insert(0, "พบใบที่อ้างเลข " + s.OrigTaxInvoiceNo + " " + exact + " ใบ ตัดสินเองไม่ได้ — เลือกใบที่ถูกจากตาราง");
+                else if (exact == 0 && !string.IsNullOrWhiteSpace(s.OrigTaxInvoiceNo))
+                    notes.Insert(0, "ไม่พบใบที่มีเลขใบกำกับ " + s.OrigTaxInvoiceNo + " ทั้งใน NextAcc และในระบบ — เลือกจากตาราง ค้นด้วยเลขที่เอกสาร NextAcc หรือเลือก \"ใบเดิมอยู่นอกระบบ\"");
             }
-            catch (Exception ex) { notes.Add("ค้นใบต้นทางอัตโนมัติไม่สำเร็จ: " + OcrReviewService.ShortError(ex)); }
-            ViewState["cnNotes"] = OcrReviewService.ToJson(notes);
+            catch (Exception ex)
+            {
+                notes.Add("ค้นใบกำกับเดิมไม่สำเร็จ: " + OcrReviewService.ApiMessage(ex));
+                ViewState["cnResults"] = null;
+            }
         }
 
         protected void btnSubmit_Click(object sender, EventArgs e) => DoSubmit(false);

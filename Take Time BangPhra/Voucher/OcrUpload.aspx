@@ -19,6 +19,8 @@
         .ocr-hint { font-size:12px; color:#777; }
         .badge { display:inline-block; padding:2px 8px; border-radius:10px; font-size:12px; color:#fff; background:#718096; }
         .tbl { width:100%; border-collapse:collapse; font-size:13px; }
+        .rv-src-top { border:2px solid #3182ce; border-radius:10px; background:#f7fbff; }
+        .rv-src-top h4 { color:#2b6cb0; }
         .ocr-del { margin-left:10px; border:1px solid #feb2b2; background:#fff5f5; color:#c53030; border-radius:6px; padding:3px 9px; font-size:12px; cursor:pointer; min-height:28px; }
         .ocr-del:hover { background:#fed7d7; }
         .tbl th, .tbl td { padding:6px 8px; border-top:1px solid #eee; text-align:left; vertical-align:top; }
@@ -598,6 +600,9 @@
             KINDS.forEach(function (k) { h += '<label class="kind-opt' + (S.DocKind === k.v ? ' sel' : '') + '"><input type="radio" name="rvKind" value="' + k.v + '" data-act="kind"' + (S.DocKind === k.v ? ' checked' : '') + ' /><b>' + k.t + '</b><small>' + k.d + '</small></label>'; });
             h += '</div><div class="hint" style="margin-top:6px;">ใบรับรองแทนใบเสร็จ (ผู้รับเงินออกใบเสร็จไม่ได้) ทำที่หน้า <a href="../Account/PaymentVoucher.aspx">ใบสำคัญจ่าย</a> — ไม่มีกระดาษให้สแกน</div></div>';
 
+            // ── ใบลด/เพิ่มหนี้: ใบกำกับเดิมที่อ้างอิง — ไว้บนสุด (เลือกแล้วระบบเติมผู้ขาย/รายการ/บัญชี/ขาเงินตามใบเดิมให้) ──
+            if (isNote()) h += renderNoteSource();
+
             // ── 2) ผู้ขาย ──
             h += '<div class="rv-sec"><h4>2. ผู้ขาย</h4><div class="rv-grid">';
             h += field('SupplierName', 'ชื่อผู้ขาย', 'text', { wide: true });
@@ -622,8 +627,8 @@
             h += field('Notes', 'หมายเหตุ / เหตุผลทางธุรกิจ (§65 ตรี)', 'textarea', { wide: true });
             h += '</div></div>';
 
-            // ── ใบลด/เพิ่มหนี้: ใบต้นทาง ──
-            if (isNote()) h += renderNote();
+            // ── ใบลด/เพิ่มหนี้: เหตุผล / การคืนสินค้า / ขาเงิน ──
+            if (isNote()) h += renderNoteRest();
 
             // ── 4) รายการ ──
             // รวม/ไม่รวม VAT: ผู้ใช้ยังไม่เลือกเอง ⇒ ระบบเลือกตามยอดบนกระดาษทุกครั้งที่คำนวณใหม่ (แก้ยอดตามเอกสาร/รายการแล้วสลับให้เอง)
@@ -679,9 +684,12 @@
             if (s !== 'AUTO') return s;
             var r = pickedReturn(); return r && r.refund ? 'BANK' : 'VENDOR';
         }
-        function renderNote() {
+        /* ใบกำกับเดิมที่อ้างอิง (§86/9-10) + เลือกเอกสารต้นทาง — แสดงบนสุดของฟอร์ม (เดิมอยู่ใต้ข้อมูลเอกสาร ต้องเลื่อนหาเอง) */
+        function renderNoteSource() {
             if (M.cnPrimary && S.SourceMode !== 'PRT') S.Settlement = effSettlement();   // ค่าที่จะทำจริง (ฝั่งเซิร์ฟเวอร์ใช้กติกาเดียวกัน — VendorCnPolicy.EffectiveSettlement)
-            var cn = S.DocKind === 'VCN', h = '<div class="rv-sec"><h4>ใบต้นทาง &amp; ' + (cn ? 'ใบลดหนี้' : 'ใบเพิ่มหนี้') + '</h4>';
+            var cn = S.DocKind === 'VCN', h = '<div class="rv-sec rv-src-top" id="rvSrcTop"><h4>📎 ใบกำกับเดิมที่' + (cn ? 'ลดหนี้' : 'เพิ่มหนี้') + ' (อ้างอิง)</h4>';
+            if (S.SourceMode === 'NEXTACC' && !S.SourceDocId)
+                h += '<div class="ocr-msg warn">ยังไม่ได้เลือกใบกำกับเดิม — ' + (S.OrigTaxInvoiceNo ? 'ระบบค้นจากเลข <b>' + esc(S.OrigTaxInvoiceNo) + '</b> แล้วยังไม่พบใบเดียวที่ตรง เลือกจากตารางหรือค้นใหม่ด้านล่าง' : 'กรอกเลขใบกำกับเดิมตามกระดาษแล้วกดค้นหา') + '</div>';
             // ── §86/9-10 บนกระดาษ: อ้างใบกำกับเดิม + มูลค่าเดิม/ที่ถูกต้อง/ผลต่าง (อ่านจาก OCR แก้ได้) ──
             var od = has(S.OrigAmount) && has(S.CorrectAmount) && has(S.DiffAmount) ? OcrMath.r2(+S.OrigAmount - (+S.CorrectAmount)) : null;
             h += '<div class="rv-grid" style="margin-bottom:10px;">' +
@@ -717,7 +725,7 @@
                     h += '<div class="ocr-msg info"><b>ใบต้นทาง: ' + esc(S.SourceDocNo || S.SourceDocId) + '</b>' + (S.SourceContactName ? ' · ' + esc(S.SourceContactName) : '') + (S.SourceSupplierDocNo ? ' · ใบผู้ขาย ' + esc(S.SourceSupplierDocNo) : '') +
                          '<br/>ยอดใบ ' + money(S.SourceTotal) + ' − ลดหนี้แล้ว ' + money(S.SourceCredited) + ' = <b>ลดได้อีก ' + money(rem) + '</b> · ค้างจ่าย ' + money(S.SourceBalanceDue) +
                          '<br/><span id="capChk"></span>' +
-                         '<br/><small>' + ((+S.SourceBalanceDue || 0) > 0.01 ? (cn ? 'ใบต้นทางยังค้างจ่าย ⇒ NextAcc ลง <b>Dr เจ้าหนี้</b> (ลดหนี้ที่ค้าง)' : 'NextAcc ลง Cr เจ้าหนี้') : (cn ? 'ใบต้นทางจ่ายครบแล้ว ⇒ NextAcc ลง <b>Dr เงินสด 111</b> — เลือกด้านล่างว่าเงินคืนเข้าบัญชีไหน หรือเก็บเป็นเครดิตกับผู้ขาย' : 'ใบต้นทางจ่ายครบ ⇒ NextAcc ลง Cr เงินสด 111 — เลือกด้านล่างว่าตั้งเจ้าหนี้รอจ่าย หรือจ่ายทันที')) + '</small></div>';
+                         '<br/><small>' + ((+S.SourceBalanceDue || 0) > 0.01 ? (cn ? 'ใบต้นทางยังค้างจ่าย ⇒ NextAcc ลง <b>Dr เจ้าหนี้</b> (ลดหนี้ที่ค้าง)' : 'NextAcc ลง Cr เจ้าหนี้') : (cn ? 'ใบต้นทางจ่ายครบแล้ว ⇒ เลือกในส่วน "เงินคืน" ด้านล่างว่าเงินคืนเข้าบัญชีไหน (ส่งบัญชีนั้นให้ NextAcc ลงตรง) หรือเก็บเป็นเครดิตกับผู้ขาย' : 'ใบต้นทางจ่ายครบ ⇒ เลือกในส่วน "การจ่าย" ด้านล่างว่าตั้งเจ้าหนี้รอจ่าย หรือจ่ายทันทีจากบัญชีไหน')) + '</small></div>';
                     var sl = S.SourceLines || [];
                     if (sl.length) {
                         h += '<details class="src-lines" open><summary>รายการ + ผังบัญชีของใบเดิม (' + sl.length + ')</summary><div style="overflow-x:auto;"><table class="tbl"><thead><tr><th>รายการ</th><th class="num">จำนวน</th><th class="num">ราคา/หน่วย</th><th class="num">ยอดก่อน VAT</th><th>บัญชี</th></tr></thead><tbody>';
@@ -732,7 +740,13 @@
                 h += '<div class="ocr-msg warn">การคืนสินค้าที่บันทึกในหน้า "คืนสินค้าให้ผู้ขาย" โพสต์บัญชีไว้ครบแล้ว (เจ้าหนี้/เงินคืน · สินค้าคงเหลือ · ภาษีซื้อ) ⇒ ระบบจะ <b>เก็บใบลดหนี้นี้เป็นหลักฐาน</b> ไม่สร้างใบลดหนี้ใน NextAcc ซ้ำ (Vendor_Cn_Primary=0)</div>' +
                      '<div class="rv-grid">' + field('ReturnRef', 'เลขอ้างอิงการคืนสินค้า (PRT-…)', 'text', { ph: 'PRT-20261026-101500-123' }) + '</div>';
             }
-            if (S.SourceMode === 'PRT') return h + '</div>';
+            return h + '</div>';
+        }
+
+        /* เหตุผล / การคืนสินค้าที่เกี่ยวข้อง / ขาเงิน (ใต้ข้อมูลเอกสาร ก่อนรายการ) */
+        function renderNoteRest() {
+            if (S.SourceMode === 'PRT') return '';
+            var cn = S.DocKind === 'VCN', h = '<div class="rv-sec"><h4>' + (cn ? 'ใบลดหนี้' : 'ใบเพิ่มหนี้') + ': เหตุผล &amp; ' + (cn ? 'เงินคืน' : 'การจ่าย') + '</h4>';
 
             // ── เหตุผล (OcrNoteReasons — map เป็น CreditNoteReason/DebitNoteReason ของ NextAcc; ข้อความเต็มไปที่หมายเหตุเอกสาร) ──
             var rl = reasonList(), cur = OcrMath.findReason(S.DocKind, S.NoteReasonCode);
