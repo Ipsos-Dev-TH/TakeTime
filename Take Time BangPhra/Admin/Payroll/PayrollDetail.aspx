@@ -316,6 +316,8 @@
                 <div class="total-item">
                     <div class="label">วันลา</div>
                     <div class="amount"><asp:Label ID="lblLeaveDays" runat="server"></asp:Label> วัน</div>
+                    <%-- ใบลาที่หักในรอบนี้ (รวมใบที่ยกมาจากเดือนก่อน) — PayrollLeaveSync.Describe --%>
+                    <asp:Literal ID="litLeaveDetail" runat="server" Mode="PassThrough"></asp:Literal>
                 </div>
                 <div class="total-item">
                     <div class="label">เงินสุทธิ</div>

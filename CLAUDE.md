@@ -794,7 +794,11 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
   รอบเดือนของใบยังไม่จ่าย = คำนวณให้ทันที · จ่ายแล้ว = รอบถัดไปที่ยังไม่จ่าย · ยังไม่มีรอบ = หักตอนสร้าง · ใบที่หักในรอบจ่ายแล้วถูกทดแทน = บอกให้แก้รายคน. ข้อความ →
   `LeaveService.LastPayrollNote` (Mobile/LeaveApprove, LeaveManagement, ข้อความ supervisor/ทดแทน).
 - หน้า `Admin/Payroll/PayrollManagement`: แถบเตือน `litLeaveMismatch` (`FindMismatches` — ยอดลาในรอบ ≠ ใบลาที่อนุมัติ; รอบจ่ายแล้ว = บอกรอบที่ยกไป) + ปุ่ม `btnSyncLeave`
-  "ปรับยอดลาให้ตรงใบลา" (`SyncPeriod`, เฉพาะคนที่ยังไม่ทำจ่าย). Migration `PHASE19_Migration_43_Leave_Payroll_Link.sql`: คอลัมน์ + backfill (ใบก่อน 6 เดือน = -1;
+  "ปรับยอดลาให้ตรงใบลา" (`SyncPeriod`, เฉพาะคนที่ยังไม่ทำจ่าย).
+- **ใบสำคัญจ่ายแสดงรายการลา** (เคส ต.ค. 2569 หักลา 440 แต่ "วันลา 0.00"): `PayrollVoucher.rdlc` field `LeaveDetail` ต่อท้ายบรรทัดวันทำงาน ("รายการลาที่หัก: ลาหยุดหักเงิน
+  27/08/2026 1 วัน (LR-…, ยกมาจาก ส.ค. 2569)") จาก `ForRecord` + `Describe` (ใบที่รอบรับไว้ / ที่ Load เลือก; ชื่อประเภทจาก `Leave_Types`) · หน้า PayrollDetail `litLeaveDetail`.
+  วันลา 0 แต่มียอดหัก = แสดงจำนวนวันจากใบ. แก้ยอดรายคน (✏ `btnSavePayroll_Click`) และ `MarkVoucherGenerated` → `SyncLeaveDaysForRecord`: ยอดหักลา > 0 = ผูกใบ + ตั้ง
+  LeaveDays/WorkDays ตามใบ (ยอดเงินที่แก้เองคงเดิม) · = 0 = ปล่อยใบ (ไปรอบถัดไป) ⇒ ใบที่หักด้วยมือไม่ถูกยกไปหักซ้ำรอบหน้า. Migration `PHASE19_Migration_43_Leave_Payroll_Link.sql`: คอลัมน์ + backfill (ใบก่อน 6 เดือน = -1;
   ที่เหลือผูกรอบเดือนตัวเองตามลำดับอนุมัติจนครบ LeaveDays ที่รอบบันทึก — ส่วนเกิน = ยังไม่ถูกหัก) + รายงานใบที่จะยกไปรอบถัดไป. ยังไม่ทำ: OT อนุมัติหลังสร้างรอบ (ยังต้องกดคำนวณใหม่),
   คืนเงินใบที่หักในรอบจ่ายแล้วแต่ภายหลังทดแทน. ต้อง build+test บน Windows.
 

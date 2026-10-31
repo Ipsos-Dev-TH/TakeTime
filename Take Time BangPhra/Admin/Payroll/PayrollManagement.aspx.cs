@@ -941,6 +941,9 @@ namespace Take_Time_BangPhra.Admin.Payroll
 
                 if (payrollService.UpdatePayrollRecord(payrollRecordId, updateFields))
                 {
+                    // ยอดหักลาที่แก้เอง → ผูกใบลาที่หักกับรอบนี้ + วันลาให้ตรงใบ (ใบสำคัญจ่ายแสดงรายการลา, รอบหน้าไม่ยกมาหักซ้ำ)
+                    Take_Time_BangPhra.Payroll.PayrollLeaveSync.SyncLeaveDaysForRecord(payrollRecordId);
+
                     // Update period totals
                     if (int.TryParse(hdnPayrollPeriodId.Value, out currentPayrollPeriodId))
                     {

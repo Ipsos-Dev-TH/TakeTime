@@ -132,6 +132,10 @@
           <DataField>OTHours</DataField>
           <rd:TypeName>System.Decimal</rd:TypeName>
         </Field>
+        <Field Name="LeaveDetail">
+          <DataField>LeaveDetail</DataField>
+          <rd:TypeName>System.String</rd:TypeName>
+        </Field>
       </Fields>
     </DataSet>
     <DataSet Name="Signatures">
@@ -738,7 +742,7 @@
                   <Paragraph>
                     <TextRuns>
                       <TextRun>
-                        <Value>="วันทำงาน: " &amp; First(Fields!WorkDays.Value, "PayrollDetails") &amp; " วัน | วันลา: " &amp; First(Fields!LeaveDays.Value, "PayrollDetails") &amp; " วัน | OT: " &amp; First(Fields!OTHours.Value, "PayrollDetails") &amp; " ชั่วโมง"</Value>
+                        <Value>="วันทำงาน: " &amp; First(Fields!WorkDays.Value, "PayrollDetails") &amp; " วัน | วันลา: " &amp; First(Fields!LeaveDays.Value, "PayrollDetails") &amp; " วัน | OT: " &amp; First(Fields!OTHours.Value, "PayrollDetails") &amp; " ชั่วโมง" &amp; IIf(Len(First(Fields!LeaveDetail.Value, "PayrollDetails") &amp; "") &gt; 0, vbCrLf &amp; "รายการลาที่หัก: " &amp; First(Fields!LeaveDetail.Value, "PayrollDetails"), "")</Value>
                         <Style>
                           <FontFamily>TH Sarabun New</FontFamily>
                           <FontSize>10pt</FontSize>

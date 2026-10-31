@@ -15,6 +15,8 @@ namespace Take_Time_BangPhra.Payroll
         public string RequestNumber { get; set; }
         public DateTime StartDate { get; set; }
         public decimal Days { get; set; }
+        /// <summary>ชื่อประเภทลา (Leave_Types.LeaveTypeName) — แสดงในใบสำคัญจ่าย</summary>
+        public string TypeName { get; set; }
         /// <summary>ใบลาของเดือนก่อนที่รอบเดือนนั้นจ่ายไปแล้ว — ยกมาหักในรอบนี้</summary>
         public bool Carried { get; set; }
     }
@@ -115,9 +117,9 @@ namespace Take_Time_BangPhra.Payroll
             bool claim = HasClaimColumn(conn, tx);
             var monthStart = new DateTime(year, month, 1);
             string sql = claim
-                ? @"SELECT LR.ID, LR.RequestNumber, LR.StartDate, LR.TotalDays,
+                ? @"SELECT LR.ID, LR.RequestNumber, LR.StartDate, LR.TotalDays, LT.LeaveTypeName,
                            CASE WHEN LR.StartDate >= @MonthStart AND LR.StartDate < @NextMonth THEN 0 ELSE 1 END AS Carried
-                    FROM Leave_Requests LR
+                    FROM Leave_Requests LR LEFT JOIN Leave_Types LT ON LT.ID = LR.LeaveType_ID
                     WHERE LR.Admin_ID = @AdminID AND LR.Status = 'APPROVED'
                       AND ISNULL(LR.DeductSalary, 0) = 1 AND ISNULL(LR.IsReplaced, 0) = 0
                       AND (
@@ -130,8 +132,8 @@ namespace Take_Time_BangPhra.Payroll
                                            AND ISNULL(PR.VoucherGenerated, 0) = 1))
                           )
                     ORDER BY LR.StartDate, LR.ID"
-                : @"SELECT LR.ID, LR.RequestNumber, LR.StartDate, LR.TotalDays, 0 AS Carried
-                    FROM Leave_Requests LR
+                : @"SELECT LR.ID, LR.RequestNumber, LR.StartDate, LR.TotalDays, LT.LeaveTypeName, 0 AS Carried
+                    FROM Leave_Requests LR LEFT JOIN Leave_Types LT ON LT.ID = LR.LeaveType_ID
                     WHERE LR.Admin_ID = @AdminID AND LR.Status = 'APPROVED'
                       AND ISNULL(LR.DeductSalary, 0) = 1 AND ISNULL(LR.IsReplaced, 0) = 0
                       AND LR.StartDate >= @MonthStart AND LR.StartDate < @NextMonth
@@ -152,6 +154,7 @@ namespace Take_Time_BangPhra.Payroll
                         {
                             Id = Convert.ToInt64(r["ID"]),
                             RequestNumber = r["RequestNumber"]?.ToString(),
+                            TypeName = r["LeaveTypeName"] == DBNull.Value ? null : r["LeaveTypeName"].ToString(),
                             StartDate = Convert.ToDateTime(r["StartDate"]),
                             Days = r["TotalDays"] == DBNull.Value ? 0m : Convert.ToDecimal(r["TotalDays"]),
                             Carried = Convert.ToInt32(r["Carried"]) == 1
@@ -389,6 +392,114 @@ namespace Take_Time_BangPhra.Payroll
                 if (!r.Read()) return null;
                 return new RecInfo { Id = Convert.ToInt64(r["ID"]), Year = Convert.ToInt32(r["Year"]), Month = Convert.ToInt32(r["Month"]), Paid = Convert.ToBoolean(r["Paid"]) };
             }
+        }
+
+        // ──────────────────────────────────────────────────────────────
+        // ใบสำคัญจ่าย / แก้ยอดรายคน / ทำจ่าย
+        // ──────────────────────────────────────────────────────────────
+
+        /// <summary>ข้อความรายการลาสำหรับใบสำคัญจ่าย: "ลาหยุดหักเงิน 27/08/2026 1 วัน (LR-…, ยกมาจาก ส.ค. 2569)" คั่นด้วย "; " — ว่าง = ไม่มีใบ</summary>
+        public static string Describe(PayrollLeaveCalc calc)
+        {
+            if (calc == null || calc.Items.Count == 0) return "";
+            return string.Join("; ", calc.Items.Select(i =>
+                (string.IsNullOrWhiteSpace(i.TypeName) ? "ลา" : i.TypeName.Trim()) + " "
+                + i.StartDate.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture) + " "
+                + i.Days.ToString("0.##", CultureInfo.InvariantCulture) + " วัน"
+                + " (" + (string.IsNullOrWhiteSpace(i.RequestNumber) ? "#" + i.Id : i.RequestNumber)
+                + (i.Carried ? ", ยกมาจาก " + ThaiMonth(i.StartDate.Year, i.StartDate.Month) : "") + ")"));
+        }
+
+        /// <summary>
+        /// ใบลาที่รอบนี้หัก: รับไว้แล้ว (มีคอลัมน์) ไม่งั้นใบที่ <see cref="Load"/> เลือกให้รอบนี้ — อ่านอย่างเดียว (ใบสำคัญจ่าย/หน้ารายละเอียด).
+        /// คืน null เมื่อไม่พบรอบ
+        /// </summary>
+        public static PayrollLeaveCalc ForRecord(long recordId)
+        {
+            using (var conn = new SqlConnection(ConnStr))
+            {
+                conn.Open();
+                var rec = RecordBasics(conn, null, recordId);
+                if (rec == null) return null;
+                var calc = Load(conn, null, rec.AdminId, rec.Year, rec.Month, recordId, rec.BaseSalary);
+                if (rec.Paid && HasClaimColumn(conn, null))
+                {
+                    // จ่ายแล้ว: เฉพาะใบที่รอบนี้รับไว้จริง (ใบที่ยังไม่มีใครรับจะไปรอบถัดไป)
+                    var claimed = ClaimedIds(conn, null, recordId);
+                    if (claimed.Count > 0) calc.Items.RemoveAll(i => !claimed.Contains(i.Id));
+                }
+                return calc;
+            }
+        }
+
+        /// <summary>
+        /// หลังแก้ยอดรายคน (✏) / ก่อนทำจ่าย: ยอดหักลา &gt; 0 = ผูกใบลาที่รอบนี้หักไว้ + ตั้งวันลา/วันทำงานให้ตรงใบ (ยอดเงินที่แก้เองคงเดิม)
+        /// · ยอดหักลา = 0 = ปล่อยใบที่เคยผูก (ไปหักรอบถัดไป). กันใบเดียวกันถูกยกไปหักซ้ำในรอบหน้า. ไม่โยน exception
+        /// </summary>
+        public static void SyncLeaveDaysForRecord(long recordId)
+        {
+            try
+            {
+                using (var conn = new SqlConnection(ConnStr))
+                {
+                    conn.Open();
+                    using (var tx = conn.BeginTransaction())
+                    {
+                        var rec = RecordBasics(conn, tx, recordId);
+                        if (rec == null) { tx.Rollback(); return; }
+                        var calc = rec.LeaveDeduction > 0m
+                            ? Load(conn, tx, rec.AdminId, rec.Year, rec.Month, recordId, rec.BaseSalary)
+                            : new PayrollLeaveCalc();
+                        Claim(conn, tx, recordId, calc);
+                        if (calc.Items.Count > 0 || rec.LeaveDeduction <= 0m)
+                            using (var cmd = new SqlCommand("UPDATE Payroll_Records SET LeaveDays = @D, WorkDays = @W WHERE ID = @R", conn, tx))
+                            {
+                                cmd.Parameters.AddWithValue("@D", calc.TotalDays);
+                                cmd.Parameters.AddWithValue("@W", WorkDays(rec.Year, rec.Month, calc.InMonthDays));
+                                cmd.Parameters.AddWithValue("@R", recordId);
+                                cmd.ExecuteNonQuery();
+                            }
+                        tx.Commit();
+                    }
+                }
+            }
+            catch (Exception ex) { Log("SyncLeaveDaysForRecord #" + recordId + ": " + ex.Message); }
+        }
+
+        private sealed class RecBasics { public int AdminId, Year, Month; public bool Paid; public decimal BaseSalary, LeaveDeduction; }
+
+        private static RecBasics RecordBasics(SqlConnection conn, SqlTransaction tx, long recordId)
+        {
+            using (var cmd = new SqlCommand(@"
+                SELECT PR.Admin_ID, PP.[Year], PP.[Month], ISNULL(PR.VoucherGenerated, 0) AS Paid, ISNULL(PR.LeaveDeduction, 0) AS LeaveDeduction,
+                       CASE WHEN ISNULL(PR.BaseSalary, 0) = 0 THEN ISNULL(ES.MonthlySalary, 0) ELSE PR.BaseSalary END AS BaseSalary
+                FROM Payroll_Records PR
+                INNER JOIN Payroll_Periods PP ON PP.ID = PR.PayrollPeriod_ID
+                LEFT JOIN Employee_Salary ES ON ES.Admin_ID = PR.Admin_ID AND ES.IsActive = 1
+                WHERE PR.ID = @R", conn, tx))
+            {
+                cmd.Parameters.AddWithValue("@R", recordId);
+                using (var r = cmd.ExecuteReader())
+                {
+                    if (!r.Read()) return null;
+                    return new RecBasics
+                    {
+                        AdminId = Convert.ToInt32(r["Admin_ID"]), Year = Convert.ToInt32(r["Year"]), Month = Convert.ToInt32(r["Month"]),
+                        Paid = Convert.ToBoolean(r["Paid"]), LeaveDeduction = Convert.ToDecimal(r["LeaveDeduction"]), BaseSalary = Convert.ToDecimal(r["BaseSalary"])
+                    };
+                }
+            }
+        }
+
+        private static HashSet<long> ClaimedIds(SqlConnection conn, SqlTransaction tx, long recordId)
+        {
+            var set = new HashSet<long>();
+            using (var cmd = new SqlCommand("SELECT ID FROM Leave_Requests WHERE Payroll_Record_ID = @R", conn, tx))
+            {
+                cmd.Parameters.AddWithValue("@R", recordId);
+                using (var r = cmd.ExecuteReader()) while (r.Read()) set.Add(Convert.ToInt64(r["ID"]));
+            }
+            return set;
         }
 
         // ──────────────────────────────────────────────────────────────

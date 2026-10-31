@@ -694,7 +694,10 @@ public class PayrollService
                 cmd.Parameters.AddWithValue("@GeneratedBy", generatedBy.HasValue ? (object)generatedBy.Value : DBNull.Value);
 
                 conn.Open();
-                return cmd.ExecuteNonQuery() > 0;
+                bool ok = cmd.ExecuteNonQuery() > 0;
+                // ทำจ่ายแล้ว = ใบลาที่หักในรอบนี้ต้องผูกไว้ ไม่งั้นรอบหน้าจะยกมาหักซ้ำ
+                if (ok) Take_Time_BangPhra.Payroll.PayrollLeaveSync.SyncLeaveDaysForRecord(payrollRecordId);
+                return ok;
             }
         }
     }
