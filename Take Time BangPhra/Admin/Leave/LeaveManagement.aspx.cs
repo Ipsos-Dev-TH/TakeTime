@@ -310,7 +310,8 @@ namespace Take_Time_BangPhra.Admin.Leave
 
                     if (success)
                     {
-                        ShowMessage("อนุมัติคำขอลาสำเร็จ", "success");
+                        ShowMessage("อนุมัติคำขอลาสำเร็จ"
+                            + (string.IsNullOrEmpty(leaveService.LastPayrollNote) ? "" : " — " + leaveService.LastPayrollNote), "success");
                         LoadLeaveRequests();
                         LoadStatistics();
                     }

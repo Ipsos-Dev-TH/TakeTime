@@ -161,7 +161,8 @@ namespace Take_Time_BangPhra.Mobile
                 if (!ok) { Msg("อนุมัติไม่สำเร็จ กรุณาลองใหม่", false); return; }
 
                 NotifyResult(true, null);
-                Msg("อนุมัติใบลาเรียบร้อย — แจ้งผู้ขอลาทาง LINE แล้ว", true);
+                Msg("อนุมัติใบลาเรียบร้อย — แจ้งผู้ขอลาทาง LINE แล้ว"
+                    + (string.IsNullOrEmpty(_leave.LastPayrollNote) ? "" : " · 💰 " + _leave.LastPayrollNote), true);
             }
             catch (Exception ex) { Msg("เกิดข้อผิดพลาด: " + ex.Message, false); }
             Refresh();

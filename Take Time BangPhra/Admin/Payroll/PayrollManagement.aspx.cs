@@ -162,6 +162,7 @@ namespace Take_Time_BangPhra.Admin.Payroll
 
                     string status = periodRow["Status"].ToString();
                     ShowPayrollNaStatus(currentPayrollPeriodId, status);
+                    ShowLeaveMismatch(currentPayrollPeriodId);
                     btnGeneratePayroll.Visible = false;
                     btnApprovePayroll.Visible = (status == "DRAFT");
                     btnProcessAll.Visible = (status == "COMPLETED" || status == "APPROVED");
@@ -172,6 +173,8 @@ namespace Take_Time_BangPhra.Admin.Payroll
                     // No payroll yet
                     gvPayroll.DataSource = null;
                     gvPayroll.DataBind();
+                    litLeaveMismatch.Text = "";
+                    btnSyncLeave.Visible = false;
                     btnGeneratePayroll.Visible = true;
                     btnApprovePayroll.Visible = false;
                     btnProcessAll.Visible = false;
@@ -389,12 +392,13 @@ namespace Take_Time_BangPhra.Admin.Payroll
                         baseSalary = oldSalary;
                     }
 
-                    // Get leave days and OT hours for this employee in this period
-                    decimal leaveDays = GetEmployeeLeaveDays(adminId, periodInfo.Year, periodInfo.Month);
+                    // ใบลาหักเงิน (เดือนนี้ + ใบที่ยกมาจากรอบที่จ่ายแล้ว) — ตัวเดียวกับสร้างรอบ/อนุมัติใบลา แล้วผูกใบกับรอบนี้
+                    var leaveCalc = Take_Time_BangPhra.Payroll.PayrollLeaveSync.LoadAndClaim(adminId, periodInfo.Year, periodInfo.Month, recordId, baseSalary);
+                    decimal leaveDays = leaveCalc.TotalDays;
                     decimal otHours = GetEmployeeOTHours(adminId, periodInfo.Year, periodInfo.Month);
 
                     // Calculate leave deduction: (salary / days in month) * leave days
-                    decimal leaveDeduction = HRConfiguration.CalculateLeaveDeduction(baseSalary, leaveDays, daysInMonth);
+                    decimal leaveDeduction = leaveCalc.Deduction;
 
                     // Calculate OT amount: (salary / days in month / 8) * OT hours (already multiplied by rate)
                     decimal otAmount = HRConfiguration.CalculateBasicOTAmount(baseSalary, otHours, daysInMonth);
@@ -404,9 +408,8 @@ namespace Take_Time_BangPhra.Admin.Payroll
                     decimal tax = row["Tax"] != DBNull.Value ? Convert.ToDecimal(row["Tax"]) : 0;
                     decimal otherDeductions = row["OtherDeductions"] != DBNull.Value ? Convert.ToDecimal(row["OtherDeductions"]) : 0;
 
-                    // Calculate work days (days in month minus leave days)
-                    int workDays = daysInMonth - (int)Math.Floor(leaveDays);
-                    if (workDays < 0) workDays = 0;
+                    // Calculate work days (days in month minus this month's leave days)
+                    int workDays = Take_Time_BangPhra.Payroll.PayrollLeaveSync.WorkDays(periodInfo.Year, periodInfo.Month, leaveCalc.InMonthDays);
 
                     // Calculate total earnings first
                     decimal totalEarnings = baseSalary + otAmount + bonus + allowance;
@@ -461,6 +464,42 @@ namespace Take_Time_BangPhra.Admin.Payroll
                          + "ถ้าต้องแก้จริง ๆ ใช้ปุ่มแก้ไข ✏ รายคน (ระบบจะส่งยอดใหม่ไป NextAcc ให้)";
                 }
                 ShowMessage(msg, skippedPaid > 0 ? "warning" : "success");
+                LoadPayrollData();
+            }
+            catch (Exception ex)
+            {
+                ShowMessage("เกิดข้อผิดพลาด: " + ex.Message, "error");
+            }
+        }
+
+        /// <summary>ใบลาที่อนุมัติแต่ยอดหักลาในรอบไม่ตรง — แสดงแถบเตือน + ปุ่มปรับ (เฉพาะคนที่ยังไม่ทำจ่าย)</summary>
+        private void ShowLeaveMismatch(int periodId)
+        {
+            try
+            {
+                var list = Take_Time_BangPhra.Payroll.PayrollLeaveSync.FindMismatches(periodId);
+                litLeaveMismatch.Text = Take_Time_BangPhra.Payroll.PayrollLeaveSync.RenderMismatchHtml(list);
+                btnSyncLeave.Visible = list.Exists(m => !m.Paid);
+            }
+            catch (Exception ex)
+            {
+                litLeaveMismatch.Text = "";
+                btnSyncLeave.Visible = false;
+                System.Diagnostics.Debug.WriteLine("ShowLeaveMismatch: " + ex.Message);
+            }
+        }
+
+        protected void btnSyncLeave_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (!int.TryParse(hdnPayrollPeriodId.Value, out currentPayrollPeriodId) || currentPayrollPeriodId <= 0)
+                {
+                    ShowMessage("ไม่พบรอบเงินเดือน", "error");
+                    return;
+                }
+                int n = Take_Time_BangPhra.Payroll.PayrollLeaveSync.SyncPeriod(currentPayrollPeriodId);
+                ShowMessage($"ปรับยอดลาให้ตรงใบลาที่อนุมัติแล้ว ({n} คนที่ยังไม่ทำจ่าย) — เงินเดือน/OT/โบนัส/หักอื่นคงเดิม", "success");
                 LoadPayrollData();
             }
             catch (Exception ex)
@@ -1084,49 +1123,6 @@ namespace Take_Time_BangPhra.Admin.Payroll
                         WHERE Admin_ID = @AdminID AND IsActive = 1", conn))
                     {
                         cmd.Parameters.AddWithValue("@AdminID", adminId);
-                        object result = cmd.ExecuteScalar();
-                        if (result != null && result != DBNull.Value)
-                        {
-                            return Convert.ToDecimal(result);
-                        }
-                    }
-                }
-            }
-            catch { }
-            return 0;
-        }
-
-        /// <summary>
-        /// Get approved leave days for an employee in a specific month
-        /// Only counts leaves where DeductSalary = 1 (excludes paid leave like sick leave, vacation with quota)
-        /// Excludes leaves that have been replaced by work
-        /// </summary>
-        private decimal GetEmployeeLeaveDays(short adminId, int year, int month)
-        {
-            try
-            {
-                string connStr = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
-                using (var conn = new System.Data.SqlClient.SqlConnection(connStr))
-                {
-                    conn.Open();
-                    // Get leaves that are approved, NOT fully replaced, AND deduct salary
-                    using (var cmd = new System.Data.SqlClient.SqlCommand(@"
-                        SELECT ISNULL(SUM(
-                            CASE
-                                WHEN ISNULL(IsReplaced, 0) = 1 THEN 0
-                                ELSE TotalDays
-                            END
-                        ), 0) AS LeaveDays
-                        FROM Leave_Requests
-                        WHERE Admin_ID = @AdminID
-                          AND Status = 'APPROVED'
-                          AND ISNULL(DeductSalary, 0) = 1
-                          AND YEAR(StartDate) = @Year
-                          AND MONTH(StartDate) = @Month", conn))
-                    {
-                        cmd.Parameters.AddWithValue("@AdminID", adminId);
-                        cmd.Parameters.AddWithValue("@Year", year);
-                        cmd.Parameters.AddWithValue("@Month", month);
                         object result = cmd.ExecuteScalar();
                         if (result != null && result != DBNull.Value)
                         {

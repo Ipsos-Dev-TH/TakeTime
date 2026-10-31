@@ -782,6 +782,22 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    · 6 healthCheck + สรุป. จำขั้นใน `Accounting_Integration_Config.Nexaacc_Setup_Wizard_Step` (1-6|DONE, `action=saveWizardStep`) → แถบ "ทำต่อ". มือถือ: ไม่มี scroll แนวนอนทั้งหน้า
    (ตารางเลื่อนในการ์ด). ทดสอบ: static render + Playwright (แท็บ/ลิงก์/วิซาร์ด/escape/390px). ต้อง build+test บน Windows.
 
+## ใบลาหักเงิน ↔ รอบเงินเดือน (ต.ค. 2026, PHASE19_43 — เคส LR-260830-18-50 ลา 27/08 ยื่น 30/08 อนุมัติแล้วแต่เงินเดือนไม่หัก)
+เดิมยอดหักลาคิดเฉพาะตอนสร้างรอบ/กด "คำนวณใหม่" (ใบของเดือนนั้นเท่านั้น) ⇒ อนุมัติหลังสร้างรอบ = ไม่หักจนมีคนกดคำนวณใหม่; รอบทำจ่ายแล้ว = ไม่หักเลย.
+ตัวกลาง `Class/Payroll/PayrollLeaveSync.cs` (namespace `Take_Time_BangPhra.Payroll`; mono test `scratchpad/payroll_leave/T.cs`):
+- `Load(conn,tx,admin,year,month,recordId,baseSalary)` = ใบ APPROVED+DeductSalary+ไม่ทดแทน ของเดือนนี้ (ยังไม่มีรอบรับ / รอบนี้ / -1) + รอบนี้รับไว้ + **ใบเดือนก่อน ≤6 เดือนที่รอบเดือนนั้น
+  `VoucherGenerated=1` และยังไม่มีรอบรับ (ยกมาหัก)**. ยอด = สูตรเดิม `HRConfiguration.CalculateLeaveDeduction` (ใบเดือนนี้รวมกัน · ใบยกมาใช้วันของเดือนที่ลา); วันทำงานลดเฉพาะใบเดือนนี้.
+  `Claim` ผูก `Leave_Requests.Payroll_Record_ID` (ไม่มีคอลัมน์ = ไม่ยกมา, หักเฉพาะเดือนตัวเองแบบเดิม).
+- ใช้ใน `PayrollService.GeneratePayrollForPeriod` + `btnRecalculate_Click` (แทน query ซ้ำ 2 ที่) · `RecalcRecord` = คำนวณเฉพาะ LeaveDays/WorkDays/LeaveDeduction/SocialSecurity
+  ของรอบที่ยังไม่ทำจ่าย (เงินเดือน/OT/โบนัส/หักอื่นคงเดิม) + ยอดรวมงวด.
+- **อนุมัติ/ทำงานทดแทน/ยกเลิกทดแทน** (`LeaveService.ApproveLeaveRequest`/`…BySupervisor`/`MarkLeaveAsReplaced`/`CancelWorkReplacement`) → `OnLeaveChanged` หลัง commit:
+  รอบเดือนของใบยังไม่จ่าย = คำนวณให้ทันที · จ่ายแล้ว = รอบถัดไปที่ยังไม่จ่าย · ยังไม่มีรอบ = หักตอนสร้าง · ใบที่หักในรอบจ่ายแล้วถูกทดแทน = บอกให้แก้รายคน. ข้อความ →
+  `LeaveService.LastPayrollNote` (Mobile/LeaveApprove, LeaveManagement, ข้อความ supervisor/ทดแทน).
+- หน้า `Admin/Payroll/PayrollManagement`: แถบเตือน `litLeaveMismatch` (`FindMismatches` — ยอดลาในรอบ ≠ ใบลาที่อนุมัติ; รอบจ่ายแล้ว = บอกรอบที่ยกไป) + ปุ่ม `btnSyncLeave`
+  "ปรับยอดลาให้ตรงใบลา" (`SyncPeriod`, เฉพาะคนที่ยังไม่ทำจ่าย). Migration `PHASE19_Migration_43_Leave_Payroll_Link.sql`: คอลัมน์ + backfill (ใบก่อน 6 เดือน = -1;
+  ที่เหลือผูกรอบเดือนตัวเองตามลำดับอนุมัติจนครบ LeaveDays ที่รอบบันทึก — ส่วนเกิน = ยังไม่ถูกหัก) + รายงานใบที่จะยกไปรอบถัดไป. ยังไม่ทำ: OT อนุมัติหลังสร้างรอบ (ยังต้องกดคำนวณใหม่),
+  คืนเงินใบที่หักในรอบจ่ายแล้วแต่ภายหลังทดแทน. ต้อง build+test บน Windows.
+
 ## QR สั่งอาหาร/เครื่องดื่ม แยกโต๊ะ/โซน (Dining — ต.ค. 2026, PHASE19_42)
 โมดูลแยกจากรูมเซอร์วิส/POS ทั้งหมด (ไม่แตะ flow เดิม) ใช้ซ้ำ Product/Product_Images, ตรวจสลิป (ข้อ 18), แคตตาล็อกแหล่งเงิน, สมุดขายรายช่องทาง (PHASE19_32),
 Notify/NotificationService/กล่องแชทรวม. **สัญญา API ของชั้น Foundation = `Take Time BangPhra/Class/Dining/README_API.md` (อ่านก่อนแก้ทุกครั้ง).**

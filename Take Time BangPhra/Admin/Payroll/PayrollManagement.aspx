@@ -259,6 +259,8 @@
             <!-- Action Bar -->
             <div class="action-bar">
                 <asp:Button ID="btnRecalculate" runat="server" Text="&#128260; คำนวณใหม่" CssClass="btn btn-info" OnClick="btnRecalculate_Click" />
+                <asp:Button ID="btnSyncLeave" runat="server" Text="&#128197; ปรับยอดลาให้ตรงใบลา" CssClass="btn btn-warning" OnClick="btnSyncLeave_Click" Visible="false"
+                    ToolTip="คำนวณเฉพาะวันลา/หักลา/ประกันสังคมของคนที่ยังไม่ทำจ่าย จากใบลาที่อนุมัติล่าสุด — ไม่แตะเงินเดือน/OT/โบนัส/หักอื่นที่แก้ไว้" />
                 <asp:Button ID="btnApprovePayroll" runat="server" Text="&#9989; อนุมัติเงินเดือน" CssClass="btn btn-warning" OnClick="btnApprovePayroll_Click" Visible="false" />
                 <asp:Button ID="btnProcessAll" runat="server" Text="&#128179; ทำจ่ายทั้งหมด" CssClass="btn btn-process" OnClick="btnProcessAll_Click" Visible="false" />
                 <asp:Button ID="btnExportSS" runat="server" Text="&#128190; Export ประกันสังคม" CssClass="btn btn-export" OnClick="btnExportSS_Click" />
@@ -268,6 +270,8 @@
             <asp:Literal ID="litPayrollModeNote" runat="server" Mode="PassThrough"></asp:Literal>
             <%-- สถานะ NextAcc ของงวดนี้ — ป้ายแบบเดียวทุกหน้า (CLAUDE.md ข้อ 24) --%>
             <asp:Literal ID="litPayrollNaStatus" runat="server" Mode="PassThrough"></asp:Literal>
+            <%-- ใบลาที่อนุมัติแต่ยอดหักลาในรอบไม่ตรง (อนุมัติหลังสร้างรอบ / รอบจ่ายแล้ว) — PayrollLeaveSync --%>
+            <asp:Literal ID="litLeaveMismatch" runat="server" Mode="PassThrough"></asp:Literal>
 
         </asp:Panel>
 

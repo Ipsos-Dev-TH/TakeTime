@@ -305,27 +305,9 @@ public class PayrollService
                             {
                                 decimal baseSalary = emp.Salary;
 
-                                // Get leave days for this employee and period
-                                // Only count leaves where DeductSalary = 1 (exclude paid leave)
-                                // Also exclude replaced leaves
-                                decimal leaveDays = 0;
-                                using (SqlCommand leaveCmd = new SqlCommand(@"
-                                    SELECT ISNULL(SUM(
-                                        CASE WHEN ISNULL(IsReplaced, 0) = 1 THEN 0 ELSE TotalDays END
-                                    ), 0) AS TotalLeaveDays
-                                    FROM Leave_Requests
-                                    WHERE Admin_ID = @AdminID
-                                      AND Status = 'APPROVED'
-                                      AND ISNULL(DeductSalary, 0) = 1
-                                      AND YEAR(StartDate) = @Year
-                                      AND MONTH(StartDate) = @Month", conn, transaction))
-                                {
-                                    leaveCmd.Parameters.AddWithValue("@AdminID", emp.Id);
-                                    leaveCmd.Parameters.AddWithValue("@Year", year);
-                                    leaveCmd.Parameters.AddWithValue("@Month", month);
-                                    object result = leaveCmd.ExecuteScalar();
-                                    leaveDays = result != null && result != DBNull.Value ? Convert.ToDecimal(result) : 0;
-                                }
+                                // ใบลาหักเงินของเดือนนี้ + ใบเดือนก่อนที่รอบเดือนนั้นทำจ่ายไปแล้ว (PayrollLeaveSync — ตัวเดียวกับอนุมัติใบลา/คำนวณใหม่)
+                                var leaveCalc = Take_Time_BangPhra.Payroll.PayrollLeaveSync.Load(conn, transaction, emp.Id, year, month, 0, baseSalary);
+                                decimal leaveDays = leaveCalc.TotalDays;
 
                                 // Get OT hours for this employee and period
                                 // Use OTHours * OTRate to get multiplied hours (1.5x or 2x)
@@ -354,13 +336,12 @@ public class PayrollService
                                     }
                                 }
 
-                                // Calculate work days
-                                int workDays = daysInMonth - (int)Math.Floor(leaveDays);
-                                if (workDays < 0) workDays = 0;
+                                // Calculate work days (ใบที่ยกมาจากเดือนก่อนไม่ลดวันทำงานเดือนนี้)
+                                int workDays = Take_Time_BangPhra.Payroll.PayrollLeaveSync.WorkDays(year, month, leaveCalc.InMonthDays);
 
                                 // Calculate leave deduction and OT amount using centralized config
                                 // OT amount is calculated using multiplied hours (already includes 1.5x or 2x rate)
-                                decimal leaveDeduction = HRConfiguration.CalculateLeaveDeduction(baseSalary, leaveDays, daysInMonth);
+                                decimal leaveDeduction = leaveCalc.Deduction;
                                 decimal otAmount = HRConfiguration.CalculateBasicOTAmount(baseSalary, otMultipliedHours, daysInMonth);
 
                                 // Calculate totals first (bonus and allowance are 0 for initial generation)
@@ -390,7 +371,8 @@ public class PayrollService
                                     (@PeriodID, @AdminID, @Name, @Salary, @WorkDays, @LeaveDays,
                                      @OTHours, @OTAmount, 0, 0,
                                      @LeaveDeduction, @SS, 0, 0,
-                                     0, GETDATE())", conn, transaction))
+                                     0, GETDATE());
+                                    SELECT CAST(SCOPE_IDENTITY() AS BIGINT);", conn, transaction))
                                 {
                                     recCmd.Parameters.AddWithValue("@PeriodID", periodId);
                                     recCmd.Parameters.AddWithValue("@AdminID", emp.Id);
@@ -402,7 +384,9 @@ public class PayrollService
                                     recCmd.Parameters.AddWithValue("@OTAmount", otAmount);
                                     recCmd.Parameters.AddWithValue("@LeaveDeduction", leaveDeduction);
                                     recCmd.Parameters.AddWithValue("@SS", socialSecurity);
-                                    recCmd.ExecuteNonQuery();
+                                    long newRecordId = Convert.ToInt64(recCmd.ExecuteScalar());
+                                    // ผูกใบลาที่หักกับรอบนี้ (กันยกไปหักซ้ำรอบอื่น)
+                                    Take_Time_BangPhra.Payroll.PayrollLeaveSync.Claim(conn, transaction, newRecordId, leaveCalc);
                                 }
 
                                 totalGross += totalEarnings;

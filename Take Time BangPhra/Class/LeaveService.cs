@@ -44,6 +44,9 @@ public class LeaveOperationResultLong
 /// </summary>
 public class LeaveService
 {
+    /// <summary>ผลต่อเงินเดือนของการอนุมัติ/ทำงานทดแทนครั้งล่าสุด (PayrollLeaveSync.OnLeaveChanged) — หน้าอนุมัติแสดงต่อท้ายข้อความสำเร็จ; ว่าง = ใบนี้ไม่หักเงิน</summary>
+    public string LastPayrollNote { get; private set; }
+
     private readonly string connectionString;
 
     public LeaveService()
@@ -1030,6 +1033,8 @@ public class LeaveService
                         cmd.ExecuteNonQuery();
 
                         transaction.Commit();
+                        // ใบลาหักเงินที่อนุมัติหลังสร้างรอบ → คำนวณยอดลาของรอบที่ยังไม่ทำจ่ายทันที (จ่ายแล้ว = ยกไปรอบถัดไป)
+                        LastPayrollNote = Take_Time_BangPhra.Payroll.PayrollLeaveSync.OnLeaveChanged(requestId);
                         return true;
                     }
                     catch
@@ -1459,7 +1464,8 @@ public class LeaveService
                 cmd.ExecuteNonQuery();
 
                 transaction.Commit();
-                return (true, "อนุมัติคำขอลาสำเร็จ");
+                LastPayrollNote = Take_Time_BangPhra.Payroll.PayrollLeaveSync.OnLeaveChanged(requestId);
+                return (true, "อนุมัติคำขอลาสำเร็จ" + (string.IsNullOrEmpty(LastPayrollNote) ? "" : " — " + LastPayrollNote));
             }
             catch (Exception ex)
             {
@@ -1671,7 +1677,9 @@ public class LeaveService
                             }
 
                             transaction.Commit();
-                            return (true, $"บันทึกการทำงานทดแทนสำเร็จ วันที่ {replacementDate:dd/MM/yyyy}");
+                            LastPayrollNote = Take_Time_BangPhra.Payroll.PayrollLeaveSync.OnLeaveChanged(requestId);
+                            return (true, $"บันทึกการทำงานทดแทนสำเร็จ วันที่ {replacementDate:dd/MM/yyyy}"
+                                + (string.IsNullOrEmpty(LastPayrollNote) ? "" : " — " + LastPayrollNote));
                         }
                         catch
                         {
@@ -1782,7 +1790,8 @@ public class LeaveService
                             }
 
                             transaction.Commit();
-                            return (true, "ยกเลิกการทำงานทดแทนสำเร็จ");
+                            LastPayrollNote = Take_Time_BangPhra.Payroll.PayrollLeaveSync.OnLeaveChanged(requestId);
+                            return (true, "ยกเลิกการทำงานทดแทนสำเร็จ" + (string.IsNullOrEmpty(LastPayrollNote) ? "" : " — " + LastPayrollNote));
                         }
                         catch
                         {

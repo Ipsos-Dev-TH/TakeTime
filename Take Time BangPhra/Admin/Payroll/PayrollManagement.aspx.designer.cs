@@ -314,5 +314,15 @@ namespace Take_Time_BangPhra.Admin.Payroll
         /// litPayrollNaStatus control — ป้ายสถานะ NextAcc ของงวด (ข้อ 24).
         /// </summary>
         protected global::System.Web.UI.WebControls.Literal litPayrollNaStatus;
+
+        /// <summary>
+        /// btnSyncLeave control — ปรับยอดลาให้ตรงใบลาที่อนุมัติ (PayrollLeaveSync).
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Button btnSyncLeave;
+
+        /// <summary>
+        /// litLeaveMismatch control — แถบเตือนยอดหักลาไม่ตรงใบลา.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Literal litLeaveMismatch;
     }
 }
