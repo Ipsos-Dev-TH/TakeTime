@@ -12,7 +12,7 @@ namespace Take_Time_BangPhra.Services
 
         public TelegramService()
         {
-            _botToken = ConfigurationManager.AppSettings["TelegramTokenTakeTime"];
+            _botToken = AppCfg.Get("TelegramTokenTakeTime");
         }
 
         public TelegramService(string botToken)
@@ -51,7 +51,7 @@ namespace Take_Time_BangPhra.Services
                            $"เช็คเอ้าท์วันที่: {checkoutDate:dd MMMM yyyy}\r\n" +
                            $"{details}";
 
-            await SendMessageAsync("-4969611371", message);
+            await SendMessageAsync(AppCfg.Get("TelegramChatId", "-4969611371"), message);
         }
 
         public async Task SendCancellationNotificationAsync(string reservationId, DataTable reservationDetails)
@@ -67,7 +67,7 @@ namespace Take_Time_BangPhra.Services
                           $"จำนวนคืน: {reservationDetails.Rows[i]["StayDays"]}\r\n\r\n";
             }
 
-            await SendMessageAsync("-4969611371", message);
+            await SendMessageAsync(AppCfg.Get("TelegramChatId", "-4969611371"), message);
         }
 
         public async Task SendEditNotificationAsync(string reservationId, string phoneNumber,
@@ -79,7 +79,7 @@ namespace Take_Time_BangPhra.Services
                            $"เช็คเอ้าท์วันที่: {checkoutDate:dd MMMM yyyy}\r\n" +
                            $"{details}";
 
-            await SendMessageAsync("-4969611371", message);
+            await SendMessageAsync(AppCfg.Get("TelegramChatId", "-4969611371"), message);
         }
     }
 }

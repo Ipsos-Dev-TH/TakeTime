@@ -121,7 +121,7 @@ namespace Take_Time_BangPhra.Services
 
                 // Check if already reviewed
                 DataTable dtReview = _code.DatabaseQuerySafe(_connectionString,
-                    "SELECT COUNT(*) FROM Guest_Reviews WHERE Reservation_ID = @ReservationID",
+                    "SELECT COUNT(*) FROM Guest_Reviews WHERE Reservation_ID = @ReservationID AND ISNULL(Status, '') <> 'REWARD_CLAIM'",
                     parameters);
 
                 if (dtReview.Rows.Count > 0 && Convert.ToInt32(dtReview.Rows[0][0]) > 0)

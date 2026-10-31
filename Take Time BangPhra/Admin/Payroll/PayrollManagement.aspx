@@ -179,6 +179,16 @@
         }
         .alert-error::before { content: "⚠ "; font-weight: bold; }
 
+        /* ทำสำเร็จแต่มีเรื่องต้องรู้ — เดิมมีแค่เขียว/แดง ข้อความเตือนเลยขึ้นเป็นสีแดง
+           ดูเหมือน "ทำไม่สำเร็จ" ทั้งที่สำเร็จ (เช่น "ข้ามคนที่ทำจ่ายแล้ว N คน") */
+        .alert-warning {
+            background: linear-gradient(135deg, #fff3cd 0%, #ffeeba 100%);
+            color: #856404;
+            border: 1px solid #ffe08a;
+            box-shadow: 0 2px 8px rgba(255, 193, 7, 0.18);
+        }
+        .alert-warning::before { content: "❗ "; font-weight: bold; }
+
         @keyframes fadeIn {
             from { opacity: 0; transform: translateY(-10px); }
             to { opacity: 1; transform: translateY(0); }
@@ -249,11 +259,19 @@
             <!-- Action Bar -->
             <div class="action-bar">
                 <asp:Button ID="btnRecalculate" runat="server" Text="&#128260; คำนวณใหม่" CssClass="btn btn-info" OnClick="btnRecalculate_Click" />
+                <asp:Button ID="btnSyncLeave" runat="server" Text="&#128197; ปรับยอดลาให้ตรงใบลา" CssClass="btn btn-warning" OnClick="btnSyncLeave_Click" Visible="false"
+                    ToolTip="คำนวณเฉพาะวันลา/หักลา/ประกันสังคมของคนที่ยังไม่ทำจ่าย จากใบลาที่อนุมัติล่าสุด — ไม่แตะเงินเดือน/OT/โบนัส/หักอื่นที่แก้ไว้" />
                 <asp:Button ID="btnApprovePayroll" runat="server" Text="&#9989; อนุมัติเงินเดือน" CssClass="btn btn-warning" OnClick="btnApprovePayroll_Click" Visible="false" />
                 <asp:Button ID="btnProcessAll" runat="server" Text="&#128179; ทำจ่ายทั้งหมด" CssClass="btn btn-process" OnClick="btnProcessAll_Click" Visible="false" />
                 <asp:Button ID="btnExportSS" runat="server" Text="&#128190; Export ประกันสังคม" CssClass="btn btn-export" OnClick="btnExportSS_Click" />
                 <asp:Button ID="btnExportPND1" runat="server" Text="&#128196; Export ภ.ง.ด.1" CssClass="btn btn-export" OnClick="btnExportPND1_Click" />
             </div>
+            <%-- โหมดลงบัญชีอย่างเดียว: เตือนว่าแบบภาษี/ประกันสังคมต้องยื่นจากข้อมูลระบบนี้ (CLAUDE.md ข้อ 23) --%>
+            <asp:Literal ID="litPayrollModeNote" runat="server" Mode="PassThrough"></asp:Literal>
+            <%-- สถานะ NextAcc ของงวดนี้ — ป้ายแบบเดียวทุกหน้า (CLAUDE.md ข้อ 24) --%>
+            <asp:Literal ID="litPayrollNaStatus" runat="server" Mode="PassThrough"></asp:Literal>
+            <%-- ใบลาที่อนุมัติแต่ยอดหักลาในรอบไม่ตรง (อนุมัติหลังสร้างรอบ / รอบจ่ายแล้ว) — PayrollLeaveSync --%>
+            <asp:Literal ID="litLeaveMismatch" runat="server" Mode="PassThrough"></asp:Literal>
 
         </asp:Panel>
 

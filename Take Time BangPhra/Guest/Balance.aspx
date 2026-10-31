@@ -1,4 +1,4 @@
-<%@ Page Title="Check Balance & Pay" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="Balance.aspx.cs" Inherits="Take_Time_BangPhra.Guest.Balance" %>
+﻿<%@ Page Title="Check Balance & Pay" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="Balance.aspx.cs" Inherits="Take_Time_BangPhra.Guest.Balance" %>
 
 <asp:Content ID="Content1" ContentPlaceHolderID="MainContent" runat="server">
     <style>
@@ -243,6 +243,10 @@
     <div class="balance-due-card">
         <h3>Balance Due</h3>
         <div class="amount">฿<asp:Label ID="lblBalanceDue" runat="server">0</asp:Label></div>
+        <asp:HyperLink ID="lnkPayOnline" runat="server" Visible="false"
+            style="display:inline-block;margin-top:10px;padding:12px 22px;background:#1b7a4b;color:#fff;border-radius:10px;text-decoration:none;font-weight:600;">
+            💳 จ่ายออนไลน์ (QR / บัตร)
+        </asp:HyperLink>
     </div>
 
     <!-- Charges Breakdown -->

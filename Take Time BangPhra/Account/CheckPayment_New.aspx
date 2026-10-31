@@ -471,18 +471,21 @@
         <!-- Detail Section -->
         <div class="detail-section">
             <div class="detail-title">📋 รายละเอียดใบสำคัญจ่าย</div>
+            <%-- แถบเตือนเมื่อดึงรายการจาก NextAcc ไม่ทัน (รายการ/สถานะอาจไม่ครบ — อย่ากดส่งซ้ำ) --%>
+            <asp:Literal ID="litNaFetchWarn" runat="server" Mode="PassThrough"></asp:Literal>
             <div style="margin-bottom: 10px;">
-                <asp:CheckBox ID="chkEnableDelete" runat="server" Text="เปิดใช้งานปุ่มลบ (Delete)" />
+                <asp:CheckBox ID="chkEnableDelete" runat="server" Text="เปิดใช้งานปุ่มยกเลิก (void) — เก็บใบในระบบเป็น &quot;ยกเลิก&quot; + ยกเลิก (void) เอกสารบน NextAcc" />
             </div>
             <asp:GridView ID="gvDetails" runat="server" CssClass="gridview-custom"
                 AutoGenerateColumns="False" EmptyDataText="ไม่พบข้อมูล"
-                DataKeyNames="ID,Status,IsNextAccOnly,NextAccViewUrl"
+                DataKeyNames="ID,Status,IsNextAccOnly,NextAccViewUrl,HasNextAcc,NextAccId,NextAccDeepLink"
                 OnRowDeleting="gvDetails_RowDeleting"
                 OnSelectedIndexChanging="gvDetails_SelectedIndexChanging"
                 OnRowCommand="gvDetails_RowCommand"
+                OnRowEditing="gvDetails_RowEditing"
                 OnRowDataBound="gvDetails_RowDataBound">
                 <Columns>
-                    <asp:CommandField ButtonType="Button" HeaderText="ลบ" DeleteText="🗑️ ลบ" ShowDeleteButton="True" />
+                    <asp:CommandField ButtonType="Button" HeaderText="ยกเลิก" DeleteText="🚫 ยกเลิก (void)" ShowDeleteButton="True" />
                     <asp:CommandField ButtonType="Button" HeaderText="ดู PDF" SelectText="📄 ดู PDF" ShowSelectButton="True" />
                     <asp:ButtonField ButtonType="Button" CommandName="edit" Text="✏️ แก้ไข" HeaderText="แก้ไข" />
                     <asp:BoundField DataField="DisplayDoc" HeaderText="เลขที่เอกสาร" />
@@ -494,12 +497,12 @@
                     <asp:BoundField DataField="Vat" HeaderText="VAT" DataFormatString="{0:N2}" ItemStyle-CssClass="amount-cell" />
                     <asp:BoundField DataField="Status" HeaderText="สถานะ" />
                     <asp:BoundField DataField="Created_By" HeaderText="ผู้สร้าง" />
-                    <asp:TemplateField HeaderText="Sync บัญชี">
+                    <asp:TemplateField HeaderText="สถานะ NextAcc">
                         <ItemTemplate>
                             <asp:Label ID="lblSyncStatus" runat="server"></asp:Label>
-                            <asp:Button ID="btnSync" runat="server" Text="📤 Sync" CommandName="sync"
+                            <asp:Button ID="btnSync" runat="server" Text="📤 ส่งเข้าบัญชี" CommandName="sync"
                                 CommandArgument='<%# Eval("ID") %>' CssClass="btn-sync-action"
-                                OnClientClick="if(!confirm('ยืนยันส่งข้อมูลเข้าระบบบัญชี?'))return false; this.disabled=true; this.value='⏳ กำลัง Sync...';"
+                                OnClientClick="if(!confirm('ยืนยันส่งข้อมูลเข้าระบบบัญชี?'))return false; this.disabled=true; this.value='⏳ กำลังส่ง...';"
                                 UseSubmitBehavior="false"
                                 Visible="false" />
                         </ItemTemplate>
@@ -507,6 +510,17 @@
                     <asp:TemplateField HeaderText="เอกสาร NextAcc">
                         <ItemTemplate>
                             <asp:Literal ID="litNextAccDoc" runat="server"></asp:Literal>
+                        </ItemTemplate>
+                    </asp:TemplateField>
+                    <asp:TemplateField HeaderText="อัพเดทไฟล์">
+                        <ItemTemplate>
+                            <asp:Button ID="btnRefreshPdf" runat="server" Text="🔄 ดึงล่าสุด"
+                                CommandName="refreshpdf"
+                                CommandArgument='<%# Container.DataItemIndex %>'
+                                CssClass="btn-sync-action" CausesValidation="false"
+                                ToolTip="ดึง PDF ใบสำคัญจ่ายล่าสุดจาก NextAcc (ข้าม cache)"
+                                OnClientClick="this.disabled=true; this.value='⏳ กำลังดึง...'; "
+                                UseSubmitBehavior="false" />
                         </ItemTemplate>
                     </asp:TemplateField>
                     <asp:TemplateField HeaderText="ไฟล์แนบ">

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Web;
@@ -19,6 +19,11 @@ namespace Take_Time_BangPhra.Account
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.FinReceipt)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
+            // หน้าเก่า (มีเส้น sync/resync ของตัวเองซ้ำกับหน้าใหม่) — ส่งต่อไปหน้าตรวจสอบเอกสารขายหน้าใหม่ คงพารามิเตอร์เดิม
+            // (CLAUDE.md ข้อ 23). endResponse:true = จบคำขอทันที — postback เดิม (ปุ่มลบ/Sync ของหน้าเก่า) ไม่ถูกประมวลผลอีก
+            // ตรรกะด้านล่างคงไว้ให้ย้อนดูเท่านั้น (ไม่ถูกเรียกแล้ว)
+            Response.Redirect("~/Account/CheckDocument_New" + Request.Url.Query, true);
             this.MaintainScrollPositionOnPostBack = true;
             try
             {
@@ -26,6 +31,8 @@ namespace Take_Time_BangPhra.Account
                 {
                     if (!IsPostBack)
                     {
+                        if (Request.QueryString["deleted"] == "1")
+                            ClientScript.RegisterStartupScript(this.GetType(), "delok", "alert('✅ ลบเอกสารเรียบร้อยแล้ว');", true);
                         TextBox1.Text = DateTime.Now.ToString("yyyy-MM-dd");
                         TextBox2.Text = DateTime.Now.ToString("yyyy-MM-dd");
 
@@ -336,7 +343,16 @@ namespace Take_Time_BangPhra.Account
                 }
                 if (docType == "REC")
                 {
-                    string path = System.Configuration.ConfigurationManager.AppSettings["ReceiptFolderPath"].ToString() + "\\" + docYear + "\\" + docMonth;
+                    // ใบที่มีใบลดหนี้อ้าง / ส่ง e-Tax ถึงกรมสรรพากรแล้ว → ลบไม่ได้ (NextAcc ปฏิเสธ void + ใบลดหนี้จะอ้างใบที่หายไป)
+                    string cnBlockDel = CreditNoteGuards.VoidBlockReason(conn, docNum);
+                    if (cnBlockDel != null)
+                    {
+                        ClientScript.RegisterStartupScript(this.GetType(), "cnBlockDel",
+                            "alert('" + HttpUtility.JavaScriptStringEncode("⚠ " + cnBlockDel) + "');", true);
+                        return;
+                    }
+
+                    string path = AppCfg.Get("ReceiptFolderPath").ToString() + "\\" + docYear + "\\" + docMonth;
 
                     // 🔧 FIX: Update Reservation.Deposit before deleting Payment_History
                     try
@@ -426,7 +442,7 @@ namespace Take_Time_BangPhra.Account
                 }
                 else if (docType == "PAY")
                 {
-                    string path = System.Configuration.ConfigurationManager.AppSettings["PaymentFolderPath"].ToString() + "\\" + docYear + "\\" + docMonth;
+                    string path = AppCfg.Get("PaymentFolderPath").ToString() + "\\" + docYear + "\\" + docMonth;
 
                     // SECURE: Delete payment record
                     var deletePaymentParams = new Dictionary<string, object>
@@ -462,9 +478,10 @@ namespace Take_Time_BangPhra.Account
                     }
                 }
 
-                // Show success message then redirect
-                ClientScript.RegisterStartupScript(this.GetType(), "success",
-                    "alert('✅ ลบเอกสารเรียบร้อยแล้ว'); window.location.href='/Account/CheckDocument';", true);
+                // Server-side redirect — เชื่อถือได้กว่า ClientScript (ไม่ขึ้นกับ JS) → row หายจริง + แจ้งสำเร็จ
+                Response.Redirect("~/Account/CheckDocument?deleted=1", false);
+                Context.ApplicationInstance.CompleteRequest();
+                return;
             }
         }
 
@@ -524,7 +541,7 @@ namespace Take_Time_BangPhra.Account
 
                 if (docStatus == "Cancel")
                 {
-                    string path = System.Configuration.ConfigurationManager.AppSettings["ReceiptFolderPath"].ToString();
+                    string path = AppCfg.Get("ReceiptFolderPath").ToString();
                     if (!string.IsNullOrEmpty(receiptUid) && File.Exists(path + "\\" + docYear + "\\" + docMonth + "" + docNum + "_" + receiptUid + "_Cancel.pdf"))
                     {
                         Response.Redirect("/Documents/Receipt/" + docYear + "/" + docMonth + "/" + docNum + "_" + receiptUid + "_Cancel.pdf");
@@ -537,7 +554,7 @@ namespace Take_Time_BangPhra.Account
                 }
                 else
                 {
-                    string path = System.Configuration.ConfigurationManager.AppSettings["ReceiptFolderPath"].ToString();
+                    string path = AppCfg.Get("ReceiptFolderPath").ToString();
                     if (!string.IsNullOrEmpty(receiptUid) && File.Exists(path + "\\" + docYear + "\\" + docMonth + "\\" + docNum + "_" + receiptUid + ".pdf"))
                     {
                         Response.Redirect("/Documents/Receipt/" + docYear + "/" + docMonth + "/" + docNum + "_" + receiptUid + ".pdf");
@@ -565,7 +582,7 @@ namespace Take_Time_BangPhra.Account
 
                 if (docStatus == "Cancel")
                 {
-                    string path = System.Configuration.ConfigurationManager.AppSettings["PaymentFolderPath"].ToString();
+                    string path = AppCfg.Get("PaymentFolderPath").ToString();
                     if (!string.IsNullOrEmpty(paymentUid) && File.Exists(path + "\\" + docYear + "\\" + docMonth + "\\" + docNum + "_" + paymentUid + "_Cancel.pdf"))
                     {
                         Response.Redirect("/Documents/Payment/" + docYear + "/" + docMonth + "/" + docNum + "_" + paymentUid + "_Cancel.pdf");
@@ -578,7 +595,7 @@ namespace Take_Time_BangPhra.Account
                 }
                 else
                 {
-                    string path = System.Configuration.ConfigurationManager.AppSettings["PaymentFolderPath"].ToString();
+                    string path = AppCfg.Get("PaymentFolderPath").ToString();
                     if (!string.IsNullOrEmpty(paymentUid) && File.Exists(path + "\\" + docYear + "\\" + docMonth + "\\" + docNum + "_" + paymentUid + ".pdf"))
                     {
                         Response.Redirect("/Documents/Payment/" + docYear + "/" + docMonth + "/" + docNum + "_" + paymentUid + ".pdf");
@@ -769,6 +786,15 @@ namespace Take_Time_BangPhra.Account
                 string docType = docId.Length >= 3 ? docId.Substring(0, 3) : "";
                 var sync = new AccountingSyncService(conn);
                 long queueId = -1;
+
+                // ใบเสร็จที่เคยขึ้น NextAcc สำเร็จแล้ว → เส้น Repost (แก้ในที่ / void ที่ยืนยันแล้วจึงสร้างใหม่) ไม่ใช่สร้างซ้ำ (PHASE19_35)
+                if (docType == "REC" && sync.HasCompletedReceiptCreate(docId))
+                {
+                    var (repostRc, repostMsg, _) = sync.ResyncSingleReceipt(docId);
+                    ClientScript.RegisterStartupScript(this.GetType(), "syncRepost",
+                        "alert('" + System.Web.HttpUtility.JavaScriptStringEncode(repostMsg ?? "") + "');", true);
+                    return;
+                }
 
                 // Cancel existing pending/failed entries so we always create fresh
                 sync.PrepareResync(docId);

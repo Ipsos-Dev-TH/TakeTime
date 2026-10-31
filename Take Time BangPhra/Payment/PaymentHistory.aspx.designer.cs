@@ -87,6 +87,16 @@ namespace Take_Time_BangPhra.Payment
         protected global::System.Web.UI.WebControls.Label lblCompletedRecords;
 
         /// <summary>
+        /// pnlRefundCard control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlRefundCard;
+
+        /// <summary>
+        /// lblRefundTotal control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Label lblRefundTotal;
+
+        /// <summary>
         /// txtReservationID control.
         /// </summary>
         /// <remarks>
@@ -175,5 +185,122 @@ namespace Take_Time_BangPhra.Payment
         /// To modify move field declaration from designer file to code-behind file.
         /// </remarks>
         protected global::System.Web.UI.WebControls.Panel pnlEmpty;
+
+        /// <summary>
+        /// btnTabMain control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Button btnTabMain;
+
+        /// <summary>
+        /// btnTabOta control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Button btnTabOta;
+
+        /// <summary>
+        /// pnlMainView control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Panel pnlMainView;
+
+        /// <summary>
+        /// pnlOtaView control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Panel pnlOtaView;
+
+        /// <summary>
+        /// ddlOtaMode control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.DropDownList ddlOtaMode;
+
+        /// <summary>
+        /// btnOtaRefresh control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Button btnOtaRefresh;
+
+        /// <summary>
+        /// litOtaSummary control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Literal litOtaSummary;
+
+        /// <summary>
+        /// litOtaNotice control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Literal litOtaNotice;
+
+        /// <summary>
+        /// btnOtaConfirm control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Button btnOtaConfirm;
+
+        /// <summary>
+        /// btnOtaReclassJe control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Button btnOtaReclassJe;
+
+        /// <summary>
+        /// btnOtaHotel control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Button btnOtaHotel;
+
+        /// <summary>
+        /// btnOtaUndo control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Button btnOtaUndo;
+
+        /// <summary>
+        /// gvOta control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.GridView gvOta;
     }
 }

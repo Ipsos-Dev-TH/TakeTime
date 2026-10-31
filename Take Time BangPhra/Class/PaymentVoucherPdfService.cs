@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.SqlClient;
@@ -50,7 +50,7 @@ public class PaymentVoucherPdfService
     /// </summary>
     private string GetOutputBasePath()
     {
-        string configPath = ConfigurationManager.AppSettings["PaymentFolderPath"];
+        string configPath = AppCfg.Get("PaymentFolderPath");
         if (!string.IsNullOrEmpty(configPath))
         {
             return configPath;

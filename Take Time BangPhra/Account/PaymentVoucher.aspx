@@ -1,728 +1,396 @@
 ﻿<%@ Page MaintainScrollPositionOnPostback="true" Title="" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="PaymentVoucher.aspx.cs" Inherits="Take_Time_BangPhra.Account.Report.PaymentVoucher" %>
 <%@ Register assembly="Microsoft.ReportViewer.WebForms" namespace="Microsoft.Reporting.WebForms" tagprefix="rsweb" %>
 <asp:Content ID="Content1" ContentPlaceHolderID="MainContent" runat="server">
-     <link rel="stylesheet" href="/Content/jquery-ui.css">
-  <link rel="stylesheet" href="/Content/style.css">
+    <link rel="stylesheet" href="/Content/jquery-ui.css">
+    <link rel="stylesheet" href="/Content/style.css">
     <link rel="stylesheet" type="text/css" href="/Content/GridView.css">
-     <style>
+    <link rel="stylesheet" href="<%= ResolveUrl("~/Content/pv-voucher.css?v=1") %>" />
+    <style>
+        .autocomplete { position: relative; display: block; }
+        .autocomplete-items { position: absolute; border: 1px solid #d4d4d4; border-bottom: none; border-top: none; z-index: 99; top: 100%; left: 0; right: 0; background-color: lemonchiffon; }
+        .autocomplete-items div { padding: 10px; cursor: pointer; border-bottom: 1px solid #d4d4d4; }
+        .autocomplete-active { background-color: DodgerBlue !important; color: #ffffff; }
+    </style>
+    <%-- ค่าตั้งของสคริปต์หน้า (nonce ของ API/PvAssist.ashx, id ของ control, อัตรา VAT ต่อประเภท) --%>
+    <asp:Literal ID="litPvCfg" runat="server" EnableViewState="false"></asp:Literal>
 
+<div class="pv-wrap" id="pvWrap">
+    <header class="pv-head">
+        <h1 class="pv-title">ใบสำคัญจ่าย</h1>
+        <p class="pv-sub">กรอกตามลำดับ: ผู้รับเงิน → รายการ → การชำระ → ภาษี → สรุป แล้วกด "บันทึก"</p>
+    </header>
+    <asp:Literal ID="litSavedMsg" runat="server" EnableViewState="false"></asp:Literal>
 
- .header-center{
-        text-align:center;
-    }
-  .header-right{
-        text-align:right;
-    }
-  .autocomplete {
-  position: relative;
-  display: inline-block;
-}
+    <%-- ① ผู้รับเงิน --%>
+    <section class="pv-card" aria-labelledby="pvS1">
+        <h2 class="pv-card-h" id="pvS1"><span class="pv-step">1</span> ผู้รับเงิน</h2>
+        <div class="pv-grid">
+            <div class="pv-field">
+                <label for="<%= txtVoucherNo.ClientID %>">เลขที่ใบสำคัญจ่าย</label>
+                <div class="pv-inline">
+                    <asp:TextBox ID="txtVoucherNo" runat="server" ReadOnly="True" BackColor="LightGray"></asp:TextBox>
+                    <asp:CheckBox ID="chkEditVoucherNo" Text="แก้เลขเอง" runat="server" AutoPostBack="True" OnCheckedChanged="chkEditVoucherNo_CheckedChanged" CssClass="pv-check" />
+                </div>
+            </div>
+            <div class="pv-field">
+                <label for="<%= TextBox8.ClientID %>">วันที่ใบสำคัญจ่าย</label>
+                <asp:TextBox ID="TextBox8" runat="server" TextMode="Date" AutoPostBack="True" OnTextChanged="TextBox8_TextChanged"></asp:TextBox>
+            </div>
+        </div>
+        <asp:PlaceHolder ID="pnlNextAccRef" runat="server" Visible="false">
+            <div class="pv-na-ref">
+                <span class="pv-na-ref-k">เอกสาร NextAcc</span>
+                <asp:Label ID="lblNextAccDocNumber" runat="server" Text="" CssClass="pv-na-ref-no"></asp:Label>
+                <asp:HyperLink ID="lnkNextAccDoc" runat="server" Text="เปิดใน NextAcc" Target="_blank" Visible="false" />
+                <asp:LinkButton ID="lnkNextAccPdf" runat="server" Text="ดู PDF (NextAcc)" OnClick="lnkNextAccPdf_Click" CausesValidation="false" Visible="false" />
+                <asp:Label ID="lblNextAccSyncStatus" runat="server" Text="" CssClass="pv-muted" />
+                <asp:Label ID="lblNextAccPaymentStatus" runat="server" Text="" />
+            </div>
+        </asp:PlaceHolder>
 
-     .autocomplete-items {
-  position: absolute;
-  border: 1px solid #d4d4d4;
-  border-bottom: none;
-  border-top: none;
-  z-index: 99;
-  /*position the autocomplete items to be the same width as the container:*/
-  top: 100%;
-  left: 0;
-  right: 0;
-  background-color: lemonchiffon;
-}
-.autocomplete-items div {
-  padding: 10px;
-  cursor: pointer;
-  border-bottom: 1px solid #d4d4d4;
-}
-
-.autocomplete-active {
-  /*when navigating through the items using the arrow keys:*/
-  background-color: DodgerBlue !important;
-  color: #ffffff;
-}
-
-/* 📎 File Attachment Styles */
-.file-grid {
-    border-collapse: collapse;
-    width: 100%;
-    margin-top: 10px;
-}
-
-.file-grid th {
-    background: linear-gradient(135deg, #5d4037 0%, #8d6e63 100%);
-    color: white;
-    padding: 10px;
-    text-align: center;
-    font-weight: 600;
-    font-size: 14px;
-}
-
-.file-grid td {
-    padding: 8px;
-    border: 1px solid #e0e0e0;
-    background: white;
-    vertical-align: middle;
-}
-
-.file-grid tr:hover td {
-    background: #f8f9fa;
-}
-
-.file-link {
-    color: #1976d2;
-    text-decoration: none;
-    font-weight: 600;
-    padding: 5px 10px;
-    border-radius: 4px;
-    display: inline-block;
-    transition: all 0.3s;
-}
-
-.file-link:hover {
-    background: #e3f2fd;
-    transform: translateX(3px);
-}
-
-.btn-delete-file {
-    background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
-    color: white;
-    padding: 6px 12px;
-    border: none;
-    border-radius: 5px;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.3s;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.15);
-}
-
-.btn-delete-file:hover {
-    background: linear-gradient(135deg, #c0392b 0%, #e74c3c 100%);
-    transform: translateY(-2px);
-    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-}
-
-/* 🎨 Button Styles */
-.btn-upload {
-    background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
-    color: white;
-    padding: 8px 20px;
-    border: none;
-    border-radius: 5px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.3s;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.15);
-}
-
-.btn-upload:hover {
-    background: linear-gradient(135deg, #2980b9 0%, #3498db 100%);
-    transform: translateY(-2px);
-    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-}
-
-.btn-save {
-    background: linear-gradient(135deg, #27ae60 0%, #229954 100%);
-    color: white;
-    padding: 10px 30px;
-    border: none;
-    border-radius: 8px;
-    font-size: 16px;
-    font-weight: 700;
-    cursor: pointer;
-    transition: all 0.3s;
-    box-shadow: 0 3px 8px rgba(0,0,0,0.2);
-}
-
-.btn-save:hover {
-    background: linear-gradient(135deg, #229954 0%, #27ae60 100%);
-    transform: translateY(-3px);
-    box-shadow: 0 6px 12px rgba(0,0,0,0.3);
-}
-
-.btn-add {
-    background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%);
-    color: white;
-    padding: 8px 20px;
-    border: none;
-    border-radius: 5px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.3s;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.15);
-}
-
-.btn-add:hover {
-    background: linear-gradient(135deg, #e67e22 0%, #f39c12 100%);
-    transform: translateY(-2px);
-    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-}
-
-.btn-secondary {
-    background: linear-gradient(135deg, #95a5a6 0%, #7f8c8d 100%);
-    color: white;
-    padding: 8px 20px;
-    border: none;
-    border-radius: 5px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.3s;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.15);
-}
-
-.btn-secondary:hover {
-    background: linear-gradient(135deg, #7f8c8d 0%, #95a5a6 100%);
-    transform: translateY(-2px);
-    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-}
-
-/* File upload section styling */
-.upload-section {
-    padding: 10px;
-    background: #f9f9f9;
-    border-radius: 5px;
-    border: 1px solid #e0e0e0;
-}
-         </style>
-            <style>
-            th, td {
-              padding: 5px;
-            }
-            .auto-style1 {
-                width: 20%;
-            }
-
-            /* Modern Form Styling */
-            .form-title {
-              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-              color: white;
-              padding: 15px 25px;
-              border-radius: 10px;
-              margin-bottom: 20px;
-              text-align: center;
-              font-size: 18px;
-              font-weight: 600;
-              box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
-            }
-
-            /* Input styling */
-            input[type="text"], input[type="number"], input[type="date"], select, textarea {
-              padding: 8px 12px;
-              border: 1px solid #ddd;
-              border-radius: 6px;
-              transition: all 0.3s;
-              font-size: 14px;
-            }
-
-            input[type="text"]:focus, input[type="number"]:focus, input[type="date"]:focus, select:focus, textarea:focus {
-              border-color: #667eea;
-              box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
-              outline: none;
-            }
-
-            input:disabled, input[readonly] {
-              background-color: #f5f5f5;
-              cursor: not-allowed;
-            }
-
-            /* Checkbox styling */
-            input[type="checkbox"] {
-              width: 18px;
-              height: 18px;
-              margin-right: 8px;
-              cursor: pointer;
-              vertical-align: middle;
-            }
-
-            /* Edit checkbox highlight */
-            .edit-checkbox-row {
-              background: linear-gradient(135deg, #fff3cd 0%, #ffeeba 100%) !important;
-              border-left: 4px solid #f39c12;
-            }
-
-            .edit-checkbox-row td {
-              padding: 12px !important;
-            }
-
-            /* Table row styling */
-            tr:hover {
-              background-color: rgba(102, 126, 234, 0.05) !important;
-            }
-
-            /* Mobile responsive */
-            @media (max-width: 768px) {
-              .form-title {
-                font-size: 16px;
-                padding: 12px 15px;
-                margin: 0 -5px 15px -5px;
-              }
-              table {
-                font-size: 14px;
-              }
-              tr {
-                display: block;
-                margin-bottom: 2px;
-                border-bottom: 1px solid #f0f0f0;
-                padding: 4px 0;
-              }
-              td {
-                display: block;
-                width: 100% !important;
-                text-align: left !important;
-                padding: 4px 10px !important;
-                box-sizing: border-box;
-              }
-              td.modal-sm, td.auto-style1 {
-                background: none;
-                font-weight: 700;
-                color: #444;
-                padding: 8px 10px 2px 10px !important;
-                font-size: 13px;
-              }
-              input[type="text"], input[type="number"], input[type="date"], select, textarea {
-                width: 100% !important;
-                max-width: 100% !important;
-                box-sizing: border-box;
-                margin: 3px 0;
-                padding: 10px 12px;
-                font-size: 15px;
-              }
-              .autocomplete {
-                width: 100% !important;
-              }
-              .upload-section {
-                padding: 10px 5px;
-              }
-              .upload-section input[type="file"] {
-                width: 100%;
-                margin: 5px 0;
-              }
-              .file-grid td {
-                display: table-cell;
-                width: auto !important;
-              }
-              input[type="submit"], button, .btn,
-              .btn-save, .btn-add, .btn-upload, .btn-secondary {
-                width: 100%;
-                margin: 5px 0;
-                padding: 12px;
-                font-size: 15px;
-                box-sizing: border-box;
-              }
-              input[type="checkbox"] {
-                width: 20px;
-                height: 20px;
-              }
-              /* Asset section inner table */
-              div[style*="border: 2px solid"] table td {
-                padding: 4px 5px !important;
-              }
-            }
-            </style>
-      <script type="text/javascript">
-      function checkEnter(event) {
-          if (event.key === 'Enter') {
-              __doPostBack('<%= TextBox9.UniqueID %>', '');
-              event.preventDefault();
-          }
-      }
-
-      // Real-time accounting validation: Subtotal + VAT - WHT = Net Payable
-      // ระบบจะแจ้งเตือนทันทีถ้ายอดไม่ตรง — ต้องแก้ก่อนกด "บันทึก"
-      function validateVoucherTotals() {
-          var parseNum = function (id) {
-              var el = document.getElementById(id);
-              if (!el) return 0;
-              var v = parseFloat((el.value || '0').toString().replace(/,/g, ''));
-              return isNaN(v) ? 0 : v;
-          };
-          var subtotal = parseNum('<%= TextBox3.ClientID %>');
-          var vat = parseNum('<%= TextBox4.ClientID %>');
-          var wht = parseNum('<%= txtWHTAmount.ClientID %>');
-          var net = parseNum('<%= TextBox6.ClientID %>');
-          var computed = subtotal + vat - wht;
-          var diff = Math.abs(computed - net);
-          var warnEl = document.getElementById('voucherValidationWarn');
-          if (!warnEl) return;
-          if (diff > 0.01) {
-              warnEl.style.display = 'block';
-              warnEl.style.color = '#d9534f';
-              warnEl.style.fontWeight = 'bold';
-              warnEl.innerHTML = '⚠️ ยอดไม่ตรง: ' + subtotal.toFixed(2) + ' + ' + vat.toFixed(2) +
-                  ' - ' + wht.toFixed(2) + ' = ' + computed.toFixed(2) +
-                  ' แต่ยอดสุทธิ = ' + net.toFixed(2) + ' (ต่างกัน ' + diff.toFixed(2) + ' บาท)';
-          } else if (subtotal > 0) {
-              warnEl.style.display = 'block';
-              warnEl.style.color = '#5cb85c';
-              warnEl.style.fontWeight = 'normal';
-              warnEl.innerHTML = '✓ ยอดถูกต้อง';
-          } else {
-              warnEl.style.display = 'none';
-          }
-      }
-
-      // Hook validation onto field changes after page load
-      document.addEventListener('DOMContentLoaded', function () {
-          var ids = ['<%= TextBox3.ClientID %>', '<%= TextBox4.ClientID %>',
-                     '<%= txtWHTAmount.ClientID %>', '<%= TextBox6.ClientID %>'];
-          ids.forEach(function (id) {
-              var el = document.getElementById(id);
-              if (el) {
-                  el.addEventListener('input', validateVoucherTotals);
-                  el.addEventListener('change', validateVoucherTotals);
-              }
-          });
-          validateVoucherTotals();
-      });
-      </script>
-    
-    <div class="form-title">
-        <i class="fas fa-file-invoice-dollar"></i> สร้าง/แก้ไข ใบสำคัญจ่าย
-    </div>
-        <table style="width:100%;">
-            <tr>
-                 <td class="modal-sm" style="width: 20%; text-align: right">เลขที่ใบสำคัญจ่าย:</td>
-                <td>
-                    &nbsp;<asp:TextBox ID="txtVoucherNo" runat="server" Width="30%" ReadOnly="True" BackColor="LightGray"></asp:TextBox>
-                    <asp:CheckBox ID="chkEditVoucherNo" Text="Edit" runat="server" AutoPostBack="True" OnCheckedChanged="chkEditVoucherNo_CheckedChanged" />
-                 </td>
-            </tr>
-            <asp:PlaceHolder ID="pnlNextAccRef" runat="server" Visible="false">
-            <tr style="background-color: #e8f5e9;">
-                <td class="modal-sm" style="width: 20%; text-align: right; color: #2e7d32; font-weight: bold;">เอกสาร NextAcc:</td>
-                <td style="padding: 8px;">
-                    <span style="font-size: 14px; font-weight: 600; color: #2e7d32;">
-                        <asp:Label ID="lblNextAccDocNumber" runat="server" Text=""></asp:Label>
-                    </span>
-                    <asp:HyperLink ID="lnkNextAccDoc" runat="server" Text="เปิดใน NextAcc" Target="_blank"
-                        Style="margin-left: 15px; color: #1565c0; text-decoration: underline; font-size: 13px;" Visible="false" />
-                    <asp:Label ID="lblNextAccSyncStatus" runat="server" Text=""
-                        Style="margin-left: 15px; font-size: 12px; color: #666;" />
-                    <asp:Label ID="lblNextAccPaymentStatus" runat="server" Text=""
-                        Style="margin-left: 10px; font-size: 12px;" />
-                </td>
-            </tr>
-            </asp:PlaceHolder>
-             <tr style="background-color:whitesmoke;">
-                 <td class="modal-sm" style="width: 20%; text-align: right">วันที่ใบสำคัญจ่าย:</td>
-                <td>
-                    &nbsp;<asp:TextBox ID="TextBox8" runat="server" Width="30%" TextMode="Date" AutoPostBack="True" OnTextChanged="TextBox8_TextChanged"></asp:TextBox>
-                 </td>
-            </tr>
-            <tr style="background-color:whitesmoke;">
-                <td class="auto-style1" style="text-align: right" rowspan="2">จ่ายเงินให้: </td>
-                <td>
-                     <div class="autocomplete" style="width:100%">
-                    <asp:TextBox ID="TextBox9" runat="server" Width="60%" autocomplete="off" AutoPostBack="True" OnTextChanged="TextBox9_TextChanged"></asp:TextBox>
-                    <asp:Literal ID="Literal1" runat="server"></asp:Literal>
-                         </div>
-                </td>
-              
-            </tr>
-            <tr style="background-color:whitesmoke;">
-                <td>
-                    <asp:DropDownList ID="DropDownList5" runat="server" Width="60%" AppendDataBoundItems="true" AutoPostBack="True" OnSelectedIndexChanged="DropDownList5_SelectedIndexChanged">
-                        <asp:ListItem Value="%">---โปรดเลือก---</asp:ListItem>
-                    </asp:DropDownList>
-                    <asp:SqlDataSource ID="SqlDataSource5" runat="server" ConnectionString="<%$ ConnectionStrings:TaketimeConnectionString %>" SelectCommand="Select distinct(Vendor_Group) from Vendor"></asp:SqlDataSource>
-                    <br />
-                    <asp:DropDownList ID="DropDownList1" runat="server" Width="60%" AppendDataBoundItems="true">
-                        <asp:ListItem>---โปรดเลือก---</asp:ListItem>
-                    </asp:DropDownList>
-                    <asp:SqlDataSource ID="SqlDataSource1" runat="server" ConnectionString="<%$ ConnectionStrings:TaketimeConnectionString %>" SelectCommand="SELECT * FROM [Vendor] WHERE ([Status] = 'True') order by Vendor_Group,Name ASC">
-                        <SelectParameters>
-                            <asp:Parameter DefaultValue="True" Name="Status" Type="Boolean" />
-                        </SelectParameters>
-                    </asp:SqlDataSource>
-                    <asp:Button ID="Button5" runat="server" Text="🔧 สร้าง/แก้ไข Vendor" CssClass="btn-secondary" OnClick="Button5_Click" />
-                </td>
-              
-            </tr>
-            <tr>
-                 <td class="modal-sm" style="width: 20%; text-align: right">วิธีจ่ายเงิน:</td>
-                <td>&nbsp;<asp:DropDownList ID="DropDownList2" runat="server" Width="60%" AppendDataBoundItems="true">
-                <asp:ListItem>---โปรดเลือก---</asp:ListItem>
+        <div class="pv-field">
+            <label for="<%= TextBox9.ClientID %>">ค้นหาผู้ขาย / ผู้รับเงิน</label>
+            <div class="autocomplete">
+                <asp:TextBox ID="TextBox9" runat="server" autocomplete="off" AutoPostBack="True" OnTextChanged="TextBox9_TextChanged" placeholder="พิมพ์ชื่อแล้วเลือกจากรายการ"></asp:TextBox>
+                <asp:Literal ID="Literal1" runat="server"></asp:Literal>
+            </div>
+        </div>
+        <div class="pv-grid">
+            <div class="pv-field">
+                <label for="<%= DropDownList5.ClientID %>">กลุ่มผู้ขาย</label>
+                <asp:DropDownList ID="DropDownList5" runat="server" AppendDataBoundItems="true" AutoPostBack="True" OnSelectedIndexChanged="DropDownList5_SelectedIndexChanged">
+                    <asp:ListItem Value="%">— ทุกกลุ่ม —</asp:ListItem>
                 </asp:DropDownList>
-                    <asp:SqlDataSource ID="SqlDataSource2" runat="server" ConnectionString="<%$ ConnectionStrings:TaketimeConnectionString %>" SelectCommand="SELECT * FROM [Account_Paid_How] WHERE ([Status] = 'True')">
-                        <SelectParameters>
-                            <asp:Parameter DefaultValue="True" Name="Status" Type="Boolean" />
-                        </SelectParameters>
-                    </asp:SqlDataSource>
-                    &nbsp;
-                    <asp:CheckBox ID="chkIsCredit" runat="server" Text=" เครดิต (ยังไม่จ่ายเงิน)" Font-Bold="true" />
-                    <span style="color: #888; font-size: 12px; margin-left: 5px;">ติ๊กถ้าเป็นเครดิต — NextAcc จะไม่บันทึกชำระเงินอัตโนมัติ</span>
-                 </td>
-
-            </tr>
-
-            <tr style="background-color:whitesmoke;">
-                 <td class="modal-sm" style="width: 20%; text-align: right">ประเภทการจ่ายเงิน:</td>
-                <td>&nbsp;<asp:DropDownList ID="DropDownList3" runat="server" Width="60%" AppendDataBoundItems="true" AutoPostBack="True" OnSelectedIndexChanged="DropDownList3_SelectedIndexChanged">
-                <asp:ListItem>---โปรดเลือก---</asp:ListItem>
-                </asp:DropDownList>
-                    <asp:SqlDataSource ID="SqlDataSource3" runat="server" ConnectionString="<%$ ConnectionStrings:TaketimeConnectionString %>" SelectCommand="SELECT * FROM [Account_Paid_Type] WHERE ([Status] = 'True')">
-                        <SelectParameters>
-                            <asp:Parameter DefaultValue="True" Name="Status" Type="Boolean" />
-                        </SelectParameters>
-                    </asp:SqlDataSource>
-                 </td>
-            
-            </tr>
-
-            <tr>
-                 <td class="modal-sm" style="width: 20%; text-align: right">ประเภทภาษี: </td>
-                <td>
-                    &nbsp;<asp:DropDownList ID="DropDownList4" runat="server" Width="60%"  OnSelectedIndexChanged="DropDownList4_SelectedIndexChanged" AppendDataBoundItems="true">
+                <asp:SqlDataSource ID="SqlDataSource5" runat="server" ConnectionString="<%$ ConnectionStrings:TaketimeConnectionString %>" SelectCommand="Select distinct(Vendor_Group) from Vendor"></asp:SqlDataSource>
+            </div>
+            <div class="pv-field">
+                <label for="<%= DropDownList1.ClientID %>">ผู้ขาย / ผู้รับเงิน <span class="pv-req" aria-hidden="true">*</span></label>
+                <asp:DropDownList ID="DropDownList1" runat="server" AppendDataBoundItems="true">
                     <asp:ListItem>---โปรดเลือก---</asp:ListItem>
-                    </asp:DropDownList>
-                    <asp:SqlDataSource ID="SqlDataSource4" runat="server" ConnectionString="<%$ ConnectionStrings:TaketimeConnectionString %>" SelectCommand="SELECT * FROM [Account_Vat_Type] WHERE ([Status] = 'True')">
-                        <SelectParameters>
-                            <asp:Parameter DefaultValue="True" Name="Status" Type="Boolean" />
-                        </SelectParameters>
-                    </asp:SqlDataSource>
-                 </td>
-            
-            </tr>
+                </asp:DropDownList>
+                <asp:SqlDataSource ID="SqlDataSource1" runat="server" ConnectionString="<%$ ConnectionStrings:TaketimeConnectionString %>" SelectCommand="SELECT * FROM [Vendor] WHERE ([Status] = 'True') order by Vendor_Group,Name ASC">
+                    <SelectParameters>
+                        <asp:Parameter DefaultValue="True" Name="Status" Type="Boolean" />
+                    </SelectParameters>
+                </asp:SqlDataSource>
+                <asp:Button ID="Button5" runat="server" Text="เพิ่ม/แก้ไขผู้ขาย" CssClass="pv-btn pv-btn-link" OnClick="Button5_Click" CausesValidation="false" />
+            </div>
+        </div>
+        <div class="pv-field">
+            <label for="<%= txtSupplierInvoiceNo.ClientID %>">เลขที่ใบกำกับภาษี / ใบเสร็จของผู้ขาย</label>
+            <asp:TextBox ID="txtSupplierInvoiceNo" runat="server" MaxLength="100" autocomplete="off" placeholder="เช่น IV6910-0012 (ใช้ตรวจว่าเคยบันทึกใบนี้แล้วหรือยัง)"></asp:TextBox>
+            <div class="pv-hint">ระบบตรวจกับใบสำคัญจ่ายเดิม หน้าสแกนเอกสาร และ NextAcc — ถ้าซ้ำจะเตือนก่อนบันทึก</div>
+            <div id="pvDupBox" class="pv-dup" aria-live="polite"></div>
+        </div>
+        <div id="pvAiVendor" class="pv-ai" aria-live="polite"></div>
+    </section>
 
-           
+    <%-- ② รายการ --%>
+    <section class="pv-card" aria-labelledby="pvS2">
+        <h2 class="pv-card-h" id="pvS2"><span class="pv-step">2</span> รายการ</h2>
 
-            <tr style="background-color:whitesmoke;">
-                 <td class="modal-sm" style="width: 20%; text-align: right">หมวดค่าใช้จ่าย (รายการ): </td>
-                <td>
-                    &nbsp;<asp:DropDownList ID="ddlLineCategory" runat="server" Width="60%" AppendDataBoundItems="true">
-                    <asp:ListItem Value="">---เลือกหมวดค่าใช้จ่าย---</asp:ListItem>
-                    </asp:DropDownList>
-                 </td>
-            </tr>
+        <details class="pv-grni">
+            <summary>ค่าสินค้าที่รับเข้าสต๊อกแล้ว? (ซื้อของเข้าคลัง)</summary>
+            <div class="pv-field">
+                <label for="<%= ddlGoodsReceipt.ClientID %>">เลือกการรับของ</label>
+                <asp:DropDownList ID="ddlGoodsReceipt" runat="server" />
+                <asp:Button ID="btnAddGrniLine" runat="server" Text="＋ เพิ่มเป็นรายการชำระค่าสินค้า" CssClass="pv-btn pv-btn-soft" OnClick="btnAddGrniLine_Click" />
+                <div class="pv-hint">รายการนี้ลงบัญชีล้างรับของ (GRNI) แทนค่าใช้จ่าย — สินค้าลงต้นทุนตอนขายแล้ว ห้ามลงค่าใช้จ่ายซ้ำ · ภาษีซื้อเคลมตามปกติ</div>
+                <asp:Literal ID="litGrniInfo" runat="server" EnableViewState="false"></asp:Literal>
+            </div>
+        </details>
 
-            <tr>
-                 <td class="modal-sm" style="width: 20%; text-align: right">รายละเอียดค่าใช้จ่าย: </td>
-                <td>
-                    &nbsp;<asp:TextBox ID="TextBox1" runat="server" Width="60%"></asp:TextBox>
-                 </td>
+        <div class="pv-line-entry">
+            <div class="pv-field">
+                <label for="<%= ddlLineAccount.ClientID %>">หมวดค่าใช้จ่าย <span class="pv-req" aria-hidden="true">*</span></label>
+                <asp:DropDownList ID="ddlLineAccount" runat="server" />
+                <div class="pv-hint">หมวดเดิมของระบบอยู่ด้านบน (แสดงบัญชี NextAcc ที่ผูกไว้) · ด้านล่างเป็นบัญชีค่าใช้จ่าย/สินทรัพย์ในผัง NextAcc ที่ยังไม่มีหมวด</div>
+            </div>
+            <div class="pv-grid pv-grid-line">
+                <div class="pv-field">
+                    <label for="<%= TextBox1.ClientID %>">รายละเอียด <span class="pv-req" aria-hidden="true">*</span></label>
+                    <asp:TextBox ID="TextBox1" runat="server" autocomplete="off" placeholder="เช่น ค่าซ่อมแอร์ห้อง 203"></asp:TextBox>
+                </div>
+                <div class="pv-field">
+                    <label for="<%= TextBox2.ClientID %>" id="pvAmtLabel">จำนวนเงิน (ไม่รวม VAT) <span class="pv-req" aria-hidden="true">*</span></label>
+                    <div class="pv-money"><asp:TextBox ID="TextBox2" runat="server" inputmode="decimal" autocomplete="off" placeholder="0.00"></asp:TextBox><span>บาท</span></div>
+                </div>
+            </div>
+            <div id="pvAiLine" class="pv-ai" aria-live="polite"></div>
+            <asp:Literal ID="litLineMsg" runat="server" EnableViewState="false"></asp:Literal>
+            <asp:Button ID="Button2" runat="server" Text="＋ เพิ่มรายการ" CssClass="pv-btn pv-btn-add" OnClick="Button2_Click" />
+        </div>
 
-            </tr>
+        <div class="pv-table-wrap">
+            <asp:GridView ID="GridView1" runat="server" AutoGenerateColumns="False" OnRowDeleting="GridView1_RowDeleting" CssClass="pv-lines">
+                <Columns>
+                    <asp:BoundField DataField="Number" HeaderText="#" />
+                    <asp:BoundField DataField="PaidTypeName" HeaderText="หมวด" />
+                    <asp:BoundField DataField="Detail" HeaderText="รายละเอียด" />
+                    <asp:BoundField DataField="Amount" HeaderText="จำนวนเงิน" DataFormatString="{0:N2}" ItemStyle-CssClass="pv-num" HeaderStyle-CssClass="pv-num" />
+                    <asp:CommandField ShowDeleteButton="True" ButtonType="Button" DeleteText="ลบ" ControlStyle-CssClass="pv-btn pv-btn-del" />
+                </Columns>
+                <EmptyDataTemplate><div class="pv-empty">ยังไม่มีรายการ — เลือกหมวด กรอกรายละเอียดและจำนวนเงิน แล้วกด "เพิ่มรายการ"</div></EmptyDataTemplate>
+            </asp:GridView>
+        </div>
 
-            <tr style="background-color:whitesmoke;">
-                 <td class="modal-sm" style="width: 20%; text-align: right">จำนวนเงิน(ไม่รวมภาษี): </td>
-                <td>
-                    &nbsp;<asp:TextBox ID="TextBox2" runat="server" Width="30%"></asp:TextBox>
-                 &nbsp;บาท</td>
+        <details class="pv-adv" id="pvHeadCat">
+            <summary>หมวดหลักของใบ (ใช้ในรายงาน): <b id="pvHeadCatText"></b></summary>
+            <div class="pv-field">
+                <label for="<%= DropDownList3.ClientID %>">หมวดหลักของใบ</label>
+                <asp:DropDownList ID="DropDownList3" runat="server" AppendDataBoundItems="true" AutoPostBack="True" OnSelectedIndexChanged="DropDownList3_SelectedIndexChanged">
+                    <asp:ListItem>---โปรดเลือก---</asp:ListItem>
+                </asp:DropDownList>
+                <asp:SqlDataSource ID="SqlDataSource3" runat="server" ConnectionString="<%$ ConnectionStrings:TaketimeConnectionString %>" SelectCommand="SELECT * FROM [Account_Paid_Type] WHERE ([Status] = 'True')">
+                    <SelectParameters>
+                        <asp:Parameter DefaultValue="True" Name="Status" Type="Boolean" />
+                    </SelectParameters>
+                </asp:SqlDataSource>
+                <div class="pv-hint">ระบบเลือกให้จากรายการแรก — เปลี่ยนเฉพาะเมื่อใบนี้ควรนับในหมวดอื่น (เช่น เงินเดือน)</div>
+            </div>
+        </details>
+        <%-- control เดิม (ซ่อน): ค่าถูกตั้งจาก "หมวดค่าใช้จ่าย" ก่อนโค้ดเพิ่มรายการเดิมทำงาน --%>
+        <div class="pv-legacy" hidden>
+            <asp:DropDownList ID="ddlLineCategory" runat="server" AppendDataBoundItems="true">
+                <asp:ListItem Value="">---เลือกหมวดค่าใช้จ่าย---</asp:ListItem>
+            </asp:DropDownList>
+            <asp:DropDownList ID="ddlLineChargeNexaacc" runat="server" />
+        </div>
+    </section>
 
-            </tr>
+    <%-- ③ การชำระ --%>
+    <section class="pv-card" aria-labelledby="pvS3">
+        <h2 class="pv-card-h" id="pvS3"><span class="pv-step">3</span> การชำระ</h2>
+        <div class="pv-field">
+            <label for="<%= ddlPayFrom.ClientID %>">จ่ายจาก <span class="pv-req" aria-hidden="true">*</span></label>
+            <asp:DropDownList ID="ddlPayFrom" runat="server" />
+            <div class="pv-hint" id="pvPayFromHint">แหล่งเงินในระบบพร้อมบัญชี NextAcc ที่ผูกไว้ — ใบนี้จะลง Cr บัญชีนั้น</div>
+        </div>
+        <div class="pv-field pv-sub-field" id="pvPaidHowAs" hidden>
+            <label for="<%= DropDownList2.ClientID %>">บันทึกในระบบเป็นวิธีจ่าย <span class="pv-req" aria-hidden="true">*</span></label>
+            <asp:DropDownList ID="DropDownList2" runat="server" AppendDataBoundItems="true">
+                <asp:ListItem>---โปรดเลือก---</asp:ListItem>
+            </asp:DropDownList>
+            <asp:SqlDataSource ID="SqlDataSource2" runat="server" ConnectionString="<%$ ConnectionStrings:TaketimeConnectionString %>" SelectCommand="SELECT * FROM [Account_Paid_How] WHERE ([Status] = 'True')">
+                <SelectParameters>
+                    <asp:Parameter DefaultValue="True" Name="Status" Type="Boolean" />
+                </SelectParameters>
+            </asp:SqlDataSource>
+            <div class="pv-hint">เลือกบัญชีที่ยังไม่มีแหล่งเงินผูก — ระบุประเภทในระบบ (ใช้ในรายงาน และตัดสินว่าเป็นเงินสด/ธนาคารที่จ่ายทันที)</div>
+        </div>
+        <div class="pv-legacy" hidden>
+            <asp:DropDownList ID="ddlPaidHowNexaacc" runat="server" />
+        </div>
+        <div class="pv-field">
+            <asp:CheckBox ID="chkIsCredit" runat="server" Text=" ซื้อเชื่อ — ยังไม่จ่ายเงิน" CssClass="pv-check" />
+            <div class="pv-hint">ติ๊กเมื่อยังไม่ได้จ่าย: NextAcc ตั้งเจ้าหนี้ไว้ · จ่ายภายหลังที่ <a href="/Account/CreditPurchasePayment">ชำระใบซื้อเชื่อ</a></div>
+        </div>
+        <div id="pvAiPay" class="pv-ai" aria-live="polite"></div>
+    </section>
 
-            <tr>
-                 <td class="modal-sm" style="width: 20%; text-align: right">&nbsp;</td>
-                <td>
-                    &nbsp;<asp:Button ID="Button2" runat="server" Text="➕ เพิ่ม" CssClass="btn-add" OnClick="Button2_Click" />
-                 </td>
+    <%-- ④ ภาษี --%>
+    <section class="pv-card" aria-labelledby="pvS4">
+        <h2 class="pv-card-h" id="pvS4"><span class="pv-step">4</span> ภาษี</h2>
+        <div class="pv-grid">
+            <div class="pv-field">
+                <label for="<%= DropDownList4.ClientID %>">ภาษีมูลค่าเพิ่ม (VAT) <span class="pv-req" aria-hidden="true">*</span></label>
+                <asp:DropDownList ID="DropDownList4" runat="server" AutoPostBack="True" OnSelectedIndexChanged="DropDownList4_SelectedIndexChanged" AppendDataBoundItems="true">
+                    <asp:ListItem>---โปรดเลือก---</asp:ListItem>
+                </asp:DropDownList>
+                <asp:SqlDataSource ID="SqlDataSource4" runat="server" ConnectionString="<%$ ConnectionStrings:TaketimeConnectionString %>" SelectCommand="SELECT * FROM [Account_Vat_Type] WHERE ([Status] = 'True')">
+                    <SelectParameters>
+                        <asp:Parameter DefaultValue="True" Name="Status" Type="Boolean" />
+                    </SelectParameters>
+                </asp:SqlDataSource>
+            </div>
+            <div class="pv-field">
+                <label for="<%= ddlVatClaim.ClientID %>">ภาษีซื้อ</label>
+                <asp:DropDownList ID="ddlVatClaim" runat="server">
+                    <asp:ListItem Value="1" Text="เคลมภาษีซื้อได้ (มีใบกำกับเต็มรูป)" Selected="True" />
+                    <asp:ListItem Value="0" Text="เคลมไม่ได้ — รวม VAT เข้าค่าใช้จ่าย (§82/5)" />
+                </asp:DropDownList>
+                <div class="pv-hint">ใบเสร็จธรรมดา/ใบกำกับอย่างย่อ/ค่ารับรอง เคลมไม่ได้</div>
+            </div>
+        </div>
+        <div class="pv-grid">
+            <div class="pv-field">
+                <label for="<%= ddlWHTRate.ClientID %>">หัก ณ ที่จ่าย</label>
+                <asp:DropDownList ID="ddlWHTRate" runat="server" AutoPostBack="True" OnSelectedIndexChanged="ddlWHTRate_SelectedIndexChanged">
+                    <asp:ListItem Text="ไม่หัก" Value="0" />
+                    <asp:ListItem Text="1% (ค่าขนส่ง/เบี้ยประกัน)" Value="1" />
+                    <asp:ListItem Text="1.5%" Value="1.5" />
+                    <asp:ListItem Text="2% (ค่าโฆษณา)" Value="2" />
+                    <asp:ListItem Text="3% (ค่าบริการ/จ้างทำของ)" Value="3" />
+                    <asp:ListItem Text="5% (ค่าเช่า)" Value="5" />
+                    <asp:ListItem Text="10%" Value="10" />
+                </asp:DropDownList>
+            </div>
+            <div class="pv-field">
+                <label for="<%= txtWHTAmount.ClientID %>">ยอดหัก ณ ที่จ่าย</label>
+                <div class="pv-money"><asp:TextBox ID="txtWHTAmount" runat="server" Enabled="False" Text="0.00"></asp:TextBox><span>บาท</span></div>
+            </div>
+        </div>
 
-            </tr>
+        <div class="pv-cil">
+            <asp:CheckBox ID="chkCertInLieu" runat="server" AutoPostBack="True" OnCheckedChanged="chkCertInLieu_CheckedChanged"
+                Text=" ผู้รับเงินออกใบเสร็จไม่ได้ — ออก &quot;ใบรับรองแทนใบเสร็จรับเงิน&quot;" CssClass="pv-check" />
+            <div class="pv-hint">เช่น ค่าแท็กซี่ / แผงลอย / ลูกจ้างรายวัน — จ่ายเงินสด ไม่มีภาษีซื้อ</div>
+            <asp:Panel ID="pnlCertInLieu" runat="server" Visible="false" CssClass="pv-cil-form">
+                <div class="pv-field">
+                    <label for="<%= txtCilReason.ClientID %>">เหตุผลที่ไม่ได้รับใบเสร็จ <span class="pv-req" aria-hidden="true">*</span></label>
+                    <asp:TextBox ID="txtCilReason" runat="server" MaxLength="500" placeholder="เช่น ผู้รับเงินเป็นผู้ขายรายย่อย ไม่มีใบเสร็จรับเงิน" data-pv-required="1" />
+                </div>
+                <div class="pv-grid">
+                    <div class="pv-field">
+                        <label for="<%= txtCilPayeeName.ClientID %>">ผู้รับเงิน (ถ้าไม่ตรงกับผู้ขาย)</label>
+                        <asp:TextBox ID="txtCilPayeeName" runat="server" MaxLength="200" placeholder="ชื่อผู้รับเงิน" />
+                    </div>
+                    <div class="pv-field">
+                        <label for="<%= txtCilPayeeAddress.ClientID %>">ที่อยู่ผู้รับเงิน</label>
+                        <asp:TextBox ID="txtCilPayeeAddress" runat="server" MaxLength="500" placeholder="ถ้ามี" />
+                    </div>
+                    <div class="pv-field">
+                        <label for="<%= txtCilCertifierName.ClientID %>">ผู้รับรอง <span class="pv-req" aria-hidden="true">*</span></label>
+                        <asp:TextBox ID="txtCilCertifierName" runat="server" MaxLength="200" placeholder="ชื่อผู้รับรอง" data-pv-required="1" />
+                    </div>
+                    <div class="pv-field">
+                        <label for="<%= txtCilCertifierPosition.ClientID %>">ตำแหน่งผู้รับรอง</label>
+                        <asp:TextBox ID="txtCilCertifierPosition" runat="server" MaxLength="200" placeholder="ตำแหน่ง" />
+                    </div>
+                    <div class="pv-field">
+                        <label for="<%= txtCilWitnessName.ClientID %>">พยาน / ผู้อนุมัติ</label>
+                        <asp:TextBox ID="txtCilWitnessName" runat="server" MaxLength="200" placeholder="ชื่อพยาน/ผู้อนุมัติ" />
+                    </div>
+                    <div class="pv-field">
+                        <label for="<%= txtCilWitnessPosition.ClientID %>">ตำแหน่งพยาน</label>
+                        <asp:TextBox ID="txtCilWitnessPosition" runat="server" MaxLength="200" placeholder="ตำแหน่ง" />
+                    </div>
+                </div>
+            </asp:Panel>
+        </div>
+    </section>
 
-            <tr>
-                <td class="modal-sm" style="width: 20%; text-align: right">&nbsp;</td>
-                 <td style="text-align: right">
-                     <asp:GridView ID="GridView1" runat="server" AutoGenerateColumns="False" OnRowDeleting="GridView1_RowDeleting">
-                         <Columns>
-                             <asp:BoundField DataField="Number" HeaderText="ลำดับ" />
-                             <asp:BoundField DataField="PaidTypeName" HeaderText="หมวดค่าใช้จ่าย" />
-                             <asp:BoundField DataField="Detail" HeaderText="รายละเอียด" />
-                             <asp:BoundField DataField="Amount" HeaderText="จำนวนเงิน" DataFormatString="{0:N2}" />
-                             <asp:CommandField ShowDeleteButton="True" ButtonType="Button" />
-                         </Columns>
-                     </asp:GridView>
-                     </td>
-            
-            </tr>
+    <%-- ⑤ เอกสารแนบ + สินทรัพย์ --%>
+    <section class="pv-card" aria-labelledby="pvS5">
+        <h2 class="pv-card-h" id="pvS5"><span class="pv-step">5</span> เอกสารแนบ</h2>
+        <div class="pv-grid">
+            <div class="pv-field">
+                <label for="<%= FileUpload1.ClientID %>">ไฟล์ (ใบกำกับ ใบเสร็จ สัญญา)</label>
+                <asp:FileUpload ID="FileUpload1" runat="server" />
+            </div>
+            <div class="pv-field">
+                <label for="<%= TextBox7.ClientID %>">ชื่อไฟล์ที่จะเก็บ</label>
+                <asp:TextBox ID="TextBox7" runat="server" Text="" placeholder="เช่น ใบกำกับภาษี"></asp:TextBox>
+            </div>
+        </div>
+        <asp:Literal ID="litUploadMsg" runat="server" EnableViewState="false"></asp:Literal>
+        <asp:Button ID="Button4" runat="server" Text="อัปโหลดไฟล์" CssClass="pv-btn pv-btn-soft" OnClick="Button4_Click" />
+        <div class="pv-table-wrap">
+            <asp:GridView ID="GridView2" runat="server" AutoGenerateColumns="False"
+                OnRowDeleted="GridView2_RowDeleted" OnRowDeleting="GridView2_RowDeleting"
+                CssClass="file-grid" OnRowDataBound="GridView2_RowDataBound">
+                <Columns>
+                    <asp:TemplateField HeaderText="ไฟล์แนบ">
+                        <ItemTemplate>
+                            <asp:HyperLink ID="lnkViewFile" runat="server"
+                                NavigateUrl='<%# GetFileUrl(Eval("Name")) %>'
+                                Text='<%# "📄 " + Eval("Name") %>'
+                                Target="_blank"
+                                CssClass="file-link">
+                            </asp:HyperLink>
+                        </ItemTemplate>
+                    </asp:TemplateField>
+                    <asp:CommandField ShowDeleteButton="True" DeleteText="ลบ" ButtonType="Button" HeaderText="">
+                        <ControlStyle CssClass="btn-delete-file" />
+                    </asp:CommandField>
+                </Columns>
+                <EmptyDataTemplate>
+                    <div class="pv-empty">ยังไม่มีไฟล์แนบ</div>
+                </EmptyDataTemplate>
+            </asp:GridView>
+        </div>
 
-            <tr>
-                 <td class="modal-sm" style="width: 20%; text-align: right">&nbsp;</td>
-                <td>
-                    <asp:CheckBox ID="CheckBox1" runat="server" Text="แก้ไขยอดเงินด้วยตนเอง" AutoPostBack="True" OnCheckedChanged="CheckBox1_CheckedChanged" />
-                 </td>
-            </tr>
-            <tr style="background-color:whitesmoke;">
-                 <td class="modal-sm" style="width: 20%; text-align: right">จำนวนรวมก่อนภาษีมุลค่าเพิ่ม: </td>
-                <td>
-                    &nbsp;<asp:TextBox ID="TextBox3" runat="server" Width="30%" Enabled="False"></asp:TextBox>
-                 &nbsp;บาท</td>
-            </tr>
-            <tr>
-                 <td class="modal-sm" style="width: 20%; text-align: right">
-                     <asp:Label ID="Label1" runat="server" Text=""></asp:Label>: </td>
-                <td>
-                    &nbsp;<asp:TextBox ID="TextBox4" runat="server" Width="30%" Enabled="False"></asp:TextBox>
-                    &nbsp;บาท
-                 </td>
-            </tr>
-
-            <tr>
-                 <td class="modal-sm" style="width: 20%; text-align: right">ภาษีหัก ณ ที่จ่าย: </td>
-                <td>
-                    &nbsp;<asp:DropDownList ID="ddlWHTRate" runat="server" Width="20%" AutoPostBack="True" OnSelectedIndexChanged="ddlWHTRate_SelectedIndexChanged">
-                        <asp:ListItem Text="ไม่หัก" Value="0" />
-                        <asp:ListItem Text="1%" Value="1" />
-                        <asp:ListItem Text="1.5%" Value="1.5" />
-                        <asp:ListItem Text="2%" Value="2" />
-                        <asp:ListItem Text="3%" Value="3" />
-                        <asp:ListItem Text="5%" Value="5" />
-                        <asp:ListItem Text="10%" Value="10" />
-                    </asp:DropDownList>
-                    &nbsp;= <asp:TextBox ID="txtWHTAmount" runat="server" Width="20%" Enabled="False" Text="0.00"></asp:TextBox>
-                    &nbsp;บาท
-                </td>
-            </tr>
-
-            <tr style="background-color:whitesmoke;">
-                 <td class="modal-sm" style="width: 20%; text-align: right">จำนวนสุทธิ: </td>
-                <td>
-                    &nbsp;<asp:TextBox ID="TextBox6" runat="server" Width="30%" Enabled="False"></asp:TextBox>
-                    &nbsp;บาท</td>
-            </tr>
-
-            <tr>
-                <td></td>
-                <td>
-                    <span id="voucherValidationWarn" style="display:none; padding:6px 10px; border-radius:4px; background:#fff3cd; border:1px solid #ffc107; font-size:13px;"></span>
-                </td>
-            </tr>
-
-            <!-- Asset Recording Section -->
-            <tr>
-                <td colspan="2" style="padding: 15px 0;">
-                    <div style="border: 2px solid #667eea; border-radius: 8px; padding: 15px; background: linear-gradient(135deg, #f8f9ff 0%, #eef2ff 100%);">
-                        <div style="margin-bottom: 10px;">
-                            <asp:CheckBox ID="chkRecordAsset" runat="server" Text=" บันทึกเป็นสินทรัพย์ถาวร"
-                                Font-Bold="true" Font-Size="14px" AutoPostBack="true"
-                                OnCheckedChanged="chkRecordAsset_CheckedChanged" />
-                            <span style="color: #666; font-size: 12px; margin-left: 10px;">
-                                (สำหรับการซื้อทรัพย์สิน เช่น คอมพิวเตอร์ เฟอร์นิเจอร์ ยานพาหนะ ฯลฯ)
-                            </span>
+        <div class="pv-asset">
+            <asp:CheckBox ID="chkRecordAsset" runat="server" Text=" บันทึกเป็นสินทรัพย์ถาวร (คอมพิวเตอร์ เฟอร์นิเจอร์ ยานพาหนะ ฯลฯ)"
+                AutoPostBack="true" OnCheckedChanged="chkRecordAsset_CheckedChanged" CssClass="pv-check" />
+            <asp:Panel ID="pnlAssetDetails" runat="server" Visible="false" CssClass="pv-asset-form">
+                <div class="pv-grid">
+                    <div class="pv-field">
+                        <label for="<%= ddlAssetCategory.ClientID %>">หมวดหมู่สินทรัพย์</label>
+                        <asp:DropDownList ID="ddlAssetCategory" runat="server" AutoPostBack="true" OnSelectedIndexChanged="ddlAssetCategory_SelectedIndexChanged"></asp:DropDownList>
+                    </div>
+                    <div class="pv-field">
+                        <label for="<%= txtAssetName.ClientID %>">ชื่อสินทรัพย์ <span class="pv-req" aria-hidden="true">*</span></label>
+                        <asp:TextBox ID="txtAssetName" runat="server" placeholder="เช่น คอมพิวเตอร์ตั้งโต๊ะ, แอร์ห้องประชุม"></asp:TextBox>
+                    </div>
+                    <div class="pv-field">
+                        <label for="<%= txtAssetQuantity.ClientID %>">จำนวน (ชิ้น)</label>
+                        <asp:TextBox ID="txtAssetQuantity" runat="server" TextMode="Number" Text="1"></asp:TextBox>
+                        <div class="pv-hint">มากกว่า 1 ชิ้น = แยกสินทรัพย์ทีละชิ้น ราคาต่อชิ้นคำนวณให้</div>
+                    </div>
+                    <div class="pv-field">
+                        <label for="<%= txtAssetBrand.ClientID %>">ยี่ห้อ / รุ่น</label>
+                        <div class="pv-inline">
+                            <asp:TextBox ID="txtAssetBrand" runat="server" placeholder="ยี่ห้อ"></asp:TextBox>
+                            <asp:TextBox ID="txtAssetModel" runat="server" placeholder="รุ่น"></asp:TextBox>
                         </div>
-                        <asp:Panel ID="pnlAssetDetails" runat="server" Visible="false">
-                            <table style="width: 100%;">
-                                <tr>
-                                    <td style="width: 20%; text-align: right; padding: 5px;">หมวดหมู่สินทรัพย์:</td>
-                                    <td style="padding: 5px;">
-                                        <asp:DropDownList ID="ddlAssetCategory" runat="server" Width="50%"
-                                            AutoPostBack="true" OnSelectedIndexChanged="ddlAssetCategory_SelectedIndexChanged">
-                                        </asp:DropDownList>
-                                    </td>
-                                </tr>
-                                <tr>
-                                    <td style="text-align: right; padding: 5px;">ชื่อสินทรัพย์:</td>
-                                    <td style="padding: 5px;">
-                                        <asp:TextBox ID="txtAssetName" runat="server" Width="60%"
-                                            placeholder="เช่น คอมพิวเตอร์ตั้งโต๊ะ, แอร์ห้องประชุม"></asp:TextBox>
-                                    </td>
-                                </tr>
-                                <tr>
-                                    <td style="text-align: right; padding: 5px;">จำนวน:</td>
-                                    <td style="padding: 5px;">
-                                        <asp:TextBox ID="txtAssetQuantity" runat="server" Width="15%" TextMode="Number" Text="1" style="text-align: center;"></asp:TextBox>
-                                        &nbsp;ชิ้น
-                                        <span style="color: #666; font-size: 12px; margin-left: 10px;">
-                                            (ถ้ามากกว่า 1 ชิ้น ระบบจะสร้างสินทรัพย์แยกแต่ละชิ้น และคำนวณราคาต่อชิ้นอัตโนมัติ)
-                                        </span>
-                                    </td>
-                                </tr>
-                                <tr>
-                                    <td style="text-align: right; padding: 5px;">ยี่ห้อ/รุ่น:</td>
-                                    <td style="padding: 5px;">
-                                        <asp:TextBox ID="txtAssetBrand" runat="server" Width="30%" placeholder="ยี่ห้อ"></asp:TextBox>
-                                        <asp:TextBox ID="txtAssetModel" runat="server" Width="28%" placeholder="รุ่น"></asp:TextBox>
-                                    </td>
-                                </tr>
-                                <tr>
-                                    <td style="text-align: right; padding: 5px;">หมายเลขซีเรียล:</td>
-                                    <td style="padding: 5px;">
-                                        <asp:TextBox ID="txtAssetSerial" runat="server" Width="40%"></asp:TextBox>
-                                    </td>
-                                </tr>
-                                <tr>
-                                    <td style="text-align: right; padding: 5px;">อายุการใช้งาน:</td>
-                                    <td style="padding: 5px;">
-                                        <asp:TextBox ID="txtAssetUsefulLife" runat="server" Width="15%" TextMode="Number" Text="5"></asp:TextBox>
-                                        &nbsp;ปี
-                                        <span style="margin-left: 20px;">มูลค่าซาก:</span>
-                                        <asp:TextBox ID="txtAssetResidual" runat="server" Width="20%" TextMode="Number" Text="0"></asp:TextBox>
-                                        &nbsp;บาท
-                                    </td>
-                                </tr>
-                                <tr>
-                                    <td style="text-align: right; padding: 5px;">สถานที่ตั้ง:</td>
-                                    <td style="padding: 5px;">
-                                        <asp:TextBox ID="txtAssetLocation" runat="server" Width="40%" placeholder="เช่น สำนักงาน, ห้องประชุม"></asp:TextBox>
-                                    </td>
-                                </tr>
-                            </table>
-                        </asp:Panel>
                     </div>
-                </td>
-            </tr>
-
-            <tr>
-                 <td class="modal-sm" style="width: 20%; text-align: right; vertical-align: top;">อัพโหลดไฟล์ที่เกี่ยวข้อง: </td>
-                <td class="upload-section">
-                    <div style="margin-bottom: 8px;">
-                        <strong>📎 เลือกไฟล์:</strong>
-                        <asp:FileUpload ID="FileUpload1" runat="server" />
+                    <div class="pv-field">
+                        <label for="<%= txtAssetSerial.ClientID %>">หมายเลขซีเรียล</label>
+                        <asp:TextBox ID="txtAssetSerial" runat="server"></asp:TextBox>
                     </div>
-                    <div style="margin-bottom: 8px;">
-                        <strong>📝 คำอธิบายไฟล์:</strong>
-                        <asp:TextBox ID="TextBox7" runat="server" Text="" Width="60%" placeholder="ระบุคำอธิบายไฟล์ (เช่น ใบเสร็จ, สัญญา, ฯลฯ)"></asp:TextBox>
+                    <div class="pv-field">
+                        <label for="<%= txtAssetLocation.ClientID %>">สถานที่ตั้ง</label>
+                        <asp:TextBox ID="txtAssetLocation" runat="server" placeholder="เช่น สำนักงาน, ห้องประชุม"></asp:TextBox>
                     </div>
-                    <asp:Button ID="Button4" runat="server" Text="📤 Upload" CssClass="btn-upload" OnClick="Button4_Click" />
-                </td>
-            </tr>
+                    <div class="pv-field">
+                        <label for="<%= txtAssetUsefulLife.ClientID %>">อายุการใช้งาน (ปี)</label>
+                        <asp:TextBox ID="txtAssetUsefulLife" runat="server" TextMode="Number" Text="5"></asp:TextBox>
+                    </div>
+                    <div class="pv-field">
+                        <label for="<%= txtAssetResidual.ClientID %>">มูลค่าซาก (บาท)</label>
+                        <asp:TextBox ID="txtAssetResidual" runat="server" TextMode="Number" Text="0"></asp:TextBox>
+                    </div>
+                </div>
+            </asp:Panel>
+        </div>
+    </section>
 
-            <tr style="background-color:whitesmoke;">
-                 <td class="modal-sm" style="width: 20%; text-align: right; vertical-align: top;">รายการไฟล์แนบ:</td>
-                <td>
-                    <asp:GridView ID="GridView2" runat="server" AutoGenerateColumns="False"
-                        OnRowDeleted="GridView2_RowDeleted" OnRowDeleting="GridView2_RowDeleting"
-                        CssClass="file-grid" OnRowDataBound="GridView2_RowDataBound">
-                        <Columns>
-                            <asp:TemplateField HeaderText="ชื่อไฟล์">
-                                <ItemTemplate>
-                                    <asp:HyperLink ID="lnkViewFile" runat="server"
-                                        NavigateUrl='<%# GetFileUrl(Eval("Name")) %>'
-                                        Text='<%# "📄 " + Eval("Name") %>'
-                                        Target="_blank"
-                                        CssClass="file-link">
-                                    </asp:HyperLink>
-                                </ItemTemplate>
-                            </asp:TemplateField>
-                            <asp:CommandField ShowDeleteButton="True" DeleteText="🗑️ ลบ"
-                                ButtonType="Button" HeaderText="ลบไฟล์">
-                                <ControlStyle CssClass="btn-delete-file" />
-                            </asp:CommandField>
-                        </Columns>
-                        <EmptyDataTemplate>
-                            <div style="padding: 15px; text-align: center; color: #999; font-style: italic;">
-                                ไม่มีไฟล์แนบ
-                            </div>
-                        </EmptyDataTemplate>
-                    </asp:GridView>
-                 </td>
-            </tr>
+    <%-- ⑥ สรุป --%>
+    <section class="pv-card pv-summary" aria-labelledby="pvS6">
+        <h2 class="pv-card-h" id="pvS6"><span class="pv-step">6</span> สรุปยอด</h2>
+        <div class="pv-totals">
+            <div class="pv-trow">
+                <label for="<%= TextBox3.ClientID %>">ยอดก่อนภาษีมูลค่าเพิ่ม</label>
+                <div class="pv-money"><asp:TextBox ID="TextBox3" runat="server" Enabled="False"></asp:TextBox><span>บาท</span></div>
+            </div>
+            <div class="pv-trow">
+                <label for="<%= TextBox4.ClientID %>"><asp:Label ID="Label1" runat="server" Text="ภาษีมูลค่าเพิ่ม"></asp:Label></label>
+                <div class="pv-money"><asp:TextBox ID="TextBox4" runat="server" Enabled="False"></asp:TextBox><span>บาท</span></div>
+            </div>
+            <div class="pv-trow">
+                <span>หัก ณ ที่จ่าย</span>
+                <div class="pv-money pv-ro"><span id="pvTotWht">0.00</span><span>บาท</span></div>
+            </div>
+            <div class="pv-trow pv-trow-net">
+                <label for="<%= TextBox6.ClientID %>">ยอดจ่ายสุทธิ</label>
+                <div class="pv-money"><asp:TextBox ID="TextBox6" runat="server" Enabled="False"></asp:TextBox><span>บาท</span></div>
+            </div>
+        </div>
+        <span id="voucherValidationWarn" class="pv-calc" role="status" style="display:none;"></span>
+        <asp:CheckBox ID="CheckBox1" runat="server" Text=" แก้ไขยอดเงินด้วยตนเอง (ยอดในใบกำกับปัดเศษต่างจากที่คำนวณ)" AutoPostBack="True" OnCheckedChanged="CheckBox1_CheckedChanged" CssClass="pv-check" />
+    </section>
 
-            <tr>
-                 <td class="modal-sm" style="width: 20%; text-align: right">&nbsp;</td>
-                <td style="padding: 15px 0;">
-                    <asp:Button ID="Button3" runat="server" Text="💾 บันทึก" CssClass="btn-save" OnClick="Button3_Click" />
-                 </td>
-            </tr>
+    <div id="pvFormMsg" class="pv-formmsg"><asp:Literal ID="litFormMsg" runat="server" EnableViewState="false"></asp:Literal></div>
+    <div class="pv-savebar">
+        <div class="pv-savebar-net"><span>ยอดจ่ายสุทธิ</span><b id="pvNetBar">0.00</b></div>
+        <asp:Button ID="Button3" runat="server" Text="บันทึกใบสำคัญจ่าย" CssClass="pv-btn pv-btn-save" OnClick="Button3_Click" />
+    </div>
+</div>
 
-        </table>
-    </p>
+    <script src="<%= ResolveUrl("~/Scripts/pv-voucher.js?v=1") %>"></script>
     <rsweb:reportviewer Visible="false" ID="ReportViewer2" runat="server" BackColor="" ClientIDMode="AutoID" HighlightBackgroundColor="" InternalBorderColor="204, 204, 204" InternalBorderStyle="Solid" InternalBorderWidth="1px" LinkActiveColor="" LinkActiveHoverColor="" LinkDisabledColor="" PrimaryButtonBackgroundColor="" PrimaryButtonForegroundColor="" PrimaryButtonHoverBackgroundColor="" PrimaryButtonHoverForegroundColor="" SecondaryButtonBackgroundColor="" SecondaryButtonForegroundColor="" SecondaryButtonHoverBackgroundColor="" SecondaryButtonHoverForegroundColor="" SplitterBackColor="" ToolbarDividerColor="" ToolbarForegroundColor="" ToolbarForegroundDisabledColor="" ToolbarHoverBackgroundColor="" ToolbarHoverForegroundColor="" ToolBarItemBorderColor="" ToolBarItemBorderStyle="Solid" ToolBarItemBorderWidth="1px" ToolBarItemHoverBackColor="" ToolBarItemPressedBorderColor="51, 102, 153" ToolBarItemPressedBorderStyle="Solid" ToolBarItemPressedBorderWidth="1px" ToolBarItemPressedHoverBackColor="153, 187, 226" Height="500px" CssClass="auto-style5" style="margin-top: 172px">
         <LocalReport EnableExternalImages="true" ReportPath="Account\Report\Payment.rdlc">
-            
         </LocalReport>
-</rsweb:reportviewer>
+    </rsweb:reportviewer>
 </asp:Content>

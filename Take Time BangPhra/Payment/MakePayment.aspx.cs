@@ -15,14 +15,62 @@ namespace Take_Time_BangPhra.Payment
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            // หน้านี้รับเงิน + ออกใบเสร็จ — เดิมไม่มีการตรวจสิทธิ์เลย (ใครรู้ URL ก็ลงรับเงินได้)
+            if (!Perm.Guard(this, Perm.FinReceipt)) return;
+            if (Session["permission"]?.ToString() != "True")
+            {
+                Response.Redirect("~/Admin/Login", false);
+                Context.ApplicationInstance.CompleteRequest();
+                return;
+            }
+
             paymentService = new PaymentService(connectionString);
             paymentDataAccess = new PaymentDataAccess(connectionString);
+
+            // 🔒 ยอดล็อกตามสลิป (PHASE19_36): เลือกไฟล์สลิป → ตรวจทันที (AJAX) ใส่ยอดจากสลิปและล็อกช่องยอด
+            if (Payments.SlipCheck.SlipVerificationService.AmountLockActive)
+            {
+                decimal? dueForPreview = null;
+                try { int rid0 = GetReservationId(); if (rid0 > 0) dueForPreview = paymentDataAccess.GetRemainingBalance(rid0); } catch { }
+                _sfDue = dueForPreview;
+                if (Payments.SlipCheck.SlipAmountLockUi.TryHandlePreview(Context, dueForPreview)) return;
+                Payments.SlipCheck.SlipAmountLockUi.BindPreview(this, fuPaymentSlip, txtPaymentAmount, "mpSlipLockMsg");
+            }
+            // ลิงก์ "ไม่มีสลิป?" + ช่องเหตุผล — เฉพาะผู้ที่บันทึกช่องทางโอนโดยไม่มีสลิปได้ (ตรวจซ้ำใน btnSubmit_Click)
+            pnlNoSlip.Visible = Payments.SlipCheck.SlipVerificationService.AmountLockActive
+                                && Payments.SlipCheck.SlipVerificationService.CanRecordWithoutSlip();
 
             if (!IsPostBack)
             {
                 LoadPaymentMethods();
                 LoadReservationData();
                 LoadPaymentHistory();
+            }
+        }
+
+        private decimal? _sfDue;
+
+        /// <summary>
+        /// สลิปก่อนยอด (CLAUDE.md ข้อ 18): ค่าตั้งให้สคริปต์หน้า — ช่องทางโอน/QR (กฎเดียวกับด่านบันทึก IsTransferPaidHow) + ยอดคงเหลือ
+        /// ปิดยอดล็อกตามสลิป/ไม่มี PHASE19_34 = {"on":false} → ลำดับและหน้าตาเดิม · เซิร์ฟเวอร์ยังบังคับยอดสลิปตอนบันทึกเหมือนเดิม
+        /// </summary>
+        public string SlipFirstJs
+        {
+            get
+            {
+                try
+                {
+                    if (!Payments.SlipCheck.SlipVerificationService.AmountLockActive) return "{\"on\":false}";
+                    var ids = new System.Collections.Generic.List<string>();
+                    foreach (ListItem it in ddlPaymentMethod.Items)
+                    {
+                        if (string.IsNullOrEmpty(it.Value)) continue;
+                        if (Payments.SlipCheck.SlipVerificationService.IsTransferPaidHow(it.Value, it.Text)) ids.Add(it.Value);
+                    }
+                    decimal due = _sfDue.HasValue && _sfDue.Value > 0m ? decimal.Round(_sfDue.Value, 2) : 0m;
+                    return new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(new { on = ids.Count > 0, transfer = ids, due = due });
+                }
+                catch { return "{\"on\":false}"; }
             }
         }
 
@@ -37,6 +85,9 @@ namespace Take_Time_BangPhra.Payment
                 ddlPaymentMethod.DataTextField = "Paid_How";
                 ddlPaymentMethod.DataValueField = "ID";
                 ddlPaymentMethod.DataBind();
+
+                // ไม่ให้เลือกช่องทางเกตเวย์ (PaySo/Omise — ลงบันทึกอัตโนมัติเมื่อเกตเวย์ยืนยัน) และช่องที่ปิด "พนักงานเห็น"
+                Payments.PaymentChannelCatalog.RemoveNonStaffItems(ddlPaymentMethod.Items, true, false);
 
                 // Add default item at the beginning
                 ddlPaymentMethod.Items.Insert(0, new ListItem("-- เลือกวิธีการชำระ --", ""));
@@ -118,6 +169,8 @@ namespace Take_Time_BangPhra.Payment
 
                     // Set max amount in textbox
                     txtPaymentAmount.Text = remainingBalance.ToString("0.00");
+
+                    ShowOnlinePayLink(reservationId, row["Customer_MobilePhone"].ToString(), remainingBalance);
                 }
                 else
                 {
@@ -169,7 +222,49 @@ namespace Take_Time_BangPhra.Payment
 
                 // Validate payment amount
                 decimal remainingBalance = decimal.Parse(lblRemainingBalance.Text.Replace(",", ""));
-                if (paymentAmount > remainingBalance)
+
+                // 🔒 ยอดล็อกตามสลิป (PHASE19_36): อ่านยอดจากสลิปได้น่าเชื่อถือ → ยอดที่บันทึก = ยอดสลิป (ไม่เชื่อช่องที่โพสต์มา)
+                //    โอนเกินยอดค้าง = บันทึกเต็มยอดสลิป (PaymentService จัดเป็นมัดจำ/รับล่วงหน้าก่อนเข้าพัก)
+                bool slipLocked = false;
+                if (fuPaymentSlip.HasFile && Payments.SlipCheck.SlipVerificationService.AmountLockActive
+                    && Payments.SlipCheck.SlipVerificationService.IsTransferPaidHow(ddlPaymentMethod.SelectedValue, paymentMethod))
+                {
+                    var lk = Payments.SlipCheck.SlipVerificationService.InspectAmountLock(fuPaymentSlip.FileBytes, fuPaymentSlip.FileName);
+                    if (lk.Locked && lk.Amount.HasValue && lk.Amount.Value > 0m)
+                    {
+                        if (Math.Abs(lk.Amount.Value - paymentAmount) > 0.005m)
+                            codeInstance.Logs(connectionString, "SlipVerify",
+                                $"MakePayment การจอง {reservationId}: ยอดล็อกตามสลิป {lk.Amount.Value:N2} (กรอก {paymentAmount:N2}) — {lk.BadgeText()}",
+                                Session["UserName"]?.ToString() ?? "SYSTEM");
+                        paymentAmount = lk.Amount.Value;
+                        slipLocked = true;
+                    }
+                }
+
+                // 🧾 ช่องทางโอน/QR โดยไม่มีสลิป (เปิดยอดล็อกตามสลิป): เฉพาะ Owner / Admin สิทธิ์การเงิน + เหตุผล ≥ 10 ตัวอักษร
+                //    → บันทึกได้แต่ติดธง "ไม่มีสลิป — รอตรวจ" ในหมายเหตุ + log ตรวจสอบ + แจ้งเจ้าของ (CLAUDE.md ข้อ 18) · ปิดฟีเจอร์ = เดิม
+                string noSlipReason = null;
+                if (!fuPaymentSlip.HasFile && Payments.SlipCheck.SlipVerificationService.AmountLockActive
+                    && Payments.SlipCheck.SlipVerificationService.IsTransferPaidHow(ddlPaymentMethod.SelectedValue, paymentMethod))
+                {
+                    if (!Payments.SlipCheck.SlipVerificationService.CanRecordWithoutSlip())
+                    {
+                        ShowError("ช่องทางโอน/QR ต้องแนบสลิป — ระบบอ่านยอดจากสลิปให้เอง · ถ้าลูกค้าไม่มีสลิป ให้ Owner หรือ Admin ที่มีสิทธิ์การเงินเป็นผู้บันทึกพร้อมเหตุผล");
+                        return;
+                    }
+                    noSlipReason = (txtNoSlipReason.Text ?? "").Trim();
+                    if (noSlipReason.Length < 10)
+                    {
+                        ShowError("กรุณาระบุเหตุผลที่ไม่มีสลิป (อย่างน้อย 10 ตัวอักษร) — ระบบจะติดธงรายการนี้ให้ตรวจภายหลัง");
+                        return;
+                    }
+                    if (noSlipReason.Length > 500) noSlipReason = noSlipReason.Substring(0, 500);
+                    notes = Payments.SlipCheck.SlipVerificationService.NoSlipFlag + " เหตุผล: " + noSlipReason
+                            + " (โดย " + Payments.SlipCheck.SlipVerificationService.CurrentUserName() + ")"
+                            + (notes.Length > 0 ? " · " + notes : "");
+                }
+
+                if (!slipLocked && paymentAmount > remainingBalance)
                 {
                     ShowError($"จำนวนเงินที่ชำระ ({paymentAmount:N2}) มากกว่ายอดคงเหลือ ({remainingBalance:N2})");
                     return;
@@ -206,7 +301,15 @@ namespace Take_Time_BangPhra.Payment
 
                 if (result.Success)
                 {
-                    ShowSuccess($"ชำระเงินสำเร็จ! จำนวน {paymentAmount:N2} บาท<br/>" +
+                    if (noSlipReason != null)
+                    {
+                        Payments.SlipCheck.SlipVerificationService.RecordNoSlipPayment(reservationId, paymentAmount, paymentMethod,
+                            noSlipReason, result.ReceiptId);
+                        txtNoSlipReason.Text = "";
+                    }
+                    string overTxt = slipLocked ? Payments.SlipCheck.SlipVerificationService.OverpayText(paymentAmount, remainingBalance) : null;
+                    ShowSuccess($"ชำระเงินสำเร็จ! จำนวน {paymentAmount:N2} บาท" + (slipLocked ? " (ยอดจากสลิป)" : "")
+                               + (overTxt != null ? " · " + System.Web.HttpUtility.HtmlEncode(overTxt) : "") + "<br/>" +
                                $"เลขที่ใบเสร็จ: {result.ReceiptId}<br/>" +
                                $"ยอดคงเหลือ: {result.RemainingBalance:N2} บาท");
 
@@ -227,6 +330,32 @@ namespace Take_Time_BangPhra.Payment
             catch (Exception ex)
             {
                 ShowError("เกิดข้อผิดพลาด: " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// ลิงก์ให้ลูกค้าจ่ายเอง — โผล่เฉพาะเมื่อเปิดฟีเจอร์ "รับชำระเงินออนไลน์"
+        /// ปิดอยู่ = ไม่มีอะไรเปลี่ยนบนหน้านี้เลย
+        /// </summary>
+        private void ShowOnlinePayLink(int reservationId, string customerPhone, decimal remaining)
+        {
+            try
+            {
+                var svc = new Payments.OnlinePaymentService(connectionString);
+                if (!svc.IsAvailable || remaining <= 0) return;
+
+                string url = Payments.PaymentUrls.SiteBase()
+                    + "/Payment/Pay?src=" + Payments.PaymentSource.Reservation
+                    + "&id=" + reservationId
+                    + "&ph=" + Uri.EscapeDataString(customerPhone ?? "");
+
+                txtPayLink.Text = url;
+                lnkOpenPay.NavigateUrl = url;
+                pnlOnlineLink.Visible = true;
+            }
+            catch
+            {
+                // ยังไม่ได้ติดตั้ง/ตั้งค่า → ไม่แสดงอะไร หน้าเดิมทำงานปกติ
             }
         }
 

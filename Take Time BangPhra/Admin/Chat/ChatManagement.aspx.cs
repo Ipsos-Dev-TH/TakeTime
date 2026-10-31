@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Web.UI;
@@ -15,12 +15,16 @@ namespace Take_Time_BangPhra.Admin.Chat
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.OpsChat)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
+            if (!Feature.Guard(this, "Chat", "~/Default")) return;   // ฟีเจอร์ถูกปิด (ตั้งค่าระบบ → หมวดฟีเจอร์)
             _code = new code();
 
             // Check admin login
-            if (Session["username"] == null)
+            // ตรวจสิทธิ์แบบเดียวกับหน้าผู้ดูแลอื่น ๆ (เดิมเช็คแค่ว่ามีชื่อผู้ใช้ใน session
+            // ไม่ได้เช็คสิทธิ์จริง และใช้คีย์คนละตัวกับทั้งระบบ)
+            if (Session["permission"]?.ToString() != "True")
             {
-                Response.Redirect("~/Admin/Login.aspx");
+                Response.Redirect("~/Admin/Login");
                 return;
             }
 

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Linq;
@@ -15,6 +15,8 @@ namespace Take_Time_BangPhra.Admin.Payroll
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.HrPayroll)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
+            if (!Feature.Guard(this, "HR", "~/Default")) return;   // ฟีเจอร์ถูกปิด (ตั้งค่าระบบ → หมวดฟีเจอร์)
             payrollService = new PayrollService();
 
             if (!IsPostBack)
@@ -23,6 +25,7 @@ namespace Take_Time_BangPhra.Admin.Payroll
                 InitializeYearDropdown();
                 LoadPaymentOptions();
                 LoadPayrollData();
+                ShowPayrollModeNotice();
             }
             else
             {
@@ -158,6 +161,8 @@ namespace Take_Time_BangPhra.Admin.Payroll
                     LoadStatistics(currentPayrollPeriodId);
 
                     string status = periodRow["Status"].ToString();
+                    ShowPayrollNaStatus(currentPayrollPeriodId, status);
+                    ShowLeaveMismatch(currentPayrollPeriodId);
                     btnGeneratePayroll.Visible = false;
                     btnApprovePayroll.Visible = (status == "DRAFT");
                     btnProcessAll.Visible = (status == "COMPLETED" || status == "APPROVED");
@@ -168,6 +173,8 @@ namespace Take_Time_BangPhra.Admin.Payroll
                     // No payroll yet
                     gvPayroll.DataSource = null;
                     gvPayroll.DataBind();
+                    litLeaveMismatch.Text = "";
+                    btnSyncLeave.Visible = false;
                     btnGeneratePayroll.Visible = true;
                     btnApprovePayroll.Visible = false;
                     btnProcessAll.Visible = false;
@@ -290,7 +297,30 @@ namespace Take_Time_BangPhra.Admin.Payroll
 
                     if (success)
                     {
-                        ShowMessage("อนุมัติเงินเดือนสำเร็จ", "success");
+                        // อนุมัติงวด = ส่งเงินเดือนทั้งงวดไปออกเอกสารบน NextAcc (ตามโหมด)
+                        //   DOCUMENT_IMPORT → import ยอดที่เราคำนวณ → NextAcc ออก GL+ภงด.1+สปส+50ทวิ+payslip จากยอดเรา
+                        //   DOCUMENT → NextAcc คำนวณเอง  |  JOURNAL_ONLY → GL โพสต์ต่อพนักงานตอนทำจ่ายแล้ว (ไม่ต้องทำซ้ำ)
+                        string naMsg = "";
+                        try
+                        {
+                            string cs = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                            var acctConfig = new Take_Time_BangPhra.Integration.AccountingConfig(cs);
+                            if (acctConfig.IsConfigured && acctConfig.Enabled)
+                            {
+                                var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(cs);
+                                // ข้อความไทยไม่มีรหัสโหมด + ลิงก์ไปคิว (NextAccUi — CLAUDE.md ข้อ 23)
+                                long qid = 0;
+                                if (acctConfig.IsPayrollImportMode) qid = sync.EnqueuePayrollRunImport(currentPayrollPeriodId);
+                                else if (acctConfig.IsPayrollDocumentMode) qid = sync.EnqueuePayrollRunSync(currentPayrollPeriodId);
+                                naMsg = PayrollNextAccNote(acctConfig, qid);
+                            }
+                        }
+                        catch (Exception ax)
+                        {
+                            naMsg = "<br/>⚠ ส่งเงินเดือนขึ้น NextAcc ไม่สำเร็จ: " + Server.HtmlEncode(ax.Message);
+                        }
+
+                        ShowMessage("อนุมัติเงินเดือนสำเร็จ" + naMsg, "success");
                         LoadPayrollData();
                     }
                     else
@@ -328,10 +358,24 @@ namespace Take_Time_BangPhra.Admin.Payroll
                 int updatedCount = 0;
                 int salaryUpdatedCount = 0;
 
+                int skippedPaid = 0;
+
                 foreach (DataRow row in dt.Rows)
                 {
                     long recordId = Convert.ToInt64(row["ID"]);
                     short adminId = Convert.ToInt16(row["Admin_ID"]);
+
+                    // ⚠ ห้ามคำนวณทับแถวที่ "ทำจ่ายแล้ว"
+                    //
+                    // เดิมวนทับทุกแถวไม่สนสถานะ ⇒ กดคำนวณใหม่ทีเดียว ยอดที่แก้มือไว้
+                    // (โบนัส/หักอื่น ๆ/OT ที่ปรับเอง) ถูกเขียนทับด้วยค่าที่คำนวณสด
+                    // และยอดที่ "จ่ายเงินออกไปแล้วจริง" ก็เปลี่ยนไม่ตรงกับใบสำคัญจ่าย
+                    // + ไม่ตรงกับที่ส่งขึ้น NextAcc แล้ว
+                    // ⇒ จ่ายแล้ว = ล็อก ต้องแก้ผ่านปุ่มแก้ไขรายคนเท่านั้น (มี audit + sync)
+                    bool alreadyPaid = row.Table.Columns.Contains("VoucherGenerated")
+                        && row["VoucherGenerated"] != DBNull.Value
+                        && Convert.ToBoolean(row["VoucherGenerated"]);
+                    if (alreadyPaid) { skippedPaid++; continue; }
 
                     // Always get latest salary from Employee_Salary
                     decimal baseSalary = GetEmployeeCurrentSalary(adminId);
@@ -348,12 +392,13 @@ namespace Take_Time_BangPhra.Admin.Payroll
                         baseSalary = oldSalary;
                     }
 
-                    // Get leave days and OT hours for this employee in this period
-                    decimal leaveDays = GetEmployeeLeaveDays(adminId, periodInfo.Year, periodInfo.Month);
+                    // ใบลาหักเงิน (เดือนนี้ + ใบที่ยกมาจากรอบที่จ่ายแล้ว) — ตัวเดียวกับสร้างรอบ/อนุมัติใบลา แล้วผูกใบกับรอบนี้
+                    var leaveCalc = Take_Time_BangPhra.Payroll.PayrollLeaveSync.LoadAndClaim(adminId, periodInfo.Year, periodInfo.Month, recordId, baseSalary);
+                    decimal leaveDays = leaveCalc.TotalDays;
                     decimal otHours = GetEmployeeOTHours(adminId, periodInfo.Year, periodInfo.Month);
 
                     // Calculate leave deduction: (salary / days in month) * leave days
-                    decimal leaveDeduction = HRConfiguration.CalculateLeaveDeduction(baseSalary, leaveDays, daysInMonth);
+                    decimal leaveDeduction = leaveCalc.Deduction;
 
                     // Calculate OT amount: (salary / days in month / 8) * OT hours (already multiplied by rate)
                     decimal otAmount = HRConfiguration.CalculateBasicOTAmount(baseSalary, otHours, daysInMonth);
@@ -363,9 +408,8 @@ namespace Take_Time_BangPhra.Admin.Payroll
                     decimal tax = row["Tax"] != DBNull.Value ? Convert.ToDecimal(row["Tax"]) : 0;
                     decimal otherDeductions = row["OtherDeductions"] != DBNull.Value ? Convert.ToDecimal(row["OtherDeductions"]) : 0;
 
-                    // Calculate work days (days in month minus leave days)
-                    int workDays = daysInMonth - (int)Math.Floor(leaveDays);
-                    if (workDays < 0) workDays = 0;
+                    // Calculate work days (days in month minus this month's leave days)
+                    int workDays = Take_Time_BangPhra.Payroll.PayrollLeaveSync.WorkDays(periodInfo.Year, periodInfo.Month, leaveCalc.InMonthDays);
 
                     // Calculate total earnings first
                     decimal totalEarnings = baseSalary + otAmount + bonus + allowance;
@@ -412,7 +456,50 @@ namespace Take_Time_BangPhra.Admin.Payroll
                 {
                     msg += $" - ดึงเงินเดือนจากการตั้งค่า {salaryUpdatedCount} คน";
                 }
-                ShowMessage(msg, "success");
+                if (skippedPaid > 0)
+                {
+                    // บอกให้ชัดว่าข้ามใครไป ไม่ใช่คำนวณไม่สำเร็จ
+                    msg += $"<br/><b>ข้ามคนที่ทำจ่ายแล้ว {skippedPaid} คน</b> — "
+                         + "ยอดที่จ่ายออกไปแล้วจะไม่ถูกเขียนทับ "
+                         + "ถ้าต้องแก้จริง ๆ ใช้ปุ่มแก้ไข ✏ รายคน (ระบบจะส่งยอดใหม่ไป NextAcc ให้)";
+                }
+                ShowMessage(msg, skippedPaid > 0 ? "warning" : "success");
+                LoadPayrollData();
+            }
+            catch (Exception ex)
+            {
+                ShowMessage("เกิดข้อผิดพลาด: " + ex.Message, "error");
+            }
+        }
+
+        /// <summary>ใบลาที่อนุมัติแต่ยอดหักลาในรอบไม่ตรง — แสดงแถบเตือน + ปุ่มปรับ (เฉพาะคนที่ยังไม่ทำจ่าย)</summary>
+        private void ShowLeaveMismatch(int periodId)
+        {
+            try
+            {
+                var list = Take_Time_BangPhra.Payroll.PayrollLeaveSync.FindMismatches(periodId);
+                litLeaveMismatch.Text = Take_Time_BangPhra.Payroll.PayrollLeaveSync.RenderMismatchHtml(list);
+                btnSyncLeave.Visible = list.Exists(m => !m.Paid);
+            }
+            catch (Exception ex)
+            {
+                litLeaveMismatch.Text = "";
+                btnSyncLeave.Visible = false;
+                System.Diagnostics.Debug.WriteLine("ShowLeaveMismatch: " + ex.Message);
+            }
+        }
+
+        protected void btnSyncLeave_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (!int.TryParse(hdnPayrollPeriodId.Value, out currentPayrollPeriodId) || currentPayrollPeriodId <= 0)
+                {
+                    ShowMessage("ไม่พบรอบเงินเดือน", "error");
+                    return;
+                }
+                int n = Take_Time_BangPhra.Payroll.PayrollLeaveSync.SyncPeriod(currentPayrollPeriodId);
+                ShowMessage($"ปรับยอดลาให้ตรงใบลาที่อนุมัติแล้ว ({n} คนที่ยังไม่ทำจ่าย) — เงินเดือน/OT/โบนัส/หักอื่นคงเดิม", "success");
                 LoadPayrollData();
             }
             catch (Exception ex)
@@ -448,7 +535,29 @@ namespace Take_Time_BangPhra.Admin.Payroll
                     }
                 }
 
-                ShowMessage($"ทำจ่ายสำเร็จ ({processedCount} คน)", "success");
+                // ส่งเงินเดือนทั้งงวดไปออกเอกสารบน NextAcc (ตามโหมดที่ตั้งไว้)
+                //   DOCUMENT_IMPORT → import ยอดที่เราคำนวณ → NextAcc ออก GL+ภงด.1+สปส+50ทวิ+payslip จากยอดเรา
+                //   DOCUMENT (native) → NextAcc คำนวณเอง   |   JOURNAL_ONLY → โพสต์ต่อพนักงานตอน GeneratePayrollVoucher แล้ว
+                string nextAccMsg = "";
+                try
+                {
+                    string cs = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                    var acctConfig = new Take_Time_BangPhra.Integration.AccountingConfig(cs);
+                    if (acctConfig.IsConfigured && acctConfig.Enabled)
+                    {
+                        var sync = new Take_Time_BangPhra.Integration.AccountingSyncService(cs);
+                        long qid = 0;
+                        if (acctConfig.IsPayrollImportMode) qid = sync.EnqueuePayrollRunImport(currentPayrollPeriodId);
+                        else if (acctConfig.IsPayrollDocumentMode) qid = sync.EnqueuePayrollRunSync(currentPayrollPeriodId);
+                        nextAccMsg = PayrollNextAccNote(acctConfig, qid);
+                    }
+                }
+                catch (Exception accEx)
+                {
+                    nextAccMsg = "<br/>⚠ ส่งเงินเดือนขึ้น NextAcc ไม่สำเร็จ: " + Server.HtmlEncode(accEx.Message);
+                }
+
+                ShowMessage($"ทำจ่ายสำเร็จ ({processedCount} คน){nextAccMsg}", "success");
                 LoadPayrollData();
             }
             catch (Exception ex)
@@ -705,7 +814,10 @@ namespace Take_Time_BangPhra.Admin.Payroll
                 var result = ProcessSinglePayment(payrollRecordId, "โอน", "ค่าจ้าง", 0);
                 if (result.Success)
                 {
-                    ShowMessage($"ทำจ่ายสำเร็จ: {result.VoucherNumber}", "success");
+                    // doc-mode (NextAcc ออกเอกสาร) ไม่มีเลขใบสำคัญจ่ายในระบบ → แสดงข้อความผลลัพธ์แทน
+                    ShowMessage(string.IsNullOrEmpty(result.VoucherNumber)
+                        ? (result.Message ?? "ทำจ่ายสำเร็จ")
+                        : $"ทำจ่ายสำเร็จ: {result.VoucherNumber}", "success");
                     LoadPayrollData();
                 }
                 else
@@ -737,7 +849,9 @@ namespace Take_Time_BangPhra.Admin.Payroll
 
                 if (result.Success)
                 {
-                    ShowMessage($"ทำจ่ายสำเร็จ: {result.VoucherNumber}", "success");
+                    ShowMessage(string.IsNullOrEmpty(result.VoucherNumber)
+                        ? (result.Message ?? "ทำจ่ายสำเร็จ")
+                        : $"ทำจ่ายสำเร็จ: {result.VoucherNumber}", "success");
                     LoadPayrollData();
                 }
                 else
@@ -827,13 +941,23 @@ namespace Take_Time_BangPhra.Admin.Payroll
 
                 if (payrollService.UpdatePayrollRecord(payrollRecordId, updateFields))
                 {
+                    // ยอดหักลาที่แก้เอง → ผูกใบลาที่หักกับรอบนี้ + วันลาให้ตรงใบ (ใบสำคัญจ่ายแสดงรายการลา, รอบหน้าไม่ยกมาหักซ้ำ)
+                    Take_Time_BangPhra.Payroll.PayrollLeaveSync.SyncLeaveDaysForRecord(payrollRecordId);
+
                     // Update period totals
                     if (int.TryParse(hdnPayrollPeriodId.Value, out currentPayrollPeriodId))
                     {
                         payrollService.UpdatePeriodTotals(currentPayrollPeriodId);
                     }
 
-                    ShowMessage("บันทึกข้อมูลสำเร็จ", "success");
+                    // แถวที่ทำจ่ายแล้ว = เคยส่งขึ้น NextAcc ไปแล้ว ⇒ แก้ยอดต้องส่งตามไปด้วย
+                    // ไม่งั้น TakeTime กับ NextAcc ถือยอดคนละชุด (เงียบ ๆ ไม่มีใครรู้)
+                    string syncNote = payrollService.ResyncPayrollRecordToAccounting(payrollRecordId);
+
+                    ShowMessage(string.IsNullOrEmpty(syncNote)
+                            ? "บันทึกข้อมูลสำเร็จ"
+                            : "บันทึกข้อมูลสำเร็จ<br/>" + syncNote,
+                        syncNote != null && syncNote.StartsWith("⚠") ? "warning" : "success");
                     LoadPayrollData();
                 }
                 else
@@ -909,6 +1033,65 @@ namespace Take_Time_BangPhra.Admin.Payroll
             return str.Replace("\\", "\\\\").Replace("'", "\\'").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "\\r");
         }
 
+        /// <summary>ข้อความหลังอนุมัติ/ทำจ่าย — ตามโหมดเงินเดือนของ NextAcc, ไม่มีรหัสโหมด, ลิงก์ไปคิว (กรองตามเลขคิว/งวด)</summary>
+        private string PayrollNextAccNote(Take_Time_BangPhra.Integration.AccountingConfig cfg, long queueId)
+        {
+            if (cfg == null || cfg.IsPayrollLocal) return "";
+            string mode = cfg.IsPayrollImportMode ? "DOCUMENT_IMPORT" : cfg.IsPayrollDocumentMode ? "DOCUMENT" : "JOURNAL_ONLY";
+            string q = queueId > 0 ? queueId.ToString() : (mode == "JOURNAL_ONLY" ? "" : currentPayrollPeriodId.ToString());
+            string url = ResolveUrl("~" + Take_Time_BangPhra.Integration.NextAccUi.QueueUrl("", q: q));
+            return Take_Time_BangPhra.Integration.NextAccUi.PayrollSyncNoteHtml(mode, queueId, url);
+        }
+
+        /// <summary>ป้ายสถานะ NextAcc ของงวด (ข้อ 24): โหมดส่งทั้งงวด = คิว IMPORT/SYNC_PAYROLL_RUN ล่าสุด (Entity_ID = งวด, query เดียว);
+        /// ลงบัญชีรายคน = ดูรายคนที่หน้าตรวจสอบใบสำคัญจ่าย; LOCAL/ไม่เชื่อม = ไม่แสดง</summary>
+        private void ShowPayrollNaStatus(int periodId, string periodStatus)
+        {
+            try
+            {
+                string cs = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                var cfg = new Take_Time_BangPhra.Integration.AccountingConfig(cs);
+                if (!cfg.IsConfigured || !cfg.Enabled || cfg.IsPayrollLocal || periodId <= 0) { litPayrollNaStatus.Text = ""; return; }
+                var inp = new Take_Time_BangPhra.Integration.NextAccUi.NaBadgeInput();
+                if (cfg.IsPayrollImportMode || cfg.IsPayrollDocumentMode)
+                {
+                    Take_Time_BangPhra.Integration.NextAccUi.NaQueueRow row;
+                    Take_Time_BangPhra.Integration.NextAccStatusData.LatestByEntityId(cs, "PAYROLL",
+                        new[] { "IMPORT_PAYROLL_RUN", "SYNC_PAYROLL_RUN" }, new long[] { periodId }).TryGetValue(periodId, out row);
+                    inp.Queue = row;
+                    inp.SentLabel = "ส่งงวดแล้ว";
+                    if (row == null && string.Equals(periodStatus, "DRAFT", StringComparison.OrdinalIgnoreCase))
+                    { inp.NotApplicable = true; inp.NotApplicableLabel = "ยังไม่อนุมัติ — ยังไม่ส่ง"; inp.NotApplicableReason = "ส่งงวดเงินเดือนเข้า NextAcc เมื่อกดอนุมัติ/ทำจ่าย"; }
+                    else inp.NotSentLabel = "งวดนี้ยังไม่ส่ง";
+                }
+                else
+                {
+                    inp.NotApplicable = true;
+                    inp.NotApplicableLabel = "ลงบัญชีรายคนตอนทำจ่าย";
+                    inp.NotApplicableReason = "ดูสถานะรายคนที่หน้า ตรวจสอบใบสำคัญจ่าย";
+                }
+                string badge = Take_Time_BangPhra.Integration.NextAccStatusData.Render(this, cs, inp, inp.Queue != null ? inp.Queue.Id.ToString() : null, null);
+                litPayrollNaStatus.Text = "<div class='na-stack' style='margin:8px 0;font-size:13px;'>สถานะบน NextAcc ของงวดนี้: " + badge + "</div>";
+            }
+            catch { litPayrollNaStatus.Text = ""; }
+        }
+
+        /// <summary>โหมดลงบัญชีอย่างเดียว (ค่าเริ่มต้น): เตือนบนหน้าตลอดว่า ภ.ง.ด.1/สปส.1-10/50 ทวิ ต้องยื่นจากข้อมูลระบบนี้</summary>
+        private void ShowPayrollModeNotice()
+        {
+            try
+            {
+                string cs = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                var cfg = new Take_Time_BangPhra.Integration.AccountingConfig(cs);
+                bool journalOnly = cfg.IsConfigured && cfg.Enabled && !cfg.IsPayrollLocal && !cfg.IsPayrollImportMode && !cfg.IsPayrollDocumentMode;
+                litPayrollModeNote.Text = journalOnly
+                    ? "<div class='alert alert-warning' style='margin:8px 0;'>📒 เงินเดือนลงบัญชี NextAcc เป็นรายการบัญชีรายคน (ไม่ออกเอกสาร). "
+                      + Take_Time_BangPhra.Integration.NextAccUi.PayrollStatutoryWarningHtml() + "</div>"
+                    : "";
+            }
+            catch { litPayrollModeNote.Text = ""; }
+        }
+
         private void ShowMessage(string message, string type)
         {
             pnlMessage.Visible = true;
@@ -917,6 +1100,11 @@ namespace Take_Time_BangPhra.Admin.Payroll
             if (type == "success")
             {
                 pnlMessage.CssClass = "alert alert-success";
+            }
+            else if (type == "warning")
+            {
+                // สำเร็จแต่มีเรื่องต้องรู้ — ไม่ใช่ error จึงไม่ควรขึ้นแดง
+                pnlMessage.CssClass = "alert alert-warning";
             }
             else
             {
@@ -938,49 +1126,6 @@ namespace Take_Time_BangPhra.Admin.Payroll
                         WHERE Admin_ID = @AdminID AND IsActive = 1", conn))
                     {
                         cmd.Parameters.AddWithValue("@AdminID", adminId);
-                        object result = cmd.ExecuteScalar();
-                        if (result != null && result != DBNull.Value)
-                        {
-                            return Convert.ToDecimal(result);
-                        }
-                    }
-                }
-            }
-            catch { }
-            return 0;
-        }
-
-        /// <summary>
-        /// Get approved leave days for an employee in a specific month
-        /// Only counts leaves where DeductSalary = 1 (excludes paid leave like sick leave, vacation with quota)
-        /// Excludes leaves that have been replaced by work
-        /// </summary>
-        private decimal GetEmployeeLeaveDays(short adminId, int year, int month)
-        {
-            try
-            {
-                string connStr = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
-                using (var conn = new System.Data.SqlClient.SqlConnection(connStr))
-                {
-                    conn.Open();
-                    // Get leaves that are approved, NOT fully replaced, AND deduct salary
-                    using (var cmd = new System.Data.SqlClient.SqlCommand(@"
-                        SELECT ISNULL(SUM(
-                            CASE
-                                WHEN ISNULL(IsReplaced, 0) = 1 THEN 0
-                                ELSE TotalDays
-                            END
-                        ), 0) AS LeaveDays
-                        FROM Leave_Requests
-                        WHERE Admin_ID = @AdminID
-                          AND Status = 'APPROVED'
-                          AND ISNULL(DeductSalary, 0) = 1
-                          AND YEAR(StartDate) = @Year
-                          AND MONTH(StartDate) = @Month", conn))
-                    {
-                        cmd.Parameters.AddWithValue("@AdminID", adminId);
-                        cmd.Parameters.AddWithValue("@Year", year);
-                        cmd.Parameters.AddWithValue("@Month", month);
                         object result = cmd.ExecuteScalar();
                         if (result != null && result != DBNull.Value)
                         {

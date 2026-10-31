@@ -1,0 +1,55 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   ป้าย "สถานะ NextAcc" แบบเดียวทุกหน้า (CLAUDE.md ข้อ 24)
+   ฝั่ง server: NextAccUi.RenderBadge · ฝั่ง client: Scripts/nextacc-ui.js (NaBadge.render)
+   ═══════════════════════════════════════════════════════════════════════════ */
+:root {
+    --na-sent-fg: #1e7e34;     --na-sent-bg: #e6f4ea;
+    --na-wait-fg: #1d5f8a;     --na-wait-bg: #e3f0fa;
+    --na-data-fg: #a04a00;     --na-data-bg: #fff0e0;
+    --na-config-fg: #6a3d9a;   --na-config-bg: #f1e9fb;
+    --na-cn-fg: #b3261e;       --na-cn-bg: #fde7e5;
+    --na-dup-fg: #ffffff;      --na-dup-bg: #37414b;
+    --na-failed-fg: #b3261e;   --na-failed-bg: #fff4f3;
+    --na-void-fg: #7a5a5a;     --na-void-bg: #f3eeee;
+    --na-none-fg: #5f6368;     --na-none-bg: #eef0f2;
+    --na-link: #1a5fb4;
+}
+
+.na-st {
+    display: inline-flex; align-items: center; gap: 4px; max-width: 100%;
+    padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1.5;
+    white-space: nowrap; vertical-align: middle; cursor: default;
+    color: var(--na-none-fg); background: var(--na-none-bg); border: 1px solid transparent;
+}
+.na-st__t { overflow: hidden; text-overflow: ellipsis; }
+.na-st__i { font-size: 11px; }
+.na-st--sent    { color: var(--na-sent-fg);   background: var(--na-sent-bg); }
+.na-st--pending,
+.na-st--sending,
+.na-st--waiting { color: var(--na-wait-fg);   background: var(--na-wait-bg); }
+.na-st--sending .na-st__i { animation: na-pulse 1.4s ease-in-out infinite; }
+.na-st--data    { color: var(--na-data-fg);   background: var(--na-data-bg);   border-color: #f5c08a; }
+.na-st--config  { color: var(--na-config-fg); background: var(--na-config-bg); border-color: #d3bdf0; }
+.na-st--cn      { color: var(--na-cn-fg);     background: var(--na-cn-bg);     border-color: #f3b0aa; }
+.na-st--dup     { color: var(--na-dup-fg);    background: var(--na-dup-bg); }
+.na-st--failed  { color: var(--na-failed-fg); background: var(--na-failed-bg); border-color: #f3b0aa; }
+.na-st--voided  { color: var(--na-void-fg);   background: var(--na-void-bg);   text-decoration: none; }
+.na-st--notsent,
+.na-st--na      { color: var(--na-none-fg);   background: var(--na-none-bg); font-weight: 500; }
+
+.na-lks { display: inline-flex; flex-wrap: wrap; gap: 2px 8px; margin-left: 6px; vertical-align: middle; }
+.na-lk { font-size: 11px; color: var(--na-link); text-decoration: none; white-space: nowrap; }
+.na-lk:hover, .na-lk:focus { text-decoration: underline; }
+.na-lk--fix { font-weight: 600; color: #a04a00; }
+
+/* ในเซลล์ตารางแคบ: ลิงก์ขึ้นบรรทัดใหม่ */
+td .na-lks, .na-stack .na-lks { display: flex; margin: 3px 0 0 0; }
+
+@keyframes na-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+
+@media (max-width: 600px) {
+    .na-st { font-size: 11px; padding: 2px 7px; }
+    .na-lk { font-size: 12px; padding: 4px 0; }       /* เป้าแตะใหญ่ขึ้นบนมือถือ */
+}
+@media (prefers-reduced-motion: reduce) { .na-st--sending .na-st__i { animation: none; } }
+@media print { .na-lks { display: none; } .na-st { border: 1px solid #999; background: none !important; color: #000 !important; } }
