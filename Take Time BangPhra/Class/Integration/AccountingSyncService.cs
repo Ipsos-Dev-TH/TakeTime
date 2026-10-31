@@ -8461,17 +8461,11 @@ namespace Take_Time_BangPhra.Integration
             // ⇒ Dr − Cr = ยอด "หักอื่น ๆ" เสมอ เพราะ import ไม่มีช่องบัญชีให้ Cr ยอดนั้น
             // เดิมเราส่งไปแล้วโดน 400 หลัง NextAcc สร้าง run ไปแล้ว (ข้อความ opaque บอกแค่ผลรวม)
             // ตรงนี้หยุดก่อนส่ง พร้อมบอกยอดและทางเลือก — ไม่ตัดสินนโยบายภาษีแทนผู้ทำบัญชี
+            // NextAcc HEAD ลง "หักอื่น ๆ" เป็น Cr ลดค่าใช้จ่ายเงินเดือน (contra) แล้ว — PayrollService.cs:3121-3145
+            // (เดิมไม่มีขา Cr ⇒ "Payroll journal unbalanced") ⇒ ไม่บล็อกก่อนส่งแล้ว. NextAcc รุ่นเก่าจะล้มที่ขั้น pay พร้อมข้อความเดิม
             if (unbalancedTotal > 0.01m)
-                throw new ArgumentException(
-                    $"งวดนี้มี \"หักลา/หักอื่น ๆ\" รวม {unbalancedTotal:N2} บาท ซึ่ง NextAcc ไม่มีบัญชีรองรับ "
-                    + $"→ ถ้าส่งไปจะได้ \"Payroll journal unbalanced\" (Dr เกิน Cr = {unbalancedTotal:N2} พอดี) "
-                    + "ทั้ง run ถูกปฏิเสธ\n\nเลือกทางใดทางหนึ่ง:\n"
-                    + "(1) ถ้าเป็น \"ลาไม่รับค่าจ้าง\" (ลูกจ้างได้รับน้อยลงจริง) → เปิดสวิตช์ "
-                    + "Nexaacc_Payroll_FoldDeductionsIntoGross = 1 ระบบจะลดยอดรายได้ลงแทนการส่งเป็นรายการหัก "
-                    + "เงินสุทธิเท่าเดิม JE สมดุล **และยอดยื่น ภ.ง.ด.1 จะลดลงตามจริง**\n"
-                    + "(2) ถ้าเป็นการหักหนี้/ค่าปรับ (เงินได้ยังเท่าเดิม) → ยอดนี้ต้องมีบัญชีเจ้าหนี้รองรับ "
-                    + "ซึ่ง NextAcc payroll import ยังไม่มีช่องให้ระบุ → ใช้โหมด JOURNAL_ONLY "
-                    + "(Nexaacc_SyncMode_Payroll = JOURNAL_ONLY) ที่เราลง JE ครบเองแทน");
+                _code.Logs(_connectionString, "AccountingSync",
+                    $"ProcessPayrollRunImport: period {periodId} มีหักลา/หักอื่น ๆ รวม {unbalancedTotal:N2} — ส่งเป็น OtherDeductions (NextAcc ลด ค่าใช้จ่ายเงินเดือน)", "SYSTEM");
 
             // 4. Import (Recalculate=false) — idempotent ด้วย ExternalRunRef
             var req = new PayrollImportRunRequest
@@ -8509,16 +8503,11 @@ namespace Take_Time_BangPhra.Integration
             decimal gotNet = imp?.data?.TotalNetPay ?? 0m;
             bool amountsDiffer = (gotGross > 0 && Math.Abs(gotGross - sentGross) > 0.01m)
                               || (gotNet > 0 && Math.Abs(gotNet - sentNet) > 0.01m);
-            if (amountsDiffer)
-                throw new Exception(
-                    $"NextAcc มี run เงินเดือนงวดนี้อยู่แล้ว (เลขที่ {payrollNumber}, สถานะ {status}) "
-                    + $"และ**ไม่ได้อัปเดตตามยอดใหม่ที่ส่งไป**\n"
-                    + $"  ยอดบน NextAcc : gross {gotGross:N2} / net {gotNet:N2}\n"
-                    + $"  ยอดที่ส่งไปรอบนี้: gross {sentGross:N2} / net {sentNet:N2}\n"
-                    + "การนำเข้าเป็นแบบ idempotent (อ้างอิง ExternalRunRef) — ยิงซ้ำจะได้ run เดิมเสมอ "
-                    + "แก้ยอดไม่ได้เมื่อ run พ้นสถานะ Calculated ไปแล้ว\n"
-                    + "วิธีแก้: ลบ/ยกเลิก run เงินเดือนงวดนี้บน NextAcc ก่อน แล้วค่อยกด Retry "
-                    + "ระบบจะนำเข้าใหม่ด้วยยอดที่ถูกต้อง");
+            // run เดิม (import idempotent ตาม ExternalRunRef ไม่อัปเดตยอด) — แก้ยอดหลังจ่ายในระบบเรา ⇒ อัปเดต run เดิมรายคน:
+            // จ่ายแล้ว = กลับรายการจ่าย (reopen) → PUT ยอดรายคนที่ต่าง → อนุมัติ/จ่ายใหม่ด้านล่าง (GL + เอกสารตามยอดใหม่)
+            bool wasExisting = imp?.data?.WasExisting == true;
+            if (wasExisting || amountsDiffer)
+                status = await UpdateExistingPayrollRunAsync(runId, payrollNumber, status, periodName, lines);
 
             // 5. approve → pay (gate ตามสถานะ → idempotent เมื่อ run เดิมถูก approve/pay ไปแล้ว)
             //
@@ -8566,6 +8555,113 @@ namespace Take_Time_BangPhra.Integration
             _lastDocNumber = payrollNumber;
             _lastDocType = "PAYROLL_RUN";
             return runId.ToString();
+        }
+
+        /// <summary>
+        /// ยอดใน TakeTime ≠ run ที่มีอยู่บน NextAcc → แก้ run เดิมรายคน (ไม่สร้างใหม่ ไม่ void):
+        /// GET run (รายคน + CanReopen) → ไม่มีคนต่าง = คืนสถานะเดิม · Paid = reopen (กลับ JE) → PUT detail เฉพาะคนที่ต่าง
+        /// (ส่งครบทุกช่อง + ภาษีเสมอ — NextAcc บังคับเมื่อรายได้เปลี่ยน) → คืนสถานะใหม่ให้ขั้น approve/pay ทำต่อ.
+        /// NextAcc: reopen PayrollController.cs:707 (บล็อกเมื่อนำส่ง สปส./งวดปิด) · detail :446 (บล็อกเมื่อยื่น ภ.ง.ด.1/สปส.1-10 แล้ว)
+        /// </summary>
+        private async Task<string> UpdateExistingPayrollRunAsync(Guid runId, string payrollNumber, string status, string periodName,
+            List<PayrollImportLine> lines)
+        {
+            var got = await _apiClient.GetPayrollRunAsync(runId);
+            var run = got?.data;
+            if (run == null || run.Details == null)
+                throw new Exception($"อ่านรอบเงินเดือน {payrollNumber} จาก NextAcc ไม่ได้ (ไม่มีรายคน) — ลองใหม่อีกครั้ง");
+            status = run.Status ?? status;
+            if (string.Equals(status, "Voided", StringComparison.OrdinalIgnoreCase))
+                throw new Exception($"รอบเงินเดือน {payrollNumber} บน NextAcc ถูกยกเลิกแล้ว — ยกเลิกรอบไม่ทำให้นำเข้าใหม่ได้ (ExternalRunRef เดิม) ติดต่อผู้ดูแล NextAcc");
+
+            // จับคู่ EMP-{adminId} ↔ Employee.Id: รหัสพนักงาน (EMP-0012 ตอน sync) ก่อน แล้วค่อยถาม by-external
+            var changes = new List<Tuple<PayrollImportLine, PayrollRunLine>>();
+            var missing = new List<string>();
+            foreach (var l in lines)
+            {
+                PayrollRunLine d = null;
+                int adminId;
+                if (int.TryParse((l.EmployeeExternalId ?? "").Replace("EMP-", ""), out adminId))
+                {
+                    string code = $"EMP-{adminId:D4}";
+                    d = run.Details.FirstOrDefault(x => string.Equals(x.EmployeeCode, code, StringComparison.OrdinalIgnoreCase));
+                }
+                if (d == null)
+                {
+                    try
+                    {
+                        var er = await _apiClient.GetPayrollEmployeeByExternalAsync("TakeTime", l.EmployeeExternalId);
+                        if (er?.data != null) d = run.Details.FirstOrDefault(x => x.EmployeeId == er.data.Id);
+                    }
+                    catch (Exception) { /* ไม่พบ = รายงานรวมด้านล่าง */ }
+                }
+                if (d == null) { missing.Add(l.EmployeeName ?? l.EmployeeExternalId); continue; }
+                if (PayrollLineDiffers(l, d)) changes.Add(Tuple.Create(l, d));
+            }
+            if (missing.Count > 0)
+                throw new ArgumentException($"พนักงานต่อไปนี้ไม่อยู่ในรอบเงินเดือน {payrollNumber} บน NextAcc: {string.Join(", ", missing)} — "
+                    + "เพิ่มพนักงานเข้ารอบที่ NextAcc (➕) แล้วกด Retry");
+            if (changes.Count == 0)
+            {
+                _code.Logs(_connectionString, "AccountingSync", $"ProcessPayrollRunImport: run {payrollNumber} ยอดรายคนตรงกับ TakeTime แล้ว (สถานะ {status})", "SYSTEM");
+                return status;
+            }
+
+            if (string.Equals(status, "Paid", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!run.CanReopen && !string.IsNullOrWhiteSpace(run.ReopenBlockReason))
+                    throw new Exception($"แก้ยอดรอบเงินเดือน {payrollNumber} บน NextAcc ไม่ได้: {run.ReopenBlockReason}");
+                try
+                {
+                    var ro = await _apiClient.ReopenPayrollRunAsync(runId,
+                        $"TakeTime แก้ยอดเงินเดือนงวด {periodName} หลังทำจ่าย ({changes.Count} คน) — ส่งยอดใหม่");
+                    status = ro?.data?.Status ?? "Approved";
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"ProcessPayrollRunImport: reopened run {payrollNumber} → {status} ({ro?.message})", "SYSTEM");
+                }
+                catch (AccountingApiException apx)
+                {
+                    throw new Exception($"กลับรายการจ่ายรอบ {payrollNumber} บน NextAcc ไม่ได้ — {DecodeUnicodeEscapes(apx.ResponseBody ?? apx.Message)}");
+                }
+            }
+
+            foreach (var c in changes)
+            {
+                var l = c.Item1;
+                var req = new PayrollUpdateDetailRequest
+                {
+                    BaseSalary = l.BaseSalary, OvertimePay = l.OvertimePay, Allowances = l.Allowances, Commission = l.Commission,
+                    Bonus = l.Bonus, OtherIncome = l.OtherEarnings, SocialSecurityEmployee = l.SocialSecurityEmployee,
+                    WithholdingTax = l.WithholdingTax, ProvidentFundEmployee = l.ProvidentFundEmployee,
+                    LoanDeduction = 0m, OtherDeductions = l.OtherDeductions + l.SalaryAdvance
+                };
+                try
+                {
+                    var up = await _apiClient.UpdatePayrollDetailAsync(runId, c.Item2.EmployeeId, req);
+                    status = up?.data?.Status ?? status;
+                    _code.Logs(_connectionString, "AccountingSync",
+                        $"ProcessPayrollRunImport: updated {l.EmployeeName} in {payrollNumber}: net {c.Item2.NetPay:N2} → {l.NetPay:N2} ({up?.message})", "SYSTEM");
+                }
+                catch (AccountingApiException apx)
+                {
+                    throw new Exception($"แก้ยอด {l.EmployeeName} ในรอบ {payrollNumber} บน NextAcc ไม่ได้ — {DecodeUnicodeEscapes(apx.ResponseBody ?? apx.Message)}"
+                        + (string.Equals(status, "Approved", StringComparison.OrdinalIgnoreCase)
+                            ? "\nรอบถูกกลับรายการจ่ายแล้ว (สถานะอนุมัติ) — แก้ที่ NextAcc แล้วกด \"จ่าย\" หรือกด Retry ที่นี่" : ""));
+                }
+            }
+            return status;
+        }
+
+        /// <summary>ยอดรายคนต่างจากบน NextAcc (±0.005) — ช่องเดียวกับที่ import ส่ง</summary>
+        private static bool PayrollLineDiffers(PayrollImportLine l, PayrollRunLine d)
+        {
+            Func<decimal, decimal, bool> ne = (a, b2) => Math.Abs(a - b2) > 0.005m;
+            return ne(l.BaseSalary, d.BaseSalary) || ne(l.OvertimePay, d.OvertimePay) || ne(l.Allowances, d.Allowances)
+                || ne(l.Commission, d.Commission) || ne(l.Bonus, d.Bonus) || ne(l.OtherEarnings, d.OtherIncome)
+                || ne(l.SocialSecurityEmployee, d.SocialSecurityEmployee) || ne(l.WithholdingTax, d.WithholdingTax)
+                || ne(l.ProvidentFundEmployee, d.ProvidentFundEmployee)
+                || ne(l.OtherDeductions + l.SalaryAdvance, d.OtherDeductions + d.LoanDeduction)
+                || ne(l.NetPay, d.NetPay);
         }
 
         private static decimal SafeDec(object v)

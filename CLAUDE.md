@@ -405,6 +405,13 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    `Payroll_Records` (→0); `LeaveDeduction` folded into `OtherDeductions` so validation balances; employer
    SSO = employee SSO (5%/5%); `IncomeTypeCode="01"`; account-code overrides left null (NextAcc defaults).
    **Use:** set `Nexaacc_SyncMode_Payroll=DOCUMENT_IMPORT` in Admin → Accounting Integration. Needs Windows build.
+   **แก้ยอดหลังทำจ่าย (ต.ค. 2026 — งวด ต.ค. 2569 แก้หักอื่น/ปกส. แล้ว NextAcc ยังยอดเดิม):** import idempotent ตาม `ExternalRunRef`
+   (`WasExisting`, ไม่อัปเดตยอด) ⇒ เดิม throw "ลบ run ก่อน" + บล็อกก่อนส่งเมื่อมีหักลา/หักอื่น (unbalanced). ตอนนี้ `UpdateExistingPayrollRunAsync`:
+   GET `payroll/runs/{id}` (Details + CanReopen) → จับคู่ `EMP-{id:D4}` (รหัสพนักงานตอน sync) / `employees/by-external/TakeTime/EMP-{id}` → เทียบรายคน
+   (`PayrollLineDiffers`) → Paid = `runs/{id}/reopen` {Reason} (กลับ JE; บล็อกเมื่อนำส่ง สปส./งวดปิด) → PUT `runs/{id}/employees/{emp}/detail` ครบทุกช่อง+ภาษีเสมอ
+   (PayrollController.cs:446; ยื่น ภ.ง.ด.1/สปส. แล้ว = PAYROLL-EDIT-LOCKED) → approve/pay เดิม (GL+เอกสารใหม่). ไม่มีคนต่าง = ทำต่อจากขั้นที่ค้าง. พนักงานไม่อยู่ในรอบ = DATA ให้เพิ่มที่ NextAcc.
+   หักลา/หักอื่น ส่งเป็น `OtherDeductions` ไม่บล็อกแล้ว — NextAcc HEAD ลง Cr ลดค่าใช้จ่ายเงินเดือน (PayrollService.cs:3121-3145; สวิตช์ FoldDeductionsIntoGross ยังใช้ได้).
+   ทริกเกอร์: ✏ แก้รายคนแถวจ่ายแล้ว → `ResyncPayrollRecordToAccounting` → `EnqueuePayrollRunImport(force)`.
 8. **POS daily roll-up — ขายหน้าร้านไม่ออกใบกำกับ → ใบรับเงินสดสรุปรายวัน:** ✅ DONE (opt-in,
    `Nexaacc_PosDailyRollup`, default off). การขายใน `Product/Default.aspx` ที่ **ไม่ติ๊ก "ออกใบกำกับภาษีในระบบ"
    (CheckBox1)** เดิมเขียนแค่ `Product_Out` (Remark='ขาย', Account_Receipt_ID='0') ไม่ sync เลย → รายได้ไม่เข้า NextAcc.

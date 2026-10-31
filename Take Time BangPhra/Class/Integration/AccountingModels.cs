@@ -2115,5 +2115,66 @@ namespace Take_Time_BangPhra.Integration
         public decimal TotalSocialSecurityEmployer { get; set; }
         public int EmployeeCount { get; set; }
         public DateTime CreatedAt { get; set; }
+        /// <summary>import: คืน run เดิมตาม ExternalRunRef (ไม่อัปเดตยอด — ImportPayrollRunResult)</summary>
+        public bool WasExisting { get; set; }
+        /// <summary>รายคน — เติมเฉพาะ GET run เดี่ยว (PayrollRunLineDto)</summary>
+        public List<PayrollRunLine> Details { get; set; }
+        public string ExternalRunRef { get; set; }
+        public bool CanEditAmounts { get; set; }
+        public string EditLockReason { get; set; }
+        public bool CanReopen { get; set; }
+        public string ReopenBlockReason { get; set; }
+    }
+
+    /// <summary>รายคนในรอบ NextAcc (PayrollDtos.cs:377 PayrollRunLineDto)</summary>
+    public class PayrollRunLine
+    {
+        public Guid EmployeeId { get; set; }
+        public string EmployeeName { get; set; }
+        public string EmployeeCode { get; set; }
+        public decimal BaseSalary { get; set; }
+        public decimal OvertimePay { get; set; }
+        public decimal Allowances { get; set; }
+        public decimal Commission { get; set; }
+        public decimal Bonus { get; set; }
+        public decimal OtherIncome { get; set; }
+        public decimal GrossIncome { get; set; }
+        public decimal SocialSecurityEmployee { get; set; }
+        public decimal SocialSecurityEmployer { get; set; }
+        public decimal WithholdingTax { get; set; }
+        public decimal ProvidentFundEmployee { get; set; }
+        public decimal LoanDeduction { get; set; }
+        public decimal OtherDeductions { get; set; }
+        public decimal TotalDeductions { get; set; }
+        public decimal NetPay { get; set; }
+    }
+
+    /// <summary>ReopenPayrollRunRequest(string Reason) — PayrollDtos.cs:446</summary>
+    public class PayrollReopenRequest
+    {
+        public string Reason { get; set; }
+    }
+
+    /// <summary>UpdatePayrollDetailRequest — PayrollDtos.cs:450 (null = คงเดิม). ส่ง SocialSecurityEmployee ⇒ NextAcc ย้อนหาฐานแล้วตั้งฝั่งนายจ้างตามฐานเดียวกัน</summary>
+    public class PayrollUpdateDetailRequest
+    {
+        public decimal? BaseSalary { get; set; }
+        public decimal? OvertimePay { get; set; }
+        public decimal? Allowances { get; set; }
+        public decimal? Commission { get; set; }
+        public decimal? Bonus { get; set; }
+        public decimal? OtherIncome { get; set; }
+        public decimal? SocialSecurityEmployee { get; set; }
+        public decimal? WithholdingTax { get; set; }
+        public decimal? ProvidentFundEmployee { get; set; }
+        public decimal? LoanDeduction { get; set; }
+        public decimal? OtherDeductions { get; set; }
+    }
+
+    /// <summary>EmployeeResponse (ใช้แค่ Id/Code)</summary>
+    public class PayrollEmployeeRef
+    {
+        public Guid Id { get; set; }
+        public string EmployeeCode { get; set; }
     }
 }

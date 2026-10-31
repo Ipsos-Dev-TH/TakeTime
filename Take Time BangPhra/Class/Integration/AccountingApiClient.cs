@@ -1897,6 +1897,35 @@ namespace Take_Time_BangPhra.Integration
             await PostActionAsync($"{CompanyPath}/payroll/runs/{runId}/void");
         }
 
+        /// <summary>GET payroll/runs/{id} — รอบเดี่ยวพร้อมรายคน (Details) + สิทธิ์แก้/กลับรายการ (PayrollController.cs:307)</summary>
+        public async Task<ApiResponse<PayrollRunResponse>> GetPayrollRunAsync(Guid runId)
+        {
+            return await GetAsync<ApiResponse<PayrollRunResponse>>($"{CompanyPath}/payroll/runs/{runId}");
+        }
+
+        /// <summary>POST payroll/runs/{id}/reopen {Reason ≥5 ตัว} — Paid → Approved + กลับ JE วันเดียวกับ PayDate
+        /// (PayrollController.cs:707; บล็อกเมื่อนำส่ง สปส. แล้ว/งวดบัญชีปิด — PayrollService.ReopenPaidRunAsync)</summary>
+        public async Task<ApiResponse<PayrollRunResponse>> ReopenPayrollRunAsync(Guid runId, string reason)
+        {
+            return await PostAsync<PayrollReopenRequest, ApiResponse<PayrollRunResponse>>(
+                $"{CompanyPath}/payroll/runs/{runId}/reopen", new PayrollReopenRequest { Reason = reason });
+        }
+
+        /// <summary>PUT payroll/runs/{id}/employees/{empId}/detail — แก้ยอดรายคน (สถานะ Calculated/Approved; null = คงเดิม;
+        /// แก้รายได้ต้องส่งภาษีด้วย — PayrollDetailAmounts.Apply) (PayrollController.cs:446)</summary>
+        public async Task<ApiResponse<PayrollRunResponse>> UpdatePayrollDetailAsync(Guid runId, Guid employeeId, PayrollUpdateDetailRequest request)
+        {
+            return await PutAsync<PayrollUpdateDetailRequest, ApiResponse<PayrollRunResponse>>(
+                $"{CompanyPath}/payroll/runs/{runId}/employees/{employeeId}/detail", request);
+        }
+
+        /// <summary>GET payroll/employees/by-external/{system}/{externalId} (PayrollController.cs:146) — หา Employee.Id จาก EMP-{adminId}</summary>
+        public async Task<ApiResponse<PayrollEmployeeRef>> GetPayrollEmployeeByExternalAsync(string externalSystem, string externalId)
+        {
+            return await GetAsync<ApiResponse<PayrollEmployeeRef>>(
+                $"{CompanyPath}/payroll/employees/by-external/{Uri.EscapeDataString(externalSystem)}/{Uri.EscapeDataString(externalId)}");
+        }
+
         // ──────────────────────────────────────────────
         // File Attachments (FileAttachmentController)
         // POST /api/companies/{companyId}/attachments/{entityType}/{entityId}
