@@ -2147,6 +2147,14 @@ namespace Take_Time_BangPhra.Integration
         public decimal OtherDeductions { get; set; }
         public decimal TotalDeductions { get; set; }
         public decimal NetPay { get; set; }
+        /// <summary>แหล่งจ่ายรายคน (AccountCode; null = ค่าระดับรอบ/ค่าเริ่มต้นบริษัท)</summary>
+        public string NetPaymentAccountCode { get; set; }
+    }
+
+    /// <summary>SetPaymentAccountRequest(string? AccountCode) — PayrollDtos.cs:441</summary>
+    public class PayrollSetPaymentAccountRequest
+    {
+        public string AccountCode { get; set; }
     }
 
     /// <summary>ReopenPayrollRunRequest(string Reason) — PayrollDtos.cs:446</summary>

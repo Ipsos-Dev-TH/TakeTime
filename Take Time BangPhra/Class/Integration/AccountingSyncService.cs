@@ -8367,9 +8367,16 @@ namespace Take_Time_BangPhra.Integration
                 @"SELECT PR.Admin_ID, PR.EmployeeName, PR.BaseSalary, PR.OTAmount, PR.BonusAmount,
                          PR.AllowanceAmount, PR.LeaveDeduction, PR.SocialSecurity, PR.Tax,
                          PR.OtherDeductions, PR.TotalEarnings, PR.TotalDeductions, PR.NetSalary,
-                         A.IDCard
+                         A.IDCard, PAY.Account_Code AS PayAccountCode
                   FROM Payroll_Records PR
                   LEFT JOIN Admin A ON A.ID = PR.Admin_ID
+                  -- แหล่งเงินที่เลือกตอนกดจ่ายในระบบเรา (ใบสำคัญจ่ายเงินเดือน Account_Payment.Paid_How) → ผังบัญชี NextAcc
+                  OUTER APPLY (SELECT TOP 1 NA.Account_Code
+                               FROM Account_Payment AP
+                               INNER JOIN Account_Paid_How PH ON PH.Paid_How = AP.Paid_How
+                               INNER JOIN Accounting_Nexaacc_Accounts NA
+                                       ON CAST(NA.Nexaacc_AccountId AS NVARCHAR(64)) = CAST(PH.Nexaacc_AccountId AS NVARCHAR(64))
+                               WHERE PR.VoucherNumber IS NOT NULL AND AP.ID = PR.VoucherNumber) PAY
                   WHERE PR.PayrollPeriod_ID = @id",
                 new Dictionary<string, object> { { "@id", periodId } });
 
@@ -8446,7 +8453,9 @@ namespace Take_Time_BangPhra.Integration
                     OtherDeductions = otherImport,
                     TotalDeductions = totalDed,
                     NetPay = net,
-                    IncomeTypeCode = "01"           // ม.40(1) เงินเดือน
+                    IncomeTypeCode = "01",          // ม.40(1) เงินเดือน
+                    // แหล่งจ่ายรายคน = ที่เลือกตอนทำจ่ายในระบบเรา (ว่าง = NextAcc ใช้แหล่งเงินเริ่มต้นของบริษัท)
+                    PaymentAccountCode = string.IsNullOrWhiteSpace(r["PayAccountCode"]?.ToString()) ? null : r["PayAccountCode"].ToString().Trim()
                 });
             }
 
@@ -8596,7 +8605,7 @@ namespace Take_Time_BangPhra.Integration
                     catch (Exception) { /* ไม่พบ = รายงานรวมด้านล่าง */ }
                 }
                 if (d == null) { missing.Add(l.EmployeeName ?? l.EmployeeExternalId); continue; }
-                if (PayrollLineDiffers(l, d)) changes.Add(Tuple.Create(l, d));
+                if (PayrollLineDiffers(l, d) || PayAccountDiffers(l, d)) changes.Add(Tuple.Create(l, d));
             }
             if (missing.Count > 0)
                 throw new ArgumentException($"พนักงานต่อไปนี้ไม่อยู่ในรอบเงินเดือน {payrollNumber} บน NextAcc: {string.Join(", ", missing)} — "
@@ -8628,6 +8637,21 @@ namespace Take_Time_BangPhra.Integration
             foreach (var c in changes)
             {
                 var l = c.Item1;
+                if (PayAccountDiffers(l, c.Item2))
+                {
+                    try
+                    {
+                        var pa = await _apiClient.SetPayrollPaymentAccountAsync(runId, c.Item2.EmployeeId, l.PaymentAccountCode);
+                        status = pa?.data?.Status ?? status;
+                        _code.Logs(_connectionString, "AccountingSync",
+                            $"ProcessPayrollRunImport: {l.EmployeeName} แหล่งจ่าย {c.Item2.NetPaymentAccountCode ?? "ค่าเริ่มต้น"} → {l.PaymentAccountCode}", "SYSTEM");
+                    }
+                    catch (AccountingApiException apx)
+                    {
+                        throw new Exception($"ตั้งแหล่งจ่ายของ {l.EmployeeName} ({l.PaymentAccountCode}) ในรอบ {payrollNumber} บน NextAcc ไม่ได้ — {DecodeUnicodeEscapes(apx.ResponseBody ?? apx.Message)}");
+                    }
+                }
+                if (!PayrollLineDiffers(l, c.Item2)) continue;
                 var req = new PayrollUpdateDetailRequest
                 {
                     BaseSalary = l.BaseSalary, OvertimePay = l.OvertimePay, Allowances = l.Allowances, Commission = l.Commission,
@@ -8651,6 +8675,11 @@ namespace Take_Time_BangPhra.Integration
             }
             return status;
         }
+
+        /// <summary>แหล่งจ่ายที่เลือกในระบบเรา ≠ แหล่งจ่ายรายคนบน NextAcc (ไม่ได้เลือก = ไม่แตะ)</summary>
+        private static bool PayAccountDiffers(PayrollImportLine l, PayrollRunLine d) =>
+            !string.IsNullOrWhiteSpace(l.PaymentAccountCode)
+            && !string.Equals(l.PaymentAccountCode.Trim(), (d.NetPaymentAccountCode ?? "").Trim(), StringComparison.OrdinalIgnoreCase);
 
         /// <summary>ยอดรายคนต่างจากบน NextAcc (±0.005) — ช่องเดียวกับที่ import ส่ง</summary>
         private static bool PayrollLineDiffers(PayrollImportLine l, PayrollRunLine d)

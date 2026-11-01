@@ -412,6 +412,9 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    (PayrollController.cs:446; ยื่น ภ.ง.ด.1/สปส. แล้ว = PAYROLL-EDIT-LOCKED) → approve/pay เดิม (GL+เอกสารใหม่). ไม่มีคนต่าง = ทำต่อจากขั้นที่ค้าง. พนักงานไม่อยู่ในรอบ = DATA ให้เพิ่มที่ NextAcc.
    หักลา/หักอื่น ส่งเป็น `OtherDeductions` ไม่บล็อกแล้ว — NextAcc HEAD ลง Cr ลดค่าใช้จ่ายเงินเดือน (PayrollService.cs:3121-3145; สวิตช์ FoldDeductionsIntoGross ยังใช้ได้).
    ทริกเกอร์: ✏ แก้รายคนแถวจ่ายแล้ว → `ResyncPayrollRecordToAccounting` → `EnqueuePayrollRunImport(force)`.
+   **แหล่งจ่ายรายคน:** import ส่ง `PaymentAccountCode` = แหล่งเงินที่เลือกตอนกด "จ่าย" (`Payroll_Records.VoucherNumber` → `Account_Payment.Paid_How` →
+   `Account_Paid_How.Nexaacc_AccountId` → `Accounting_Nexaacc_Accounts.Account_Code`; ว่าง = ค่าเริ่มต้นบริษัท) · รอบเดิม = `PUT runs/{id}/employees/{emp}/payment-account`
+   (PayrollController.cs:428) เมื่อต่างจาก `NetPaymentAccountCode` (`PayAccountDiffers`) ก่อนแก้ยอด.
 8. **POS daily roll-up — ขายหน้าร้านไม่ออกใบกำกับ → ใบรับเงินสดสรุปรายวัน:** ✅ DONE (opt-in,
    `Nexaacc_PosDailyRollup`, default off). การขายใน `Product/Default.aspx` ที่ **ไม่ติ๊ก "ออกใบกำกับภาษีในระบบ"
    (CheckBox1)** เดิมเขียนแค่ `Product_Out` (Remark='ขาย', Account_Receipt_ID='0') ไม่ sync เลย → รายได้ไม่เข้า NextAcc.

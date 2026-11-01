@@ -1919,6 +1919,15 @@ namespace Take_Time_BangPhra.Integration
                 $"{CompanyPath}/payroll/runs/{runId}/employees/{employeeId}/detail", request);
         }
 
+        /// <summary>PUT payroll/runs/{id}/employees/{empId}/payment-account {AccountCode} — แหล่งจ่ายเงินสุทธิรายคน
+        /// (PayrollController.cs:428; สถานะ Calculated/Approved — PayrollRunEditPolicy.CanSetPaymentAccount)</summary>
+        public async Task<ApiResponse<PayrollRunResponse>> SetPayrollPaymentAccountAsync(Guid runId, Guid employeeId, string accountCode)
+        {
+            return await PutAsync<PayrollSetPaymentAccountRequest, ApiResponse<PayrollRunResponse>>(
+                $"{CompanyPath}/payroll/runs/{runId}/employees/{employeeId}/payment-account",
+                new PayrollSetPaymentAccountRequest { AccountCode = accountCode });
+        }
+
         /// <summary>GET payroll/employees/by-external/{system}/{externalId} (PayrollController.cs:146) — หา Employee.Id จาก EMP-{adminId}</summary>
         public async Task<ApiResponse<PayrollEmployeeRef>> GetPayrollEmployeeByExternalAsync(string externalSystem, string externalId)
         {
