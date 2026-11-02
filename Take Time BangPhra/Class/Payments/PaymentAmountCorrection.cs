@@ -126,10 +126,25 @@ namespace Take_Time_BangPhra.Payments
             var dt = new code().DatabaseQuerySafe(conn, "SELECT SlipFileURL FROM Payment_Slips WHERE ID = @id", new Dictionary<string, object> { { "@id", slipId } });
             if (dt != null && dt.Rows.Count > 0) url = Convert.ToString(dt.Rows[0]["SlipFileURL"]);
             if (string.IsNullOrWhiteSpace(url)) { note = "ไม่พบไฟล์สลิป"; return null; }
+            if (!SlipVerificationService.AmountLockActive) { note = "ระบบตรวจสลิปยังไม่เปิด (SlipVerify_Enabled / PHASE19_34)"; return null; }
             SlipAmountLock lk;
-            try { lk = SlipVerificationService.InspectAmountLockFile(url); }
+            try
+            {
+                // ลำดับเดียวกับหน้าจอง: SlipOK (ธนาคาร) ก่อน → ไม่ได้ข้อมูล/โควต้าหมด/ไม่ตั้งค่า → OCR ในเครื่อง (SlipVerificationService.Inspect)
+                string path = SlipVerificationService.MapSlipPath(url);
+                if (string.IsNullOrEmpty(path) || !System.IO.File.Exists(path)) { note = "ไม่พบไฟล์สลิปบนเซิร์ฟเวอร์ (" + url + ")"; return null; }
+                var insp = SlipVerificationService.Inspect(System.IO.File.ReadAllBytes(path), System.IO.Path.GetFileName(path), false);
+                // สลิปเก่าที่เคยส่ง SlipOK แล้ว → 1012 "เคยตรวจแล้ว" แต่ยังคืนข้อมูลธนาคารมา — สำหรับ "อ่านยอด" ถือเป็นยอดธนาคารได้
+                // (ตัวล็อกยอดหน้าจองไม่ล็อกเคสนี้เพราะใช้ตรวจสลิปซ้ำ — คนละวัตถุประสงค์)
+                var v = insp.Vendor;
+                if (v != null && v.HasData && v.Amount.HasValue && v.Amount.Value > 0m)
+                    lk = new SlipAmountLock { Active = true, Locked = true, Amount = v.Amount, Source = SlipVerifySource.SlipOk, Confidence = 100,
+                        Reason = v.Kind == SlipVendorResponse.KindDuplicate ? "ธนาคารยืนยัน (SlipOK เคยตรวจสลิปนี้แล้ว)" : "ธนาคารยืนยันยอดผ่าน SlipOK" };
+                else
+                    lk = SlipVerificationService.GetAmountLock(insp);
+                if (!string.IsNullOrEmpty(insp.VendorSkipReason)) Log(conn, "ReadSlipAmount slip #" + slipId + " ข้าม SlipOK: " + insp.VendorSkipReason);
+            }
             catch (Exception ex) { note = "อ่านสลิปไม่ได้: " + ex.Message; return null; }
-            if (lk == null || !lk.Active) { note = "ระบบตรวจสลิปยังไม่เปิด (SlipVerify_Enabled / PHASE19_34)"; return null; }
             if (!lk.Locked || !lk.Amount.HasValue)
             {
                 note = "อ่านยอดจากสลิปไม่มั่นใจพอ" + (lk.HintAmount.HasValue ? " (ค่าที่เดา " + lk.HintAmount.Value.ToString("N2") + ")" : "")
@@ -149,7 +164,7 @@ namespace Take_Time_BangPhra.Payments
                 }
             }
             catch (Exception ex) { Log(conn, "ReadSlipAmount save slip #" + slipId + ": " + ex.Message); }
-            note = (lk.Source == SlipVerifySource.SlipOk ? "ธนาคารยืนยัน" : "OCR ความมั่นใจ " + lk.Confidence) + " ยอด " + lk.Amount.Value.ToString("N2");
+            note = (lk.Source == SlipVerifySource.SlipOk ? lk.Reason : "OCR ในเครื่อง ความมั่นใจ " + lk.Confidence + "% (SlipOK ไม่ได้ข้อมูล)") + " · ยอด " + lk.Amount.Value.ToString("N2");
             return lk.Amount;
         }
 
