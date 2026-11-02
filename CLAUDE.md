@@ -792,6 +792,20 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    · 6 healthCheck + สรุป. จำขั้นใน `Accounting_Integration_Config.Nexaacc_Setup_Wizard_Step` (1-6|DONE, `action=saveWizardStep`) → แถบ "ทำต่อ". มือถือ: ไม่มี scroll แนวนอนทั้งหน้า
    (ตารางเลื่อนในการ์ด). ทดสอบ: static render + Playwright (แท็บ/ลิงก์/วิซาร์ด/escape/390px). ต้อง build+test บน Windows.
 
+## แก้ยอดรับเงินที่บันทึกผิด + เตือนยอด ≠ สลิป (พ.ย. 2026 — เคสลูกค้ากรอกมัดจำ 3,200 แต่สลิปโอน 2,000 ก่อนมีระบบล็อกยอด)
+เดิม: หน้าแก้ไขการจองปิดช่องยอด (TextBox5.Enabled=false) · หน้าใบเสร็จแก้ยอดได้แต่ไม่ปรับ `Reservation.Deposit` ⇒ แอดมินแก้ให้ถูกไม่ได้. ไม่มี migration.
+- `Class/Payments/PaymentAmountCorrection.cs` (namespace `Take_Time_BangPhra.Payments`): `ListForReservation` = Payment_History COMPLETED ที่มีใบ + สลิปที่ผูก
+  (PaymentSlip_ID / Account_Receipt_ID) + **ยอดสลิปที่เชื่อได้** (`Slip_Amount` ธนาคาร → `OCR_Amount` เมื่อ `OCR_Confidence ≥ SlipVerify_Lock_Min_Confidence`; ไม่มีคอลัมน์ PHASE19_34 = ไม่มี) ·
+  `Mismatch` = ต่าง > 1 บาท และไม่มี `Override_At` · `ReadSlipAmount` อ่านไฟล์สลิปเก่าด้วย `SlipVerificationService.InspectAmountLockFile` แล้วบันทึก Slip_Amount/OCR_Amount ·
+  `Correct(conn, receiptId, newAmount, reason≥10, adminId)`: ใบ Normal + บรรทัดบวก 1 บรรทัด ไม่มีบรรทัดติดลบ (ไม่งั้นชี้ไปหน้าใบเสร็จ) + `CreditNoteGuards.VoidBlockReason` →
+  transaction: Account_Receipt (Total/Vat ตามสัดส่วนเดิม/Ex) + Account_Receipt_Detail + Payment_History (+Notes) + `Reservation.Deposit` ±ส่วนต่าง (เฉพาะใบในสมุดรับเงิน, ไม่ต่ำกว่า 0)
+  + Payment_Slips.Claimed_Amount → NextAcc `ResyncSingleReceipt` (in-place → void→ใหม่ → ไม่เคยส่ง = เข้าคิว) → `ReceiptPreflight.WriteEditLog("AMOUNT_FIX")`. PDF ใบเสร็จในระบบไม่ regenerate (บอกในข้อความ).
+  `ApplyDepositDelta` เรียกจาก Receipt.aspx โหมด edit หลัง UPDATE Payment_History (ใช้ `pfBefore.Total`) · `ScanMismatches` ให้ตัวตรวจรายคืน.
+- หน้า `Reserve.aspx` (แก้ไข/เช็คอิน) ส่วน `pnlAmountFix` ใต้ประวัติการชำระเงิน (`Reserve.aspx.AmountFix.cs`, เรียกจาก `LoadPaymentHistory`): แถบ `.af-warn` ทุกแถวที่ยอด ≠ สลิป (ทุกคนเห็น) ·
+  Owner/Admin บัญชี (`ReceiptPreflight.CanOverrideCurrentUser`) ได้ฟอร์ม เลือกใบ → ยอดที่ถูกต้อง (เติมยอดสลิปให้) → เหตุผล → "บันทึกยอดที่ถูกต้อง" · ปุ่ม "อ่านยอดจากสลิป" เมื่อสลิปยังไม่เคยอ่าน.
+- ตัวตรวจรายคืน `RunLocalIntegrityScan` ข้อ 4b: finding `SLIP_AMOUNT_MISMATCH` (คีย์ `LOC:SLIP:{slipId}`, Telegram รายชนิด/ศูนย์บัญชีเหมือนชนิดอื่น; `NextAccUi.FindingTypeTh`).
+  ป้องกันต้นทาง = ยอดล็อกตามสลิป (ข้อ 18 PHASE19_36) ต้องเปิด `SlipVerify_Enabled` + รัน PHASE19_34/36. ต้อง build+test บน Windows.
+
 ## ใบลาหักเงิน ↔ รอบเงินเดือน (ต.ค. 2026, PHASE19_43 — เคส LR-260830-18-50 ลา 27/08 ยื่น 30/08 อนุมัติแล้วแต่เงินเดือนไม่หัก)
 เดิมยอดหักลาคิดเฉพาะตอนสร้างรอบ/กด "คำนวณใหม่" (ใบของเดือนนั้นเท่านั้น) ⇒ อนุมัติหลังสร้างรอบ = ไม่หักจนมีคนกดคำนวณใหม่; รอบทำจ่ายแล้ว = ไม่หักเลย.
 ตัวกลาง `Class/Payroll/PayrollLeaveSync.cs` (namespace `Take_Time_BangPhra.Payroll`; mono test `scratchpad/payroll_leave/T.cs`):

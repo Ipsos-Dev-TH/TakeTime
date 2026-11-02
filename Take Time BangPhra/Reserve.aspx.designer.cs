@@ -816,6 +816,17 @@ namespace Take_Time_BangPhra
         /// </remarks>
         protected global::System.Web.UI.WebControls.Button btnPostpone;
 
+        /// <summary>แก้ยอดรับเงินที่บันทึกผิด (Reserve.aspx.AmountFix.cs)</summary>
+        protected global::System.Web.UI.WebControls.Panel pnlAmountFix;
+        protected global::System.Web.UI.WebControls.Literal litAmountFixWarn;
+        protected global::System.Web.UI.WebControls.Panel pnlAmountFixForm;
+        protected global::System.Web.UI.WebControls.DropDownList ddlAmountFixReceipt;
+        protected global::System.Web.UI.WebControls.TextBox txtAmountFixNew;
+        protected global::System.Web.UI.WebControls.TextBox txtAmountFixReason;
+        protected global::System.Web.UI.WebControls.Button btnAmountFixReadSlip;
+        protected global::System.Web.UI.WebControls.Button btnAmountFixSave;
+        protected global::System.Web.UI.WebControls.Literal litAmountFixResult;
+
         /// <summary>
         /// pnlPetStay control.
         /// </summary>

@@ -931,6 +931,16 @@ namespace Take_Time_BangPhra.Integration
                 catch { }
             }
 
+            // 4b) ยอดที่บันทึก ≠ ยอดบนสลิปที่เชื่อได้ (ธนาคาร/OCR ≥ เกณฑ์ล็อก) — เคสลูกค้ากรอกมัดจำ 3,200 แต่โอน 2,000 ก่อนมีระบบล็อกยอด
+            try
+            {
+                foreach (var m in Payments.PaymentAmountCorrection.ScanMismatches(_connectionString, days, max))
+                    save(m.ReservationId, "SLIP:" + m.SlipId, "SLIP_AMOUNT_MISMATCH", m.ReceiptId, m.Recorded - m.SlipAmount,
+                        $"บันทึก {m.Recorded:N2} แต่สลิป {m.SlipAmount:N2} ({(m.Source == "SLIPOK" ? "ธนาคารยืนยัน" : "อ่านจากรูป")}) ต่าง {m.Recorded - m.SlipAmount:N2} — "
+                        + "แก้ที่หน้าแก้ไขการจอง (ส่วน \"ยอดรับเงินที่บันทึกไว้ vs สลิป\") หรือยืนยันข้ามที่หน้าตรวจสลิป");
+            }
+            catch (Exception ex) { _code.Logs(_connectionString, "AccountingSync", "IntegrityScan slip mismatch: " + ex.Message, "SYSTEM"); }
+
             // 5) คิวค้าง
             if (ReceiptPreflight.QueueSchemaReady(_connectionString))
             {
@@ -1096,7 +1106,7 @@ namespace Take_Time_BangPhra.Integration
                         var parts = lf.Rows.Cast<DataRow>().Select(r => r["Finding_Type"] + " " + r["N"]).ToList();
                         add("warn", "ผลตรวจรายคืน (ไม่เรียก API) ที่ยังเปิด", string.Join(" · ", parts)
                             + "\nPREFLIGHT_BLOCK=ใบผิดกฎ · NOT_ENQUEUED=ใบไม่เคยเข้าคิว · DEPOSIT_LEDGER=มัดจำการจอง≠ใบมัดจำ · BALANCE_VS_RECEIPTS=เช็คเอาท์แล้วยอดไม่ปิด · "
-                            + "QUEUE_STUCK=คิวค้าง · PRE_FILING_GAP=ใบเดือนก่อนยังไม่ขึ้น NextAcc (ก่อนยื่น ภ.พ.30)");
+                            + "QUEUE_STUCK=คิวค้าง · PRE_FILING_GAP=ใบเดือนก่อนยังไม่ขึ้น NextAcc (ก่อนยื่น ภ.พ.30) · SLIP_AMOUNT_MISMATCH=ยอดที่บันทึก≠สลิป");
                     }
                 }
                 catch { }

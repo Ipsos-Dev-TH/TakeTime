@@ -495,6 +495,7 @@ namespace Take_Time_BangPhra.Integration
                 case "BALANCE_VS_RECEIPTS": return "เช็คเอาท์แล้วยอดไม่ปิด";
                 case "QUEUE_STUCK": return "คิวค้างนาน";
                 case "PRE_FILING_GAP": return "ยังไม่ขึ้น NextAcc ก่อนยื่น ภ.พ.30";
+                case "SLIP_AMOUNT_MISMATCH": return "ยอดที่บันทึก ≠ สลิป";
                 case "": return "-";
                 default: return type;
             }

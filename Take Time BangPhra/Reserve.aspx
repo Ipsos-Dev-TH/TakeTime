@@ -1158,6 +1158,41 @@
                 </div>
             </div>
 
+            <%-- ══ แก้ยอดรับเงินที่บันทึกผิด (แก้ไข/เช็คอิน) — เตือนเมื่อยอด ≠ สลิป · Owner/Admin บัญชีแก้ได้ (Reserve.aspx.AmountFix.cs) ══ --%>
+            <asp:Panel ID="pnlAmountFix" runat="server" Visible="false" CssClass="form-row"
+                style="display:block; background:#FFF8E1; border:1px solid #FFE082; border-radius:10px; padding:14px 16px; margin-top:12px;">
+                <style>
+                    .af-warn { background:#FDECEA; border-left:4px solid #E53935; color:#8E1B10; padding:8px 10px; margin:4px 0; border-radius:6px; font-size:0.95em; }
+                    .af-ok { background:#E8F5E9; border-left:4px solid #43A047; color:#1B5E20; padding:8px 10px; margin:4px 0; border-radius:6px; font-size:0.95em; }
+                    .af-grid { display:grid; grid-template-columns:1fr; gap:8px; margin-top:8px; }
+                    .af-grid .rounded-textbox, .af-grid select { width:100%; max-width:520px; box-sizing:border-box; }
+                    .af-note { font-size:0.85em; color:#6D4C41; margin-top:6px; }
+                </style>
+                <h4 style="margin:0 0 6px; color:#6D4C41;">🧾 ยอดรับเงินที่บันทึกไว้ vs สลิป</h4>
+                <asp:Literal ID="litAmountFixWarn" runat="server" />
+                <asp:Panel ID="pnlAmountFixForm" runat="server" CssClass="af-grid">
+                    <label>รายการที่จะแก้ยอด
+                        <asp:DropDownList ID="ddlAmountFixReceipt" runat="server" AutoPostBack="true" OnSelectedIndexChanged="ddlAmountFixReceipt_SelectedIndexChanged" CssClass="rounded-textbox" />
+                    </label>
+                    <label>ยอดที่ถูกต้องตามสลิป (บาท)
+                        <asp:TextBox ID="txtAmountFixNew" runat="server" CssClass="rounded-textbox" inputmode="decimal" placeholder="เช่น 2000.00" />
+                    </label>
+                    <label>เหตุผล (อย่างน้อย 10 ตัวอักษร — เก็บในประวัติการแก้ใบ)
+                        <asp:TextBox ID="txtAmountFixReason" runat="server" CssClass="rounded-textbox" placeholder="ลูกค้ากรอกยอดมัดจำ 3,200 แต่สลิปโอนจริง 2,000" />
+                    </label>
+                    <div>
+                        <asp:Button ID="btnAmountFixReadSlip" runat="server" Text="อ่านยอดจากสลิป" CssClass="reservation-button" OnClick="btnAmountFixReadSlip_Click" Visible="false"
+                            style="background:#8D6E63; color:#fff; margin-right:8px;" />
+                        <asp:Button ID="btnAmountFixSave" runat="server" Text="บันทึกยอดที่ถูกต้อง" CssClass="reservation-button" OnClick="btnAmountFixSave_Click"
+                            OnClientClick="return confirm('แก้ยอดรับเงินของใบนี้ตามสลิป? ระบบจะแก้ใบเสร็จ สมุดรับเงิน มัดจำการจอง และส่งแก้ไปที่ NextAcc');"
+                            style="background:linear-gradient(135deg,#E53935,#B71C1C); color:#fff;" />
+                    </div>
+                    <div class="af-note">แก้ครบทุกจุดในครั้งเดียว: ใบเสร็จ (ยอด/VAT ตามสัดส่วน) · สมุดรับเงิน · มัดจำของการจอง · ประวัติการแก้ใบ · เอกสารบน NextAcc (แก้เดิม/ยกเลิก→สร้างใหม่) ·
+                        ใบที่มีใบลดหนี้/ส่ง e-Tax แล้วจะแก้ไม่ได้ · ใบหลายบรรทัดให้แก้ที่หน้าใบเสร็จ</div>
+                </asp:Panel>
+                <asp:Literal ID="litAmountFixResult" runat="server" />
+            </asp:Panel>
+
             <%-- ══ เก็บเงินออนไลน์ + เงินประกัน (โผล่เฉพาะโหมดเช็คอิน และเมื่อเปิดฟีเจอร์) ══
                  ส่วนนี้เป็นส่วนเสริมล้วน ๆ ไม่แตะตรรกะบันทึกจอง/เช็คอินเดิมเลย
                  ปิดฟีเจอร์เมื่อไหร่ pnlOnlinePay จะ Visible=false ทั้งบล็อก --%>

@@ -1232,6 +1232,9 @@ namespace Take_Time_BangPhra.Account.Report
 
                             code2.DatabaseInsertSafe(conn, updatePaymentQuery, updateParams);
                             System.Diagnostics.Debug.WriteLine($"✅ Updated Payment_History for Receipt: {docNum}");
+                            // ยอดใบเปลี่ยน → มัดจำ/ยอดรับสะสมของการจอง (Reservation.Deposit) ปรับตามส่วนต่าง (เดิมไม่แตะ ⇒ ยอดค้างบนบอร์ดผิด)
+                            if (pfBefore != null)
+                                Take_Time_BangPhra.Payments.PaymentAmountCorrection.ApplyDepositDelta(conn, reservation_id, docNum, pfBefore.Total, totalAmount);
                         }
                         else
                         {

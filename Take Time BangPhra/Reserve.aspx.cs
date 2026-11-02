@@ -10284,6 +10284,8 @@ public DataTable CheckReservationAvailability(DateTime checkInDate, DateTime che
                     gvPaymentHistory.DataSource = dtHistory;
                     gvPaymentHistory.DataBind();
                     divPaymentHistory.Visible = true;
+                    // เตือนยอด ≠ สลิป + แก้ยอดที่บันทึกผิด (Owner/Admin บัญชี) — Reserve.aspx.AmountFix.cs
+                    int afRid; if (int.TryParse(reservationId, out afRid)) AmountFixLoad(afRid);
 
                     // Hide old slip image when showing GridView
                     Image1.Visible = false;
