@@ -526,6 +526,7 @@
     <Content Include="DailyBoard.aspx" />
     <Content Include="Admin\Settings\ActivityManagement.aspx" />
     <Content Include="Admin\Settings\BookingPolicies.aspx" />
+    <Content Include="Admin\Settings\OtaRoomMapping.aspx" />
     <Content Include="Admin\Settings\PetStay.aspx" />
     <Content Include="Admin\Settings\LineAccount.aspx" />
     <Content Include="Admin\Settings\Index.aspx" />
@@ -1101,6 +1102,7 @@
     <Compile Include="Class\UploadHelper.cs" />
     <Compile Include="Class\Services\DbRunLease.cs" />
     <Compile Include="Class\Services\EmailReservationService.cs" />
+    <Compile Include="Class\Services\OtaRoomMap.cs" />
     <Compile Include="Class\Services\GuestPhone.cs" />
     <Compile Include="Class\Services\OtaFieldReader.cs" />
     <Compile Include="Class\Services\OtaParseLearner.cs" />
@@ -1564,6 +1566,13 @@
     </Compile>
     <Compile Include="Admin\Settings\BookingPolicies.aspx.designer.cs">
       <DependentUpon>BookingPolicies.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\Settings\OtaRoomMapping.aspx.cs">
+      <DependentUpon>OtaRoomMapping.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Admin\Settings\OtaRoomMapping.aspx.designer.cs">
+      <DependentUpon>OtaRoomMapping.aspx</DependentUpon>
     </Compile>
     <Compile Include="Admin\Settings\PetStay.aspx.cs">
       <DependentUpon>PetStay.aspx</DependentUpon>

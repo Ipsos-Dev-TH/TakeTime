@@ -131,7 +131,8 @@ namespace Take_Time_BangPhra.Admin
 
         protected void Button21_Click(object sender, EventArgs e)
         {
-            Response.Redirect("./Edit_Data.aspx?data=MapDataWithSTAAH"); 
+            // แก้ผ่านหน้าเฉพาะ (เห็นชื่อห้อง/ประเภท + ช่องติ๊กอาหารเช้า) — หน้าตารางดิบเห็นแค่เลขห้อง
+            Response.Redirect("~/Admin/Settings/OtaRoomMapping");
         }
     }
 }

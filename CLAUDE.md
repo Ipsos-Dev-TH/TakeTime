@@ -867,6 +867,23 @@ Notify/NotificationService/กล่องแชทรวม. **สัญญา 
   ไม่มี kitchen ticket/ใบเสร็จอย่างย่อให้ลูกค้า (ม.86/6 — ดู `Sales_Doc_Local_Slip_Required`) · ตอบแชทกลับถึงมือถือลูกค้า/รายงานยอดขายร้านอาหาร · ตรวจสลิปต้องมี PHASE19_34/36 + `SlipVerify_Enabled`
   ไม่งั้นสลิปทุกใบรอพนักงาน · หน้าตั้งค่าใช้ postback ล้วน (ไม่มี JS framework) — ตารางยาวเลื่อนในการ์ด.
 
+## Mapping ห้อง OTA + อาหารเช้า (พ.ย. 2026, PHASE19_44 — เคส Agoda "Nordic Tent - RNB - … - Room no breakfast" ได้ "ห้องกระจก3(ชั้นล่าง)")
+ต้นเหตุ: `MapDataWithSTAAH` เก็บแค่เลข `Accommodation_ID` (แก้ผ่านหน้าตารางดิบ = มองไม่เห็นว่าเลขไหนคือห้องอะไร) + ตัวอ่านอีเมลจับคู่แบบหลวม
+(ชื่อสั้นก่อน " - ", 15 ตัวแรก, LIKE, ข้ามช่องทาง `Email_Rsv_MapAnyChannel`) + อาหารเช้ารู้จากข้อความ Remark เท่านั้น.
+- **กติกากลาง** `Class/Services/OtaRoomMap.cs` (pure, mono test 35 เคส `scratchpad/otamap/T.cs`): `RoomTypeEquals` = ชื่อเต็มหลังปรับรูป (entity/nbsp/ขีดยาว/ช่องว่างรอบขีด/ตัวพิมพ์;
+  ยอมรูปแบบเดิมที่ "ลบ" entity) ไม่ตัด ไม่เทียบบางส่วน · `ChannelAlike` · `BreakfastFromText` (เฉพาะข้อความที่เจ้าหน้าที่พิมพ์ — ไม่ใช้กับชื่อแผน OTA) · `Combine` (ต่างกัน = CONFLICT) ·
+  `RemarkLine`/`BreakfastFromRemark` (บรรทัด `อาหารเช้า:` ในหมายเหตุการจอง) · `MixedTypes` · `TryParseUnmappedLog`.
+- **ตัวอ่านอีเมล** (`EmailReservationService`): `Email_Rsv_MapStrict` (ไม่มีค่า = 1) → `MappedAccommodationsStrict` อ่านทั้งตาราง+ห้อง แล้วเลือกแถว ช่องทาง+ชื่อเต็มตรงเท่านั้น;
+  ไม่ตรง = ไม่ลงจอง (เดิม: แจ้ง/พัก/ลองใหม่ 72 ชม.) + เหตุบอกสิ่งที่แบบหลวม "จะ" เลือก (`Suggestion`, ไม่ใช้เอง) + ลิงก์หน้าตั้งค่า. `=0` = `MappedAccommodationsFuzzy` เดิม.
+  อาหารเช้า = คอลัมน์ `Breakfast` (INCLUDED/EXCLUDED/NULL) ของแถวที่ตรง → `RoomBooking.MapBreakfast` → หมายเหตุ "อาหารเช้า: ไม่รวม/รวม (ตาม mapping ห้อง OTA)" (ขัดกัน = ⚠);
+  หมายเหตุที่พูดแค่อาหารเช้าถูกตัดเมื่อติ๊กแล้ว. ไม่มีคอลัมน์ = หมายเหตุแบบเดิม. ReserveTable: บรรทัดนี้ = ป้ายส้ม "ไม่รวมอาหารเช้า"/เขียว `rm-bf-in` "รวมอาหารเช้า" และชนะการเดาจากข้อความ.
+- **หน้า** `Admin/Settings/OtaRoomMapping.aspx` (Owner/Admin + SYS_SETTINGS|SYS_CHANNEL; การ์ดศูนย์ตั้งค่าหมวดราคา/ช่องทางขาย; Edit_Home + `Edit_Data?data=MapDataWithSTAAH` redirect มา — `&raw=1` = ตารางดิบ):
+  สวิตช์โหมดเข้ม · ลำดับ `Email_Rsv_RoomPriority` พร้อมชื่อห้อง · ชื่อจาก OTA ที่ยังไม่ map (Logs "no mapping" 30 วัน → ปุ่มตั้ง mapping) · ฟอร์ม ช่องทาง/ชื่อเต็ม/ติ๊กห้อง (ชื่อ · ประเภท [#id])/
+  อาหารเช้า 3 ทาง/หมายเหตุ (แก้ = ลบห้องที่เลิกติ๊ก, คงแถวที่ยังติ๊ก, insert เฉพาะคอลัมน์ที่รู้จัก) · ตารางทั้งหมด + เตือน ห้องปนประเภท / ปิดใช้งาน / ไม่มีห้อง / ยังไม่ระบุ/ขัดกันอาหารเช้า /
+  ชื่อ OTA ดูขัดกับที่ติ๊ก / แถวซ้ำต่างแค่ช่องว่าง · ทดสอบจับคู่ (`Diagnose`). ทุกการแก้ log `OtaRoomMapping`.
+- **Migration** `PHASE19_Migration_44_Ota_Room_Map_Breakfast.sql`: คอลัมน์ + CHECK, ย้ายจาก Remark (คำปฏิเสธก่อน), seed `Email_Rsv_MapStrict=1`, รายงาน mapping ทุกแผนพร้อมชื่อ/ประเภทห้อง (TypeCount>1 = ปน).
+  ไม่แก้ห้องที่ผูกให้เอง. ใบที่ลงห้องผิดไปแล้วต้องย้ายห้องเอง. ต้อง build+test บน Windows.
+
 ## Queue resilience (ส.ค. 2026 — หลังเคส NextAcc ล่มทั้งแอป)
 
 NextAcc เคย start ไม่ขึ้น (DI circular dependency ใน `Program.cs`) → ทุก endpoint ตอบ HTTP 500

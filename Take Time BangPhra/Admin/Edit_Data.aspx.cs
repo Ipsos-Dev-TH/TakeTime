@@ -101,6 +101,15 @@ namespace Take_Time_BangPhra.Admin
                 supplier_type = Request.QueryString["supplier_type"];
                 supplierid = Request.QueryString["supplierid"];
 
+                // MapDataWithSTAAH แก้ที่หน้าเฉพาะ (เห็นชื่อ/ประเภทห้อง + ติ๊กอาหารเช้า) — ตารางดิบเห็นแค่เลขห้อง ⇒ ผูกห้องผิดประเภทได้
+                // ?raw=1 = เปิดตารางดิบแบบเดิม (กรณีพิเศษ)
+                if (!IsPostBack && data == "MapDataWithSTAAH" && Request.QueryString["raw"] != "1")
+                {
+                    Response.Redirect("~/Admin/Settings/OtaRoomMapping", false);
+                    Context.ApplicationInstance.CompleteRequest();
+                    return;
+                }
+
                 if (!IsPostBack)
                 {
 

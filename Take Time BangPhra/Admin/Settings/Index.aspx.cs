@@ -276,6 +276,12 @@ namespace Take_Time_BangPhra.Admin.Settings
                 "ภาพรวมช่องทาง OTA ที่เชื่อมอยู่",
                 "~/Admin/ChannelManager/Dashboard",
                 "channel manager ota agoda booking ช่องทาง", true, "ChannelManager"));
+            price.Items.Add(new Item("Mapping ห้อง OTA (Agoda / Booking ฯลฯ → ห้องจริง + อาหารเช้า)",
+                "ชื่อห้องที่ OTA ส่งมา → ห้องที่จะจัดให้ (แสดงชื่อ/ประเภทห้อง) · ติ๊กรวม/ไม่รวมอาหารเช้า · ชื่อที่ยังไม่ map · ทดสอบจับคู่",
+                "~/Admin/Settings/OtaRoomMapping",
+                "mapping ota staah agoda booking expedia trip ห้อง ประเภทห้อง room type rate plan แผนราคา อาหารเช้า breakfast จัดห้อง อีเมลจอง",
+                false, null, Perm.SysSettings + "|" + Perm.SysChannel)
+            { AdminOnly = true });
             price.Items.Add(new Item("สิทธิประโยชน์ระดับสมาชิก (Tier)",
                 "กำหนดส่วนลด/สิทธิพิเศษของแต่ละระดับสมาชิก",
                 "~/Account/TierBenefitsManagement",

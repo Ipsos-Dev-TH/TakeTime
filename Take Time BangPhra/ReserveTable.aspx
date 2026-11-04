@@ -65,6 +65,18 @@
             margin: 3px 0;
         }
 
+        /* อาหารเช้ารวมในราคา (ติ๊กไว้ใน mapping ห้อง OTA) */
+        .rm-bf-in {
+            display: inline-block;
+            background: #e8f5e9;
+            border: 1px solid #a5d6a7;
+            color: #1e7e42;
+            font-weight: 700;
+            border-radius: 6px;
+            padding: 2px 7px;
+            margin: 3px 0;
+        }
+
         .rm-req {
             background: #e8f1fb;
             border-left: 3px solid #4a90d9;

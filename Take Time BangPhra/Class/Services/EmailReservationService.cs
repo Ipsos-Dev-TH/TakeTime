@@ -70,7 +70,7 @@ namespace Take_Time_BangPhra.Services
             _code.Logs(_conn, "EmailReservation", message + " | " + key, "SYSTEM");
             if (_notifyTelegram) Notify(message + $"\n🖥 <i>{E(InstanceStamp())}</i>", true, global::Notify.Ev.OtaIntakeStale);
         }
-        private readonly bool _moveFailed, _notifyTelegram, _createDocument, _retryFailed, _mapAnyChannel;
+        private readonly bool _moveFailed, _notifyTelegram, _createDocument, _retryFailed, _mapAnyChannel, _mapStrict;
         private readonly List<int> _roomPriority;   // ลำดับห้องที่จัดให้ก่อน (โปรแกรมเดิม hard-code ไว้)
         private readonly string _cancelStatus;      // สถานะเมื่อยกเลิกจากอีเมล (ยกเลิก/ยกเลิกคืนเงิน/ยกเลิกไม่คืนเงิน)
         private readonly int _customerTypeId;       // Customer_Type_ID ของลูกค้าที่สร้างอัตโนมัติ (2 = บุคคลธรรมดา)
@@ -95,6 +95,9 @@ namespace Take_Time_BangPhra.Services
             _retryHours = int.TryParse(Cfg("Email_Rsv_RetryHours", "72"), out var rh) ? rh : 72;
             _retryMax = int.TryParse(Cfg("Email_Rsv_RetryMaxPerRun", "20"), out var rm) ? rm : 20;
             _mapAnyChannel = Cfg("Email_Rsv_MapAnyChannel", "1") == "1";
+            // ⭐ จัดห้องตาม mapping ที่ตรง "ช่องทาง + ชื่อห้องเต็ม" เท่านั้น (ไม่เชื่อชื่อห้องจาก OTA / ไม่เดาแบบคล้าย)
+            //    ปิด (0) = กลับไปใช้การจับคู่แบบหลวมรุ่นเดิม — ไม่แนะนำ (เคส Agoda RNB ได้ห้องกระจก 3)
+            _mapStrict = Cfg("Email_Rsv_MapStrict", "1") != "0";
             _roomPriority = (Cfg("Email_Rsv_RoomPriority", "") ?? "")
                 .Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries)
                 .Select(x => int.TryParse(x.Trim(), out var v) ? v : -1)
@@ -1162,6 +1165,8 @@ namespace Take_Time_BangPhra.Services
             public string SpecialRequest;
             /// <summary>หมายเหตุที่ผูกไว้กับแผนราคานี้ในตาราง MapDataWithSTAAH (เจ้าหน้าที่เป็นคนกรอก)</summary>
             public string MapNote;
+            /// <summary>อาหารเช้าตามช่องติ๊กในแถว mapping (INCLUDED/EXCLUDED/CONFLICT/null = ไม่ระบุ) — ไม่เดาจากชื่อแผน OTA</summary>
+            public string MapBreakfast;
             // ⚠️ อีเมล STAAH ให้ตัวเลขมาแค่ 2 ตัว และ **ไม่มีค่าคอมมิชชั่น/ยอดที่ OTA จะโอนจริง**
             //    - AMOUNT      = เรตต่อคืนของ room row นั้น (ตัวที่โปรแกรมเดิมใช้คิดยอดรวมทั้งใบ)
             //    - refsell_amt = ราคาขายอ้างอิงระดับ booking (บางอีเมลไม่มี → fallback Total (All Inclusive))
@@ -1545,6 +1550,7 @@ namespace Take_Time_BangPhra.Services
                         {
                             var map = MappedAccommodations(con, tx, r.ChannelName, r.RoomType);
                             if (map.Notes.Count > 0) r.MapNote = string.Join(" · ", map.Notes.ToArray());
+                            r.MapBreakfast = map.Breakfast;
                             if (map.Rooms.Count == 0)
                             {
                                 tx.Rollback();
@@ -1656,6 +1662,10 @@ namespace Take_Time_BangPhra.Services
             public List<string> KnownChannels = new List<string>();
             /// <summary>หมายเหตุที่เจ้าหน้าที่ผูกไว้กับแถว mapping นี้ (คอลัมน์หมายเหตุใน MapDataWithSTAAH)</summary>
             public List<string> Notes = new List<string>();
+            /// <summary>อาหารเช้าจากช่องติ๊ก Breakfast ของแถวที่ตรง (INCLUDED/EXCLUDED/CONFLICT/null)</summary>
+            public string Breakfast;
+            /// <summary>โหมดเข้ม: ไม่มีแถวที่ตรงเป๊ะ — สิ่งที่การจับคู่แบบหลวมรุ่นเดิม "จะ" เลือก (แสดงให้คนตัดสิน ไม่ใช้เอง)</summary>
+            public string Suggestion;
 
             public List<int> Ids => Rooms.Select(r => r.Id).ToList();
             public RoomInfo Find(int id) => Rooms.FirstOrDefault(r => r.Id == id);
@@ -1669,7 +1679,9 @@ namespace Take_Time_BangPhra.Services
                     : (KnownChannels.Count > 0
                         ? $" | ไม่พบ Agency '{channel}' — Agency ที่มีในตาราง: " + string.Join(", ", KnownChannels.Take(12))
                         : " | ตาราง MapDataWithSTAAH ยังว่าง");
-                return $"ไม่มี mapping ห้องพัก: Agency='{channel}' ROOM_TYPE='{roomType}' (ตาราง MapDataWithSTAAH)" + hint;
+                return $"ไม่มี mapping ห้องพัก: Agency='{channel}' ROOM_TYPE='{roomType}' (ตาราง MapDataWithSTAAH)" + hint
+                     + (string.IsNullOrEmpty(Suggestion) ? "" : " | " + Suggestion + " — ระบบไม่จัดห้องจากชื่อที่คล้ายกันเอง")
+                     + " | เพิ่ม mapping ที่ ศูนย์ตั้งค่า → Mapping ห้อง OTA (/Admin/Settings/OtaRoomMapping)";
             }
         }
 
@@ -1792,17 +1804,11 @@ namespace Take_Time_BangPhra.Services
         {
             string x = NormChannel(a), y = NormChannel(b);
             if (x.Length < 4 || y.Length < 4) return x == y;
-            return x == y || x.IndexOf(y, StringComparison.Ordinal) >= 0
-                          || y.IndexOf(x, StringComparison.Ordinal) >= 0;
+            return OtaRoomMap.ChannelAlike(a, b);
         }
 
         /// <summary>ยุบชื่อช่องทางให้เทียบกันได้ — ตัดอักขระพิเศษ + คำว่า "dot" ที่คนพิมพ์แทนจุด</summary>
-        private static string NormChannel(string s)
-        {
-            if (string.IsNullOrWhiteSpace(s)) return "";
-            string v = Regex.Replace(s.ToLowerInvariant(), @"\bdot\b", ".");
-            return Regex.Replace(v, @"[^a-z0-9ก-๙]", "");
-        }
+        private static string NormChannel(string s) => OtaRoomMap.NormChannel(s);
 
         /// <summary>ชื่อ Agency ทั้งหมดในตาราง mapping (แบบยุบแล้ว) — ใช้ดูว่าหมายเหตุเป็นแค่ชื่อช่องทางไหม</summary>
         private HashSet<string> _agencyNames;
@@ -1843,6 +1849,112 @@ namespace Take_Time_BangPhra.Services
 
         private MapResult MappedAccommodations(SqlConnection con, SqlTransaction tx, string channel, string roomType)
         {
+            return _mapStrict
+                ? MappedAccommodationsStrict(con, tx, channel, roomType)
+                : MappedAccommodationsFuzzy(con, tx, channel, roomType, true);
+        }
+
+        /// <summary>แถวหนึ่งของ MapDataWithSTAAH + ข้อมูลห้อง (โหมดเข้มอ่านทั้งตารางแล้วเทียบใน C# — ตารางเล็ก)</summary>
+        private class MapRow
+        {
+            public string Agency = "", RoomType = "", Note = "", Breakfast, AccomName = "", AccomType = "";
+            public int AccomId, OrderId, People;
+            public bool Exists, Active, Limit;
+        }
+
+        private List<MapRow> LoadAllMapRows(SqlConnection con, SqlTransaction tx)
+        {
+            var list = new List<MapRow>();
+            string noteCol = MapNoteColumn();
+            var cols = MapColumns();
+            string noteSel = noteCol.Length > 0 ? "ISNULL(CONVERT(nvarchar(400), m.[" + noteCol + "]), N'')" : "N''";
+            string bfSel = cols.Contains("Breakfast") ? "CONVERT(nvarchar(20), m.Breakfast)" : "CAST(NULL AS nvarchar(20))";
+            string typeSel = AccomColumns().Contains("Accommodation_Type") ? "ISNULL(CONVERT(nvarchar(100), a.Accommodation_Type), N'')" : "N''";
+            string sql = @"SELECT ISNULL(m.Agency, N''), ISNULL(m.ROOM_TYPE, N''), m.Accommodation_ID, " + noteSel + ", " + bfSel + @",
+                                  CASE WHEN a.ID IS NULL THEN 0 ELSE 1 END, ISNULL(a.AccomName, N''),
+                                  ISNULL(CONVERT(nvarchar(10), a.Status), '0'),
+                                  ISNULL(CONVERT(nvarchar(10), a.LimitWithPeople), 'False'),
+                                  ISNULL(TRY_CONVERT(int, a.People), 0), ISNULL(TRY_CONVERT(int, a.OrderID), 0), " + typeSel + @"
+                             FROM MapDataWithSTAAH m
+                             LEFT JOIN Accommodation a ON a.ID = m.Accommodation_ID
+                            WHERE m.Accommodation_ID IS NOT NULL";
+            using (var cmd = new SqlCommand(sql, con, tx))
+            using (var rd = cmd.ExecuteReader())
+                while (rd.Read())
+                {
+                    string st = rd[7]?.ToString() ?? "0", lim = rd[8]?.ToString() ?? "False";
+                    list.Add(new MapRow
+                    {
+                        Agency = rd[0].ToString().Trim(), RoomType = rd[1].ToString(),
+                        AccomId = Convert.ToInt32(rd[2]), Note = rd[3].ToString().Trim(),
+                        Breakfast = rd[4] == DBNull.Value ? null : OtaRoomMap.NormalizeBreakfast(rd[4].ToString()),
+                        Exists = Convert.ToInt32(rd[5]) == 1, AccomName = rd[6].ToString(),
+                        Active = st == "1" || st.Equals("True", StringComparison.OrdinalIgnoreCase),
+                        Limit = lim == "1" || lim.Equals("True", StringComparison.OrdinalIgnoreCase),
+                        People = Convert.ToInt32(rd[9]), OrderId = Convert.ToInt32(rd[10]), AccomType = rd[11].ToString().Trim()
+                    });
+                }
+            return list;
+        }
+
+        private HashSet<string> _mapCols, _accomCols;
+        private HashSet<string> MapColumns() => _mapCols ?? (_mapCols = TableColumns("MapDataWithSTAAH"));
+        private HashSet<string> AccomColumns() => _accomCols ?? (_accomCols = TableColumns("Accommodation"));
+
+        /// <summary>
+        /// โหมดเข้ม (ค่าเริ่มต้น): ห้องที่จัดให้ = แถว mapping ที่ "ช่องทางเดียวกัน + ชื่อห้องเต็มตรงกัน" เท่านั้น
+        /// ไม่ตัดชื่อสั้น ("Nordic Tent"), ไม่เทียบ 15 ตัวแรก, ไม่ข้ามช่องทาง — ชื่อห้องจาก OTA ใช้หาแถวเท่านั้น
+        /// ห้องที่ได้คือห้องที่เจ้าหน้าที่ติ๊กไว้ในแถวนั้น. ไม่ตรง = ไม่ลงจองอัตโนมัติ + บอกสิ่งที่แบบหลวม "จะ" เลือกไว้ให้คนตัดสิน
+        /// </summary>
+        private MapResult MappedAccommodationsStrict(SqlConnection con, SqlTransaction tx, string channel, string roomType)
+        {
+            var res = new MapResult();
+            if (string.IsNullOrWhiteSpace(roomType)) return res;
+            string ch = Norm(CleanEntities(channel));
+            var all = LoadAllMapRows(con, tx);
+            var hit = all.Where(x => OtaRoomMap.ChannelAlike(x.Agency, ch) && OtaRoomMap.RoomTypeEquals(x.RoomType, roomType)).ToList();
+
+            if (hit.Count == 0)
+            {
+                res.KnownRoomTypes = all.Where(x => OtaRoomMap.ChannelAlike(x.Agency, ch))
+                    .Select(x => x.RoomType).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x).ToList();
+                if (res.KnownRoomTypes.Count == 0)
+                    res.KnownChannels = all.Select(x => x.Agency).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x).ToList();
+                try
+                {
+                    var fz = MappedAccommodationsFuzzy(con, tx, channel, roomType, false);
+                    if (fz.Rooms.Count > 0)
+                        res.Suggestion = "แบบจับคู่หลวมรุ่นเดิมจะได้ [" + fz.MatchedBy + "]: " + string.Join(", ", fz.Rooms.Select(r => r.Name));
+                }
+                catch { }
+                return res;
+            }
+
+            res.MatchedBy = "ตรงตาม mapping (ช่องทาง + ชื่อห้องเต็ม)";
+            res.Breakfast = OtaRoomMap.Combine(hit.Select(x => x.Breakfast));
+            var seenDisabled = new HashSet<int>();
+            foreach (var x in hit)
+            {
+                string note = CleanMapNote(con, tx, x.Note, x.Agency, channel);
+                // ติ๊กอาหารเช้าไว้แล้ว → หมายเหตุที่พูดแค่เรื่องอาหารเช้าไม่ต้องแสดงซ้ำ (บรรทัด "อาหารเช้า:" แทน)
+                if (note.Length > 0 && res.Breakfast != null && OtaRoomMap.IsBreakfastOnlyNote(note)) note = "";
+                if (note.Length > 0 && !res.Notes.Contains(note)) res.Notes.Add(note);
+
+                if (!x.Exists || !x.Active) { if (seenDisabled.Add(x.AccomId)) res.DisabledCount++; continue; }
+                if (res.Rooms.Any(r => r.Id == x.AccomId)) continue;
+                res.Rooms.Add(new RoomInfo
+                {
+                    Id = x.AccomId, Name = string.IsNullOrEmpty(x.AccomName) ? "#" + x.AccomId : x.AccomName,
+                    LimitWithPeople = x.Limit, Capacity = x.People, OrderId = x.OrderId
+                });
+            }
+            OrderRooms(res.Rooms);
+            return res;
+        }
+
+        /// <summary>การจับคู่แบบหลวมรุ่นเดิม (Email_Rsv_MapStrict=0) — โหมดเข้มเรียกเพื่อ "เสนอ" เท่านั้น (logFallback=false)</summary>
+        private MapResult MappedAccommodationsFuzzy(SqlConnection con, SqlTransaction tx, string channel, string roomType, bool logFallback)
+        {
             var res = new MapResult();
             string ch = Norm(CleanEntities(channel));
             var variants = RoomTypeCandidates(roomType);
@@ -1878,7 +1990,7 @@ namespace Take_Time_BangPhra.Services
                     if (res.Rooms.Count > 0)
                     {
                         res.MatchedBy = tier.How + (rt == variants[0] ? "" : $" (ใช้ชื่อ '{rt}')");
-                        if (tier.How.StartsWith("Agency คล้าย") || tier.How.StartsWith("ROOM_TYPE ตรง (ข้าม"))
+                        if (logFallback && (tier.How.StartsWith("Agency คล้าย") || tier.How.StartsWith("ROOM_TYPE ตรง (ข้าม")))
                             _code.Logs(_conn, "EmailReservation",
                                 $"mapping fallback: Agency='{ch}' ROOM_TYPE='{roomType}' → {res.MatchedBy} ({res.Rooms.Count} ห้อง)", "SYSTEM");
                         return res;
@@ -2098,7 +2210,7 @@ namespace Take_Time_BangPhra.Services
                         CheckIn = checkIn, CheckOut = checkOut, NoOfRooms = noOfRooms
                     };
                     int free = map.Rooms.Count(x => IsRoomFree(x, adults));
-                    string head = $"map เจอ {map.Rooms.Count} ห้อง [{map.MatchedBy}]: " +
+                    string head = $"map เจอ {map.Rooms.Count} ห้อง [{map.MatchedBy}] · อาหารเช้า: {OtaRoomMap.BreakfastLabel(map.Breakfast)}: " +
                                   string.Join(", ", map.Rooms.Select(x =>
                                       x.Name + (x.LimitWithPeople ? $"(รวม {x.Capacity} คน)" : "")));
                     if (free >= noOfRooms)
@@ -2444,6 +2556,7 @@ namespace Take_Time_BangPhra.Services
                         {
                             var map = MappedAccommodations(con, tx, r.ChannelName, r.RoomType);
                             if (map.Notes.Count > 0) r.MapNote = string.Join(" · ", map.Notes.ToArray());
+                            r.MapBreakfast = map.Breakfast;
                             if (map.Rooms.Count == 0)
                             {
                                 tx.Rollback();
@@ -2945,6 +3058,10 @@ namespace Take_Time_BangPhra.Services
                 // ⚠️ ห้ามสรุปเองจากชื่อแผนราคา: รหัสเดียวกันความหมายต่างกันได้ตามช่องทาง —
                 // บางเจ้า map "RNB" ไว้กับแผนที่ "มี" อาหารเช้า ⇒ เดาแล้วจะบอกลูกค้าผิด
                 // ชื่อแผนราคาดิบยังแสดงในบรรทัด "แผนราคา:" ให้ตรวจเทียบได้อยู่แล้ว
+                // อาหารเช้า = ช่องติ๊กในแถว mapping (ทุกห้องในใบรวมกัน; ต่างกัน = เตือนขัดกัน)
+                string bfLine = OtaRoomMap.RemarkLine(OtaRoomMap.Combine(rooms.Select(r => r.MapBreakfast)));
+                if (bfLine != null) optional.Add(bfLine);
+
                 string mapNote = MergeMapNotes(rooms, head.ChannelName);
                 if (!string.IsNullOrEmpty(mapNote)) optional.Add("หมายเหตุแผนราคา: " + mapNote);
 

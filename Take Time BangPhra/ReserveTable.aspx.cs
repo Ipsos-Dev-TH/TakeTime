@@ -266,6 +266,17 @@ namespace Take_Time_BangPhra
                     else
                         sb.Append("<div class=\"rm-line\">").Append(Server.HtmlEncode(line)).Append("</div>");
                 }
+                else if (line.StartsWith(Take_Time_BangPhra.Services.OtaRoomMap.RemarkBreakfastPrefix, StringComparison.Ordinal))
+                {
+                    // บรรทัดอาหารเช้าจากช่องติ๊กใน mapping ห้อง OTA (ไม่ใช่การเดาจากชื่อแผน) — ไม่รวม/ขัดกัน = ป้ายส้ม, รวม = ป้ายเขียว
+                    string bf = Take_Time_BangPhra.Services.OtaRoomMap.BreakfastFromRemark(line);
+                    if (bf == Take_Time_BangPhra.Services.OtaRoomMap.BfIncluded)
+                        sb.Append("<div><span class=\"rm-bf-in\">รวมอาหารเช้า</span></div>");
+                    else if (bf == Take_Time_BangPhra.Services.OtaRoomMap.BfExcluded)
+                        sb.Append("<div><span class=\"rm-plan\">ไม่รวมอาหารเช้า</span></div>");
+                    else
+                        sb.Append("<div><span class=\"rm-plan\">").Append(Server.HtmlEncode(line)).Append("</span></div>");
+                }
                 else if (line.StartsWith(reqKey, StringComparison.Ordinal))
                 {
                     sb.Append("<div class=\"rm-req\">").Append(Server.HtmlEncode(line)).Append("</div>");
@@ -285,6 +296,9 @@ namespace Take_Time_BangPhra
         private static bool IsNoBreakfastRemark(string remark)
         {
             if (string.IsNullOrEmpty(remark)) return false;
+            // ช่องติ๊กใน mapping (บรรทัด "อาหารเช้า:") ชนะเสมอ — ไม่ต้องเดาจากข้อความ
+            string explicitBf = Take_Time_BangPhra.Services.OtaRoomMap.BreakfastFromRemark(remark);
+            if (explicitBf != null) return explicitBf != Take_Time_BangPhra.Services.OtaRoomMap.BfIncluded;
             string planText = "";
             foreach (string l in remark.Replace("\r\n", "\n").Replace("\r", "\n").Split('\n'))
             {
