@@ -884,6 +884,13 @@ Notify/NotificationService/กล่องแชทรวม. **สัญญา 
 - **Migration** `PHASE19_Migration_44_Ota_Room_Map_Breakfast.sql`: คอลัมน์ + CHECK, ย้ายจาก Remark (คำปฏิเสธก่อน), seed `Email_Rsv_MapStrict=1`, รายงาน mapping ทุกแผนพร้อมชื่อ/ประเภทห้อง (TypeCount>1 = ปน).
   ไม่แก้ห้องที่ผูกให้เอง. ใบที่ลงห้องผิดไปแล้วต้องย้ายห้องเอง. ต้อง build+test บน Windows.
 
+## ดึงรีวิวอัตโนมัติไม่ตามรอบ (พ.ย. 2026 — Agoda "ถัดไป" ผ่านไปแล้วไม่ดึง ต้องกดเอง)
+ตัวตั้งเวลา `ReviewAggregationService.RunIfDue` เดิมพ่วงท้าย tick บัญชีใน Global.asax ⇒ tick ถูกข้ามทั้งก้อนเมื่อ `_isSyncing` (คิวบัญชียังวิ่ง >2 นาที) /
+ข้อยกเว้นก่อนถึงบรรทัดรีวิว / timer บัญชีไม่เริ่มเพราะตอน start สวิตช์ยังปิด; สวิตช์ใหญ่ `Review_Aggregation_Enabled` (ค่าเริ่ม 0) ปิด = ไม่ดึงเองแต่หน้าแสดง "เปิด" + "ถัดไป".
+แก้: `Global.ReviewTick` timer ของตัวเอง (เริ่มเสมอ 90 วิ, ทุก 60 วิ; ไม่ต้อง recycle เมื่อเปิดสวิตช์) · `SchedulerStatus` (สวิตช์/timer เดินไหม/รอบล่าสุด/ถึงรอบกี่แหล่ง/ล้ม, ในหน่วยความจำ process) ·
+watchdog ปลดธง `_running` ค้าง >30 นาที · หน้า `Admin/CRM/ReviewSources` แถบเตือน (`renderSched`) + ป้าย "เปิด แต่สวิตช์ใหญ่ปิด" + "⏰ เลยรอบ … — เหตุผล" (`OverdueReason`).
+IIS App Pool ควรตั้ง Idle Time-out = 0 + Start Mode = AlwaysRunning (เว็บหลับ = timer ไม่เดิน; ตื่นแล้วดึงแหล่งที่เลยรอบให้เอง).
+
 ## Queue resilience (ส.ค. 2026 — หลังเคส NextAcc ล่มทั้งแอป)
 
 NextAcc เคย start ไม่ขึ้น (DI circular dependency ใน `Program.cs`) → ทุก endpoint ตอบ HTTP 500

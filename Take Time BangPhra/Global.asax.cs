@@ -18,6 +18,8 @@ namespace Take_Time_BangPhra
     public class Global : HttpApplication
     {
         private static Timer _accountingSyncTimer;
+        /// <summary>ตัวตั้งเวลาดึงรีวิว — แยกจาก timer บัญชี (เดิมพ่วงท้าย tick บัญชี ⇒ คิวบัญชีค้าง/งานก่อนหน้าล้ม = ไม่ดึงรีวิวเลย)</summary>
+        private static Timer _reviewTimer;
         private static readonly object _syncLock = new object();
         private static bool _isSyncing = false;
 
@@ -43,12 +45,26 @@ namespace Take_Time_BangPhra
 
             // Start accounting sync background timer
             StartAccountingSyncTimer();
+
+            // ดึงรีวิวอัตโนมัติ: timer ของตัวเอง เริ่มเสมอ (เช็คสวิตช์ใหญ่ทุก tick — เปิดสวิตช์ทีหลังไม่ต้อง recycle App Pool)
+            _reviewTimer = new Timer(ReviewTick, null, 90000, 60000);
+        }
+
+        private static void ReviewTick(object state)
+        {
+            try
+            {
+                string conn = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                Take_Time_BangPhra.Services.Reviews.ReviewAggregationService.RunIfDue(conn);
+            }
+            catch (Exception ex) { System.Diagnostics.Trace.TraceError($"ReviewAggregation timer error: {(ex.InnerException ?? ex).Message}"); }
         }
 
         void Application_End(object sender, EventArgs e)
         {
             // Dispose timer on app shutdown
             _accountingSyncTimer?.Dispose();
+            _reviewTimer?.Dispose();
         }
 
         /// <summary>
@@ -66,8 +82,7 @@ namespace Take_Time_BangPhra
                 {
                     string conn = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
                     bgFeaturesOn = EmailReservationService.IsEnabled(conn) || DailyReportLineService.IsEnabled(conn)
-                                   || EmailChatService.IsEnabled(conn)
-                                   || Take_Time_BangPhra.Services.Reviews.ReviewAggregationService.IsEnabled(conn);
+                                   || EmailChatService.IsEnabled(conn);
                 }
                 catch { }
                 if (!config.IsReadyToSync && !bgFeaturesOn) return;
@@ -252,14 +267,7 @@ namespace Take_Time_BangPhra
                 }
                 catch (Exception cnx) { System.Diagnostics.Trace.TraceError($"CreditNote alert error: {(cnx.InnerException ?? cnx).Message}"); }
 
-                // รวมรีวิวหลายแพลตฟอร์ม (Google/OTA/อีเมลแจ้งรีวิว): ดึงแหล่งที่ถึงรอบ + AI วิเคราะห์ภายใต้งบ token
-                // — no-op ถ้า Review_Aggregation_Enabled = 0 / ยังไม่รัน PHASE19_26; รันใน background task ไม่บล็อก tick นี้
-                try
-                {
-                    string revConn = System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
-                    Take_Time_BangPhra.Services.Reviews.ReviewAggregationService.RunIfDue(revConn);
-                }
-                catch (Exception rvx) { System.Diagnostics.Trace.TraceError($"ReviewAggregation timer error: {(rvx.InnerException ?? rvx).Message}"); }
+                // รวมรีวิวหลายแพลตฟอร์ม: ย้ายไป timer ของตัวเอง (ReviewTick) — ไม่ขึ้นกับ tick นี้แล้ว
 
                 _consecutiveTimerErrors = 0;
             }

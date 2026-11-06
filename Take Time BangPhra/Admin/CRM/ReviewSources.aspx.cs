@@ -132,6 +132,8 @@ namespace Take_Time_BangPhra.Admin.CRM
         private Dictionary<string, object> HandleGetSources()
         {
             bool ready = ReviewSourceConfig.SchemaReady(ConnStr);
+            var sched = ReviewAggregationService.SchedulerStatus(ConnStr);
+            bool masterOn = (bool)sched["masterOn"], ticking = (bool)sched["ticking"];
             var list = new List<Dictionary<string, object>>();
             var dt = new code().DatabaseQuerySafe(ConnStr, "SELECT * FROM AI_Review_Sources ORDER BY SourceCode", null);
             foreach (DataRow r in dt.Rows)
@@ -153,6 +155,10 @@ namespace Take_Time_BangPhra.Admin.CRM
                     { "platformRating", s.PlatformRating }, { "platformScale", s.PlatformRatingScale },
                     { "platformCount", s.PlatformReviewCount }, { "totalReviews", s.TotalReviews },
                     { "leaseUntil", Fmt(DateCol(r, "Lease_Until")) },
+                    { "overdueMin", s.IsAutoEnabled && s.NextFetchAt.HasValue && s.NextFetchAt.Value < DateTime.Now
+                        ? (int)(DateTime.Now - s.NextFetchAt.Value).TotalMinutes : 0 },
+                    { "overdueReason", ReviewAggregationService.OverdueReason(s.IsAutoEnabled, s.NextFetchAt, DateCol(r, "Lease_Until"),
+                        masterOn, ticking, DateTime.Now) },
                     // ความลับถูกแทนด้วย ••••xxxx — ค่าจริงไม่ออกจาก server
                     { "config", ReviewSourceConfig.MaskedDictionary(apiJson) }
                 });
@@ -164,7 +170,7 @@ namespace Take_Time_BangPhra.Admin.CRM
             return new Dictionary<string, object>
             {
                 { "success", true }, { "schemaReady", ready }, { "isSecretAdmin", IsSecretAdmin },
-                { "sources", list }, { "settings", settings },
+                { "sources", list }, { "settings", settings }, { "scheduler", sched },
                 { "methods", IngestMethods.All },
                 { "aiUsedToday", ready ? ReviewAiBudget.UsedToday(ConnStr) : 0 },
                 { "emailDefaults", EmailReviewAdapter.Defaults.ToDictionary(kv => kv.Key, kv => (object)kv.Value) }
@@ -490,8 +496,8 @@ WHERE ID = @id",
             }
             new code().Logs(ConnStr, "ReviewSources", "แก้ค่าตั้งระบบรีวิว", Session["UserName"] != null ? Session["UserName"].ToString() : "ADMIN");
             string note = ReviewAggregationService.IsEnabled(ConnStr)
-                ? "ถ้าเพิ่งเปิดสวิตช์ใหญ่ครั้งแรกและระบบยังไม่มีงานเบื้องหลังอื่นเปิดอยู่ ต้อง recycle App Pool หนึ่งครั้งให้ตัวตั้งเวลาเริ่ม"
-                : null;
+                ? null
+                : "สวิตช์ใหญ่ปิด — ระบบจะไม่ดึงรีวิวเองตามรอบ (กดดึงเองได้)";
             return new Dictionary<string, object> { { "success", true }, { "message", "บันทึกค่าตั้งแล้ว" }, { "warning", note } };
         }
 

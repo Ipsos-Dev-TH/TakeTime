@@ -40,6 +40,14 @@ namespace Take_Time_BangPhra.Services.Reviews
         private static DateTime _lastPurge = DateTime.MinValue;
         private static readonly object _gate = new object();
 
+        // สถานะตัวตั้งเวลา (ในหน่วยความจำของ process นี้) — หน้าแหล่งรีวิวใช้บอกว่า "ทำไมไม่ดึงตามรอบ"
+        private static DateTime _lastTick = DateTime.MinValue;       // timer เรียก RunIfDue ล่าสุด (แม้สวิตช์ใหญ่ปิด)
+        private static DateTime _lastRunStarted = DateTime.MinValue; // เริ่มรอบดึงล่าสุด
+        private static DateTime _lastRunFinished = DateTime.MinValue;
+        private static int _lastRunPicked;                           // จำนวนแหล่งที่ถึงรอบในรอบล่าสุด
+        private static string _lastRunError;
+        private static readonly DateTime _processStarted = DateTime.Now;
+
         /// <summary>เปิดดึงรีวิวอัตโนมัติไหม (ใช้ใน Global.asax เพื่อเปิด timer ด้วย)</summary>
         public static bool IsEnabled(string conn)
         {
@@ -69,6 +77,7 @@ namespace Take_Time_BangPhra.Services.Reviews
         {
             try
             {
+                _lastTick = DateTime.Now;
                 if (string.IsNullOrEmpty(conn) || !IsEnabled(conn)) return;
                 lock (_gate)
                 {
@@ -76,14 +85,26 @@ namespace Take_Time_BangPhra.Services.Reviews
                     _lastRun = DateTime.Now;
                 }
                 if (!ReviewSourceConfig.SchemaReady(conn)) return;
+                // watchdog: รอบก่อนค้างเกิน 30 นาที (เช่น HTTP ค้าง) ⇒ ปลดธงให้เริ่มรอบใหม่ได้ — lease ต่อแหล่งใน DB กันดึงซ้อนอยู่แล้ว
+                if (Interlocked.CompareExchange(ref _running, 0, 0) == 1 && _lastRunStarted != DateTime.MinValue
+                    && (DateTime.Now - _lastRunStarted).TotalMinutes > 30)
+                {
+                    _lastRunError = "รอบที่เริ่ม " + _lastRunStarted.ToString("HH:mm") + " ค้างเกิน 30 นาที — เริ่มรอบใหม่";
+                    Interlocked.Exchange(ref _running, 0);
+                }
                 if (Interlocked.CompareExchange(ref _running, 1, 0) != 0) return;
 
                 // ไม่บล็อก timer กลาง (คิวบัญชี/อีเมลจอง) — งาน IMAP/HTTP อาจนานหลายนาที
                 Task.Run(() =>
                 {
-                    try { new ReviewAggregationService(conn).RunDueSources(); }
-                    catch (Exception ex) { System.Diagnostics.Trace.TraceError("ReviewAggregation: " + ex.Message); }
-                    finally { Interlocked.Exchange(ref _running, 0); }
+                    _lastRunStarted = DateTime.Now;
+                    try { new ReviewAggregationService(conn).RunDueSources(); _lastRunError = null; }
+                    catch (Exception ex)
+                    {
+                        _lastRunError = ex.Message;
+                        System.Diagnostics.Trace.TraceError("ReviewAggregation: " + ex.Message);
+                    }
+                    finally { _lastRunFinished = DateTime.Now; Interlocked.Exchange(ref _running, 0); }
                 });
             }
             catch (Exception ex)
@@ -105,6 +126,8 @@ namespace Take_Time_BangPhra.Services.Reviews
                      AND (Lease_Until IS NULL OR Lease_Until < GETDATE())
                    ORDER BY ISNULL(Next_Fetch_At, '2000-01-01')",
                 new Dictionary<string, object> { { "@n", MaxSourcesPerRun } });
+            _lastRunPicked = dt == null ? 0 : dt.Rows.Count;
+            if (dt == null) return;
 
             foreach (DataRow r in dt.Rows)
             {
@@ -136,6 +159,43 @@ namespace Take_Time_BangPhra.Services.Reviews
             }
             catch (Exception ex) { System.Diagnostics.Trace.TraceError("ReviewAI batch: " + ex.Message); }
             if ((DateTime.Now - _lastPurge).TotalHours >= 24) { _lastPurge = DateTime.Now; store.PurgeOldLogs(); }
+        }
+
+        /// <summary>
+        /// สถานะตัวตั้งเวลาให้หน้าแหล่งรีวิว: สวิตช์ใหญ่, timer เดินไหม, รอบดึงล่าสุด
+        /// (ค่าในหน่วยความจำของ worker process นี้ — App Pool เพิ่งเริ่ม/ถูก recycle = ยังไม่มีค่า)
+        /// </summary>
+        public static Dictionary<string, object> SchedulerStatus(string conn)
+        {
+            Func<DateTime, object> f = d => d == DateTime.MinValue ? null : (object)d.ToString("yyyy-MM-dd HH:mm");
+            bool master = IsEnabled(conn);
+            bool ticking = _lastTick != DateTime.MinValue && (DateTime.Now - _lastTick).TotalMinutes <= 5;
+            return new Dictionary<string, object>
+            {
+                { "masterOn", master },
+                { "ticking", ticking },
+                { "lastTick", f(_lastTick) },
+                { "lastRunStarted", f(_lastRunStarted) },
+                { "lastRunFinished", f(_lastRunFinished) },
+                { "lastRunPicked", _lastRunPicked },
+                { "lastRunError", _lastRunError },
+                { "running", Interlocked.CompareExchange(ref _running, 0, 0) == 1 },
+                { "processStarted", f(_processStarted) }
+            };
+        }
+
+        /// <summary>
+        /// เหตุผลที่แหล่งนี้ "เลยรอบแล้วยังไม่ดึง" (null = ไม่เลยรอบ/ไม่ใช่ปัญหา) — เลยรอบ = Next_Fetch_At ผ่านไปเกิน graceMin นาที
+        /// </summary>
+        public static string OverdueReason(bool autoEnabled, DateTime? nextFetchAt, DateTime? leaseUntil, bool masterOn, bool ticking,
+            DateTime now, int graceMin = 15)
+        {
+            if (!autoEnabled || !nextFetchAt.HasValue) return null;
+            if ((now - nextFetchAt.Value).TotalMinutes <= graceMin) return null;
+            if (leaseUntil.HasValue && leaseUntil.Value > now) return "กำลังดึงอยู่";
+            if (!masterOn) return "สวิตช์ใหญ่ 'เปิดดึงรีวิวอัตโนมัติ' ปิดอยู่ — ระบบไม่ดึงเองเลย (ปุ่ม 'ดึงตอนนี้' ยังใช้ได้)";
+            if (!ticking) return "ตัวตั้งเวลาไม่ได้ทำงาน (เว็บถูกปิด/รีสตาร์ท หรือ App Pool หลับเพราะไม่มีคนเข้า) — ดึงให้เองเมื่อเว็บทำงานอีกครั้ง";
+            return "ถึงรอบแล้ว รอรอบตัวตั้งเวลาถัดไป (ทุก 5 นาที, ครั้งละไม่เกิน " + MaxSourcesPerRun + " แหล่ง)";
         }
 
         /// <summary>ปุ่ม "ดึงตอนนี้" — ใช้ lease เดียวกับตัวตั้งเวลา (กดซ้ำระหว่างดึงอยู่ = แจ้งว่ากำลังดึง)</summary>

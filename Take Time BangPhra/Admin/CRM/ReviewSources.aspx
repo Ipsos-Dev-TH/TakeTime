@@ -73,6 +73,7 @@
     <!-- ตารางแหล่ง -->
     <div class="rs-card">
         <h3><i class="fas fa-list"></i> แหล่งรีวิวทั้งหมด</h3>
+        <div id="rsSched"></div>
         <div class="rs-scroll">
             <table class="rs-table">
                 <thead><tr>
@@ -359,7 +360,8 @@
             state.emailDefaults = res.emailDefaults || {};
             $('rsSchemaWarn').style.display = res.schemaReady ? 'none' : 'block';
             $('rsAiUsage').textContent = 'token AI รีวิววันนี้: ' + (res.aiUsedToday || 0) + ' / ' + (res.settings.Review_AI_Daily_Token_Budget || '-');
-            renderSettings(); renderTable(); fillSourceSelects();
+            state.scheduler = res.scheduler || {};
+            renderSettings(); renderSched(); renderTable(); fillSourceSelects();
         }).catch(function (e) { toast('โหลดข้อมูลไม่สำเร็จ: ' + e, 'err'); });
     }
 
@@ -396,6 +398,32 @@
             + (s.platformCount ? '<div class="rs-muted">' + s.platformCount + ' รีวิว</div>' : '');
     }
 
+    // สถานะตัวตั้งเวลา — บอกตรง ๆ ว่าทำไมไม่ดึงตามรอบ (สวิตช์ใหญ่ปิด / timer ไม่เดิน / รอบล่าสุดล้ม)
+    function renderSched() {
+        var c = state.scheduler || {}, h = '';
+        var anyAuto = state.sources.some(function (s) { return s.autoEnabled && AUTO_METHODS.indexOf(s.method) >= 0; });
+        if (anyAuto && !c.masterOn)
+            h += '<div class="rs-alert err" style="display:block">⛔ <b>ระบบไม่ดึงรีวิวเองตามรอบ</b> เพราะสวิตช์ใหญ่ "เปิดดึงรีวิวอัตโนมัติ" ปิดอยู่ '
+               + '— ติ๊กในส่วนค่าตั้งด้านบนแล้วกดบันทึก (แหล่งที่ขึ้นว่า "เปิด" จะเริ่มดึงเองในไม่กี่นาที)</div>';
+        else if (anyAuto && !c.ticking)
+            h += '<div class="rs-alert err" style="display:block">⚠ ตัวตั้งเวลายังไม่ทำงานใน process นี้'
+               + (c.lastTick ? ' (ทำงานล่าสุด ' + esc(c.lastTick) + ')' : ' (เว็บเพิ่งเริ่ม ' + esc(c.processStarted || '') + ' — รอ ~2 นาที)')
+               + ' · ถ้าเป็นบ่อย ให้ตั้ง IIS App Pool: Idle Time-out = 0 และ Start Mode = AlwaysRunning (ไม่งั้นเว็บหลับเมื่อไม่มีคนเข้า = ไม่ดึงตามเวลา)</div>';
+        if (c.masterOn)
+            h += '<div class="rs-muted" style="margin-bottom:8px">ตัวตั้งเวลา: ' + (c.ticking ? '🟢 ทำงาน' : '🔴 ไม่ทำงาน')
+               + (c.lastRunStarted ? ' · รอบดึงล่าสุด ' + esc(c.lastRunStarted) + ' (ถึงรอบ ' + (c.lastRunPicked || 0) + ' แหล่ง)' : ' · ยังไม่มีรอบดึงตั้งแต่เว็บเริ่ม ' + esc(c.processStarted || ''))
+               + (c.running ? ' · กำลังดึงอยู่' : '')
+               + (c.lastRunError ? ' · <span class="rs-err">รอบล่าสุดล้ม: ' + esc(c.lastRunError) + '</span>' : '') + '</div>';
+        $('rsSched').innerHTML = h;
+    }
+
+    function fmtMin(m) {
+        m = m || 0;
+        if (m >= 1440) return Math.floor(m / 1440) + ' วัน ' + Math.floor((m % 1440) / 60) + ' ชม.';
+        if (m >= 60) return Math.floor(m / 60) + ' ชม. ' + (m % 60) + ' นาที';
+        return m + ' นาที';
+    }
+
     function renderTable() {
         var h = '';
         state.sources.forEach(function (s, i) {
@@ -403,9 +431,14 @@
             h += '<tr>'
                 + '<td><i class="' + esc(s.icon || 'fas fa-star') + '" style="color:' + esc(s.color || '#5D4037') + '"></i> <b>' + esc(s.name) + '</b><div class="rs-muted">' + esc(s.code) + '</div></td>'
                 + '<td>' + esc(METHOD_LABEL[s.method] || (s.method || '— ยังไม่ตั้ง —')) + '</td>'
-                + '<td>' + (auto ? (s.autoEnabled ? '<span class="rs-badge on">เปิด</span>' : '<span class="rs-badge off">ปิด</span>') : '<span class="rs-muted">มือ</span>') + '</td>'
+                + '<td>' + (auto ? (s.autoEnabled
+                        ? ((state.scheduler && state.scheduler.masterOn === false)
+                            ? '<span class="rs-badge off" title="สวิตช์ใหญ่ปิด — ไม่ดึงเอง">เปิด แต่สวิตช์ใหญ่ปิด</span>'
+                            : '<span class="rs-badge on">เปิด</span>')
+                        : '<span class="rs-badge off">ปิด</span>') : '<span class="rs-muted">มือ</span>') + '</td>'
                 + '<td>' + (auto ? s.intervalMin + ' นาที' : '—') + '</td>'
-                + '<td>' + (esc(s.lastSuccessAt) || '<span class="rs-muted">ยังไม่เคย</span>') + (s.autoEnabled && s.nextFetchAt ? '<div class="rs-muted">ถัดไป ' + esc(s.nextFetchAt) + '</div>' : '') + '</td>'
+                + '<td>' + (esc(s.lastSuccessAt) || '<span class="rs-muted">ยังไม่เคย</span>') + (s.autoEnabled && s.nextFetchAt ? '<div class="rs-muted">ถัดไป ' + esc(s.nextFetchAt) + '</div>' : '')
+                + (s.overdueReason ? '<div class="rs-err">⏰ เลยรอบ ' + fmtMin(s.overdueMin) + ' — ' + esc(s.overdueReason) + '</div>' : '') + '</td>'
                 + '<td>' + (s.lastError ? '<div class="rs-err">' + (s.failures > 0 ? '❌ ×' + s.failures + ' ' : '') + esc(s.lastError) + '</div>' : '<span class="rs-muted">—</span>') + '</td>'
                 + '<td>' + fmtRating(s) + '</td>'
                 + '<td>' + (s.totalReviews || 0) + '</td>'
