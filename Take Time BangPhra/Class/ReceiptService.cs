@@ -527,7 +527,7 @@ namespace Take_Time_BangPhra.Services
                                     double totalAmount, double vat, double priceExcludeVat,
                                     string paidType, string createdById, bool etax, string customerId = "0")
         {
-            string uid = Guid.NewGuid().ToString("N"); // Generate unique identifier for receipt
+            string uid = Guid.NewGuid().ToString(); // รูปแบบมีขีด — คอลัมน์ UID เป็น uniqueidentifier ("N" = Conversion failed)
 
             var parameters = new System.Collections.Generic.Dictionary<string, object>
             {
@@ -635,7 +635,7 @@ namespace Take_Time_BangPhra.Services
                                         string paidType, string createdById, DataTable dtReserve,
                                         bool etax, string customerId, double depositApplied = 0)
         {
-            string uid = Guid.NewGuid().ToString("N"); // Generate unique identifier for receipt
+            string uid = Guid.NewGuid().ToString(); // รูปแบบมีขีด — คอลัมน์ UID เป็น uniqueidentifier ("N" = Conversion failed)
 
             var parameters = new System.Collections.Generic.Dictionary<string, object>
             {

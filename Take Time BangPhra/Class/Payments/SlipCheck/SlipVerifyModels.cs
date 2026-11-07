@@ -252,14 +252,17 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
         /// <summary>การ์ดผลตรวจ (HTML encode ทุกค่าแล้ว)</summary>
         public string ToHtml()
         {
-            string color = Status == SlipVerifyStatus.Verified || Status == SlipVerifyStatus.Allocated || IsAllocationContinuation ? "#2e7d32"
+            // สลิปของการจองนี้ที่แนบไว้แต่ยังไม่ลงรับเงิน = ไม่ใช่ปัญหา (กดบันทึกแล้วลงเงินให้) → สีเขียว ไม่ขึ้น "สลิปซ้ำ"
+            bool adopt = Status == SlipVerifyStatus.Duplicate && PriorUse != null && PriorUse.CanAdopt;
+            string color = adopt || Status == SlipVerifyStatus.Verified || Status == SlipVerifyStatus.Allocated || IsAllocationContinuation ? "#2e7d32"
                 : IsBlocking ? "#c62828" : "#ef6c00";
-            string bg = Status == SlipVerifyStatus.Verified || IsAllocationContinuation ? "#e8f5e9" : IsBlocking ? "#ffebee" : "#fff3e0";
+            string bg = adopt || Status == SlipVerifyStatus.Verified || IsAllocationContinuation ? "#e8f5e9" : IsBlocking ? "#ffebee" : "#fff3e0";
             var sb = new StringBuilder();
             sb.Append("<div class='slipchk' style='border:1px solid ").Append(color).Append(";background:").Append(bg)
               .Append(";border-radius:8px;padding:10px 12px;margin:8px 0;font-size:14px;line-height:1.7;max-width:560px;'>");
             sb.Append("<b style='color:").Append(color).Append("'>🔎 ผลตรวจสลิป: ")
-              .Append(E(IsAllocationContinuation ? SlipVerifyStatus.Thai(SlipVerifyStatus.Allocated) : SlipVerifyStatus.Thai(Status))).Append("</b>");
+              .Append(E(adopt ? "สลิปของการจองนี้ — รอลงรับเงิน"
+                  : IsAllocationContinuation ? SlipVerifyStatus.Thai(SlipVerifyStatus.Allocated) : SlipVerifyStatus.Thai(Status))).Append("</b>");
             sb.Append(" <span style='color:#666;font-size:12px'>(").Append(E(SlipVerifySource.Thai(Source))).Append(")</span><br/>");
             if (Amount.HasValue)
                 sb.Append("ยอดในสลิป: <b>").Append(Amount.Value.ToString("N2")).Append("</b> บาท");

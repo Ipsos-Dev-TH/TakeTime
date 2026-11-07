@@ -482,7 +482,7 @@ namespace Take_Time_BangPhra
                     new Dictionary<string, object>
                     {
                         { "@receiptId", receiptId },
-                        { "@uid", Guid.NewGuid().ToString("N") },
+                        { "@uid", Guid.NewGuid().ToString() },   // รูปแบบมีขีด — คอลัมน์ UID เป็น uniqueidentifier ("N" ไม่มีขีด = Conversion failed)
                         { "@reservationId", reservationId },
                         { "@createdDate", DateTime.Now },
                         { "@totalAmount", amount },

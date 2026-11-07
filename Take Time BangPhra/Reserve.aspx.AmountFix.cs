@@ -102,7 +102,8 @@ namespace Take_Time_BangPhra
                          AND NOT EXISTS (SELECT 1 FROM Payment_History ph WHERE ph.PaymentSlip_ID = @id)",
                     new Dictionary<string, object> { { "@id", slipId } });
 
-                int adminId = Session["ID"] != null ? Convert.ToInt32(Session["ID"]) : 0;
+                int adminId;   // Login ตั้ง Session["UserID"] (Session["ID"] ไม่มีใครตั้ง)
+                if (!int.TryParse(Convert.ToString(Session["UserID"]), out adminId)) int.TryParse(Convert.ToString(Session["ID"]), out adminId);
                 PaymentResult pr = new PaymentService(conn).ApproveReservationSlip(slipId, adminId > 0 ? (int?)adminId : null);
                 if (pr == null || !pr.Success)
                 {
