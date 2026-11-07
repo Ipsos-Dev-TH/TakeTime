@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Configuration;
@@ -96,6 +96,19 @@ namespace Take_Time_BangPhra
             {
                 decimal totalPrice = Convert.ToDecimal(result.Rows[0]["TotalPrice"]);
                 decimal totalPaid = Convert.ToDecimal(result.Rows[0]["TotalPaid"]);
+
+                // OTA Channel Collect: ค่าห้องตามที่จองถูก OTA เก็บจากลูกค้าไปแล้ว
+                // เดิมคิดจาก Payment_History ล้วน (ใบจองจาก OTA ไม่มีแถวรับเงิน) ⇒ คืนยอดเต็ม
+                // → ลิงก์/QR ชำระเงิน (Pay.aspx, MakePayment) ขอเงินค่าห้องซ้ำจากลูกค้า
+                // ใช้ยอดค้างจากสูตรกลาง: ส่วนที่เกินยอด OTA (เพิ่มคืน/ของเสริม/ค่าชาร์จ) ยังจ่ายผ่านลิงก์ได้
+                // (ห้ามคืน 0 ตายตัว — ลิงก์ที่หน้าเช็คอินสร้างให้ของเสริมจะขึ้น "ชำระครบแล้ว" จ่ายไม่ได้)
+                try
+                {
+                    var bal = ReservationBalance.Load(_connectionString, reservationId);
+                    if (bal != null && bal.IsChannelCollect) return bal.Due;
+                }
+                catch { /* ตรวจไม่ได้ → ใช้สูตรเดิม */ }
+
                 return totalPrice - totalPaid;
             }
 

@@ -14,6 +14,10 @@ namespace Take_Time_BangPhra.Admin.RoomService
         protected global::System.Web.UI.WebControls.TextBox txtOpenTime;
         protected global::System.Web.UI.WebControls.TextBox txtCloseTime;
         protected global::System.Web.UI.WebControls.TextBox txtClosedMessage;
+        protected global::System.Web.UI.WebControls.DropDownList ddlServiceChargeMode;
+        protected global::System.Web.UI.WebControls.TextBox txtServiceChargeValue;
+        protected global::System.Web.UI.WebControls.TextBox txtServiceChargeMax;
+        protected global::System.Web.UI.WebControls.TextBox txtServiceChargeLabel;
         protected global::System.Web.UI.WebControls.Button btnSave;
         protected global::System.Web.UI.WebControls.Label lblSaved;
     }

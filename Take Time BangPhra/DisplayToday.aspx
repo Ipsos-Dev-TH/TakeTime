@@ -76,8 +76,8 @@
                     <asp:BoundField DataField="AccomName" HeaderText="รายชื่อห้องพัก" />
                     <asp:BoundField DataField="StayDays" HeaderText="จำนวนคืน" />
                     <asp:BoundField DataField="Items" HeaderText="รายการของเช่า" />
-                    <asp:BoundField DataField="TotalPrice" HeaderText="ราคาทั้งหมด" />
-                    <asp:BoundField DataField="Deposit" HeaderText="ยอดเงินรับมา" />
+                    <asp:BoundField DataField="GrandTotal" HeaderText="ราคาทั้งหมด" />
+                    <asp:BoundField DataField="Received" HeaderText="ยอดเงินรับมา" />
                     <asp:BoundField DataField="Remain" HeaderText="ส่วนที่เหลือ" />
                     <asp:BoundField DataField="remark" HeaderText="หมายเหตุ" />
                     <asp:BoundField DataField="Reserve_By" HeaderText="จองโดย" />

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Web;
@@ -16,6 +16,10 @@ namespace Take_Time_BangPhra.Admin
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            string action = Request.QueryString["action"];
+            if (action == null) action = "";
+            // action=dining (badge QR สั่งอาหาร) ใช้สิทธิ์ OPS_DINING — พนักงานร้านอาหารไม่จำเป็นต้องมีสิทธิ์ฐานข้อมูล; action อื่นคงกฎเดิม
+            if (!Perm.Guard(this, action == "dining" ? Perm.OpsDining : Perm.SysDatabase)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             Response.Clear();
             Response.ContentType = "application/json";
             Response.Cache.SetCacheability(HttpCacheability.NoCache);
@@ -29,9 +33,6 @@ namespace Take_Time_BangPhra.Admin
                 return;
             }
 
-            string action = Request.QueryString["action"];
-            if (action == null) action = "";
-
             try
             {
                 if (action == "chat")
@@ -41,6 +42,10 @@ namespace Take_Time_BangPhra.Admin
                 else if (action == "rs")
                 {
                     Response.Write(GetRoomServiceJson());
+                }
+                else if (action == "dining")
+                {
+                    Response.Write(GetDiningJson());
                 }
                 else if (action == "test")
                 {
@@ -198,6 +203,58 @@ namespace Take_Time_BangPhra.Admin
             catch
             {
                 return "{\"success\":false,\"orders\":[]}";
+            }
+        }
+
+        /// <summary>
+        /// badge/modal QR สั่งอาหารทั่วระบบ (Site.Master checkDiningOrders): ตัวนับจาก DiningOrderService.GetNewOrdersSince(0)
+        /// (ออเดอร์ NEW + สลิปรอตรวจ + โต๊ะเรียกพนักงาน + โต๊ะขอบิล) + ออเดอร์ใหม่ล่าสุด 1 รายการ + ชื่อโต๊ะที่เรียก/ขอบิล — ฟีเจอร์ปิด = total 0
+        /// </summary>
+        private string GetDiningJson()
+        {
+            try
+            {
+                var ser = new System.Web.Script.Serialization.JavaScriptSerializer();
+                var d = new Dictionary<string, object>();
+                d["success"] = true;
+                if (!Take_Time_BangPhra.Dining.DiningConfig.Enabled) { d["total"] = 0; return ser.Serialize(d); }
+
+                var poll = new Take_Time_BangPhra.Dining.DiningOrderService().GetNewOrdersSince(0);
+                d["newCount"] = poll.NewCount;
+                d["pendingSlipCount"] = poll.PendingSlipCount;
+                d["callStaffCount"] = poll.CallStaffCount;
+                d["billRequestedCount"] = poll.BillRequestedCount;
+                d["total"] = poll.NewCount + poll.PendingSlipCount + poll.CallStaffCount + poll.BillRequestedCount;
+                if (poll.NewOrders != null && poll.NewOrders.Count > 0)
+                {
+                    var o = poll.NewOrders[0];   // ใหม่สุดก่อน
+                    var l = new Dictionary<string, object>();
+                    l["orderId"] = o.Id;
+                    l["orderNo"] = o.OrderNo ?? "";
+                    l["table"] = string.IsNullOrEmpty(o.TableName) ? (o.TableCode ?? "") : o.TableName;
+                    l["zone"] = o.ZoneName ?? "";
+                    l["itemsPreview"] = Take_Time_BangPhra.Dining.DiningStaffView.ItemsPreview(o, 3);
+                    l["totalAmount"] = Take_Time_BangPhra.Dining.DiningStaffView.Money(o.TotalAmount);
+                    l["round"] = o.RoundNo;
+                    d["latest"] = l;
+                }
+                if (poll.CallStaffCount > 0 || poll.BillRequestedCount > 0)
+                {
+                    var call = new List<string>(); var bill = new List<string>();
+                    foreach (var r in new Take_Time_BangPhra.Dining.DiningTableService().GetBoard(null))
+                    {
+                        if (r.Table == null) continue;
+                        if (r.Table.Status == Take_Time_BangPhra.Dining.DiningStatus.Table.NeedsStaff && call.Count < 5) call.Add(r.Table.DisplayName);
+                        if (r.BillRequested && bill.Count < 5) bill.Add(r.Table.DisplayName);
+                    }
+                    d["callTables"] = string.Join(", ", call.ToArray());
+                    d["billTables"] = string.Join(", ", bill.ToArray());
+                }
+                return ser.Serialize(d);
+            }
+            catch (Exception ex)
+            {
+                return "{\"success\":false,\"total\":0,\"error\":\"" + EscapeJson(ex.Message) + "\"}";
             }
         }
 

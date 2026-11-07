@@ -300,5 +300,29 @@ namespace Take_Time_BangPhra.Admin.Payroll
         /// btnConfirmPayment control.
         /// </summary>
         protected global::System.Web.UI.WebControls.Button btnConfirmPayment;
+
+        /// <summary>
+        /// litPayrollModeNote control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Literal litPayrollModeNote;
+
+        /// <summary>
+        /// litPayrollNaStatus control — ป้ายสถานะ NextAcc ของงวด (ข้อ 24).
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Literal litPayrollNaStatus;
+
+        /// <summary>
+        /// btnSyncLeave control — ปรับยอดลาให้ตรงใบลาที่อนุมัติ (PayrollLeaveSync).
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Button btnSyncLeave;
+
+        /// <summary>
+        /// litLeaveMismatch control — แถบเตือนยอดหักลาไม่ตรงใบลา.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Literal litLeaveMismatch;
     }
 }

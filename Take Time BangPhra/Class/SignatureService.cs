@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Data;
 using System.Data.SqlClient;
 using System.Configuration;
@@ -17,7 +17,7 @@ public class SignatureService
     public SignatureService()
     {
         connectionString = ConfigurationManager.ConnectionStrings["TaketimeConnectionString"].ConnectionString;
-        signatureFolderPath = ConfigurationManager.AppSettings["StaffSignatureFolderPath"] ?? "~/Documents/Staff/Signature";
+        signatureFolderPath = AppCfg.Get("StaffSignatureFolderPath") ?? "~/Documents/Staff/Signature";
     }
 
     #region Get Signature Path

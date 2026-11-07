@@ -159,6 +159,24 @@ namespace Take_Time_BangPhra.Account.Report
         protected global::System.Web.UI.WebControls.TextBox TextBox12;
 
         /// <summary>
+        /// btnDbdLookup control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Button btnDbdLookup;
+
+        /// <summary>
+        /// divDbdResult control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.HtmlControls.HtmlGenericControl divDbdResult;
+
+        /// <summary>
         /// TextBox13 control.
         /// </summary>
         /// <remarks>
@@ -382,6 +400,16 @@ namespace Take_Time_BangPhra.Account.Report
         /// To modify move field declaration from designer file to code-behind file.
         /// </remarks>
         protected global::System.Web.UI.WebControls.Button Button3;
+
+        /// <summary>
+        /// txtEditReason control (PHASE19_37 — เหตุผลการแก้ใบ / ยืนยันข้ามการตรวจก่อนส่ง).
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtEditReason;
+
+        /// <summary>
+        /// ddlLineKind control (PHASE19_37 — ชนิดบรรทัดติดลบ: หักมัดจำ / ส่วนลด / ปรับยอด).
+        /// </summary>
+        protected global::System.Web.UI.WebControls.DropDownList ddlLineKind;
 
         /// <summary>
         /// ReportViewer2 control.

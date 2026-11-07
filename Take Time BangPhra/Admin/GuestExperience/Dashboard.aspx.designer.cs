@@ -9,6 +9,9 @@ namespace Take_Time_BangPhra.Admin.GuestExperience
     public partial class Dashboard
     {
         protected global::System.Web.UI.WebControls.Label lblOverallScore;
+        protected global::System.Web.UI.WebControls.Label lblReviewCount;
+        protected global::System.Web.UI.HtmlControls.HtmlGenericControl respBar;
+        protected global::System.Web.UI.WebControls.Literal litRecentReviews;
         protected global::System.Web.UI.WebControls.Label lblCleanliness;
         protected global::System.Web.UI.WebControls.Label lblService;
         protected global::System.Web.UI.WebControls.Label lblValue;

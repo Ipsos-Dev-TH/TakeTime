@@ -230,14 +230,27 @@ END", null);
                 }
                 catch { kpis["chatMessages"] = 0; }
 
-                // Reviews today
+                // Reviews today — Guest_Reviews ไม่มีคอลัมน์ Created_Date (เดิม query พังเงียบ ⇒ 0 เสมอ) ใช้ SubmittedDate
+                // ไม่นับแถว "แนบภาพรีวิวรับแต้ม" (REWARD_CLAIM) + รวมรีวิวออนไลน์ที่ดึงเข้ามาวันนี้
                 try
                 {
                     DataTable dtReviews = _code.DatabaseQuerySafe(_connStr,
                         @"SELECT COUNT(*) AS Cnt FROM Guest_Reviews
-                          WHERE CAST(Created_Date AS DATE) = @Date",
+                          WHERE CAST(SubmittedDate AS DATE) = @Date AND ISNULL(Status, '') IN ('APPROVED', 'PENDING')",
                         new Dictionary<string, object> { { "@Date", dateStr } });
-                    kpis["newReviews"] = dtReviews.Rows.Count > 0 ? Convert.ToInt32(dtReviews.Rows[0]["Cnt"]) : 0;
+                    int internalCnt = dtReviews.Rows.Count > 0 ? Convert.ToInt32(dtReviews.Rows[0]["Cnt"]) : 0;
+                    int onlineCnt = 0;
+                    try
+                    {
+                        DataTable dtOnline = _code.DatabaseQuerySafe(_connStr,
+                            @"SELECT COUNT(*) AS Cnt FROM AI_Online_Reviews
+                              WHERE CAST(Created_Date AS DATE) = @Date AND Is_Excluded = 0",
+                            new Dictionary<string, object> { { "@Date", dateStr } });
+                        onlineCnt = dtOnline.Rows.Count > 0 ? Convert.ToInt32(dtOnline.Rows[0]["Cnt"]) : 0;
+                    }
+                    catch { }   // ยังไม่รัน PHASE19_26 / ไม่มีตาราง
+                    kpis["newReviews"] = internalCnt + onlineCnt;
+                    kpis["newOnlineReviews"] = onlineCnt;
                 }
                 catch { kpis["newReviews"] = 0; }
             }
@@ -391,10 +404,12 @@ END", null);
                 // Review count and average rating
                 try
                 {
+                    // Guest_Reviews ไม่มี Created_Date (เดิมพังเงียบ ⇒ 0 เสมอ) — ใช้ SubmittedDate และตัดแถวรับแต้ม (REWARD_CLAIM)
                     DataTable dtReviews = _code.DatabaseQuerySafe(_connStr,
                         @"SELECT COUNT(*) AS ReviewCount, ISNULL(AVG(CAST(OverallRating AS FLOAT)), 0) AS AvgRating
                           FROM Guest_Reviews
-                          WHERE CAST(Created_Date AS DATE) >= @Start AND CAST(Created_Date AS DATE) <= @End",
+                          WHERE CAST(SubmittedDate AS DATE) >= @Start AND CAST(SubmittedDate AS DATE) <= @End
+                            AND ISNULL(Status, '') IN ('APPROVED', 'PENDING')",
                         new Dictionary<string, object> { { "@Start", startStr }, { "@End", endStr } });
                     if (dtReviews.Rows.Count > 0)
                     {
@@ -412,6 +427,23 @@ END", null);
                     kpis["reviewCount"] = 0;
                     kpis["avgRating"] = 0.0;
                 }
+
+                // รีวิวออนไลน์ (Google/OTA) ในเดือน — คะแนนเทียบ /5, ไม่นับแถวที่ไม่รู้คะแนน (NULL) และแถวที่ตัดออก
+                try
+                {
+                    DataTable dtOnline = _code.DatabaseQuerySafe(_connStr,
+                        @"SELECT COUNT(*) AS Cnt, AVG(CAST(Rating_5 AS FLOAT)) AS Avg5
+                          FROM AI_Online_Reviews
+                          WHERE CAST(ReviewDate AS DATE) >= @Start AND CAST(ReviewDate AS DATE) <= @End AND Is_Excluded = 0",
+                        new Dictionary<string, object> { { "@Start", startStr }, { "@End", endStr } });
+                    if (dtOnline.Rows.Count > 0)
+                    {
+                        kpis["onlineReviewCount"] = Convert.ToInt32(dtOnline.Rows[0]["Cnt"]);
+                        kpis["onlineAvgRating5"] = dtOnline.Rows[0]["Avg5"] == DBNull.Value
+                            ? (object)null : Math.Round(Convert.ToDouble(dtOnline.Rows[0]["Avg5"]), 2);
+                    }
+                }
+                catch { /* ยังไม่รัน PHASE19_26 */ }
 
                 // Comparison with previous month
                 DateTime prevMonthStart = monthStart.AddMonths(-1);

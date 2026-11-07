@@ -10,6 +10,10 @@ namespace Take_Time_BangPhra.Admin.RoomService
     {
         protected global::System.Web.UI.WebControls.Panel pnlPendingBadge;
         protected global::System.Web.UI.WebControls.Label lblPendingCount;
+        protected global::System.Web.UI.WebControls.Panel pnlRsBackfill;
+        protected global::System.Web.UI.WebControls.TextBox txtBackfillFrom;
+        protected global::System.Web.UI.WebControls.TextBox txtBackfillTo;
+        protected global::System.Web.UI.WebControls.Button btnBackfillPaid;
         protected global::System.Web.UI.WebControls.Repeater rptOrderList;
         protected global::System.Web.UI.WebControls.Panel pnlNoOrders;
         protected global::System.Web.UI.WebControls.Panel pnlOrderDetail;
@@ -23,8 +27,22 @@ namespace Take_Time_BangPhra.Admin.RoomService
         protected global::System.Web.UI.WebControls.Label lblDeliveryNote;
         protected global::System.Web.UI.WebControls.Repeater rptOrderItems;
         protected global::System.Web.UI.WebControls.Label lblTotalAmount;
+        /// <summary>
+        /// pnlRsPay control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlRsPay;
+
+        /// <summary>
+        /// txtRsPayLink control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtRsPayLink;
+
+        /// <summary>
+        /// btnClaim control.
+        /// </summary>
         protected global::System.Web.UI.WebControls.Button btnClaim;
         protected global::System.Web.UI.WebControls.Button btnDelivered;
+        protected global::System.Web.UI.WebControls.Button btnMarkPaid;
         protected global::System.Web.UI.WebControls.Button btnCancel;
         protected global::System.Web.UI.WebControls.Panel pnlSelectOrder;
         protected global::System.Web.UI.WebControls.HiddenField hfSelectedOrder;

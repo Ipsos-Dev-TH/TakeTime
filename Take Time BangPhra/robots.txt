@@ -1,0 +1,39 @@
+# Take Time Nature Resort — บางพระ ศรีราชา ชลบุรี
+# robots.txt — allow search + AI/answer engines to index & cite
+
+User-agent: *
+Allow: /
+# กันหน้าหลังบ้าน/ธุรกรรม ไม่ให้ index (ไม่ใช่หน้าเนื้อหาสาธารณะ)
+Disallow: /Admin/
+Disallow: /Account/
+Disallow: /API/
+Disallow: /Payment/
+Disallow: /Guest/
+Disallow: /Checkout.aspx
+Disallow: /Reservation_Confirmed.aspx
+Disallow: /ReservationList.aspx
+Disallow: /ReserveTable.aspx
+Disallow: /PostponeList.aspx
+Disallow: /Default_Backup.aspx
+
+# AI / Answer engines — อนุญาตให้อ่านเพื่อแนะนำ/อ้างอิงในแชตบอต
+User-agent: GPTBot
+Allow: /
+User-agent: OAI-SearchBot
+Allow: /
+User-agent: ChatGPT-User
+Allow: /
+User-agent: Google-Extended
+Allow: /
+User-agent: PerplexityBot
+Allow: /
+User-agent: ClaudeBot
+Allow: /
+User-agent: anthropic-ai
+Allow: /
+User-agent: Applebot-Extended
+Allow: /
+User-agent: Bingbot
+Allow: /
+
+Sitemap: https://taketimebangphra.com/sitemap.xml

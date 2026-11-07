@@ -184,6 +184,15 @@
     <div class="form-title">
         <i class="fas fa-file-invoice"></i> สร้าง/แก้ไข ใบกำกับภาษี
     </div>
+    <%-- CLAUDE.md ข้อ 25: งาน NextAcc ของใบนี้ (ใบกำกับเต็มรูปทีหลัง / แก้แหล่งเงิน / ส่งอีเมล) — เฉพาะโหมดแก้ไขใบที่มีอยู่ --%>
+    <% if (string.Equals(Request.QueryString["command"], "edit", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(Request.QueryString["uid"])) { %>
+    <div style="margin:-8px 0 14px; text-align:right">
+        <a href="<%= ResolveUrl("~/Account/ReceiptNextAcc?uid=" + HttpUtility.UrlEncode(Request.QueryString["uid"])) %>"
+           style="display:inline-block; background:#e0f2f1; color:#00695c; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:13px">
+            💼 ลูกค้าขอใบกำกับเต็มรูป / แก้แหล่งเงิน (NextAcc)
+        </a>
+    </div>
+    <% } %>
         <table style="width:100%;">
             <tr>
                  <td class="modal-sm" style="width: 20%; text-align: right">เลขที่:</td>
@@ -252,7 +261,14 @@
             <tr style="background-color:whitesmoke;">
                 <td class="modal-sm" style="width: 20%;  text-align: right">เลขประจำตัวผู้เสียภาษี:</td>
                 <td>
-                    <asp:TextBox ID="TextBox12" runat="server" Width="60%"></asp:TextBox>
+                    <asp:TextBox ID="TextBox12" runat="server" Width="40%"></asp:TextBox>
+                &nbsp;&nbsp;
+                    <%-- ดึงชื่อจดทะเบียน + ที่อยู่สำนักงานใหญ่จากกรมพัฒนาธุรกิจการค้า (DBD)
+                         ผ่าน NextAcc /api/dbd/juristic/{id} — ผู้ใช้ตรวจแล้วค่อยกดบันทึก --%>
+                    <asp:Button ID="btnDbdLookup" runat="server" Text="🔍 ดึงข้อมูลจากเลขผู้เสียภาษี"
+                        Width="35%" CausesValidation="false" OnClick="btnDbdLookup_Click" />
+                    <div id="divDbdResult" runat="server" visible="false"
+                         style="margin-top:6px; font-size:12px; padding:7px 10px; border-radius:5px;"></div>
                  </td>
               
             </tr>
@@ -379,6 +395,12 @@
                  <td class="modal-sm" style="width: 20%; text-align: right">&nbsp;</td>
                 <td>
                     &nbsp;<asp:Button ID="Button2" runat="server" Text="เพิ่ม" Width="75px" OnClick="Button2_Click" />
+                    &nbsp;<asp:DropDownList ID="ddlLineKind" runat="server" ToolTip="ชนิดของบรรทัดติดลบ — ระบบบัญชีใช้แยก 'หักมัดจำ' ออกจาก 'ส่วนลด/ปรับยอด'">
+                        <asp:ListItem Value="" Text="บรรทัดติดลบ: ไม่ระบุ (= หักมัดจำ)" />
+                        <asp:ListItem Value="DEPOSIT_DEDUCTION" Text="บรรทัดติดลบ: หักมัดจำ" />
+                        <asp:ListItem Value="DISCOUNT" Text="บรรทัดติดลบ: ส่วนลด" />
+                        <asp:ListItem Value="ADJUSTMENT" Text="บรรทัดติดลบ: ปรับยอด/ชำระที่อื่นแล้ว" />
+                    </asp:DropDownList>
                  </td>
             
             </tr>
@@ -396,6 +418,7 @@
                              <asp:BoundField DataField="Product_Unit" HeaderText="หน่วย" />
                              <asp:BoundField DataField="Price_PerPeice" HeaderText="ราคาต่อหน่วย" />
                              <asp:BoundField DataField="Price_Amount" HeaderText="จำนวนเงินรวม" />
+                             <asp:BoundField DataField="Line_Kind" HeaderText="ชนิดบรรทัดติดลบ" />
                              <asp:CommandField ShowDeleteButton="True" ButtonType="Button" />
                          </Columns>
                      </asp:GridView>
@@ -442,6 +465,8 @@
             <tr>
                  <td class="modal-sm" style="width: 20%; text-align: right">&nbsp;</td>
                 <td>
+                    &nbsp;<asp:TextBox ID="txtEditReason" runat="server" Width="45%" MaxLength="500"
+                        placeholder="เหตุผลการแก้ไข / ยืนยันข้ามการตรวจ (จำเป็นเมื่อแก้ยอด มัดจำ วันที่ แหล่งเงิน)"></asp:TextBox>
                     &nbsp;<asp:Button ID="Button3" runat="server" Text="บันทึก" Width="100px" Height="33px" OnClick="Button3_Click" />
                  </td>
             </tr>

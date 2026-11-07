@@ -94,6 +94,9 @@ namespace Take_Time_BangPhra.Class
                 { "@excludeReservationId", excludeReservationId }
             };
 
+            // สถานะที่ถือห้อง: เกณฑ์กลาง RescheduleService.SqlHoldsRoom — เดิม NOT IN (N'ยกเลิก', …) ตัดแค่ "ยกเลิก"
+            // ตรงตัว ⇒ ใบ ยกเลิกคืนเงิน / ยกเลิกไม่คืนเงิน / ลบจากการเลื่อนวันเข้าพัก ที่ยังมีแถวห้องค้างอยู่ทำให้ห้องไม่ว่าง
+            // (no-show และ เสร็จสิ้น = คืนห้อง ตามกฎเดิม; ใบเลื่อนวันที่ค่าแทน 1990 ไม่ถือห้อง)
             DataTable dtConflicts = _code.DatabaseQuerySafe(_connectionString,
                 @"SELECT
                     R.ID AS ReservationID,
@@ -109,7 +112,7 @@ namespace Take_Time_BangPhra.Class
                   LEFT JOIN [Customer] C ON C.MobilePhone = R.Customer_MobilePhone
                   WHERE RA.Accommodation_ID = @accommodationId
                     AND R.ID != @excludeReservationId
-                    AND R.Status NOT IN (N'ยกเลิก', N'เสร็จสิ้น', N'ไม่มาเช็คอิน')
+                    AND " + global::Take_Time_BangPhra.RescheduleService.SqlHoldsRoom("R") + @"
                     AND (
                         -- Check for date range overlap
                         (@checkinDate < R.CheckoutDate AND @checkoutDate > R.CheckinDate)

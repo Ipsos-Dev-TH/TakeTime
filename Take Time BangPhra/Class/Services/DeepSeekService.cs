@@ -167,7 +167,10 @@ END", null);
 
         /// <param name="systemPromptOverride">ถ้าระบุ จะใช้แทน AI_SystemPrompt จาก config —
         /// ใช้ส่ง prompt เสริม (booking context ฯลฯ) แบบ per-request โดยไม่แตะ config กลาง</param>
-        public ChatResponse SendMessage(string userMessage, string sessionKey, List<ChatMessage> history = null, string systemPromptOverride = null)
+        /// <param name="temperatureOverride">ถ้าระบุ ใช้แทน AI_Temperature (งานสกัดข้อมูล/วิเคราะห์ควรต่ำ เช่น 0.2)</param>
+        /// <param name="saveHistory">false = ไม่เก็บ prompt/คำตอบลง AI_Chat_History (งาน batch — usage ยังบันทึก)</param>
+        public ChatResponse SendMessage(string userMessage, string sessionKey, List<ChatMessage> history = null, string systemPromptOverride = null,
+            double? temperatureOverride = null, bool saveHistory = true)
         {
             var sw = Stopwatch.StartNew();
             string model = GetConfig("AI_Model", "deepseek-chat");
@@ -181,7 +184,7 @@ END", null);
 
                 apiKey = DecryptKey(apiKey);
                 int maxTokens = int.Parse(GetConfig("AI_MaxTokens", "2048"));
-                double temperature = double.Parse(GetConfig("AI_Temperature", "0.7"));
+                double temperature = temperatureOverride ?? double.Parse(GetConfig("AI_Temperature", "0.7"));
                 int timeoutSec = int.Parse(GetConfig("AI_TimeoutSec", "30"));
                 string systemPrompt = !string.IsNullOrEmpty(systemPromptOverride)
                     ? systemPromptOverride
@@ -257,8 +260,11 @@ END", null);
 
                 sw.Stop();
 
-                SaveHistory(sessionKey, "user", userMessage, 0);
-                SaveHistory(sessionKey, "assistant", assistantMessage, completionTokens);
+                if (saveHistory)
+                {
+                    SaveHistory(sessionKey, "user", userMessage, 0);
+                    SaveHistory(sessionKey, "assistant", assistantMessage, completionTokens);
+                }
                 LogUsage(sessionKey, model, promptTokens, completionTokens, totalTokens, (int)sw.ElapsedMilliseconds, true, null);
 
                 return new ChatResponse

@@ -56,6 +56,21 @@ namespace Take_Time_BangPhra.Admin.Leave
         protected global::System.Web.UI.WebControls.TextBox txtAnnualQuota;
         protected global::System.Web.UI.WebControls.CheckBox chkDeductSalary;
         protected global::System.Web.UI.WebControls.CheckBox chkRequiresMedicalCert;
+
+        /// <summary>
+        /// pnlCertRule control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlCertRule;
+
+        /// <summary>
+        /// txtCertAfterDays control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.TextBox txtCertAfterDays;
+
+        /// <summary>
+        /// ddlNoCertAction control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.DropDownList ddlNoCertAction;
         protected global::System.Web.UI.WebControls.CheckBox chkRequiresApproval;
         protected global::System.Web.UI.WebControls.CheckBox chkIsActive;
         protected global::System.Web.UI.WebControls.Button btnCancelLeaveType;

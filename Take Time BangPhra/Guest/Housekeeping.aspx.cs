@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Data;
 using System.Web.UI;
 using Take_Time_BangPhra.Services;
@@ -15,6 +15,7 @@ namespace Take_Time_BangPhra.Guest
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Feature.Guard(this, "Housekeeping", "~/Guest/Dashboard")) return;   // ฟีเจอร์ถูกปิด (ตั้งค่าระบบ → หมวดฟีเจอร์)
             _guestPortalService = new GuestPortalService(_connectionString);
 
             // Check session

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Data;
 using System.Data.SqlClient;
 using System.Configuration;
@@ -15,6 +15,8 @@ namespace Take_Time_BangPhra.Admin.HR
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.HrEmployee)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
+            if (!Feature.Guard(this, "HR", "~/Default")) return;   // ฟีเจอร์ถูกปิด (ตั้งค่าระบบ → หมวดฟีเจอร์)
             employeeService = new EmployeeService();
 
             if (!IsPostBack)
@@ -1018,7 +1020,7 @@ namespace Take_Time_BangPhra.Admin.HR
             }
 
             // Use physical path from config to avoid permission issues
-            string signatureDir = ConfigurationManager.AppSettings["StaffSignatureFolderPath"]?.ToString() ?? "";
+            string signatureDir = AppCfg.Get("StaffSignatureFolderPath")?.ToString() ?? "";
             if (string.IsNullOrEmpty(signatureDir))
             {
                 // Fallback to Server.MapPath if config not set

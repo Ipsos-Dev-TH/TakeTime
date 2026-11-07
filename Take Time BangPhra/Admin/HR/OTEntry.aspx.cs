@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Data;
 using System.Web.UI;
 using System.Web.UI.WebControls;
@@ -57,6 +57,41 @@ namespace Take_Time_BangPhra.Admin.HR
             }
         }
 
+        /// <summary>ชื่อพนักงานของคนที่ล็อกอินอยู่ — ใช้บอกให้ชัดว่า OT จะเข้าชื่อใคร</summary>
+        private string _selfName;
+        private string SelfName
+        {
+            get
+            {
+                if (_selfName != null) return _selfName;
+                _selfName = "ตัวคุณเอง";
+                try
+                {
+                    string cs = System.Configuration.ConfigurationManager
+                        .ConnectionStrings["TaketimeConnectionString"].ConnectionString;
+                    using (var con = new System.Data.SqlClient.SqlConnection(cs))
+                    {
+                        con.Open();
+                        using (var cmd = new System.Data.SqlClient.SqlCommand(
+                            "SELECT TOP 1 ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(FirstName,'') + ' ' + ISNULL(LastName,''))),''), Username) "
+                            + "FROM Admin WHERE ID = @id", con))
+                        {
+                            cmd.Parameters.AddWithValue("@id", currentAdminId);
+                            object o = cmd.ExecuteScalar();
+                            if (o != null && o != DBNull.Value && !string.IsNullOrWhiteSpace(o.ToString()))
+                                _selfName = o.ToString().Trim();
+                        }
+                    }
+                }
+                catch { }
+                return _selfName;
+            }
+        }
+
+        /// <summary>ค่าที่ฝั่งหน้าเว็บใช้เทียบว่า "กำลังลงให้คนอื่นอยู่ไหม"</summary>
+        public string SelfAdminIdJs { get { return currentAdminId.ToString(); } }
+        public string SelfNameJs { get { return Server.HtmlEncode(SelfName); } }
+
         #endregion
 
         #region Initialization
@@ -71,7 +106,10 @@ namespace Take_Time_BangPhra.Admin.HR
                 pnlApprovalTab.Visible = true;
 
                 ddlEmployee.Items.Clear();
-                ddlEmployee.Items.Add(new ListItem("-- บันทึก OT ให้ตัวเอง --", currentAdminId.ToString()));
+                // ⚠ เดิมเขียนว่า "-- บันทึก OT ให้ตัวเอง --" ซึ่งอ่านเหมือน placeholder
+                //   หัวหน้างานเลยไม่ทันสังเกตว่ามันคือ "ตัวเลือกที่ถูกเลือกอยู่" ⇒ ลงผิดเป็นของตัวเอง
+                //   ใส่ชื่อจริงลงไปให้เห็นชัดว่ากำลังจะเข้าชื่อใคร
+                ddlEmployee.Items.Add(new ListItem("ตัวฉันเอง — " + SelfName, currentAdminId.ToString()));
 
                 foreach (DataRow row in subordinates.Rows)
                 {
@@ -87,6 +125,9 @@ namespace Take_Time_BangPhra.Admin.HR
             {
                 pnlSupervisorMode.Visible = false;
                 pnlApprovalTab.Visible = false;
+                // ไม่ใช่หัวหน้างาน = ลงให้ตัวเองอย่างเดียว บอกไปตรง ๆ ว่าเข้าชื่อใคร
+                pnlSelfOnly.Visible = true;
+                litSelfName.Text = Server.HtmlEncode(SelfName);
             }
 
             // Initialize dropdowns
@@ -274,14 +315,29 @@ namespace Take_Time_BangPhra.Admin.HR
                     targetAdminId = Convert.ToInt16(ddlEmployee.SelectedValue);
                 }
 
+                // ⚠ ค่าจาก dropdown แก้จากฝั่งเบราว์เซอร์ได้ — ต้องตรวจซ้ำที่เซิร์ฟเวอร์เสมอ
+                //   ว่าคนที่เลือกเป็นลูกน้องของคนที่ล็อกอินอยู่จริง
+                if (targetAdminId != currentAdminId
+                    && !supervisorService.IsSupervisorOf(currentAdminId, targetAdminId))
+                {
+                    ShowMessage("คุณไม่มีสิทธิ์บันทึก OT ให้พนักงานคนนี้", "error");
+                    return;
+                }
+
                 var result = otService.CreateOTEntry(
                     targetAdminId, otDate, otHours, workDescription,
                     currentAdminId, otRate, notes);
 
                 if (result.Success)
                 {
-                    ShowMessage(result.Message, "success");
-                    ClearForm();
+                    // บอกชื่อคนที่ได้ OT ในข้อความผลลัพธ์ด้วย — ถ้าลงผิดคนจะได้เห็นทันที
+                    string forWhom = targetAdminId == currentAdminId
+                        ? SelfName + " (ตัวคุณเอง)"
+                        : (ddlEmployee.SelectedItem != null ? ddlEmployee.SelectedItem.Text : "");
+                    ShowMessage("บันทึก OT ให้ " + forWhom + " วันที่ "
+                        + otDate.ToString("dd/MM/yyyy") + " จำนวน " + otHours.ToString("0.##")
+                        + " ชม. เรียบร้อยแล้ว", "success");
+                    ClearForm(false);
                     LoadStatistics();
                     LoadMyOT();
                 }
@@ -301,14 +357,23 @@ namespace Take_Time_BangPhra.Admin.HR
             ClearForm();
         }
 
-        private void ClearForm()
+        /// <param name="resetEmployee">
+        /// รีเซ็ตช่อง "บันทึกให้ใคร" กลับเป็นตัวเองด้วยไหม
+        ///
+        /// ⚠ เดิมรีเซ็ตทุกครั้งรวมถึงหลังบันทึกสำเร็จ — หัวหน้างานที่ลง OT ให้ลูกน้อง
+        /// หลายคนติดกันจะโดนเด้งกลับเป็น "ตัวเอง" ทุกใบ พอกรอกใบถัดไปแล้วลืมเลือกใหม่
+        /// ก็กลายเป็นลงให้ตัวเอง = ต้นเหตุที่ลงผิดบ่อย
+        /// ⇒ หลังบันทึกสำเร็จให้คงคนเดิมไว้ (แถบสีส้มยังเตือนอยู่ตลอด)
+        ///   ปุ่ม "ล้างฟอร์ม" ที่ผู้ใช้กดเองเท่านั้นที่รีเซ็ตทั้งหมด
+        /// </param>
+        private void ClearForm(bool resetEmployee = true)
         {
             txtOTDate.Text = DateTime.Now.ToString("yyyy-MM-dd");
             txtOTHours.Text = "1";
             ddlOTRate.SelectedIndex = 1; // Default to 1.5x (ล่วงเวลา)
             txtWorkDescription.Text = "";
             txtNotes.Text = "";
-            if (pnlSupervisorMode.Visible)
+            if (resetEmployee && pnlSupervisorMode.Visible)
             {
                 ddlEmployee.SelectedIndex = 0;
             }

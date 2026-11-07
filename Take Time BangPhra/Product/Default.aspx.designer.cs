@@ -337,5 +337,20 @@ namespace Take_Time_BangPhra.Product
         /// To modify move field declaration from designer file to code-behind file.
         /// </remarks>
         protected global::Microsoft.Reporting.WebForms.ReportViewer ReportViewer2;
+
+        /// <summary>
+        /// lblSalesDocRoute control. (นโยบายเอกสารขาย PHASE19_29)
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Label lblSalesDocRoute;
+
+        /// <summary>
+        /// pnlPosSlip control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Panel pnlPosSlip;
+
+        /// <summary>
+        /// litPosSlip control.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Literal litPosSlip;
     }
 }

@@ -96,6 +96,11 @@ namespace Take_Time_BangPhra.Admin.Payroll
         protected global::System.Web.UI.WebControls.Label lblLeaveDays;
 
         /// <summary>
+        /// litLeaveDetail control — รายการใบลาที่หักในรอบนี้.
+        /// </summary>
+        protected global::System.Web.UI.WebControls.Literal litLeaveDetail;
+
+        /// <summary>
         /// lblNetSalary control.
         /// </summary>
         protected global::System.Web.UI.WebControls.Label lblNetSalary;

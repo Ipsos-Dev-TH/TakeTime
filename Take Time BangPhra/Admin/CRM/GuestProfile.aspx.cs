@@ -1,4 +1,4 @@
-// ===========================================================================
+﻿// ===========================================================================
 // GuestProfile.aspx.cs
 // Guest Profile 360° - Complete customer view with all information
 // ===========================================================================
@@ -25,6 +25,7 @@ namespace Take_Time_BangPhra.Admin.CRM
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.CrmCustomer)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             _code = new code();
             _loyaltyService = new LoyaltyService(_connectionString);
 

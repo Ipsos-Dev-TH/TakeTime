@@ -1,0 +1,148 @@
+/* ============================================================================
+   ตารางข้อมูลที่อ่านได้จริงบนมือถือ — ไม่ต้องกด "Desktop site"
+   ใช้คู่กับ /Scripts/responsive-table.js
+   ----------------------------------------------------------------------------
+   ปัญหาเดิม: ตารางถูกตั้ง width:100% ⇒ บนจอแคบเบราว์เซอร์บีบทุกคอลัมน์จนเหลือ
+   คำละบรรทัด แถวสูงเป็นหน้าจอ อ่านอะไรไม่ได้เลย
+
+   วิธีแก้ 2 ชั้น:
+     1. ไม่มี JavaScript → บังคับความกว้างขั้นต่ำแล้วให้ "เลื่อนแนวนอน" แทนการบีบ
+     2. มี JavaScript    → เปลี่ยนเป็น "การ์ดรายรายการ" มีป้ายชื่อคอลัมน์กำกับ
+                           (ค่าเริ่มต้นบนมือถือ) สลับกลับเป็นตารางเต็มได้ด้วยปุ่ม
+
+   วิธีใช้กับหน้าอื่น:
+     - ใส่ class="rt-table" ให้ตาราง (หรือ CssClass ของ GridView)
+     - อ้างไฟล์ css + js นี้
+     JS จะสร้างกล่องครอบ ป้ายชื่อคอลัมน์ และปุ่มสลับให้เอง
+   ========================================================================== */
+
+.rt-toggle {
+    display: none;
+    width: 100%;
+    margin: 0 0 10px;
+    padding: 9px 12px;
+    border: 1px solid #d7ccc8;
+    border-radius: 9px;
+    background: #fff;
+    color: #5d4037;
+    font-size: 13.5px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.rt-toggle:active { background: #f5efe9; }
+
+@media screen and (max-width: 820px) {
+
+    .rt-toggle { display: block; }
+
+    /* ── ชั้นที่ 1: ตารางเต็ม เลื่อนแนวนอนได้ (ทำงานแม้ JavaScript พัง) ────── */
+    .rt-wrap {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        max-width: 100%;
+    }
+
+    .rt-wrap > table.rt-table {
+        min-width: 980px;   /* กว้างพอให้ทุกคอลัมน์อ่านออก แล้วค่อยเลื่อนดู */
+        width: auto;
+    }
+
+    .rt-wrap > table.rt-table th,
+    .rt-wrap > table.rt-table td {
+        white-space: normal;
+        word-break: normal;
+        overflow-wrap: anywhere;
+        vertical-align: top;
+        font-size: 12px;
+    }
+
+    /* ── ชั้นที่ 2: โหมดการ์ด (JS เปิดให้) ───────────────────────────────── */
+    .rt-wrap.rt-cards { overflow-x: visible; }
+
+    .rt-wrap.rt-cards > table.rt-table {
+        display: block;
+        width: 100%;
+        min-width: 0;
+        border: 0;
+        box-shadow: none;
+        background: transparent;
+    }
+
+    .rt-wrap.rt-cards > table.rt-table > thead,
+    .rt-wrap.rt-cards > table.rt-table > tbody,
+    .rt-wrap.rt-cards > table.rt-table > tfoot { display: block; width: 100%; }
+
+    /* หัวตารางไม่ต้องแสดง — ชื่อคอลัมน์ไปอยู่หน้าค่าของแต่ละแถวแทน */
+    .rt-wrap.rt-cards table.rt-table tr.rt-head { display: none !important; }
+
+    .rt-wrap.rt-cards table.rt-table tr {
+        display: block !important;
+        background: #fff;
+        border: 1px solid #e0d8d2;
+        border-radius: 12px;
+        box-shadow: 0 1px 4px rgba(0,0,0,.06);
+        margin: 0 0 12px;
+        padding: 6px 12px;
+        overflow: hidden;
+    }
+
+    .rt-wrap.rt-cards table.rt-table td {
+        display: flex !important;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        width: auto !important;
+        max-width: none !important;
+        min-width: 0 !important;
+        border: 0 !important;
+        border-bottom: 1px dashed #efe9e4 !important;
+        padding: 8px 0 !important;
+        background: transparent !important;
+        white-space: normal !important;
+        word-break: normal !important;
+        overflow-wrap: anywhere;
+        text-align: right;
+        font-size: 13.5px !important;
+        line-height: 1.55;
+    }
+
+    .rt-wrap.rt-cards table.rt-table tr td:last-child { border-bottom: 0 !important; }
+
+    .rt-wrap.rt-cards table.rt-table td::before {
+        content: attr(data-label);
+        flex: 0 0 38%;
+        text-align: left;
+        color: #8d7f76;
+        font-weight: 600;
+        font-size: 12.5px;
+        white-space: normal;
+    }
+
+    /* ช่องที่ไม่มีค่า ไม่ต้องกินที่ */
+    .rt-wrap.rt-cards table.rt-table td.rt-empty { display: none !important; }
+
+    /* ช่องแรกของการ์ด (ปุ่ม/สถานะ) และแถวแบ่งหน้า — เต็มความกว้าง ไม่ต้องมีป้าย */
+    .rt-wrap.rt-cards table.rt-table td.rt-full {
+        display: block !important;
+        text-align: center;
+        border-bottom: 0 !important;
+        padding: 8px 0 !important;
+    }
+    .rt-wrap.rt-cards table.rt-table td.rt-full::before { content: ""; display: none; }
+
+    /* คอลัมน์ที่หน้าเดิมซ่อนไว้ (class="hidden") ต้องซ่อนต่อในโหมดการ์ดด้วย */
+    .rt-wrap.rt-cards table.rt-table td.hidden { display: none !important; }
+}
+
+/* จอเล็กมาก — ป้ายชื่อขึ้นบรรทัดบนของค่า อ่านง่ายกว่าแบ่งซ้าย-ขวา */
+@media screen and (max-width: 400px) {
+    .rt-wrap.rt-cards table.rt-table td {
+        display: block !important;
+        text-align: left;
+    }
+    .rt-wrap.rt-cards table.rt-table td::before {
+        display: block;
+        margin-bottom: 2px;
+    }
+}

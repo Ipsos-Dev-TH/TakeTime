@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Web;
@@ -84,6 +84,7 @@ namespace Take_Time_BangPhra.Admin
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.SysDatabase)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             try
             {
                 if (Session["permission"].ToString() == "True" && Session["User"].ToString() == "Owner")
@@ -99,6 +100,15 @@ namespace Take_Time_BangPhra.Admin
                 data = Request.QueryString["data"];
                 supplier_type = Request.QueryString["supplier_type"];
                 supplierid = Request.QueryString["supplierid"];
+
+                // MapDataWithSTAAH แก้ที่หน้าเฉพาะ (เห็นชื่อ/ประเภทห้อง + ติ๊กอาหารเช้า) — ตารางดิบเห็นแค่เลขห้อง ⇒ ผูกห้องผิดประเภทได้
+                // ?raw=1 = เปิดตารางดิบแบบเดิม (กรณีพิเศษ)
+                if (!IsPostBack && data == "MapDataWithSTAAH" && Request.QueryString["raw"] != "1")
+                {
+                    Response.Redirect("~/Admin/Settings/OtaRoomMapping", false);
+                    Context.ApplicationInstance.CompleteRequest();
+                    return;
+                }
 
                 if (!IsPostBack)
                 {

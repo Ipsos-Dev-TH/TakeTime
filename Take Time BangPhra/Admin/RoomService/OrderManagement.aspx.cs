@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Data;
 using System.Web.UI;
 using System.Web.Services;
@@ -13,12 +13,16 @@ namespace Take_Time_BangPhra.Admin.RoomService
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.OpsRoomService)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
+            if (!Feature.Guard(this, "RoomService", "~/Default")) return;   // ฟีเจอร์ถูกปิด (ตั้งค่าระบบ → หมวดฟีเจอร์)
             _code = new code();
 
             // Check admin login
-            if (Session["username"] == null)
+            // ตรวจสิทธิ์แบบเดียวกับหน้าผู้ดูแลอื่น ๆ (เดิมเช็คแค่ว่ามีชื่อผู้ใช้ใน session
+            // ไม่ได้เช็คสิทธิ์จริง และใช้คีย์คนละตัวกับทั้งระบบ)
+            if (Session["permission"]?.ToString() != "True")
             {
-                Response.Redirect("~/Admin/Login.aspx");
+                Response.Redirect("~/Admin/Login");
                 return;
             }
 
@@ -26,6 +30,67 @@ namespace Take_Time_BangPhra.Admin.RoomService
             {
                 LoadOrderList();
                 UpdatePendingBadge();
+            }
+            pnlRsBackfill.Visible = CanBackfillPaid();
+            if (pnlRsBackfill.Visible && !IsPostBack)
+            {
+                txtBackfillFrom.Text = DateTime.Today.AddDays(-30).ToString("yyyy-MM-dd");
+                txtBackfillTo.Text = DateTime.Today.AddDays(-1).ToString("yyyy-MM-dd");
+            }
+        }
+
+        /// <summary>ปุ่มรับเงินย้อนหลัง: Owner/Admin + เปิดนโยบายเอกสารขาย (ปิดนโยบาย = นับทุกออเดอร์อยู่แล้ว ไม่ต้องใช้)</summary>
+        private bool CanBackfillPaid()
+        {
+            string role = Session["User"]?.ToString();
+            if (role != "Owner" && role != "Admin") return false;
+            return Take_Time_BangPhra.Integration.ChannelPosting.PolicyEnabled(_connectionString);
+        }
+
+        /// <summary>
+        /// ทำเครื่องหมายรับเงินย้อนหลังแบบกลุ่ม (ครั้งเดียวหลังเปิดนโยบายเอกสารขาย): ออเดอร์เงินสด/โอนที่ส่งของแล้ว
+        /// ยังไม่ PAID และยังไม่ลงบัญชี (Acct_Post_Ref IS NULL) ในช่วงวันสั่ง → PAID + Paid_Date = วันสั่ง (เดิมว่าง)
+        /// RevenuePostingService จะออกใบตามนโยบายรอบถัดไป (วันที่สรุปไปแล้ว = ใบเสริม -S{n}). Owner/Admin เท่านั้น
+        /// </summary>
+        protected void btnBackfillPaid_Click(object sender, EventArgs e)
+        {
+            if (!CanBackfillPaid()) return;
+            DateTime from, to;
+            if (!DateTime.TryParse(txtBackfillFrom.Text, System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None, out from)
+                || !DateTime.TryParse(txtBackfillTo.Text, System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None, out to))
+            {
+                ScriptManager.RegisterStartupScript(this, GetType(), "bfErr", "alert('กรุณาเลือกช่วงวันที่ให้ถูกต้อง');", true);
+                return;
+            }
+            if (to < from) { var t = from; from = to; to = t; }
+            try
+            {
+                bool hasPaidDate = Take_Time_BangPhra.Integration.ChannelPosting.HasColumn(_connectionString, "Guest_Room_Service_Orders", "Paid_Date");
+                int n = _code.DatabaseInsertSafe(_connectionString,
+                    "UPDATE Guest_Room_Service_Orders SET Payment_Status = 'PAID'" +
+                    (hasPaidDate ? ", Paid_Date = COALESCE(Paid_Date, Order_Date)" : "") +
+                    " WHERE Payment_Method IN ('CASH','TRANSFER')" +
+                    " AND ISNULL(Payment_Status,'') NOT IN ('PAID','CHARGED')" +
+                    " AND Order_Status NOT IN ('CANCELLED','PENDING')" +
+                    " AND Acct_Post_Ref IS NULL" +
+                    " AND Order_Date >= @f AND Order_Date < @t",
+                    new Dictionary<string, object> { { "@f", from.Date }, { "@t", to.Date.AddDays(1) } });
+                try
+                {
+                    _code.Logs(_connectionString, "RoomService",
+                        $"ทำเครื่องหมายรับเงินย้อนหลัง {from:yyyy-MM-dd}..{to:yyyy-MM-dd}: {n} ออเดอร์ (เงินสด/โอน)",
+                        Session["username"]?.ToString() ?? "Unknown");
+                }
+                catch { }
+                ScriptManager.RegisterStartupScript(this, GetType(), "bfDone",
+                    "alert('ตั้งรับเงินแล้ว " + n + " ออเดอร์ — รายได้จะเข้าบัญชีรอบถัดไปตามนโยบายเอกสารขาย');", true);
+            }
+            catch (Exception ex)
+            {
+                ScriptManager.RegisterStartupScript(this, GetType(), "bfEx",
+                    "alert('เกิดข้อผิดพลาด: " + ex.Message.Replace("\\", "\\\\").Replace("'", "\\'").Replace("\n", " ") + "');", true);
             }
         }
 
@@ -139,6 +204,44 @@ namespace Take_Time_BangPhra.Admin.RoomService
         /// <summary>
         /// Load order detail
         /// </summary>
+        /// <summary>
+        /// ลิงก์ให้ลูกค้าจ่ายออเดอร์นี้เอง — โผล่เฉพาะออเดอร์ที่ยังค้างจ่ายจริง ๆ
+        ///
+        /// ฝั่งรับเงิน (Pay.aspx รองรับ src=ROOMSERVICE + ApplyToRoomServiceOrder)
+        /// มีมาตั้งแต่ต้นแล้ว แต่ไม่เคยมีหน้าไหนสร้างลิงก์ให้ ⇒ ช่องทางนี้ตายมาตลอด
+        ///
+        /// เงียบสนิทถ้าปิดฟีเจอร์/ปิดช่องทางรูมเซอร์วิส — หน้าเดิมทำงานเหมือนเดิม
+        /// </summary>
+        private void ShowOnlinePayLink(long orderId, decimal amount,
+            string paymentStatus, string orderStatus, string phone)
+        {
+            try
+            {
+                if (pnlRsPay == null) return;
+                pnlRsPay.Visible = false;
+
+                string ps = (paymentStatus ?? "").ToUpperInvariant();
+                if (ps == "PAID" || ps == "CHARGED") return;      // จ่ายแล้ว/คิดเข้าห้องแล้ว
+                if ((orderStatus ?? "").ToUpperInvariant() == "CANCELLED") return;
+                if (amount <= 0) return;
+
+                var svc = new Take_Time_BangPhra.Payments.OnlinePaymentService(_connectionString);
+                if (svc.AvailableMethods(amount,
+                        Take_Time_BangPhra.Payments.PaymentSource.RoomService).Count == 0) return;
+
+                txtRsPayLink.Text = Take_Time_BangPhra.Payments.PaymentUrls.SiteBase()
+                    + "/Payment/Pay?src=" + Take_Time_BangPhra.Payments.PaymentSource.RoomService
+                    + "&id=" + orderId
+                    + "&ph=" + Uri.EscapeDataString(phone ?? "");
+                pnlRsPay.Visible = true;
+            }
+            catch
+            {
+                // ยังไม่ได้ติดตั้ง/ตั้งค่า → ไม่แสดงอะไร หน้าเดิมทำงานปกติ
+                try { pnlRsPay.Visible = false; } catch { }
+            }
+        }
+
         private void LoadOrderDetail(long orderId)
         {
             try
@@ -168,13 +271,29 @@ namespace Take_Time_BangPhra.Admin.RoomService
                     lblStatus.Text = GetStatusText(order["Order_Status"].ToString());
                     lblPayment.Text = GetPaymentText(order["Payment_Method"].ToString(), order["Payment_Status"].ToString());
                     lblDeliveryNote.Text = string.IsNullOrEmpty(order["Delivery_Instructions"].ToString()) ? "-" : order["Delivery_Instructions"].ToString();
-                    lblTotalAmount.Text = Convert.ToDecimal(order["Total_Amount"]).ToString("N0");
+                    // ยอดรวม + แยกให้เห็นว่ามีค่าบริการรวมอยู่เท่าไหร่ (คอลัมน์จาก PHASE18_21)
+                    decimal totalAmt = Convert.ToDecimal(order["Total_Amount"]);
+                    decimal svcAmt = 0m;
+                    if (order.Table.Columns.Contains("Service_Charge") && order["Service_Charge"] != DBNull.Value)
+                        svcAmt = Convert.ToDecimal(order["Service_Charge"]);
+                    lblTotalAmount.Text = svcAmt > 0m
+                        ? $"{totalAmt:N0} <small style='color:#7a8794; font-weight:400;'>(ค่าสินค้า {(totalAmt - svcAmt):N0} + ค่าบริการ {svcAmt:N0})</small>"
+                        : totalAmt.ToString("N0");
 
                     // Update button visibility based on status
                     string status = order["Order_Status"].ToString();
                     btnClaim.Visible = status == "PENDING";
                     btnDelivered.Visible = status == "CONFIRMED";
                     btnCancel.Visible = status != "DELIVERED" && status != "CANCELLED";
+                    // เงินสด/โอน: รายได้เข้าบัญชีเมื่อพนักงานยืนยันว่ารับเงินแล้วจริง (เก็บเงินสด/ตรวจสลิป) เท่านั้น
+                    string payMethod = Convert.ToString(order["Payment_Method"]);
+                    string payStatus = Convert.ToString(order["Payment_Status"]);
+                    btnMarkPaid.Visible = (payMethod == "CASH" || payMethod == "TRANSFER")
+                        && payStatus != "PAID" && payStatus != "CHARGED" && status != "CANCELLED";
+
+                    ShowOnlinePayLink(orderId, totalAmt,
+                        Convert.ToString(order["Payment_Status"]), status,
+                        Convert.ToString(order["Phone"]));
                 }
 
                 // Get order items
@@ -238,6 +357,103 @@ namespace Take_Time_BangPhra.Admin.RoomService
         protected void btnDelivered_Click(object sender, EventArgs e)
         {
             UpdateOrderStatus("DELIVERED");
+        }
+
+        /// <summary>
+        /// ยืนยันรับเงิน (เงินสดเก็บแล้ว / ตรวจสลิปโอนแล้ว) → Payment_Status = PAID + Paid_Date
+        /// ใบสรุปรายได้รูมเซอร์วิส (RevenuePostingService) นับเฉพาะออเดอร์ที่ PAID — ยังไม่ยืนยัน = ยังไม่ลงบัญชี
+        /// </summary>
+        protected void btnMarkPaid_Click(object sender, EventArgs e)
+        {
+            string orderId = hfSelectedOrder.Value;
+            if (string.IsNullOrEmpty(orderId)) return;
+            try
+            {
+                // 🔎 ตรวจสลิปโอนก่อนบันทึกรับเงิน (PHASE19_34 — ปิดสวิตช์ = แบบเดิม)
+                string slipBlock = CheckOrderSlip(Convert.ToInt64(orderId));
+                if (slipBlock != null)
+                {
+                    LoadOrderDetail(Convert.ToInt64(orderId));
+                    ScriptManager.RegisterStartupScript(this, GetType(), "slipBlock",
+                        "alert('" + System.Web.HttpUtility.JavaScriptStringEncode(slipBlock) + "');", true);
+                    return;
+                }
+
+                bool hasPaidDate =Take_Time_BangPhra.Integration.ChannelPosting.HasColumn(_connectionString, "Guest_Room_Service_Orders", "Paid_Date");
+                int n = _code.DatabaseInsertSafe(_connectionString,
+                    "UPDATE Guest_Room_Service_Orders SET Payment_Status = 'PAID'" + (hasPaidDate ? ", Paid_Date = GETDATE()" : "") +
+                    " WHERE ID = @OrderId AND Payment_Method IN ('CASH','TRANSFER')" +
+                    " AND ISNULL(Payment_Status,'') NOT IN ('PAID','CHARGED') AND Order_Status <> 'CANCELLED'",
+                    new Dictionary<string, object> { { "@OrderId", Convert.ToInt64(orderId) } });
+                try
+                {
+                    _code.Logs(_connectionString, "RoomService",
+                        $"ยืนยันรับเงินออเดอร์ #{orderId} ({(n > 0 ? "สำเร็จ" : "ไม่มีการเปลี่ยนแปลง")})",
+                        Session["username"]?.ToString() ?? "Unknown");
+                }
+                catch { }
+                LoadOrderDetail(Convert.ToInt64(orderId));
+                ScriptManager.RegisterStartupScript(this, GetType(), "paidUpdate",
+                    n > 0 ? "alert('บันทึกรับเงินแล้ว — รายได้จะเข้าบัญชีตามนโยบายเอกสารขาย');"
+                          : "alert('ออเดอร์นี้ชำระแล้ว/ไม่ใช่เงินสดหรือโอน');", true);
+            }
+            catch (Exception ex)
+            {
+                ScriptManager.RegisterStartupScript(this, GetType(), "error",
+                    "alert('เกิดข้อผิดพลาด: " + ex.Message.Replace("'", "\\'") + "');", true);
+            }
+        }
+
+        /// <summary>
+        /// ออเดอร์โอนที่มีสลิป → ตรวจยอดกับสลิป ก่อน PAID — คืนข้อความหยุด หรือ null = ไปต่อ
+        /// ไม่ผ่าน (ยอดไม่ตรง/ผู้รับผิด): Owner/Admin กด "ยืนยันรับเงิน" ซ้ำภายใน 10 นาที = ยืนยัน · สลิปซ้ำ = หยุดเสมอ
+        /// ตรวจไม่ได้ = ไปต่อ (นโยบาย: มีปัญหาให้ข้ามการตรวจ)
+        /// </summary>
+        private string CheckOrderSlip(long orderId)
+        {
+            try
+            {
+                if (!Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.IsEnabled) return null;
+                DataTable dt = _code.DatabaseQuerySafe(_connectionString,
+                    "SELECT Payment_Method, Payment_Slip_Path, Total_Amount FROM Guest_Room_Service_Orders WHERE ID = @id",
+                    new Dictionary<string, object> { { "@id", orderId } });
+                if (dt == null || dt.Rows.Count == 0) return null;
+                DataRow o = dt.Rows[0];
+                string path = o["Payment_Slip_Path"] == DBNull.Value ? null : o["Payment_Slip_Path"].ToString();
+                if (Convert.ToString(o["Payment_Method"]) != "TRANSFER" || string.IsNullOrEmpty(path)) return null;
+                decimal amount = o["Total_Amount"] == DBNull.Value ? 0m : Convert.ToDecimal(o["Total_Amount"]);
+
+                var ctx = new Take_Time_BangPhra.Payments.SlipCheck.SlipVerifyContext
+                {
+                    SourceType = "ROOM_SERVICE", SourceId = orderId,
+                    User = Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.CurrentUserName()
+                };
+                // ยอดตายตัว (ยอดออเดอร์) + ยอดล็อกตามสลิป (PHASE19_36): โอนเกิน = ผ่าน (รับเกิน) · ขาด = ชำระไม่ครบ · อ่านไม่ได้ = แบบเดิม
+                var r = Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.VerifyFileFixedTotal(path, amount > 0m ? (decimal?)amount : null, ctx);
+                if (r.IsBlocking)
+                {
+                    bool canOv = Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.CanOverrideCurrentUser();
+                    bool confirmed = r.CanOverride && canOv
+                        && Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.ConsumeSecondClick("RS-" + orderId);
+                    if (!confirmed)
+                    {
+                        Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.NotifyIfSerious(r, null, null, null, ctx.User);
+                        return "ตรวจสลิปไม่ผ่าน: " + r.Message
+                            + (r.CanOverride && canOv ? "\nตรวจกับบัญชีธนาคารแล้วกด \"ยืนยันรับเงินแล้ว\" อีกครั้งภายใน 10 นาทีเพื่อยืนยัน" : "");
+                    }
+                    Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.NotifyIfSerious(r, null, null,
+                        "ยืนยันซ้ำที่หน้าจัดการรูมเซอร์วิส (ออเดอร์ #" + orderId + ")", ctx.User);
+                }
+                Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.TryLog(ctx, r, true);   // กันใช้สลิปเดิมซ้ำ
+                _code.Logs(_connectionString, "RoomService", "ตรวจสลิปออเดอร์ #" + orderId + ": " + r.ShortText()
+                    + (r.AmountLocked ? " · " + r.AmountLock.BadgeText() : ""),
+                    Session["username"]?.ToString() ?? "Unknown");
+            }
+            catch (Exception ex)
+            {
+                try { _code.Logs(_connectionString, "RoomService", "ตรวจสลิปออเดอร์ #" + orderId + " ไม่ได้ (ข้าม): " + ex.Message, "SYSTEM"); } catch { }
+            }
+            return null;
         }
 
         /// <summary>

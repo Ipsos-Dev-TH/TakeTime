@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.SqlClient;
@@ -262,6 +262,7 @@ namespace Take_Time_BangPhra.Admin.Leave
 
                 if (result.Success)
                 {
+                    NotifyLeaveDecision(requestId, false, reason);
                     ShowMessage(result.Message, "success");
                     LoadStatistics();
                     LoadLeaveRequests();
@@ -289,6 +290,7 @@ namespace Take_Time_BangPhra.Admin.Leave
 
                 if (result.Success)
                 {
+                    NotifyLeaveDecision(requestId, true, null);
                     ShowMessage(result.Message, "success");
                     LoadStatistics();
                     LoadLeaveRequests();
@@ -604,5 +606,19 @@ namespace Take_Time_BangPhra.Admin.Leave
         }
 
         #endregion
-    }
+    
+        /// <summary>แจ้งผลการพิจารณาใบลากลับไปหาผู้ขอทาง LINE (best-effort)</summary>
+        private void NotifyLeaveDecision(long requestId, bool approved, string reason)
+        {
+            try
+            {
+                new Take_Time_BangPhra.Services.LeaveLineNotifier(
+                    System.Configuration.ConfigurationManager
+                        .ConnectionStrings["TaketimeConnectionString"].ConnectionString)
+                    .NotifyDecision(requestId, approved, reason, Session["UserName"]?.ToString());
+            }
+            catch { }
+        }
+
+}
 }

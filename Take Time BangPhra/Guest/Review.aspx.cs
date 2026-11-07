@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Data;
 using System.IO;
 using System.Web;
@@ -19,6 +19,7 @@ namespace Take_Time_BangPhra.Guest
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Feature.Guard(this, "Reviews", "~/Guest/Dashboard")) return;   // ฟีเจอร์ถูกปิด (ตั้งค่าระบบ → หมวดฟีเจอร์)
             _guestPortalService = new GuestPortalService(_connectionString);
             _loyaltyService = new LoyaltyService(_connectionString);
             _code = new code();
@@ -213,14 +214,18 @@ namespace Take_Time_BangPhra.Guest
 
                 if (result.Success)
                 {
-                    // Store screenshot reference in Guest_Reviews
+                    // เก็บหลักฐานภาพหน้าจอใน Guest_Reviews แบบ Status = 'REWARD_CLAIM'
+                    // ⚠ ไม่ใช่รีวิวจริง (ไม่รู้คะแนน/เนื้อหา) — เดิมบันทึก PENDING + 5 ดาว ทำให้คะแนนเฉลี่ย INTERNAL ถูกปั่น
+                    //   และ AI วิเคราะห์ path ไฟล์. view vw_AI_Review_AllSources / สถิติ นับเฉพาะ APPROVED/PENDING จึงไม่นับแถวนี้
+                    //   (OverallRating ต้องมีค่า 1-5 ตาม CHECK constraint ของตาราง — ค่านี้ไม่ถูกใช้ที่ไหน)
+                    //   รีวิว Google ตัวจริงเข้ามาทางแหล่งรีวิว (GBP/Places API) เอง
                     try
                     {
                         _code.DatabaseInsertSafe(_connectionString,
                             @"INSERT INTO Guest_Reviews
-                              (Reservation_ID, Customer_MobilePhone, OverallRating, ReviewTitle, ReviewText, Status, Source, SubmittedDate)
+                              (Reservation_ID, Customer_MobilePhone, OverallRating, ReviewTitle, ReviewText, Status, Source, IsPublic, SubmittedDate)
                               VALUES
-                              (@ReservationId, @Phone, 5, @Title, @ScreenshotPath, 'PENDING', 'GOOGLE', GETDATE())",
+                              (@ReservationId, @Phone, 5, @Title, @ScreenshotPath, 'REWARD_CLAIM', 'GOOGLE', 0, GETDATE())",
                             new System.Collections.Generic.Dictionary<string, object>
                             {
                                 { "@ReservationId", _reservationId },

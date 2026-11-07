@@ -1,4 +1,4 @@
-// ===========================================================================
+﻿// ===========================================================================
 // ReviewManagement.aspx.cs
 // Review Management - Approve/reject reviews, add responses, view analytics
 // ===========================================================================
@@ -25,6 +25,8 @@ namespace Take_Time_BangPhra.Admin.CRM
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.CrmReview)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
+            if (!Feature.Guard(this, "Reviews", "~/Default")) return;   // ฟีเจอร์ถูกปิด (ตั้งค่าระบบ → หมวดฟีเจอร์)
             _code = new code();
             _reviewService = new ReviewService(_connectionString);
 
@@ -64,6 +66,16 @@ namespace Take_Time_BangPhra.Admin.CRM
                     lblAvgRating.Text = analytics.AvgOverallRating.ToString("N1");
                     lblPending.Text = analytics.PendingReviews.ToString("N0");
                 }
+
+                // ค่าเฉลี่ยจริงของรีวิวภายใน: ไม่นับแถว "ส่งภาพรีวิว Google รับแต้ม" (Guest/Review.aspx ใส่ 5 ดาวอัตโนมัติ)
+                // และไม่นับรีวิวที่ถูกปฏิเสธ — ใช้ตัวคำนวณเดียวกับหน้า ReviewAnalytics
+                try
+                {
+                    var kpi = (Dictionary<string, object>)Reviews.ReviewQuery.GetAnalytics(_connectionString,
+                        new Reviews.ReviewFilter { Platforms = new List<string> { "INTERNAL" } })["kpi"];
+                    lblAvgRating.Text = kpi["avg5"] == null ? "-" : Convert.ToDouble(kpi["avg5"]).ToString("N1");
+                }
+                catch { /* keep view value */ }
             }
             catch (Exception ex)
             {
@@ -109,9 +121,9 @@ namespace Take_Time_BangPhra.Admin.CRM
                 if (ddlRatingFilter.SelectedValue != "0")
                 {
                     int rating = Convert.ToInt32(ddlRatingFilter.SelectedValue);
-                    query.Append(" AND GR.Overall_Rating >= @MinRating AND GR.Overall_Rating < @MaxRating");
-                    parameters["@MinRating"] = rating;
-                    parameters["@MaxRating"] = rating + 1;
+                    // คอลัมน์จริงคือ OverallRating (เดิมใช้ Overall_Rating → SQL error ทุกครั้งที่เลือกกรองคะแนน)
+                    query.Append(" AND GR.OverallRating = @Rating");
+                    parameters["@Rating"] = rating;
                 }
 
                 // Search by customer
@@ -162,7 +174,8 @@ namespace Take_Time_BangPhra.Admin.CRM
         protected void rptReviews_ItemCommand(object source, RepeaterCommandEventArgs e)
         {
             long reviewId = Convert.ToInt64(e.CommandArgument);
-            short adminId = Session["UserID"] != null ? Convert.ToInt16(Session["UserID"]) : (short)1;
+            short adminId;
+            if (!short.TryParse(Session["UserID"]?.ToString(), out adminId)) adminId = 1;
 
             if (e.CommandName == "Approve")
             {
@@ -194,14 +207,35 @@ namespace Take_Time_BangPhra.Admin.CRM
             }
             else if (e.CommandName == "Respond")
             {
-                // Redirect to response page or show modal
-                Response.Redirect($"ReviewResponse.aspx?reviewId={reviewId}");
+                // ตอบกลับแบบ inline (เดิม redirect ไป ReviewResponse.aspx ซึ่งไม่มีอยู่จริง → 404)
+                var txt = e.Item.FindControl("txtResponse") as TextBox;
+                string text = txt?.Text?.Trim() ?? "";
+                if (text.Length == 0)
+                {
+                    ShowAlert("กรุณาพิมพ์ข้อความตอบกลับ", "error");
+                    return;
+                }
+                if (text.Length > 4000) text = text.Substring(0, 4000);
+                if (_reviewService.AddResponse(reviewId, text, adminId))
+                {
+                    ShowAlert("บันทึกคำตอบแล้ว", "success");
+                    LoadReviews();
+                }
+                else
+                {
+                    ShowAlert("บันทึกคำตอบไม่สำเร็จ", "error");
+                }
             }
+        }
+
+        protected bool HasText(object value)
+        {
+            return value != null && value != DBNull.Value && !string.IsNullOrWhiteSpace(value.ToString());
         }
 
         protected string GetStars(object rating)
         {
-            if (rating == DBNull.Value) return "";
+            if (rating == null || rating == DBNull.Value) return "<span style='color:#bbb'>-</span>";
 
             decimal ratingValue = Convert.ToDecimal(rating);
             int fullStars = (int)Math.Floor(ratingValue);

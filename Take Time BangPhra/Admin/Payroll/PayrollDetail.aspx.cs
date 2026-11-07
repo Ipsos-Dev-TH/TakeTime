@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Configuration;
 using System.Data;
 using System.IO;
@@ -14,6 +14,7 @@ namespace Take_Time_BangPhra.Admin.Payroll
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.HrPayroll)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             payrollService = new PayrollService();
             CheckAdminLogin();
 
@@ -102,6 +103,20 @@ namespace Take_Time_BangPhra.Admin.Payroll
                     // Totals
                     lblWorkDays.Text = record["WorkDays"]?.ToString() ?? "0";
                     lblLeaveDays.Text = record["LeaveDays"]?.ToString() ?? "0";
+                    // รายการใบลาที่หักในรอบนี้ (รวมใบที่ยกมาจากเดือนก่อน)
+                    try
+                    {
+                        decimal ld = record["LeaveDeduction"] != DBNull.Value ? Convert.ToDecimal(record["LeaveDeduction"]) : 0;
+                        var lc = Take_Time_BangPhra.Payroll.PayrollLeaveSync.ForRecord(payrollRecordId);
+                        if (ld > 0 && lc != null && lc.Items.Count > 0)
+                        {
+                            decimal shown = record["LeaveDays"] != DBNull.Value ? Convert.ToDecimal(record["LeaveDays"]) : 0;
+                            if (shown <= 0) lblLeaveDays.Text = lc.TotalDays.ToString("0.##");
+                            litLeaveDetail.Text = "<div style=\"font-size:12px;font-weight:normal;color:#555;margin-top:4px;\">"
+                                + Server.HtmlEncode(Take_Time_BangPhra.Payroll.PayrollLeaveSync.Describe(lc)) + "</div>";
+                        }
+                    }
+                    catch { }
                     lblNetSalary.Text = FormatCurrency(record["NetSalary"]);
 
                     bool voucherGenerated = record["VoucherGenerated"] != DBNull.Value && Convert.ToBoolean(record["VoucherGenerated"]);
@@ -277,6 +292,14 @@ namespace Take_Time_BangPhra.Admin.Payroll
             dtPayrollDetails.Columns.Add("WorkDays", typeof(int));
             dtPayrollDetails.Columns.Add("LeaveDays", typeof(decimal));
             dtPayrollDetails.Columns.Add("OTHours", typeof(decimal));
+            dtPayrollDetails.Columns.Add("LeaveDetail", typeof(string));
+
+            // ใบลาที่หักในรอบนี้ (รวมใบที่ยกมาจากเดือนก่อน) — แสดงในใบสำคัญจ่าย
+            var leaveCalc = Take_Time_BangPhra.Payroll.PayrollLeaveSync.ForRecord(payrollRecordId);
+            decimal leaveDeductionAmt = record["LeaveDeduction"] != DBNull.Value ? Convert.ToDecimal(record["LeaveDeduction"]) : 0;
+            string leaveDetail = leaveDeductionAmt > 0 ? Take_Time_BangPhra.Payroll.PayrollLeaveSync.Describe(leaveCalc) : "";
+            decimal leaveDaysShown = record["LeaveDays"] != DBNull.Value ? Convert.ToDecimal(record["LeaveDays"]) : 0;
+            if (leaveDaysShown <= 0 && leaveDeductionAmt > 0 && leaveCalc != null) leaveDaysShown = leaveCalc.TotalDays;
 
             string voucherNumber = record["VoucherNumber"] != DBNull.Value ? record["VoucherNumber"].ToString() : "PV-" + DateTime.Now.ToString("yyMMdd") + "-XXXX";
             string payDate = DateTime.Now.ToString("dd/MM/yyyy");
@@ -297,8 +320,9 @@ namespace Take_Time_BangPhra.Admin.Payroll
                 record["TotalDeductions"] != DBNull.Value ? Convert.ToDecimal(record["TotalDeductions"]) : 0,
                 record["NetSalary"] != DBNull.Value ? Convert.ToDecimal(record["NetSalary"]) : 0,
                 record["WorkDays"] != DBNull.Value ? Convert.ToInt32(record["WorkDays"]) : 0,
-                record["LeaveDays"] != DBNull.Value ? Convert.ToDecimal(record["LeaveDays"]) : 0,
-                record["OTHours"] != DBNull.Value ? Convert.ToDecimal(record["OTHours"]) : 0
+                leaveDaysShown,
+                record["OTHours"] != DBNull.Value ? Convert.ToDecimal(record["OTHours"]) : 0,
+                leaveDetail
             );
 
             // 4. Create Signatures DataTable

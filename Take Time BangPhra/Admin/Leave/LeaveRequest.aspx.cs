@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Data;
 using System.IO;
 using System.Web.UI;
@@ -165,6 +165,26 @@ namespace Take_Time_BangPhra.Admin.Leave
                         {
                             text += " (หักเงิน)";
                         }
+
+                        // บอกกฎใบรับรองแพทย์ตั้งแต่ตอนเลือก — ไม่งั้นพนักงานรู้ตัวอีกที
+                        // ตอนโดนหักเงินไปแล้ว (คอลัมน์อาจยังไม่มีถ้ายังไม่รัน migration 14)
+                        bool needCert = row.Table.Columns.Contains("RequiresMedicalCert")
+                            && row["RequiresMedicalCert"] != DBNull.Value
+                            && Convert.ToBoolean(row["RequiresMedicalCert"]);
+                        if (needCert)
+                        {
+                            bool hasAfter = row.Table.Columns.Contains("MedicalCertAfterDays")
+                                && row["MedicalCertAfterDays"] != DBNull.Value;
+                            string act = row.Table.Columns.Contains("NoCertAction")
+                                ? Convert.ToString(row["NoCertAction"]) : "BLOCK";
+                            bool deductIfMissing = !string.Equals(act, "BLOCK", StringComparison.OrdinalIgnoreCase);
+
+                            text += hasAfter
+                                ? " — ลาเกิน " + Convert.ToDecimal(row["MedicalCertAfterDays"]).ToString("0.##")
+                                  + " วันต้องแนบใบรับรองแพทย์" + (deductIfMissing ? " ไม่แนบ = หักเงิน" : "")
+                                : " — ต้องแนบใบรับรองแพทย์" + (deductIfMissing ? " ไม่แนบ = หักเงิน" : "");
+                        }
+
                         ddlLeaveType.Items.Add(new System.Web.UI.WebControls.ListItem(text, row["ID"].ToString()));
                     }
                 }
@@ -370,6 +390,16 @@ namespace Take_Time_BangPhra.Admin.Leave
 
                 if (result.Success)
                 {
+                    // แจ้งหัวหน้าทาง LINE (best-effort — ล้มเหลวต้องไม่กระทบการยื่นใบลา)
+                    try
+                    {
+                        new Take_Time_BangPhra.Services.LeaveLineNotifier(
+                            System.Configuration.ConfigurationManager
+                                .ConnectionStrings["TaketimeConnectionString"].ConnectionString)
+                            .NotifyNewRequest(result.ID);
+                    }
+                    catch { }
+
                     // PRG Pattern: Store success message in session and redirect
                     Session["LeaveRequestSuccess"] = "ส่งคำขอลาสำเร็จ เลขที่คำขอ: " + result.ID;
                     Response.Redirect(Request.Url.PathAndQuery, false);

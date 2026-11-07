@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
@@ -17,6 +17,7 @@ namespace Take_Time_BangPhra.Admin.Settings
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.SysSettings)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
             if (Session["permission"]?.ToString() != "True")
             {
                 Response.Redirect("~/Admin/Login");
@@ -60,14 +61,14 @@ namespace Take_Time_BangPhra.Admin.Settings
 
             string lineUrl = ConfigurationManager.AppSettings["lineurl"] ?? "";
             string lineToken = ConfigurationManager.AppSettings["linetoken"] ?? "";
-            string lineChannelToken = ConfigurationManager.AppSettings["linechannelaccesstokentaketime"] ?? "";
-            string telegramToken = ConfigurationManager.AppSettings["TelegramTokenTakeTime"] ?? "";
-            string smtpServer = ConfigurationManager.AppSettings["SMTP"] ?? "";
-            string smtpPort = ConfigurationManager.AppSettings["SMTP_Port"] ?? "";
-            string emailFrom = ConfigurationManager.AppSettings["Email_From"] ?? "";
-            string smtpSsl = ConfigurationManager.AppSettings["SMTP_EnableSsl"] ?? "";
-            string googleApiKey = ConfigurationManager.AppSettings["GooglePlacesApiKey"] ?? "";
-            string taxApiKey = ConfigurationManager.AppSettings["TaxInvoiceApiKey"] ?? "";
+            string lineChannelToken = AppCfg.Get("linechannelaccesstokentaketime") ?? "";
+            string telegramToken = AppCfg.Get("TelegramTokenTakeTime") ?? "";
+            string smtpServer = AppCfg.Get("SMTP") ?? "";
+            string smtpPort = AppCfg.Get("SMTP_Port") ?? "";
+            string emailFrom = AppCfg.Get("Email_From") ?? "";
+            string smtpSsl = AppCfg.Get("SMTP_EnableSsl") ?? "";
+            string googleApiKey = AppCfg.Get("GooglePlacesApiKey") ?? "";
+            string taxApiKey = AppCfg.Get("TaxInvoiceApiKey") ?? "";
 
             var data = new Dictionary<string, object>
             {
@@ -231,7 +232,7 @@ namespace Take_Time_BangPhra.Admin.Settings
         {
             try
             {
-                string token = ConfigurationManager.AppSettings["TelegramTokenTakeTime"] ?? "";
+                string token = AppCfg.Get("TelegramTokenTakeTime") ?? "";
                 if (string.IsNullOrEmpty(token))
                     return new Dictionary<string, object> { { "success", false }, { "message", "ยังไม่ได้ตั้งค่า Telegram Token" } };
 
@@ -261,8 +262,8 @@ namespace Take_Time_BangPhra.Admin.Settings
         {
             try
             {
-                string smtp = ConfigurationManager.AppSettings["SMTP"] ?? "";
-                string port = ConfigurationManager.AppSettings["SMTP_Port"] ?? "587";
+                string smtp = AppCfg.Get("SMTP") ?? "";
+                string port = AppCfg.Get("SMTP_Port") ?? "587";
 
                 if (string.IsNullOrEmpty(smtp))
                     return new Dictionary<string, object> { { "success", false }, { "message", "ยังไม่ได้ตั้งค่า SMTP Server" } };
@@ -318,7 +319,7 @@ namespace Take_Time_BangPhra.Admin.Settings
 
         private Dictionary<string, object> TestGoogleConnection()
         {
-            string apiKey = ConfigurationManager.AppSettings["GooglePlacesApiKey"] ?? "";
+            string apiKey = AppCfg.Get("GooglePlacesApiKey") ?? "";
             if (string.IsNullOrEmpty(apiKey))
                 return new Dictionary<string, object> { { "success", false }, { "message", "ยังไม่ได้ตั้งค่า Google API Key" } };
 
@@ -327,7 +328,7 @@ namespace Take_Time_BangPhra.Admin.Settings
 
         private Dictionary<string, object> TestTaxInvoiceConnection()
         {
-            string apiKey = ConfigurationManager.AppSettings["TaxInvoiceApiKey"] ?? "";
+            string apiKey = AppCfg.Get("TaxInvoiceApiKey") ?? "";
             if (string.IsNullOrEmpty(apiKey))
                 return new Dictionary<string, object> { { "success", false }, { "message", "ยังไม่ได้ตั้งค่า Tax Invoice API Key" } };
 

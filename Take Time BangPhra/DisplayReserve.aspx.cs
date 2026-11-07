@@ -150,6 +150,10 @@ namespace Take_Time_BangPhra
         {
             try
             {
+                // สูตรกลาง ReservationBalance ก่อน (รวมค่าใช้จ่ายในห้อง/ค่าสัตว์เลี้ยง, Payment_History, OTA collect mode)
+                // ไม่สำเร็จ → ใช้ stored procedure เดิม (ยอดห้อง − Deposit)
+                if (TryBalanceSummary(year, month)) return;
+
                 // ใช้ข้อมูลจาก Report โดยตรง
                 GetExactReportData(year, month);
             }
@@ -160,6 +164,58 @@ namespace Take_Time_BangPhra
                 Label5.Text = "0";
                 Label6.Text = "0";
             }
+        }
+
+        /// <summary>
+        /// สรุปยอดของเดือน (การจองที่เข้าพักในเดือนนี้) ด้วยสูตรกลาง: ยอดเงินทั้งหมด = Σ ยอดรวม, ยอดเงินรับมา = Σ รับแล้ว,
+        /// ยอดค้างชำระ = Σ คงเหลือ — ตัดใบยกเลิก/ลบ/no-show และใบเลื่อน (เกณฑ์ RescheduleService.SqlActiveStay)
+        /// เดิม (SP) = ยอดห้อง − Deposit ⇒ ไม่รวมค่าใช้จ่ายในห้อง และ OTA Channel Collect ขึ้นค้างผิด
+        /// </summary>
+        private bool TryBalanceSummary(int year, int month)
+        {
+            try
+            {
+                DateTime start = new DateTime(year, month, 1);
+                var p = new Dictionary<string, object>
+                {
+                    { "@rsStart", start },
+                    { "@rsEnd", start.AddMonths(1) }
+                };
+                Dictionary<int, ReservationBalance> map = ReservationBalance.LoadMany(conn,
+                    "r.CheckinDate >= @rsStart AND r.CheckinDate < @rsEnd AND " + RescheduleService.SqlActiveStay("r"), p);
+
+                decimal total = 0m, received = 0m, due = 0m;
+                foreach (ReservationBalance b in map.Values)
+                {
+                    total += b.Total;
+                    received += b.Received;
+                    due += b.Due;
+                }
+                Label4.Text = total.ToString("#,##0");     // ยอดเงินทั้งหมด
+                Label5.Text = received.ToString("#,##0");  // ยอดเงินรับมา
+                Label6.Text = due.ToString("#,##0");       // ยอดค้างชำระ
+                return true;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"TryBalanceSummary error (fallback SP): {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>ยอดของการจองในตารางเดือน (ตั้งใน LoadReservationGridView) — ใช้ใน FormatCustomerInfo</summary>
+        private Dictionary<int, ReservationBalance> _gridBalances;
+
+        /// <summary>แถวการจองที่ไม่ควรแสดงบนตารางห้อง: ยกเลิก*/ลบ*, no-show, ใบเลื่อน (ไม่มีวันเข้าพักจริง)</summary>
+        private static bool IsHiddenFromGrid(DataRow reservation)
+        {
+            string status = reservation.Table.Columns.Contains("Status") && reservation["Status"] != DBNull.Value
+                ? reservation["Status"].ToString() : "";
+            if (status.StartsWith("ยกเลิก", StringComparison.Ordinal) || status.StartsWith("ลบ", StringComparison.Ordinal)
+                || status == "ไม่มาเช็คอิน")
+                return true;
+            if (reservation["CheckinDate"] == DBNull.Value) return true;
+            return RescheduleService.IsPlaceholderDate(Convert.ToDateTime(reservation["CheckinDate"]));
         }
 
         private void GetExactReportData(int year, int month)
@@ -493,6 +549,26 @@ namespace Take_Time_BangPhra
                 // โหลดข้อมูลการจอง
                 DataTable dtReservation = GetReservationData(year, month);
 
+                // ยอดเงินต่อการจอง (สูตรกลาง) — query เดียวสำหรับทุกใบในเดือน; พลาด = ใช้ Deposit แบบเดิม
+                _gridBalances = null;
+                try
+                {
+                    var ids = new HashSet<int>();
+                    foreach (DataRow r in dtReservation.Rows)
+                        if (r["ID"] != DBNull.Value) ids.Add(Convert.ToInt32(r["ID"]));
+                    if (ids.Count > 0)
+                    {
+                        var idText = new List<string>();
+                        foreach (int id in ids) idText.Add(id.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                        _gridBalances = ReservationBalance.LoadMany(conn, "r.ID IN (" + string.Join(",", idText) + ")", null);
+                    }
+                }
+                catch (Exception bex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"DisplayReserve balances error: {bex.Message}");
+                    _gridBalances = null;
+                }
+
                 // เติมข้อมูลลงในตาราง
                 FillReservationData(dtShow, dtAccom, dtReservation, year, month);
 
@@ -530,6 +606,9 @@ namespace Take_Time_BangPhra
             // จัดกลุ่มการจองตามวันที่และห้องพัก
             foreach (DataRow reservation in dtReservation.Rows)
             {
+                // ใบยกเลิก/ลบ/no-show/ใบเลื่อนไม่ถือห้อง — เดิม SP/query ตัดแค่ 2 สถานะยกเลิก
+                if (IsHiddenFromGrid(reservation)) continue;
+
                 DateTime checkinDate = Convert.ToDateTime(reservation["CheckinDate"]);
                 DateTime checkoutDate = Convert.ToDateTime(reservation["CheckoutDate"]);
                 string accomId = reservation["Accommodation_ID"].ToString();
@@ -605,10 +684,23 @@ namespace Take_Time_BangPhra
                 decimal deposit = reservation["Deposit"] != DBNull.Value ? Convert.ToDecimal(reservation["Deposit"]) : 0;
                 string status = reservation["Status"]?.ToString() ?? "";
 
+                // รับแล้ว/ค้าง ของทั้งใบจาก ReservationBalance (Payment_History, ค่าใช้จ่ายในห้อง, OTA collect mode)
+                string dueText = "";
+                ReservationBalance bal = null;
+                if (_gridBalances != null && reservation["ID"] != DBNull.Value)
+                    _gridBalances.TryGetValue(Convert.ToInt32(reservation["ID"]), out bal);
+                if (bal != null)
+                {
+                    deposit = bal.Received;
+                    if (bal.Due > 0m) dueText = $" | ค้าง: {bal.Due:#,##0}";
+                    if (bal.IsChannelCollect) dueText += " | OTA เก็บแล้ว";
+                    else if (bal.IsCollectUnknown) dueText += " | ยังไม่ชัดใครเก็บ";
+                }
+
                 info.Append($"<div class='customer-info'>");
                 info.Append($"<div class='customer-name'>{name} ({nickname})</div>");
                 info.Append($"<div class='customer-details'>เบอร์: {phone} | {peopleStay} คน | {stayDays} คืน</div>");
-                info.Append($"<div class='payment-info'>คืนละ: {pricePerNight:#,##0} | รวม: {totalPrice:#,##0} | รับมาแล้ว: {deposit:#,##0}</div>");
+                info.Append($"<div class='payment-info'>คืนละ: {pricePerNight:#,##0} | รวม: {totalPrice:#,##0} | รับมาแล้ว: {deposit:#,##0}{dueText}</div>");
                 info.Append($"<div class='status-info'>สถานะ: {GetStatusText(status)}</div>");
                 info.Append("</div>");
             }

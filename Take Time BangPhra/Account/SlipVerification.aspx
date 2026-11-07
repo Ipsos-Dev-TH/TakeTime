@@ -373,6 +373,13 @@
                     <asp:Button ID="btnSearch" runat="server" Text="ค้นหา" CssClass="btn-view" OnClick="ApplyFilter" />
                 </div>
             </div>
+            <%-- 🔎 ตรวจสลิป (PHASE19_34): อนุมัติสลิปที่ตรวจไม่ผ่าน (ยอดไม่ตรง/โอนเข้าบัญชีอื่น) ต้องมีเหตุผล — Owner/Admin เท่านั้น --%>
+            <div class="filter-row" style="margin-top:10px;">
+                <div class="filter-group" style="flex:1; min-width:280px;">
+                    <label class="filter-label">เหตุผลยืนยันสลิปที่ตรวจไม่ผ่าน (Owner/Admin — ใช้กับปุ่มอนุมัติถัดไป):</label>
+                    <asp:TextBox ID="txtOverrideReason" runat="server" CssClass="filter-control" MaxLength="500" placeholder="เช่น ตรวจยอดในแอปธนาคารแล้ว / ลูกค้าโอนแยก 2 ครั้ง" />
+                </div>
+            </div>
         </div>
 
         <!-- Slips Grid -->
@@ -419,6 +426,12 @@
                         </ItemTemplate>
                     </asp:TemplateField>
 
+                    <asp:TemplateField HeaderText="ผลตรวจสลิป">
+                        <ItemTemplate>
+                            <%# FormatVerify(Container.DataItem) %>
+                        </ItemTemplate>
+                    </asp:TemplateField>
+
                     <asp:TemplateField HeaderText="สถานะ OCR">
                         <ItemTemplate>
                             <span class='status-badge status-<%# Eval("OCR_Status").ToString().ToLower().Replace("_", "-") %>'>
@@ -451,6 +464,21 @@
                                     CssClass="btn-approve"
                                     Visible='<%# Eval("VerificationStatus").ToString() == "PENDING" %>'
                                     OnClientClick="return confirm('ยืนยันการอนุมัติสลิปนี้?');" />
+
+                                <asp:Button runat="server"
+                                    CommandName="ApproveSlipAmount"
+                                    CommandArgument='<%# Eval("SlipID") %>'
+                                    Text="✓ อนุมัติตามยอดสลิป"
+                                    CssClass="btn-approve"
+                                    Visible='<%# ShowApproveSlipAmount(Container.DataItem) %>'
+                                    OnClientClick="return confirm('อนุมัติและลงรับเงินตามยอดในสลิป (ไม่ใช่ยอดที่ลูกค้าแจ้ง)?');" />
+
+                                <asp:Button runat="server"
+                                    CommandName="RecheckSlip"
+                                    CommandArgument='<%# Eval("SlipID") %>'
+                                    Text="🔎 ตรวจใหม่"
+                                    CssClass="btn-view"
+                                    Visible='<%# SlipVerifyOn %>' />
 
                                 <asp:Button runat="server"
                                     CommandName="RejectSlip"

@@ -1,6 +1,8 @@
-// ===========================================================================
+﻿// ===========================================================================
 // AIReviewDashboard.aspx.cs
 // AI Review Dashboard - Sentiment analysis, review management, response tools
+// API: POST ?action=… (JSON, ต้องมี header X-CSRF-Token — กลไกเดียวกับ ReviewSources)
+//      แก้ ApiConfig/ความลับ (updateSource) ได้เฉพาะ Owner/Admin ตามกฎของ ReviewSources
 // ===========================================================================
 
 using System;
@@ -17,6 +19,32 @@ namespace Take_Time_BangPhra.Admin.CRM
     public partial class AIReviewDashboard : Page
     {
         private string ConnStr => ConfigurationManager.ConnectionStrings["TaketimeConnectionString"]?.ConnectionString ?? "";
+        private const string CsrfKey = "AIReviewDashboard_Csrf";
+
+        /// <summary>โทเคนกัน CSRF ของ session นี้ (ฝังในหน้าให้ JS ส่งกลับใน header X-CSRF-Token)</summary>
+        protected string CsrfToken
+        {
+            get
+            {
+                string t = Session[CsrfKey] as string;
+                if (string.IsNullOrEmpty(t))
+                {
+                    t = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N");
+                    Session[CsrfKey] = t;
+                }
+                return t;
+            }
+        }
+
+        /// <summary>Owner/Admin — แก้ความลับและค่าตั้งแหล่งรีวิวได้ (กฎเดียวกับ ReviewSources)</summary>
+        protected bool IsSecretAdmin
+        {
+            get
+            {
+                string u = Session["User"] != null ? Session["User"].ToString() : "";
+                return u == "Owner" || u == "Admin";
+            }
+        }
 
         protected override void OnInit(EventArgs e)
         {
@@ -26,6 +54,8 @@ namespace Take_Time_BangPhra.Admin.CRM
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (!Perm.Guard(this, Perm.CrmReview)) return;   // กลุ่มสิทธิ์ไม่อนุญาตส่วนนี้
+            if (!Feature.Guard(this, "Reviews", "~/Default")) return;   // ฟีเจอร์ถูกปิด (ตั้งค่าระบบ → หมวดฟีเจอร์)
             // Auth check
             try
             {
@@ -52,6 +82,13 @@ namespace Take_Time_BangPhra.Admin.CRM
 
         private void HandlePost()
         {
+            // ทุก action ต้องมีโทเคน CSRF (content-type JSON อย่างเดียวกันไม่ได้ — เช่น fetch no-cors / form ที่ตั้ง enctype เอง)
+            if (!CheckCsrf(Request.Headers["X-CSRF-Token"]))
+            {
+                WriteJson(new Dictionary<string, object> { { "success", false }, { "message", "CSRF token ไม่ถูกต้อง — โหลดหน้าใหม่" } });
+                return;
+            }
+
             string body;
             using (var reader = new StreamReader(Request.InputStream))
                 body = reader.ReadToEnd();
@@ -111,6 +148,9 @@ namespace Take_Time_BangPhra.Admin.CRM
                 case "getSources":
                     result = HandleGetSources();
                     break;
+                case "getPlatforms":
+                    result = HandleGetPlatforms();
+                    break;
                 case "updateSource":
                     result = HandleUpdateSource(data);
                     break;
@@ -120,6 +160,13 @@ namespace Take_Time_BangPhra.Admin.CRM
             }
 
             WriteJson(result);
+        }
+
+        private bool CheckCsrf(string token)
+        {
+            string expected = Session[CsrfKey] as string;
+            return !string.IsNullOrEmpty(expected) && !string.IsNullOrEmpty(token)
+                && string.Equals(expected, token, StringComparison.Ordinal);
         }
 
         #region Action Handlers
@@ -431,10 +478,26 @@ namespace Take_Time_BangPhra.Admin.CRM
             }
         }
 
+        /// <summary>แหล่งรีวิวที่มีข้อมูลจริง (แทน dropdown ที่ hard-code ไว้ 3 แหล่ง)</summary>
+        private Dictionary<string, object> HandleGetPlatforms()
+        {
+            try
+            {
+                return new Dictionary<string, object> { { "success", true }, { "data", Reviews.ReviewQuery.GetSourceCodeList(ConnStr) } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "success", false }, { "message", "โหลดรายชื่อแหล่งรีวิวไม่สำเร็จ: " + ex.Message } };
+            }
+        }
+
         private Dictionary<string, object> HandleUpdateSource(Dictionary<string, object> data)
         {
             try
             {
+                if (!IsSecretAdmin)
+                    return new Dictionary<string, object> { { "success", false }, { "message", "แก้ API key / token / ค่าตั้งแหล่งรีวิวได้เฉพาะ Owner หรือ Admin" } };
+
                 var svc = new AIReviewAnalysisService(ConnStr);
                 string sourceCode = GetString(data, "sourceCode", "");
                 bool enabled = GetBool(data, "enabled", false);
@@ -444,6 +507,9 @@ namespace Take_Time_BangPhra.Admin.CRM
                     return new Dictionary<string, object> { { "success", false }, { "message", "ไม่พบรหัสแหล่งที่มา" } };
 
                 svc.UpdateSourceConfig(sourceCode, enabled, apiConfig);
+                new code().Logs(ConnStr, "AIReviewDashboard", "แก้ไขแหล่งรีวิว " + sourceCode + " enabled=" + enabled
+                    + (string.IsNullOrWhiteSpace(apiConfig) ? "" : " (แก้ ApiConfig)"),
+                    Session["UserName"] != null ? Session["UserName"].ToString() : "ADMIN");
                 return new Dictionary<string, object> { { "success", true }, { "message", "อัปเดตแหล่งที่มาสำเร็จ" } };
             }
             catch (Exception ex)

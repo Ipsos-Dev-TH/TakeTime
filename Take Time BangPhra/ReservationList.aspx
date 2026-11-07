@@ -470,11 +470,55 @@
             border-left: 4px solid #FFC107;
         }
 
+        /* ตารางเลื่อนในกล่องของตัวเอง — หัวตาราง (position: sticky) ติดด้านบนกล่องขณะเลื่อน
+           เดิม .results-section overflow:hidden + ตาราง display:block ทำให้ sticky ไม่ทำงาน */
+        .table-scroll {
+            overflow: auto;
+            max-height: 75vh;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .table-scroll .reservation-table {
+            min-width: 980px;
+        }
+
+        /* ป้ายเสริมใต้สถานะ — ใบเลื่อน / วิธีเก็บเงิน OTA / สัตว์เลี้ยง */
+        .mini-badges {
+            margin-top: 4px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 3px;
+        }
+
+        .mini-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.72em;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .mb-postpone { background: #FFF8E1; color: #F57F17; }
+        .mb-channel  { background: #E8F5E9; color: #1b7a43; }
+        .mb-hotel    { background: #FFF3E0; color: #c25e00; }
+        .mb-unknown  { background: #F1F1F1; color: #6b6b6b; }
+        .mb-pet      { background: #EDE7F6; color: #5E35B1; }
+
+        .price-postponed {
+            color: #F57F17;
+            font-weight: 600;
+        }
+
         /* Responsive */
-        @media (max-width: 1200px) {
-            .reservation-table {
-                display: block;
-                overflow-x: auto;
+        @media (max-width: 768px) {
+            .table-scroll {
+                max-height: 70vh;
+            }
+
+            .reservation-table td,
+            .reservation-table th {
+                padding: 8px;
             }
         }
 
@@ -651,16 +695,27 @@
                         <asp:ListItem Value="เช็คเอาท์แล้ว">เช็คเอาท์แล้ว</asp:ListItem>
                         <asp:ListItem Value="เสร็จสิ้น">เสร็จสิ้น</asp:ListItem>
                         <asp:ListItem Value="ยกเลิก">ยกเลิก (ทั้งหมด)</asp:ListItem>
+                        <asp:ListItem Value="postponed">ใบเลื่อนวันเข้าพัก</asp:ListItem>
                     </asp:DropDownList>
                 </div>
 
                 <div class="filter-group">
-                    <label><i class="fas fa-calendar"></i> จากวันที่</label>
+                    <label><i class="fas fa-bed"></i> เข้าพัก ตั้งแต่</label>
+                    <asp:TextBox ID="txtStayFrom" runat="server" TextMode="Date" ToolTip="แสดงการจองที่มีวันพักทับช่วงนี้ (เช็คอิน–เช็คเอาท์)"></asp:TextBox>
+                </div>
+
+                <div class="filter-group">
+                    <label><i class="fas fa-bed"></i> เข้าพัก ถึง</label>
+                    <asp:TextBox ID="txtStayTo" runat="server" TextMode="Date" ToolTip="แสดงการจองที่มีวันพักทับช่วงนี้ (เช็คอิน–เช็คเอาท์)"></asp:TextBox>
+                </div>
+
+                <div class="filter-group">
+                    <label><i class="fas fa-calendar"></i> วันที่จอง ตั้งแต่</label>
                     <asp:TextBox ID="txtDateFrom" runat="server" TextMode="Date"></asp:TextBox>
                 </div>
 
                 <div class="filter-group">
-                    <label><i class="fas fa-calendar"></i> ถึงวันที่</label>
+                    <label><i class="fas fa-calendar"></i> วันที่จอง ถึง</label>
                     <asp:TextBox ID="txtDateTo" runat="server" TextMode="Date"></asp:TextBox>
                 </div>
 
@@ -691,13 +746,24 @@
                     <i class="fas fa-list"></i> พบ <asp:Label ID="lblResultCount" runat="server" Text="0"></asp:Label> รายการ
                 </div>
                 <div class="results-summary">
-                    <span class="summary-item">ยอดรวม: <strong><asp:Label ID="lblTotalAmount" runat="server" Text="0"></asp:Label></strong> บาท</span>
-                    <span class="summary-item">มัดจำ: <strong><asp:Label ID="lblTotalDeposit" runat="server" Text="0"></asp:Label></strong> บาท</span>
-                    <span class="summary-item">ค้างชำระ: <strong><asp:Label ID="lblTotalRemain" runat="server" Text="0"></asp:Label></strong> บาท</span>
+                    <%-- ยอดรวมคำนวณเฉพาะเมื่อเลือกช่วงวันที่ (เข้าพักหรือวันที่จอง) — ไม่งั้นรวมทั้งประวัติ ตัวเลขไม่มีความหมาย --%>
+                    <asp:PlaceHolder ID="phTotals" runat="server">
+                        <span class="summary-item">ยอดรวม: <strong><asp:Label ID="lblTotalAmount" runat="server" Text="0"></asp:Label></strong> บาท</span>
+                        <span class="summary-item">รับแล้ว: <strong><asp:Label ID="lblTotalDeposit" runat="server" Text="0"></asp:Label></strong> บาท</span>
+                        <span class="summary-item">ค้างชำระ: <strong><asp:Label ID="lblTotalRemain" runat="server" Text="0"></asp:Label></strong> บาท</span>
+                        <%-- ใบเลื่อน (ยังไม่มีวันเข้าพัก) ไม่นับในค้างชำระ — มัดจำที่ถือไว้แสดงแยก --%>
+                        <asp:PlaceHolder ID="phPostponedHeld" runat="server" Visible="false">
+                            <span class="summary-item" title="มัดจำที่รับไว้ของใบเลื่อนวันเข้าพัก (ไม่นับในค้างชำระ)">มัดจำของใบเลื่อน: <strong>&#3647;<asp:Label ID="lblTotalPostponedHeld" runat="server" Text="0"></asp:Label></strong></span>
+                        </asp:PlaceHolder>
+                    </asp:PlaceHolder>
+                    <asp:PlaceHolder ID="phTotalsHint" runat="server" Visible="false">
+                        <span class="summary-item"><i class="fas fa-info-circle"></i> เลือกช่วงวันเข้าพักเพื่อดูยอดรวม</span>
+                    </asp:PlaceHolder>
                 </div>
             </div>
 
-            <div style="overflow-x: auto;">
+            <%-- เลื่อนภายในกล่อง (ทั้งแนวนอน/แนวตั้ง) — หัวตาราง sticky ทำงานได้เพราะกล่องนี้เป็นตัวเลื่อน --%>
+            <div class="table-scroll">
                 <asp:GridView ID="gvReservations" runat="server" AutoGenerateColumns="false"
                     CssClass="reservation-table" EmptyDataText=""
                     OnRowDataBound="gvReservations_RowDataBound"
@@ -752,13 +818,14 @@
                             <ItemTemplate>
                                 <div class="price-total"><%# String.Format("{0:N0}", Eval("TotalPrice")) %></div>
                                 <div class="price-deposit">มัดจำ: <%# String.Format("{0:N0}", Eval("Deposit")) %></div>
-                                <div class="price-remain">ค้าง: <%# String.Format("{0:N0}", Convert.ToDecimal(Eval("TotalPrice")) - Convert.ToDecimal(Eval("Deposit") ?? 0)) %></div>
+                                <div class="price-remain"><%# RemainHtml(Eval("BalDue"), Eval("IsPostponedRow")) %></div>
                             </ItemTemplate>
                         </asp:TemplateField>
 
                         <asp:TemplateField HeaderText="สถานะ">
                             <ItemTemplate>
                                 <asp:Label ID="lblStatus" runat="server" CssClass="status-badge"></asp:Label>
+                                <asp:Literal ID="litBadges" runat="server"></asp:Literal>
                             </ItemTemplate>
                         </asp:TemplateField>
 

@@ -84,6 +84,16 @@ namespace Take_Time_BangPhra.Services
                     }
                 }
 
+                // Hook: แก้ข้อมูลลูกค้าผ่านหน้าแอดมิน → enqueue sync ผู้ติดต่อไป NextAcc
+                // (background queue; กลืน error ทุกชนิด — ห้ามพังการเซฟลูกค้า)
+                // ใช้ conn string จาก config ก่อน — SqlConnection.ConnectionString หลัง Open()
+                // ถูกตัด password ทิ้ง (Persist Security Info=false) ส่งต่อไปเปิด connection ใหม่ไม่ได้
+                string accSyncConnStr =
+                    System.Configuration.ConfigurationManager.ConnectionStrings["TaketimeConnectionString"]?.ConnectionString
+                    ?? _conn.ConnectionString;
+                Take_Time_BangPhra.Integration.AccountingSyncService.TryEnqueueCustomerContactSync(
+                    accSyncConnStr, customer.MobilePhone);
+
                 return new CustomerUpsertResult
                 {
                     Success = true,
