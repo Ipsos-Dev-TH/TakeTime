@@ -327,6 +327,26 @@
             .toolbar .search-input { max-width: none; }
             .modal-content { width: 95%; padding: 16px; }
         }
+        /* GridView2.css ตั้ง ".mydatagrid a" = ตัวขาวพื้นใส และ ".mydatagrid span" = กล่องเทา (สำหรับปุ่มเปลี่ยนหน้า)
+           ⇒ ทับลิงก์/ป้ายในแถวข้อมูลจนมองไม่เห็น — คืนค่าเฉพาะแถวข้อมูล (แถวเปลี่ยนหน้า tr.pager คงเดิม) */
+        .mydatagrid tr:not(.pager) td a { background-color: transparent; padding: 0; color: #1f5f99; font-weight: bold; }
+        .mydatagrid tr:not(.pager) td a:hover { background-color: transparent; color: #12406b; text-decoration: underline; }
+        .mydatagrid tr:not(.pager) td span { background-color: transparent; padding: 0; color: inherit; }
+        .mydatagrid tr:not(.pager) td a.btn-edit { background-color: #337ab7; color: #fff; padding: 6px 14px; border-radius: 4px; text-decoration: none; }
+        .mydatagrid tr:not(.pager) td a.btn-edit:hover { background-color: #286090; color: #fff; text-decoration: none; }
+        .mydatagrid tr:not(.pager) td a.phone-link { color: #1f5f99; font-weight: normal; }
+        .mydatagrid tr:not(.pager) td span.muted { color: #6b7782; }
+        .mydatagrid tr:not(.pager) td span.age-normal { color: #333; font-weight: bold; }
+        .mydatagrid tr:not(.pager) td span.age-amber { color: #a37800; font-weight: bold; }
+        .mydatagrid tr:not(.pager) td span.age-orange { color: #d35400; font-weight: bold; }
+        .mydatagrid tr:not(.pager) td span.age-red { color: #c0392b; font-weight: bold; }
+        .mydatagrid tr:not(.pager) td span.remark-text { color: #444; }
+        .mydatagrid tr:not(.pager) td span.reason-text { color: #666; }
+        .mydatagrid tr:not(.pager) td span.reschedule-count { background-color: #5bc0de; color: #fff; padding: 2px 8px; border-radius: 10px; }
+        .mydatagrid tr:not(.pager) td span.badge { color: #fff; padding: 2px 8px; border-radius: 10px; }
+        .mydatagrid tr:not(.pager) td span.badge-red { background-color: #d9534f; }
+        .mydatagrid tr:not(.pager) td span.badge-orange { background-color: #f0ad4e; }
+        .mydatagrid tr:not(.pager) td span.badge-grey { background-color: #888; }
     </style>
 
     <nav class="as-crumb" aria-label="เส้นทาง">
