@@ -570,6 +570,10 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    ตั้งค่า: `Admin/Settings/SlipCheckSettings` (สถานะ/โควต้าเดือนนี้/บัญชีรับเงิน/ทดสอบด้วยสลิป). **Deploy:** NuGet restore ZXing.Net 0.16.11; ติดตั้ง Tesseract 5
    (UB Mannheim, เลือกภาษา Thai) ที่ `C:\Program Files\Tesseract-OCR` หรือวาง `tesseract.exe`+DLL ที่ `~/App_Data/tesseract` และ `tha/eng.traineddata`
    (tessdata_fast) ที่ `~/App_Data/tessdata`; App Pool identity ต้อง execute ได้ + เขียน `%TEMP%`; VC++ 2015-2022 x64 (ตัวติดตั้งใส่ให้). ไม่มีอะไรเลย = ข้ามการตรวจ.
+   - **สลิปซ้ำบอกที่ใช้ + วิธีจัดการ (พ.ย. 2026):** `SlipPriorUse` (SlipVerifyModels.cs) จาก `LoadPriorUseDetail` (best-effort แยกจากคิวรีตรวจซ้ำ): การจอง/ผู้จอง/วันเข้าพัก/สถานะ/
+     ใบเสร็จ/ยอดที่ลง/เวลา + `SameAsCurrent` (ใช้กับการจองนี้เองแล้ว = "บันทึกไปแล้ว ไม่ต้องซ้ำ") · `StaffHtml` แผงขั้นตอนต่อไป (ส่งผิดใบ / ลงผิดการจอง → แก้/ใบลดหนี้ที่การจองเดิม /
+     จ่ายหลายการจองต้องแบ่งตั้งแต่ครั้งแรก / การจองเดิมยกเลิก) + ลิงก์เปิดการจองนั้น — ต่อท้าย card ในสาขาพนักงานของ `SlipFirstVerdict` เท่านั้น (ลูกค้าไม่เห็นชื่อคนอื่น);
+     `Message` ไม่มีชื่อลูกค้า.
    - **ยอดล็อกตามสลิป (PHASE19_36):** `SlipVerificationService.GetAmountLock` (ที่เดียว) = SlipOK มีข้อมูลธนาคาร (ไม่นับ 1012) หรือ OCR ในเครื่อง (อ่านแบบไม่อิงยอดที่กรอก)
      ≥ `SlipVerify_Lock_Min_Confidence` (85) → ยอดที่บันทึก = ยอดสลิปเสมอ: UI ใส่ให้+readonly (`SlipAmountLockUi`, `Scripts/slip-amount-lock.js`; Reserve หลังปุ่มอัปโหลด,
      MakePayment AJAX `X-Slip-Preview`) และเซิร์ฟเวอร์บังคับซ้ำ (`VerifyWithLock` ใน Reserve `RunSlipGate`/`GateUploadedSlip`, `Decide` ตั้ง UseAmount=ยอดสลิป +

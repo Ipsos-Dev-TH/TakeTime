@@ -50,6 +50,13 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
         /// customerMode = ลูกค้าจองเอง (IsCustomerReserveMode) · due = ยอดค้าง/ยอดรวมของหน้า (แสดง "รับเกิน") ·
         /// canOverride = SlipVerificationService.CanOverrideCurrentUser() ของผู้ใช้หน้านี้
         /// </summary>
+        /// <summary>ลิงก์เปิดหน้าแก้ไขการจอง (ใช้ในแผงสลิปซ้ำ) — ไม่มี HttpContext = ไม่ทำลิงก์</summary>
+        private static string ReserveUrl(long id)
+        {
+            try { return VirtualPathUtility.ToAbsolute("~/Reserve") + "?command=edit&id=" + id; }
+            catch { return null; }
+        }
+
         public static SlipFirstVerdict Build(SlipVerifyResult r, SlipAmountLock lkIn, bool customerMode, decimal? due, bool canOverride)
         {
             var v = new SlipFirstVerdict();
@@ -121,6 +128,9 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
             v.StaffBranch = true;
             v.Lock = lk;
             v.CardHtml = r.ToHtml();
+            // สลิปซ้ำ: บอกให้ชัดว่าใช้ไปที่การจองไหน (ผู้จอง/วันเข้าพัก/ใบเสร็จ) + ขั้นตอนต่อไป — เฉพาะพนักงาน
+            if (r.Status == SlipVerifyStatus.Duplicate && !r.IsAllocationContinuation && r.PriorUse != null)
+                v.CardHtml += r.PriorUse.StaffHtml(ReserveUrl);
             bool problem = r.IsBlocking;
             bool locked = lk != null && lk.Locked;
             if (locked)
@@ -150,7 +160,10 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
             bool dupStop = r.Status == SlipVerifyStatus.Duplicate && !splitRemainder;
             bool lockedNow = locked && !splitRemainder;
             v.State = dupStop ? Stop : lockedNow ? Locked : Edit;
-            v.Message = dupStop ? "⛔ สลิปนี้ถูกใช้ชำระไปแล้ว — แนบสลิปใบอื่น"
+            v.Message = dupStop ? (r.PriorUse != null && r.PriorUse.SameAsCurrent
+                    ? "⛔ สลิปนี้บันทึกไปแล้วในการจองนี้ — ไม่ต้องแนบซ้ำ"
+                    : "⛔ สลิปนี้ใช้ไปแล้ว" + (r.PriorUse != null && r.PriorUse.IsReservation ? "กับการจอง #" + r.PriorUse.SourceId.Value : "")
+                      + " — ดูวิธีจัดการด้านล่าง")
                 : splitRemainder ? "✏️ สลิปนี้แบ่งใช้แล้ว — กรอกยอดส่วนของการจองนี้"
                 : problem ? "⚠️ ตรวจพบปัญหา — ดูรายละเอียดใต้รูปสลิป"
                 : lockedNow ? (lk.Source == SlipVerifySource.SlipOk

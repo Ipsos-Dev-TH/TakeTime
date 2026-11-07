@@ -319,6 +319,7 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
             if (prior != null)
             {
                 r.DuplicateOfSlipId = prior.SlipId;
+                r.PriorUse = LoadPriorUseDetail(prior, ctx);
                 decimal slipTotal = prior.SlipAmount ?? r.Amount ?? 0m;
                 if (prior.HasAllocation && slipTotal > 0m)
                 {
@@ -335,9 +336,13 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
                 }
                 r.Status = SlipVerifyStatus.Duplicate;
                 r.CanOverride = false;
-                r.Message = "สลิปนี้ (อ้างอิง " + r.TransRef + ") เคยใช้แล้วกับ " + prior.Describe
+                bool same = r.PriorUse != null && r.PriorUse.SameAsCurrent;
+                r.Message = (same
+                        ? "สลิปนี้ (อ้างอิง " + r.TransRef + ") บันทึกไปแล้วใน" + (r.PriorUse != null ? r.PriorUse.Describe() : prior.Describe)
+                          + " — ยอดนี้รับไว้แล้ว ไม่ต้องบันทึกซ้ำ"
+                        : "สลิปนี้ (อ้างอิง " + r.TransRef + ") เคยใช้แล้วกับ " + (r.PriorUse != null ? r.PriorUse.Describe() : prior.Describe))
                     + (r.AllocationRemaining.HasValue ? " — ยอดคงเหลือของสลิป " + r.AllocationRemaining.Value.ToString("N2") + " บาท ไม่พอ" : "")
-                    + " · ห้ามใช้สลิปเดิมซ้ำ";
+                    + (same ? "" : " · ห้ามใช้สลิปเดิมซ้ำ");
                 return Finish(r);
             }
 
@@ -566,6 +571,9 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
         private class PriorUse
         {
             public long? SlipId;
+            public string SourceType = "RESERVATION";
+            public long? SourceId;
+            public string ReceiptId;
             public decimal? SlipAmount;
             public decimal Allocated;
             public bool HasAllocation;
@@ -598,9 +606,12 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
                             {
                                 if (rd.Read())
                                 {
+                                    long rid;
                                     var p = new PriorUse
                                     {
                                         SlipId = Convert.ToInt64(rd["ID"]),
+                                        SourceId = long.TryParse(Convert.ToString(rd["Reservation_ID"]), out rid) ? (long?)rid : null,
+                                        ReceiptId = rd["Rcpt"] == DBNull.Value ? null : Convert.ToString(rd["Rcpt"]),
                                         SlipAmount = rd["Slip_Amount"] == DBNull.Value ? (decimal?)null : Convert.ToDecimal(rd["Slip_Amount"]),
                                         Describe = "การจอง #" + Convert.ToString(rd["Reservation_ID"])
                                             + (rd["Rcpt"] == DBNull.Value ? "" : " ใบเสร็จ " + Convert.ToString(rd["Rcpt"]))
@@ -640,7 +651,15 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
                             using (var rd = cmd.ExecuteReader())
                             {
                                 if (rd.Read())
-                                    return new PriorUse { Describe = SourceThai(Convert.ToString(rd["Source_Type"])) + " #" + Convert.ToString(rd["Source_ID"]) };
+                                {
+                                    long sid;
+                                    return new PriorUse
+                                    {
+                                        SourceType = Convert.ToString(rd["Source_Type"]),
+                                        SourceId = long.TryParse(Convert.ToString(rd["Source_ID"]), out sid) ? (long?)sid : null,
+                                        Describe = SourceThai(Convert.ToString(rd["Source_Type"])) + " #" + Convert.ToString(rd["Source_ID"])
+                                    };
+                                }
                             }
                         }
                     }
@@ -648,6 +667,60 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
             }
             catch (Exception ex) { Log("FindPriorUse: " + ex.Message); }
             return null;
+        }
+
+        /// <summary>
+        /// รายละเอียดการใช้ครั้งก่อนให้พนักงาน (ผู้จอง/วันเข้าพัก/สถานะ/ใบเสร็จ/ยอด/เวลา) — best-effort แยกจากคิวรีตรวจซ้ำ
+        /// (คอลัมน์ไม่ตรง/ล้ม = ได้แค่เลขการจอง ไม่กระทบการตัดสินว่าซ้ำ)
+        /// </summary>
+        private static SlipPriorUse LoadPriorUseDetail(PriorUse p, SlipVerifyContext ctx)
+        {
+            var d = new SlipPriorUse
+            {
+                SlipId = p.SlipId, SourceType = p.SourceType ?? "RESERVATION", SourceId = p.SourceId,
+                ReceiptId = p.ReceiptId, SlipAmount = p.SlipAmount
+            };
+            d.SameAsCurrent = d.IsReservation && ctx != null && (ctx.SourceType ?? "RESERVATION") == "RESERVATION"
+                              && ctx.SourceId.HasValue && ctx.SourceId.Value == d.SourceId.Value;
+            if (!d.IsReservation) return d;
+            try
+            {
+                using (var con = new SqlConnection(ConnStr))
+                {
+                    con.Open();
+                    using (var cmd = new SqlCommand(@"
+                        SELECT r.CheckinDate, r.CheckoutDate, r.Status, c.Name
+                          FROM Reservation r LEFT JOIN Customer c ON c.MobilePhone = r.Customer_MobilePhone
+                         WHERE r.ID = @rid", con))
+                    {
+                        cmd.Parameters.AddWithValue("@rid", d.SourceId.Value);
+                        using (var rd = cmd.ExecuteReader())
+                            if (rd.Read())
+                            {
+                                d.CheckIn = rd[0] == DBNull.Value ? (DateTime?)null : Convert.ToDateTime(rd[0]);
+                                d.CheckOut = rd[1] == DBNull.Value ? (DateTime?)null : Convert.ToDateTime(rd[1]);
+                                d.ReservationStatus = rd[2] == DBNull.Value ? null : rd[2].ToString();
+                                d.GuestName = rd[3] == DBNull.Value ? null : rd[3].ToString();
+                            }
+                    }
+                    if (p.SlipId.HasValue)
+                        using (var cmd = new SqlCommand("SELECT UploadedDate FROM Payment_Slips WHERE ID = @id", con))
+                        {
+                            cmd.Parameters.AddWithValue("@id", p.SlipId.Value);
+                            object v = cmd.ExecuteScalar();
+                            if (v != null && v != DBNull.Value) d.UsedAt = Convert.ToDateTime(v);
+                        }
+                    if (!string.IsNullOrEmpty(d.ReceiptId))
+                        using (var cmd = new SqlCommand("SELECT TOP 1 Total_Amount FROM Account_Receipt WHERE CAST(ID AS NVARCHAR(50)) = @id", con))
+                        {
+                            cmd.Parameters.AddWithValue("@id", d.ReceiptId);
+                            object v = cmd.ExecuteScalar();
+                            if (v != null && v != DBNull.Value) d.UsedAmount = Convert.ToDecimal(v);
+                        }
+                }
+            }
+            catch (Exception ex) { Log("LoadPriorUseDetail: " + ex.Message); }
+            return d;
         }
 
         private static string SourceThai(string st)

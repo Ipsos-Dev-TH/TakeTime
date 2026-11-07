@@ -189,6 +189,8 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
         public string OcrRaw;
         public string FileHash;
         public long? DuplicateOfSlipId;
+        /// <summary>รายละเอียดการใช้สลิปครั้งก่อน (การจอง/ผู้เข้าพัก/วันเข้าพัก/ใบเสร็จ) — แสดงเฉพาะพนักงาน (มีชื่อลูกค้าคนอื่น)</summary>
+        public SlipPriorUse PriorUse;
         /// <summary>ใช้ยอดคงเหลือของสลิปที่แบ่งไว้ (สลิปเดิม = DuplicateOfSlipId)</summary>
         public bool IsAllocationContinuation;
         public decimal? AllocationRemaining;
@@ -286,6 +288,100 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
         }
 
         private static string E(string s) => HttpUtility.HtmlEncode(s ?? "");
+    }
+
+    /// <summary>
+    /// สลิปซ้ำ: เคยใช้กับอะไร + ควรทำอะไรต่อ (เฉพาะพนักงาน — มีชื่อ/วันเข้าพักของลูกค้าอื่น ห้ามแสดงในช่องทางลูกค้า)
+    /// </summary>
+    public class SlipPriorUse
+    {
+        public long? SlipId;
+        public string SourceType = "RESERVATION";   // RESERVATION | ACTIVITY | ROOM_SERVICE
+        public long? SourceId;                       // Reservation_ID / Source_ID
+        public string ReceiptId;
+        public decimal? SlipAmount;                  // ยอดสลิปที่ธนาคารยืนยันตอนใช้ครั้งก่อน
+        public decimal? UsedAmount;                  // ยอดที่ลงไว้กับการจองนั้น (ใบเสร็จ)
+        public DateTime? UsedAt;
+        public string GuestName;
+        public DateTime? CheckIn, CheckOut;
+        public string ReservationStatus;
+        public bool SameAsCurrent;                   // ใช้กับ "การจองนี้เอง" ไปแล้ว
+
+        public bool IsReservation => SourceType == "RESERVATION" && SourceId.HasValue;
+        public bool PriorCancelled => (ReservationStatus ?? "").StartsWith("ยกเลิก", StringComparison.Ordinal);
+
+        private static string E(string s) => HttpUtility.HtmlEncode(s ?? "");
+        private static string D(DateTime? d, string fmt) => d.HasValue ? d.Value.ToString(fmt, new CultureInfo("th-TH")) : "";
+
+        /// <summary>ข้อความสั้นแบบไม่มีชื่อลูกค้า (ใช้ใน Message/Telegram/log)</summary>
+        public string Describe()
+        {
+            if (!IsReservation) return SourceThai(SourceType) + (SourceId.HasValue ? " #" + SourceId.Value : "");
+            return (SameAsCurrent ? "การจองนี้เอง (#" + SourceId.Value + ")" : "การจอง #" + SourceId.Value)
+                + (string.IsNullOrEmpty(ReceiptId) ? "" : " ใบเสร็จ " + ReceiptId)
+                + (SlipId.HasValue ? " (สลิป #" + SlipId.Value + ")" : "");
+        }
+
+        public static string SourceThai(string st)
+        {
+            switch (st)
+            {
+                case "ACTIVITY": return "การจองกิจกรรม";
+                case "ROOM_SERVICE": return "ออเดอร์รูมเซอร์วิส";
+                case "RESERVATION": return "การจอง";
+                default: return st ?? "";
+            }
+        }
+
+        /// <summary>แผงรายละเอียด + ขั้นตอนต่อไป สำหรับพนักงาน. reserveUrl(id) = ลิงก์เปิดการจอง (null = ไม่ทำลิงก์)</summary>
+        public string StaffHtml(Func<long, string> reserveUrl)
+        {
+            var sb = new StringBuilder();
+            sb.Append("<div class='slip-dup-detail' style='margin-top:8px;padding:10px 12px;border-radius:8px;background:#fff;border:1px solid #ef9a9a;"
+                + "font-size:13.5px;line-height:1.7;max-width:560px;'>");
+            sb.Append("<b>📌 ใช้ไปแล้วที่: ");
+            if (IsReservation)
+            {
+                string label = (SameAsCurrent ? "การจองนี้เอง " : "การจอง ") + "#" + SourceId.Value;
+                string url = SameAsCurrent || reserveUrl == null ? null : reserveUrl(SourceId.Value);
+                sb.Append(url == null ? E(label) : "<a href='" + E(url) + "' target='_blank' rel='noopener'>" + E(label) + " ↗</a>");
+            }
+            else sb.Append(E(SourceThai(SourceType) + (SourceId.HasValue ? " #" + SourceId.Value : "")));
+            sb.Append("</b><br/>");
+            if (!string.IsNullOrEmpty(GuestName)) sb.Append("ผู้จอง: ").Append(E(GuestName)).Append(" · ");
+            if (CheckIn.HasValue) sb.Append("เข้าพัก ").Append(E(D(CheckIn, "dd/MM/yyyy"))).Append(CheckOut.HasValue ? "–" + E(D(CheckOut, "dd/MM/yyyy")) : "").Append(" · ");
+            if (!string.IsNullOrEmpty(ReservationStatus)) sb.Append("สถานะ: ").Append(E(ReservationStatus));
+            sb.Append("<br/>");
+            if (!string.IsNullOrEmpty(ReceiptId)) sb.Append("ใบเสร็จ ").Append(E(ReceiptId)).Append(" · ");
+            if (UsedAmount.HasValue) sb.Append("ลงยอดไว้ ").Append(UsedAmount.Value.ToString("N2")).Append(" บาท · ");
+            if (UsedAt.HasValue) sb.Append("บันทึกเมื่อ ").Append(E(D(UsedAt, "dd/MM/yyyy HH:mm")));
+            if (SlipId.HasValue) sb.Append(" · สลิป #").Append(SlipId.Value);
+
+            sb.Append("<div style='margin-top:6px;font-weight:700'>จัดการต่ออย่างไร</div><ol style='margin:2px 0 0 18px;padding:0'>");
+            if (SameAsCurrent)
+            {
+                sb.Append("<li>ยอดของสลิปนี้<b>นับเป็นเงินรับของการจองนี้แล้ว</b> — ไม่ต้องบันทึกซ้ำ (ดูในประวัติการชำระเงินด้านบน)</li>");
+                sb.Append("<li>ถ้าลูกค้า<b>โอนเพิ่มจริง</b> → ขอสลิปของการโอนครั้งใหม่ (เลขอ้างอิงจะไม่ซ้ำกับใบนี้)</li>");
+                sb.Append("<li>ถ้าครั้งก่อน<b>ลงยอดผิด</b> → ใช้ส่วน \"แก้ยอดรับเงินที่บันทึกผิด\" ใต้ประวัติการชำระเงิน (เจ้าของ/ผู้ดูแลบัญชี)</li>");
+            }
+            else if (IsReservation)
+            {
+                sb.Append("<li>ลูกค้า<b>ส่งสลิปผิดใบ</b> (เป็นสลิปของการจองนั้น) → ขอสลิปของการโอนครั้งนี้</li>");
+                sb.Append("<li>ครั้งก่อน<b>ลงผิดการจอง</b> (เงินนี้เป็นของการจองนี้จริง) → เปิดการจอง #").Append(SourceId.Value)
+                  .Append(" ยกเลิก/แก้ใบเสร็จ").Append(string.IsNullOrEmpty(ReceiptId) ? "" : " " + E(ReceiptId))
+                  .Append(" ก่อน (ใบที่ส่งบัญชีแล้วต้องออกใบลดหนี้) แล้วกลับมาแนบสลิปนี้ใหม่</li>");
+                if (SlipAmount.HasValue && UsedAmount.HasValue && SlipAmount.Value - UsedAmount.Value > 1m)
+                    sb.Append("<li>โอนครั้งเดียว<b>จ่ายหลายการจอง</b> (สลิป ").Append(SlipAmount.Value.ToString("N2")).Append(" แต่ลงไว้ ")
+                      .Append(UsedAmount.Value.ToString("N2")).Append(") → ต้องแบ่งสลิปตั้งแต่ตอนบันทึกที่การจอง #").Append(SourceId.Value)
+                      .Append(" — ให้เจ้าของ/ผู้ดูแลบัญชีแก้ที่การจองนั้นก่อน</li>");
+                if (PriorCancelled)
+                    sb.Append("<li>การจองนั้น<b>ยกเลิกแล้ว</b> — ถ้าลูกค้าขอย้ายเงินมาการจองนี้ ให้คืน/ย้ายยอดผ่านใบลดหนี้ของการจองนั้นก่อน ห้ามแนบสลิปซ้ำ</li>");
+            }
+            else
+                sb.Append("<li>ขอสลิปของการโอนครั้งนี้ — ถ้าเงินนี้ใช้ผิดรายการ ให้แก้ที่").Append(E(SourceThai(SourceType))).Append(" นั้นก่อน</li>");
+            sb.Append("<li>สงสัยว่าใช้สลิปซ้ำโดยเจตนา → แจ้งเจ้าของ (ระบบส่งแจ้งเตือนแล้ว)</li></ol></div>");
+            return sb.ToString();
+        }
     }
 
     /// <summary>ผลการตัดสินที่หน้า (ไป/หยุด/พักรอพนักงาน)</summary>
