@@ -306,6 +306,13 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
         public DateTime? CheckIn, CheckOut;
         public string ReservationStatus;
         public bool SameAsCurrent;                   // ใช้กับ "การจองนี้เอง" ไปแล้ว
+        /// <summary>มีการลงรับเงินจากสลิปนี้แล้วจริง (ผูกใบเสร็จ หรือมี Payment_History) — false = แนบไว้เฉย ๆ เช่นลูกค้าแนบรอตรวจ</summary>
+        public bool Recorded = true;
+        public string VerificationStatus;            // PENDING / APPROVED / …
+        public decimal? ClaimedAmount;
+
+        /// <summary>สลิปแนบไว้กับการจองนี้แล้วแต่ยังไม่ได้ลงรับเงิน (มัดจำยังเป็น 0) — พนักงานกดบันทึก = อนุมัติสลิปเดิมให้</summary>
+        public bool CanAdopt => SameAsCurrent && !Recorded && SlipId.HasValue;
 
         public bool IsReservation => SourceType == "RESERVATION" && SourceId.HasValue;
         public bool PriorCancelled => (ReservationStatus ?? "").StartsWith("ยกเลิก", StringComparison.Ordinal);
@@ -359,7 +366,15 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
             if (SlipId.HasValue) sb.Append(" · สลิป #").Append(SlipId.Value);
 
             sb.Append("<div style='margin-top:6px;font-weight:700'>จัดการต่ออย่างไร</div><ol style='margin:2px 0 0 18px;padding:0'>");
-            if (SameAsCurrent)
+            if (CanAdopt)
+            {
+                sb.Append("<li>สลิปนี้<b>แนบไว้แล้วแต่ยังไม่ได้ลงรับเงิน</b>")
+                  .Append(string.IsNullOrEmpty(VerificationStatus) ? "" : " (สถานะ " + E(VerificationStatus) + ")")
+                  .Append(" — <b>กดบันทึก</b> ระบบจะอนุมัติสลิป #").Append(SlipId.Value)
+                  .Append(" ลงรับเงิน ออกใบเสร็จ อัปเดตยอดมัดจำ และส่งบัญชีให้เอง (ไม่สร้างสลิปซ้ำ)</li>");
+                sb.Append("<li>หรืออนุมัติที่หน้า \"ตรวจสลิป\" ก็ได้ผลเท่ากัน</li>");
+            }
+            else if (SameAsCurrent)
             {
                 sb.Append("<li>ยอดของสลิปนี้<b>นับเป็นเงินรับของการจองนี้แล้ว</b> — ไม่ต้องบันทึกซ้ำ (ดูในประวัติการชำระเงิน)</li>");
                 sb.Append("<li>ไม่ได้รับเงินเพิ่ม → <b>เอาติ๊ก \"มัดจำเพิ่ม\" ออก</b> แล้วบันทึกการแก้ไขตามปกติ (ไม่ต้องแนบสลิป)</li>");

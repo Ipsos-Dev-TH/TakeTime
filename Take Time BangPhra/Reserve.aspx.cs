@@ -7965,6 +7965,9 @@ namespace Take_Time_BangPhra
                 _slipVerify = r;
 
                 bool customer = IsCustomerReserveMode && command == "reserve";
+                // สลิปที่แนบไว้กับการจองนี้แล้วแต่ยังไม่ได้ลงรับเงิน (เช่น ลูกค้าแนบรอตรวจ มัดจำยัง 0) → อนุมัติสลิปเดิมแทนการสร้างใหม่
+                if (!customer && r.PriorUse != null && r.PriorUse.CanAdopt)
+                    return TryAdoptPendingSlip(r, expected);
                 var lk = r.AmountLock ?? _slipLock ?? Take_Time_BangPhra.Payments.SlipCheck.SlipAmountLock.Inactive();
                 bool forceHold = false;
                 if (customer && Take_Time_BangPhra.Payments.SlipCheck.SlipVerificationService.AmountLockActive)

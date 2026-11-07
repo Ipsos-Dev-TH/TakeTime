@@ -157,9 +157,19 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
                 v.CardHtml += "<div class='slip-lock-msg warn'>✏️ สลิปนี้แบ่งใช้กับการจองอื่นแล้ว — กรอกยอดของการจองนี้ไม่เกินยอดคงเหลือ "
                     + r.AllocationRemaining.Value.ToString("N2") + " บาท</div>";
             // สลิปก่อนยอด (หน้าจอง): จำผลไว้ให้หน้าเปิดช่องยอดตามผล — ซ้ำ (ไม่มียอดคงเหลือให้แบ่ง) = หยุด
-            bool dupStop = r.Status == SlipVerifyStatus.Duplicate && !splitRemainder;
+            // สลิปของการจองนี้ที่ยังไม่ได้ลงรับเงิน → ไม่หยุด: กดบันทึก = อนุมัติสลิปเดิม (Reserve.RunSlipGate → TryAdoptPendingSlip)
+            bool adopt = r.Status == SlipVerifyStatus.Duplicate && r.PriorUse != null && r.PriorUse.CanAdopt;
+            bool dupStop = r.Status == SlipVerifyStatus.Duplicate && !splitRemainder && !adopt;
             bool lockedNow = locked && !splitRemainder;
             v.State = dupStop ? Stop : lockedNow ? Locked : Edit;
+            if (adopt)
+            {
+                v.State = lockedNow ? Locked : Edit;
+                v.Message = "✅ สลิปนี้แนบไว้แล้วแต่ยังไม่ได้ลงรับเงิน — กดบันทึกเพื่อลงรับเงิน"
+                    + (r.Amount.HasValue ? " " + r.Amount.Value.ToString("N2") + " บาท" : "");
+                v.Tone = "ok";
+                return v;
+            }
             bool sameBooking = dupStop && r.PriorUse != null && r.PriorUse.SameAsCurrent;
             v.Message = dupStop ? (sameBooking
                     ? "ℹ️ สลิปนี้รับเงินไว้แล้วในการจองนี้" + (r.PriorUse.UsedAmount.HasValue ? " (" + r.PriorUse.UsedAmount.Value.ToString("N2") + " บาท)" : "")

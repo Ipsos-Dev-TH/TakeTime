@@ -2,6 +2,8 @@ using System;
 using System.Globalization;
 using System.Linq;
 using System.Text;
+using System.Collections.Generic;
+using System.Web;
 using System.Web.UI.WebControls;
 using Take_Time_BangPhra.Integration;
 using Take_Time_BangPhra.Payments;
@@ -65,6 +67,66 @@ namespace Take_Time_BangPhra
             {
                 pnlAmountFix.Visible = false;
                 try { new code().Logs(conn, "PaymentAmountFix", "AmountFixLoad: " + ex.Message, Session["User"]?.ToString()); } catch { }
+            }
+        }
+
+        /// <summary>
+        /// พนักงานแนบสลิปที่ "แนบไว้กับการจองนี้แล้วแต่ยังไม่ได้ลงรับเงิน" (เช่น ลูกค้าแนบตอนจอง รอตรวจ → มัดจำ 0) แล้วกดบันทึก
+        /// → อนุมัติสลิปเดิมผ่าน <see cref="PaymentService.ApproveReservationSlip(long,int?)"/> (ลงรับเงินตามยอดธนาคาร + ใบเสร็จ + มัดจำ +
+        /// ยืนยันการจอง + คิวบัญชี) แทนการสร้างแถวสลิป/ใบเสร็จใหม่ (ซ้ำกับแถวเดิม) · คืน false เสมอ = ไม่ทำเส้นบันทึกปกติต่อ แล้วโหลดหน้าใหม่
+        /// </summary>
+        private bool TryAdoptPendingSlip(Take_Time_BangPhra.Payments.SlipCheck.SlipVerifyResult r, decimal typed)
+        {
+            long slipId = r.PriorUse.SlipId.Value;
+            string who = Session["User"]?.ToString() ?? "SYSTEM";
+            try
+            {
+                // ยอดที่ลงรับ: ธนาคารยืนยัน → ยอดนั้น · ไม่งั้นยอดที่พนักงานกรอก (อนุมัติจะตรวจสลิปซ้ำกับยอดนี้อีกชั้น)
+                decimal amount = r.BankConfirmed && r.Amount.HasValue && r.Amount.Value > 0m ? r.Amount.Value
+                               : r.AmountLocked ? r.AmountLock.Amount.Value : typed;
+                if (amount <= 0m)
+                {
+                    ShowUserError("slipAdopt", "กรอกยอดตามสลิปก่อน แล้วกดบันทึกอีกครั้ง", SlipAmountBox(Request.QueryString["command"] ?? ""));
+                    return false;
+                }
+                var p = new Dictionary<string, object> { { "@id", slipId }, { "@amt", amount } };
+                // ยังไม่มียอดที่แจ้ง → ใช้ยอดนี้ · สถานะไม่ใช่ PENDING แต่ไม่เคยลงเงิน (อนุมัติค้างครึ่งทาง) → คืนเป็น PENDING ให้อนุมัติได้
+                code2.DatabaseInsertSafe(conn,
+                    @"UPDATE Payment_Slips SET Claimed_Amount = @amt
+                       WHERE ID = @id AND ISNULL(Claimed_Amount, 0) <= 0
+                         AND NOT EXISTS (SELECT 1 FROM Payment_History ph WHERE ph.PaymentSlip_ID = @id)", p);
+                code2.DatabaseInsertSafe(conn,
+                    @"UPDATE Payment_Slips SET VerificationStatus = 'PENDING', IsVerified = 0
+                       WHERE ID = @id AND ISNULL(VerificationStatus, '') NOT IN ('PENDING', 'REJECTED')
+                         AND ISNULL(CAST(Account_Receipt_ID AS NVARCHAR(50)), '') IN ('', '0')
+                         AND NOT EXISTS (SELECT 1 FROM Payment_History ph WHERE ph.PaymentSlip_ID = @id)",
+                    new Dictionary<string, object> { { "@id", slipId } });
+
+                int adminId = Session["ID"] != null ? Convert.ToInt32(Session["ID"]) : 0;
+                PaymentResult pr = new PaymentService(conn).ApproveReservationSlip(slipId, adminId > 0 ? (int?)adminId : null);
+                if (pr == null || !pr.Success)
+                {
+                    string why = pr == null ? "ข้อมูลสลิปไม่ครบ (ไม่มียอดที่แจ้ง/ไม่ผูกการจอง)" : pr.Message;
+                    ShowSlipCheck(r);
+                    ShowUserError("slipAdopt", "ลงรับเงินจากสลิป #" + slipId + " ไม่สำเร็จ — " + why
+                        + "\nลองอนุมัติที่หน้า \"ตรวจสลิป\" หรือแจ้งผู้ดูแลบัญชี", FileUpload1);
+                    code2.Logs(conn, "SlipVerify", "Reserve: อนุมัติสลิปเดิม #" + slipId + " ไม่สำเร็จ — " + why, who);
+                    return false;
+                }
+                try { if (System.IO.File.Exists(SfTempSlipPath())) System.IO.File.Delete(SfTempSlipPath()); } catch { }
+                code2.Logs(conn, "SlipVerify", "Reserve: ลงรับเงินจากสลิปเดิม #" + slipId + " (แนบไว้แต่ยังไม่ได้ลงเงิน) ยอด "
+                    + amount.ToString("N2") + " ใบเสร็จ " + pr.ReceiptId, who);
+                string msg = "✅ ลงรับเงินจากสลิป #" + slipId + " แล้ว" + (string.IsNullOrEmpty(pr.ReceiptId) ? "" : " · ใบเสร็จ " + pr.ReceiptId)
+                    + "\nยอดมัดจำ/ประวัติการชำระอัปเดตแล้ว (ไม่ได้สร้างสลิปซ้ำ) — ถ้าแก้ข้อมูลอื่นไว้ในหน้านี้ กรุณาแก้อีกครั้ง";
+                ClientScript.RegisterStartupScript(GetType(), "slipAdoptOk",
+                    "alert(" + HttpUtility.JavaScriptStringEncode(msg, true) + ");window.location.replace(window.location.href);", true);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                ShowUserError("slipAdopt", "ลงรับเงินจากสลิปเดิมไม่สำเร็จ: " + ex.Message, FileUpload1);
+                try { code2.Logs(conn, "SlipVerify", "Reserve TryAdoptPendingSlip #" + slipId + ": " + ex.Message, who); } catch { }
+                return false;
             }
         }
 

@@ -573,7 +573,9 @@ with `0`** (helper `AccountingDataMapper.IsJuristicPerson`). In DOCUMENT mode Ne
    - **สลิปซ้ำบอกที่ใช้ + วิธีจัดการ (พ.ย. 2026):** `SlipPriorUse` (SlipVerifyModels.cs) จาก `LoadPriorUseDetail` (best-effort แยกจากคิวรีตรวจซ้ำ): การจอง/ผู้จอง/วันเข้าพัก/สถานะ/
      ใบเสร็จ/ยอดที่ลง/เวลา + `SameAsCurrent` (ใช้กับการจองนี้เองแล้ว = "บันทึกไปแล้ว ไม่ต้องซ้ำ") · `StaffHtml` แผงขั้นตอนต่อไป (ส่งผิดใบ / ลงผิดการจอง → แก้/ใบลดหนี้ที่การจองเดิม /
      จ่ายหลายการจองต้องแบ่งตั้งแต่ครั้งแรก / การจองเดิมยกเลิก) + ลิงก์เปิดการจองนั้น — ต่อท้าย card ในสาขาพนักงานของ `SlipFirstVerdict` เท่านั้น (ลูกค้าไม่เห็นชื่อคนอื่น);
-     `Message` ไม่มีชื่อลูกค้า.
+     `Message` ไม่มีชื่อลูกค้า. **แนบไว้กับการจองนี้แต่ยังไม่ได้ลงเงิน** (`SlipPriorUse.Recorded=false` = ไม่มีใบเสร็จ/Payment_History เช่นลูกค้าแนบรอตรวจ มัดจำ 0 →
+     `CanAdopt`): Status คง Duplicate (เส้นอื่นสร้างแถวซ้ำไม่ได้) แต่ verdict ไม่หยุด · หน้าจองกดบันทึก → `Reserve.TryAdoptPendingSlip` (เติม Claimed_Amount ที่ว่าง,
+     คืน PENDING ถ้าอนุมัติค้าง) → `PaymentService.ApproveReservationSlip` (ใบเสร็จ/มัดจำ/ยืนยันการจอง/คิวบัญชี) → โหลดหน้าใหม่ · ไม่แจ้ง Telegram สลิปซ้ำ.
    - **ยอดล็อกตามสลิป (PHASE19_36):** `SlipVerificationService.GetAmountLock` (ที่เดียว) = SlipOK มีข้อมูลธนาคาร (ไม่นับ 1012) หรือ OCR ในเครื่อง (อ่านแบบไม่อิงยอดที่กรอก)
      ≥ `SlipVerify_Lock_Min_Confidence` (85) → ยอดที่บันทึก = ยอดสลิปเสมอ: UI ใส่ให้+readonly (`SlipAmountLockUi`, `Scripts/slip-amount-lock.js`; Reserve หลังปุ่มอัปโหลด,
      MakePayment AJAX `X-Slip-Preview`) และเซิร์ฟเวอร์บังคับซ้ำ (`VerifyWithLock` ใน Reserve `RunSlipGate`/`GateUploadedSlip`, `Decide` ตั้ง UseAmount=ยอดสลิป +

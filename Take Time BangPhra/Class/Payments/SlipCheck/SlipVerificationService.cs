@@ -337,6 +337,14 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
                 r.Status = SlipVerifyStatus.Duplicate;
                 r.CanOverride = false;
                 bool same = r.PriorUse != null && r.PriorUse.SameAsCurrent;
+                if (r.PriorUse != null && r.PriorUse.CanAdopt && !ctx.CustomerSelfService)
+                {
+                    // แนบไว้กับการจองนี้แต่ยังไม่ได้ลงรับเงิน — ไม่ใช่สลิปซ้ำจริง: หน้าจองกดบันทึก = อนุมัติสลิปเดิม (Status คงเป็น Duplicate กันเส้นอื่นสร้างแถวสลิปซ้ำ)
+                    r.CanOverride = false;
+                    r.Message = "สลิปนี้แนบไว้กับการจองนี้แล้ว (สลิป #" + r.PriorUse.SlipId.Value + ") แต่ยังไม่ได้ลงรับเงิน — กดบันทึกเพื่อลงรับเงิน"
+                        + (r.Amount.HasValue ? " " + r.Amount.Value.ToString("N2") + " บาท" : "") + " จากสลิปนี้";
+                    return Finish(r);
+                }
                 r.Message = (same
                         ? "สลิปนี้ (อ้างอิง " + r.TransRef + ") บันทึกไปแล้วใน" + (r.PriorUse != null ? r.PriorUse.Describe() : prior.Describe)
                           + " — ยอดนี้รับไว้แล้ว ไม่ต้องบันทึกซ้ำ"
@@ -709,6 +717,23 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
                             cmd.Parameters.AddWithValue("@id", p.SlipId.Value);
                             object v = cmd.ExecuteScalar();
                             if (v != null && v != DBNull.Value) d.UsedAt = Convert.ToDateTime(v);
+                        }
+                    // ลงรับเงินจากสลิปนี้แล้วจริงไหม — ไม่มีใบเสร็จและไม่มี Payment_History = แนบไว้เฉย ๆ (เช่น ลูกค้าแนบรอตรวจ มัดจำยัง 0)
+                    if (p.SlipId.HasValue)
+                        using (var cmd = new SqlCommand(@"
+                            SELECT CASE WHEN ISNULL(CAST(ps.Account_Receipt_ID AS NVARCHAR(50)), '') NOT IN ('', '0')
+                                          OR EXISTS (SELECT 1 FROM Payment_History ph WHERE ph.PaymentSlip_ID = ps.ID) THEN 1 ELSE 0 END,
+                                   ISNULL(ps.VerificationStatus, ''), ps.Claimed_Amount
+                              FROM Payment_Slips ps WHERE ps.ID = @id", con))
+                        {
+                            cmd.Parameters.AddWithValue("@id", p.SlipId.Value);
+                            using (var rd = cmd.ExecuteReader())
+                                if (rd.Read())
+                                {
+                                    d.Recorded = Convert.ToInt32(rd[0]) == 1;
+                                    d.VerificationStatus = rd[1].ToString();
+                                    d.ClaimedAmount = rd[2] == DBNull.Value ? (decimal?)null : Convert.ToDecimal(rd[2]);
+                                }
                         }
                     if (!string.IsNullOrEmpty(d.ReceiptId))
                         using (var cmd = new SqlCommand("SELECT TOP 1 Total_Amount FROM Account_Receipt WHERE CAST(ID AS NVARCHAR(50)) = @id", con))
@@ -1948,7 +1973,7 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
             try
             {
                 if (r == null || r.IsAllocationContinuation) return;
-                // แนบสลิปเดิมซ้ำในการจองเดียวกัน (เช่น ติ๊ก "มัดจำเพิ่ม" แล้วเลือกสลิปเก่า) = ไม่ใช่การใช้สลิปซ้ำ — ไม่แจ้งเจ้าของ
+                // แนบสลิปเดิมซ้ำในการจองเดียวกัน (เช่น ติ๊ก "มัดจำเพิ่ม" แล้วเลือกสลิปเก่า / สลิปลูกค้าที่ยังไม่ได้อนุมัติ) = ไม่ใช่การใช้สลิปซ้ำ — ไม่แจ้งเจ้าของ
                 if (r.Status == SlipVerifyStatus.Duplicate && r.PriorUse != null && r.PriorUse.SameAsCurrent && string.IsNullOrEmpty(overrideReason)) return;
                 bool serious = r.Status == SlipVerifyStatus.Duplicate || r.Status == SlipVerifyStatus.WrongReceiver;
                 if (!serious && string.IsNullOrEmpty(overrideReason)) return;
