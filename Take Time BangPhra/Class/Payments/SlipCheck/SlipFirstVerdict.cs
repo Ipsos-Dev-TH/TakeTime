@@ -160,8 +160,10 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
             bool dupStop = r.Status == SlipVerifyStatus.Duplicate && !splitRemainder;
             bool lockedNow = locked && !splitRemainder;
             v.State = dupStop ? Stop : lockedNow ? Locked : Edit;
-            v.Message = dupStop ? (r.PriorUse != null && r.PriorUse.SameAsCurrent
-                    ? "⛔ สลิปนี้บันทึกไปแล้วในการจองนี้ — ไม่ต้องแนบซ้ำ"
+            bool sameBooking = dupStop && r.PriorUse != null && r.PriorUse.SameAsCurrent;
+            v.Message = dupStop ? (sameBooking
+                    ? "ℹ️ สลิปนี้รับเงินไว้แล้วในการจองนี้" + (r.PriorUse.UsedAmount.HasValue ? " (" + r.PriorUse.UsedAmount.Value.ToString("N2") + " บาท)" : "")
+                      + " — ไม่ต้องแนบซ้ำ ถ้าไม่ได้รับเงินเพิ่มให้เอาติ๊ก \"มัดจำเพิ่ม\" ออก"
                     : "⛔ สลิปนี้ใช้ไปแล้ว" + (r.PriorUse != null && r.PriorUse.IsReservation ? "กับการจอง #" + r.PriorUse.SourceId.Value : "")
                       + " — ดูวิธีจัดการด้านล่าง")
                 : splitRemainder ? "✏️ สลิปนี้แบ่งใช้แล้ว — กรอกยอดส่วนของการจองนี้"
@@ -169,7 +171,8 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
                 : lockedNow ? (lk.Source == SlipVerifySource.SlipOk
                     ? "✅ ธนาคารยืนยันยอดแล้ว" : "✅ อ่านยอดจากสลิปแล้ว (" + lk.Confidence + "%)")
                 : "✏️ อ่านยอดไม่ชัด — ตรวจ/กรอกยอดตามสลิป";
-            v.Tone = dupStop ? "err" : problem || !lockedNow ? "warn" : "ok";
+            // ใช้กับการจองนี้เองแล้ว = ไม่ใช่การโกง/ความผิดพลาดร้ายแรง แค่แนบซ้ำ → สีเตือน (ยังบันทึกซ้ำไม่ได้)
+            v.Tone = sameBooking ? "warn" : dupStop ? "err" : problem || !lockedNow ? "warn" : "ok";
             v.Hint = !lockedNow && lk != null && lk.HintAmount.HasValue
                 ? "ระบบอ่านได้ประมาณ " + lk.HintAmount.Value.ToString("N2") + " บาท — ตรวจให้ตรงสลิป" : null;
             return v;

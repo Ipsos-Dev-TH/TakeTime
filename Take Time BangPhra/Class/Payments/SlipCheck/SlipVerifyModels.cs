@@ -337,7 +337,8 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
         public string StaffHtml(Func<long, string> reserveUrl)
         {
             var sb = new StringBuilder();
-            sb.Append("<div class='slip-dup-detail' style='margin-top:8px;padding:10px 12px;border-radius:8px;background:#fff;border:1px solid #ef9a9a;"
+            sb.Append("<div class='slip-dup-detail' style='margin-top:8px;padding:10px 12px;border-radius:8px;background:#fff;border:1px solid ")
+              .Append(SameAsCurrent ? "#ffcc80" : "#ef9a9a").Append(";"
                 + "font-size:13.5px;line-height:1.7;max-width:560px;'>");
             sb.Append("<b>📌 ใช้ไปแล้วที่: ");
             if (IsReservation)
@@ -360,7 +361,8 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
             sb.Append("<div style='margin-top:6px;font-weight:700'>จัดการต่ออย่างไร</div><ol style='margin:2px 0 0 18px;padding:0'>");
             if (SameAsCurrent)
             {
-                sb.Append("<li>ยอดของสลิปนี้<b>นับเป็นเงินรับของการจองนี้แล้ว</b> — ไม่ต้องบันทึกซ้ำ (ดูในประวัติการชำระเงินด้านบน)</li>");
+                sb.Append("<li>ยอดของสลิปนี้<b>นับเป็นเงินรับของการจองนี้แล้ว</b> — ไม่ต้องบันทึกซ้ำ (ดูในประวัติการชำระเงิน)</li>");
+                sb.Append("<li>ไม่ได้รับเงินเพิ่ม → <b>เอาติ๊ก \"มัดจำเพิ่ม\" ออก</b> แล้วบันทึกการแก้ไขตามปกติ (ไม่ต้องแนบสลิป)</li>");
                 sb.Append("<li>ถ้าลูกค้า<b>โอนเพิ่มจริง</b> → ขอสลิปของการโอนครั้งใหม่ (เลขอ้างอิงจะไม่ซ้ำกับใบนี้)</li>");
                 sb.Append("<li>ถ้าครั้งก่อน<b>ลงยอดผิด</b> → ใช้ส่วน \"แก้ยอดรับเงินที่บันทึกผิด\" ใต้ประวัติการชำระเงิน (เจ้าของ/ผู้ดูแลบัญชี)</li>");
             }
@@ -379,7 +381,8 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
             }
             else
                 sb.Append("<li>ขอสลิปของการโอนครั้งนี้ — ถ้าเงินนี้ใช้ผิดรายการ ให้แก้ที่").Append(E(SourceThai(SourceType))).Append(" นั้นก่อน</li>");
-            sb.Append("<li>สงสัยว่าใช้สลิปซ้ำโดยเจตนา → แจ้งเจ้าของ (ระบบส่งแจ้งเตือนแล้ว)</li></ol></div>");
+            if (!SameAsCurrent) sb.Append("<li>สงสัยว่าใช้สลิปซ้ำโดยเจตนา → แจ้งเจ้าของ (ระบบส่งแจ้งเตือนแล้ว)</li>");
+            sb.Append("</ol></div>");
             return sb.ToString();
         }
     }

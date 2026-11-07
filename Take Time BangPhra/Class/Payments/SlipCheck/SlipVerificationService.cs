@@ -1948,6 +1948,8 @@ namespace Take_Time_BangPhra.Payments.SlipCheck
             try
             {
                 if (r == null || r.IsAllocationContinuation) return;
+                // แนบสลิปเดิมซ้ำในการจองเดียวกัน (เช่น ติ๊ก "มัดจำเพิ่ม" แล้วเลือกสลิปเก่า) = ไม่ใช่การใช้สลิปซ้ำ — ไม่แจ้งเจ้าของ
+                if (r.Status == SlipVerifyStatus.Duplicate && r.PriorUse != null && r.PriorUse.SameAsCurrent && string.IsNullOrEmpty(overrideReason)) return;
                 bool serious = r.Status == SlipVerifyStatus.Duplicate || r.Status == SlipVerifyStatus.WrongReceiver;
                 if (!serious && string.IsNullOrEmpty(overrideReason)) return;
                 string head = r.Status == SlipVerifyStatus.Duplicate ? "⚠️ <b>สลิปซ้ำ</b>"
